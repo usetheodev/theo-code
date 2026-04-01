@@ -1,6 +1,8 @@
 use async_trait::async_trait;
 use theo_domain::error::ToolError;
-use theo_domain::tool::{PermissionCollector, Tool, ToolContext, ToolOutput};
+use theo_domain::tool::{
+    PermissionCollector, Tool, ToolCategory, ToolContext, ToolOutput, ToolParam, ToolSchema,
+};
 
 pub struct TodoTool;
 
@@ -18,6 +20,21 @@ impl Tool for TodoTool {
 
     fn description(&self) -> &str {
         "Update the session todo list"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            params: vec![ToolParam {
+                name: "todos".to_string(),
+                param_type: "array".to_string(),
+                description: "Array of todo items".to_string(),
+                required: true,
+            }],
+        }
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Utility
     }
 
     async fn execute(

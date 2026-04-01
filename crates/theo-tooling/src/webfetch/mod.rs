@@ -2,8 +2,8 @@ use async_trait::async_trait;
 use theo_domain::error::ToolError;
 use theo_domain::permission::{PermissionRequest, PermissionType};
 use theo_domain::tool::{
-    FileAttachment, PermissionCollector, Tool, ToolContext, ToolOutput, optional_string,
-    require_string,
+    FileAttachment, PermissionCollector, Tool, ToolCategory, ToolContext, ToolOutput, ToolParam,
+    ToolSchema, optional_string, require_string,
 };
 
 pub struct WebFetchTool;
@@ -36,6 +36,21 @@ impl Tool for WebFetchTool {
 
     fn description(&self) -> &str {
         "Fetch a URL and return its content"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            params: vec![ToolParam {
+                name: "url".to_string(),
+                param_type: "string".to_string(),
+                description: "URL to fetch".to_string(),
+                required: true,
+            }],
+        }
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Web
     }
 
     async fn execute(

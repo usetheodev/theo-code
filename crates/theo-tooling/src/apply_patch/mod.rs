@@ -2,7 +2,8 @@ use async_trait::async_trait;
 use theo_domain::error::ToolError;
 use theo_domain::permission::{PermissionRequest, PermissionType};
 use theo_domain::tool::{
-    PermissionCollector, Tool, ToolContext, ToolOutput, require_string,
+    PermissionCollector, Tool, ToolCategory, ToolContext, ToolOutput, ToolParam, ToolSchema,
+    require_string,
 };
 
 pub struct ApplyPatchTool;
@@ -289,6 +290,21 @@ impl Tool for ApplyPatchTool {
 
     fn description(&self) -> &str {
         "Apply a unified patch to files"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            params: vec![ToolParam {
+                name: "patchText".to_string(),
+                param_type: "string".to_string(),
+                description: "Unified diff patch to apply".to_string(),
+                required: true,
+            }],
+        }
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::FileOps
     }
 
     async fn execute(

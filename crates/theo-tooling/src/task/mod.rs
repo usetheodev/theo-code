@@ -1,6 +1,9 @@
 use async_trait::async_trait;
 use theo_domain::error::ToolError;
-use theo_domain::tool::{PermissionCollector, Tool, ToolContext, ToolOutput, require_string};
+use theo_domain::tool::{
+    PermissionCollector, Tool, ToolCategory, ToolContext, ToolOutput, ToolParam, ToolSchema,
+    require_string,
+};
 
 #[derive(Debug, Clone)]
 pub struct SubagentInfo {
@@ -39,6 +42,35 @@ impl Tool for TaskTool {
 
     fn description(&self) -> &str {
         "Spawn a subagent for a specialized task"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            params: vec![
+                ToolParam {
+                    name: "description".to_string(),
+                    param_type: "string".to_string(),
+                    description: "Brief description of the task".to_string(),
+                    required: true,
+                },
+                ToolParam {
+                    name: "prompt".to_string(),
+                    param_type: "string".to_string(),
+                    description: "Detailed prompt for the subagent".to_string(),
+                    required: true,
+                },
+                ToolParam {
+                    name: "subagent_type".to_string(),
+                    param_type: "string".to_string(),
+                    description: "Type of subagent to spawn".to_string(),
+                    required: true,
+                },
+            ],
+        }
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Orchestration
     }
 
     async fn execute(

@@ -1,6 +1,8 @@
 use async_trait::async_trait;
 use theo_domain::error::ToolError;
-use theo_domain::tool::{PermissionCollector, Tool, ToolContext, ToolOutput};
+use theo_domain::tool::{
+    PermissionCollector, Tool, ToolCategory, ToolContext, ToolOutput, ToolParam, ToolSchema,
+};
 
 pub struct BatchTool;
 
@@ -18,6 +20,21 @@ impl Tool for BatchTool {
 
     fn description(&self) -> &str {
         "Execute multiple tool calls in parallel (experimental)"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            params: vec![ToolParam {
+                name: "calls".to_string(),
+                param_type: "array".to_string(),
+                description: "Array of tool calls to execute in parallel (max 25)".to_string(),
+                required: true,
+            }],
+        }
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Orchestration
     }
 
     async fn execute(

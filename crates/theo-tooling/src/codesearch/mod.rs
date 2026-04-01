@@ -1,6 +1,9 @@
 use async_trait::async_trait;
 use theo_domain::error::ToolError;
-use theo_domain::tool::{PermissionCollector, Tool, ToolContext, ToolOutput, require_string};
+use theo_domain::tool::{
+    PermissionCollector, Tool, ToolCategory, ToolContext, ToolOutput, ToolParam, ToolSchema,
+    require_string,
+};
 
 pub struct CodeSearchTool;
 
@@ -18,6 +21,21 @@ impl Tool for CodeSearchTool {
 
     fn description(&self) -> &str {
         "Search code context"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            params: vec![ToolParam {
+                name: "query".to_string(),
+                param_type: "string".to_string(),
+                description: "Code search query".to_string(),
+                required: true,
+            }],
+        }
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Search
     }
 
     async fn execute(

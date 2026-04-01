@@ -1,6 +1,9 @@
 use async_trait::async_trait;
 use theo_domain::error::ToolError;
-use theo_domain::tool::{PermissionCollector, Tool, ToolContext, ToolOutput, require_string};
+use theo_domain::tool::{
+    PermissionCollector, Tool, ToolCategory, ToolContext, ToolOutput, ToolParam, ToolSchema,
+    require_string,
+};
 
 pub struct InvalidTool;
 
@@ -18,6 +21,29 @@ impl Tool for InvalidTool {
 
     fn description(&self) -> &str {
         "Error placeholder for invalid tool calls"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            params: vec![
+                ToolParam {
+                    name: "tool".to_string(),
+                    param_type: "string".to_string(),
+                    description: "Name of the invalid tool".to_string(),
+                    required: false,
+                },
+                ToolParam {
+                    name: "error".to_string(),
+                    param_type: "string".to_string(),
+                    description: "Error message".to_string(),
+                    required: false,
+                },
+            ],
+        }
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Utility
     }
 
     async fn execute(

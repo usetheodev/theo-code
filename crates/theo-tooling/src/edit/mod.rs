@@ -2,7 +2,8 @@ use async_trait::async_trait;
 use theo_domain::error::ToolError;
 use theo_domain::permission::{PermissionRequest, PermissionType};
 use theo_domain::tool::{
-    PermissionCollector, Tool, ToolContext, ToolOutput, optional_bool, require_string,
+    PermissionCollector, Tool, ToolCategory, ToolContext, ToolOutput, ToolParam, ToolSchema,
+    optional_bool, require_string,
 };
 use std::path::{Path, PathBuf};
 
@@ -100,6 +101,41 @@ impl Tool for EditTool {
 
     fn description(&self) -> &str {
         "Replace text in a file"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            params: vec![
+                ToolParam {
+                    name: "filePath".to_string(),
+                    param_type: "string".to_string(),
+                    description: "Path to the file to edit".to_string(),
+                    required: true,
+                },
+                ToolParam {
+                    name: "oldString".to_string(),
+                    param_type: "string".to_string(),
+                    description: "Exact text to find and replace (must be unique in the file)".to_string(),
+                    required: true,
+                },
+                ToolParam {
+                    name: "newString".to_string(),
+                    param_type: "string".to_string(),
+                    description: "Replacement text".to_string(),
+                    required: true,
+                },
+                ToolParam {
+                    name: "replaceAll".to_string(),
+                    param_type: "boolean".to_string(),
+                    description: "Replace all occurrences (default false)".to_string(),
+                    required: false,
+                },
+            ],
+        }
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::FileOps
     }
 
     async fn execute(

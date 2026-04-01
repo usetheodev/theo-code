@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use theo_domain::error::ToolError;
-use theo_domain::tool::{PermissionCollector, Tool, ToolContext, ToolOutput};
+use theo_domain::tool::{PermissionCollector, Tool, ToolCategory, ToolContext, ToolOutput, ToolSchema};
 
 pub struct PlanExitTool;
 
@@ -18,6 +18,14 @@ impl Tool for PlanExitTool {
 
     fn description(&self) -> &str {
         "Exit plan mode (experimental)"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema::new()
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Utility
     }
 
     async fn execute(

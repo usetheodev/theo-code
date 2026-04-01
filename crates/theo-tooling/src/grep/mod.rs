@@ -2,7 +2,8 @@ use async_trait::async_trait;
 use theo_domain::error::ToolError;
 use theo_domain::permission::{PermissionRequest, PermissionType};
 use theo_domain::tool::{
-    PermissionCollector, Tool, ToolContext, ToolOutput, optional_string, require_string,
+    PermissionCollector, Tool, ToolCategory, ToolContext, ToolOutput, ToolParam, ToolSchema,
+    optional_string, require_string,
 };
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -26,6 +27,35 @@ impl Tool for GrepTool {
 
     fn description(&self) -> &str {
         "Search file contents using regex patterns"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            params: vec![
+                ToolParam {
+                    name: "pattern".to_string(),
+                    param_type: "string".to_string(),
+                    description: "Regular expression pattern to search for".to_string(),
+                    required: true,
+                },
+                ToolParam {
+                    name: "path".to_string(),
+                    param_type: "string".to_string(),
+                    description: "File or directory to search in".to_string(),
+                    required: false,
+                },
+                ToolParam {
+                    name: "include".to_string(),
+                    param_type: "string".to_string(),
+                    description: "Glob pattern to filter files (e.g. '*.py')".to_string(),
+                    required: false,
+                },
+            ],
+        }
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Search
     }
 
     async fn execute(

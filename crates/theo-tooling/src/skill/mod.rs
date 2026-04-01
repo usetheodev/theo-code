@@ -2,7 +2,8 @@ use async_trait::async_trait;
 use theo_domain::error::ToolError;
 use theo_domain::permission::{PermissionRequest, PermissionType};
 use theo_domain::tool::{
-    PermissionCollector, Tool, ToolContext, ToolOutput, require_string,
+    PermissionCollector, Tool, ToolCategory, ToolContext, ToolOutput, ToolParam, ToolSchema,
+    require_string,
 };
 use std::path::PathBuf;
 
@@ -41,6 +42,21 @@ impl Tool for SkillTool {
 
     fn description(&self) -> &str {
         "Load a specialized skill"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            params: vec![ToolParam {
+                name: "name".to_string(),
+                param_type: "string".to_string(),
+                description: "Name of the skill to load".to_string(),
+                required: true,
+            }],
+        }
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Orchestration
     }
 
     async fn execute(

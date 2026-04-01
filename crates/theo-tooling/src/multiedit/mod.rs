@@ -1,6 +1,8 @@
 use async_trait::async_trait;
 use theo_domain::error::ToolError;
-use theo_domain::tool::{PermissionCollector, Tool, ToolContext, ToolOutput};
+use theo_domain::tool::{
+    PermissionCollector, Tool, ToolCategory, ToolContext, ToolOutput, ToolParam, ToolSchema,
+};
 
 pub struct MultiEditTool;
 
@@ -18,6 +20,29 @@ impl Tool for MultiEditTool {
 
     fn description(&self) -> &str {
         "Apply multiple edits to a single file"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            params: vec![
+                ToolParam {
+                    name: "filePath".to_string(),
+                    param_type: "string".to_string(),
+                    description: "Path to the file to edit".to_string(),
+                    required: true,
+                },
+                ToolParam {
+                    name: "edits".to_string(),
+                    param_type: "array".to_string(),
+                    description: "Array of edits to apply sequentially".to_string(),
+                    required: true,
+                },
+            ],
+        }
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::FileOps
     }
 
     async fn execute(

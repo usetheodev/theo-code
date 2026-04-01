@@ -2,7 +2,8 @@ use async_trait::async_trait;
 use theo_domain::error::ToolError;
 use theo_domain::permission::{PermissionRequest, PermissionType};
 use theo_domain::tool::{
-    PermissionCollector, Tool, ToolContext, ToolOutput, require_string,
+    PermissionCollector, Tool, ToolCategory, ToolContext, ToolOutput, ToolParam, ToolSchema,
+    require_string,
 };
 use std::path::{Path, PathBuf};
 
@@ -38,6 +39,29 @@ impl Tool for WriteTool {
 
     fn description(&self) -> &str {
         "Write content to a file"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            params: vec![
+                ToolParam {
+                    name: "filePath".to_string(),
+                    param_type: "string".to_string(),
+                    description: "Absolute or relative path to the file to write".to_string(),
+                    required: true,
+                },
+                ToolParam {
+                    name: "content".to_string(),
+                    param_type: "string".to_string(),
+                    description: "The complete content to write to the file".to_string(),
+                    required: true,
+                },
+            ],
+        }
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::FileOps
     }
 
     async fn execute(

@@ -2,8 +2,8 @@ use async_trait::async_trait;
 use theo_domain::error::ToolError;
 use theo_domain::permission::{PermissionRequest, PermissionType};
 use theo_domain::tool::{
-    PermissionCollector, Tool, ToolContext, ToolOutput, optional_string, optional_u64,
-    require_string,
+    PermissionCollector, Tool, ToolCategory, ToolContext, ToolOutput, ToolParam, ToolSchema,
+    optional_string, optional_u64, require_string,
 };
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -72,6 +72,35 @@ impl Tool for BashTool {
 
     fn description(&self) -> &str {
         "Execute a shell command"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            params: vec![
+                ToolParam {
+                    name: "command".to_string(),
+                    param_type: "string".to_string(),
+                    description: "The bash command to execute".to_string(),
+                    required: true,
+                },
+                ToolParam {
+                    name: "description".to_string(),
+                    param_type: "string".to_string(),
+                    description: "Brief description of what the command does".to_string(),
+                    required: true,
+                },
+                ToolParam {
+                    name: "timeout".to_string(),
+                    param_type: "integer".to_string(),
+                    description: "Timeout in milliseconds (default 120000)".to_string(),
+                    required: false,
+                },
+            ],
+        }
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Execution
     }
 
     async fn execute(

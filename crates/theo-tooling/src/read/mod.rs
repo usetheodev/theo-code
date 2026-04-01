@@ -2,8 +2,8 @@ use async_trait::async_trait;
 use theo_domain::error::ToolError;
 use theo_domain::permission::{PermissionRequest, PermissionType};
 use theo_domain::tool::{
-    FileAttachment, PermissionCollector, Tool, ToolContext, ToolOutput, optional_u64,
-    require_string,
+    FileAttachment, PermissionCollector, Tool, ToolCategory, ToolContext, ToolOutput, ToolParam,
+    ToolSchema, optional_u64, require_string,
 };
 use std::path::{Path, PathBuf};
 
@@ -105,6 +105,35 @@ impl Tool for ReadTool {
 
     fn description(&self) -> &str {
         "Read a file or directory"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            params: vec![
+                ToolParam {
+                    name: "filePath".to_string(),
+                    param_type: "string".to_string(),
+                    description: "Absolute or relative path to the file to read".to_string(),
+                    required: true,
+                },
+                ToolParam {
+                    name: "offset".to_string(),
+                    param_type: "integer".to_string(),
+                    description: "Line number to start reading from (0-based)".to_string(),
+                    required: false,
+                },
+                ToolParam {
+                    name: "limit".to_string(),
+                    param_type: "integer".to_string(),
+                    description: "Maximum number of lines to read".to_string(),
+                    required: false,
+                },
+            ],
+        }
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::FileOps
     }
 
     async fn execute(

@@ -2,7 +2,8 @@ use async_trait::async_trait;
 use theo_domain::error::ToolError;
 use theo_domain::permission::{PermissionRequest, PermissionType};
 use theo_domain::tool::{
-    PermissionCollector, Tool, ToolContext, ToolOutput, optional_string, require_string,
+    PermissionCollector, Tool, ToolCategory, ToolContext, ToolOutput, ToolParam, ToolSchema,
+    optional_string, require_string,
 };
 use std::path::PathBuf;
 
@@ -24,6 +25,29 @@ impl Tool for GlobTool {
 
     fn description(&self) -> &str {
         "Find files matching a glob pattern"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            params: vec![
+                ToolParam {
+                    name: "pattern".to_string(),
+                    param_type: "string".to_string(),
+                    description: "Glob pattern to match files (e.g. 'src/**/*.rs')".to_string(),
+                    required: true,
+                },
+                ToolParam {
+                    name: "path".to_string(),
+                    param_type: "string".to_string(),
+                    description: "Base directory to search in".to_string(),
+                    required: false,
+                },
+            ],
+        }
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Search
     }
 
     async fn execute(

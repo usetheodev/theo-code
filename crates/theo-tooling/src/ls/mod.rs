@@ -1,6 +1,9 @@
 use async_trait::async_trait;
 use theo_domain::error::ToolError;
-use theo_domain::tool::{PermissionCollector, Tool, ToolContext, ToolOutput, optional_string};
+use theo_domain::tool::{
+    PermissionCollector, Tool, ToolCategory, ToolContext, ToolOutput, ToolParam, ToolSchema,
+    optional_string,
+};
 use std::path::PathBuf;
 
 pub struct LsTool;
@@ -19,6 +22,21 @@ impl Tool for LsTool {
 
     fn description(&self) -> &str {
         "List directory contents"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            params: vec![ToolParam {
+                name: "path".to_string(),
+                param_type: "string".to_string(),
+                description: "Directory path to list".to_string(),
+                required: false,
+            }],
+        }
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Search
     }
 
     async fn execute(
