@@ -1,0 +1,13 @@
+[package]
+name = "theo-governance"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+theo-engine-graph = { path = "../theo-engine-graph" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

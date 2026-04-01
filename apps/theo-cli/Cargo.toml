@@ -1,0 +1,22 @@
+[package]
+name = "theo-code"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+theo-domain.workspace = true
+theo-engine-graph.workspace = true
+theo-engine-retrieval.workspace = true
+theo-governance.workspace = true
+theo-engine-parser.workspace = true
+theo-tooling.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+walkdir.workspace = true
+ignore.workspace = true
+rayon = "1"
+bincode = "1"
+
+[dev-dependencies]
+tempfile.workspace = true

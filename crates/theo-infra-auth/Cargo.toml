@@ -1,0 +1,19 @@
+[package]
+name = "theo-infra-auth"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+reqwest.workspace = true
+sha2 = "0.10"
+base64 = "0.22"
+rand = "0.9"
+dirs = "6"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+tempfile.workspace = true

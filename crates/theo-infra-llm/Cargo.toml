@@ -1,0 +1,16 @@
+[package]
+name = "theo-infra-llm"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+reqwest.workspace = true
+futures = "0.3"
+bytes = "1"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }

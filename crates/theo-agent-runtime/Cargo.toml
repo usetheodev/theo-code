@@ -1,0 +1,20 @@
+[package]
+name = "theo-agent-runtime"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+theo-domain.workspace = true
+theo-tooling.workspace = true
+theo-infra-llm = { path = "../theo-infra-llm" }
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+async-trait.workspace = true
+futures = "0.3"
+theo-infra-auth = { path = "../theo-infra-auth" }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+tempfile.workspace = true

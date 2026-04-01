@@ -1,0 +1,598 @@
+[
+  {
+    "task_id": "permission_eval",
+    "mode": "without_graphctx",
+    "success": true,
+    "interactions": 1,
+    "total_input_tokens": 94,
+    "total_output_tokens": 418,
+    "total_tokens": 512,
+    "found_target_at_interaction": 1,
+    "elapsed_seconds": 36.96593379974365,
+    "details": [
+      {
+        "interaction": 1,
+        "input_tokens": 94,
+        "output_tokens": 418,
+        "found_target": true
+      }
+    ]
+  },
+  {
+    "task_id": "permission_eval",
+    "mode": "with_graphctx",
+    "success": true,
+    "interactions": 1,
+    "total_input_tokens": 4430,
+    "total_output_tokens": 294,
+    "total_tokens": 4724,
+    "found_target_at_interaction": 1,
+    "elapsed_seconds": 8.562964916229248,
+    "details": [
+      {
+        "interaction": 1,
+        "input_tokens": 4430,
+        "output_tokens": 294,
+        "found_target": true
+      }
+    ]
+  },
+  {
+    "task_id": "bm25_search",
+    "mode": "without_graphctx",
+    "success": true,
+    "interactions": 1,
+    "total_input_tokens": 89,
+    "total_output_tokens": 891,
+    "total_tokens": 980,
+    "found_target_at_interaction": 1,
+    "elapsed_seconds": 5.465369701385498,
+    "details": [
+      {
+        "interaction": 1,
+        "input_tokens": 89,
+        "output_tokens": 891,
+        "found_target": true
+      }
+    ]
+  },
+  {
+    "task_id": "bm25_search",
+    "mode": "with_graphctx",
+    "success": true,
+    "interactions": 1,
+    "total_input_tokens": 21630,
+    "total_output_tokens": 439,
+    "total_tokens": 22069,
+    "found_target_at_interaction": 1,
+    "elapsed_seconds": 10.729613304138184,
+    "details": [
+      {
+        "interaction": 1,
+        "input_tokens": 21630,
+        "output_tokens": 439,
+        "found_target": true
+      }
+    ]
+  },
+  {
+    "task_id": "impact_analysis",
+    "mode": "without_graphctx",
+    "success": false,
+    "interactions": 10,
+    "total_input_tokens": 16974,
+    "total_output_tokens": 3071,
+    "total_tokens": 20045,
+    "found_target_at_interaction": null,
+    "elapsed_seconds": 21.832419872283936,
+    "details": [
+      {
+        "interaction": 1,
+        "input_tokens": 98,
+        "output_tokens": 520,
+        "found_target": false
+      },
+      {
+        "interaction": 2,
+        "input_tokens": 643,
+        "output_tokens": 317,
+        "found_target": false
+      },
+      {
+        "interaction": 3,
+        "input_tokens": 985,
+        "output_tokens": 279,
+        "found_target": false
+      },
+      {
+        "interaction": 4,
+        "input_tokens": 1289,
+        "output_tokens": 260,
+        "found_target": false
+      },
+      {
+        "interaction": 5,
+        "input_tokens": 1574,
+        "output_tokens": 291,
+        "found_target": false
+      },
+      {
+        "interaction": 6,
+        "input_tokens": 1890,
+        "output_tokens": 266,
+        "found_target": false
+      },
+      {
+        "interaction": 7,
+        "input_tokens": 2181,
+        "output_tokens": 258,
+        "found_target": false
+      },
+      {
+        "interaction": 8,
+        "input_tokens": 2464,
+        "output_tokens": 285,
+        "found_target": false
+      },
+      {
+        "interaction": 9,
+        "input_tokens": 2774,
+        "output_tokens": 277,
+        "found_target": false
+      },
+      {
+        "interaction": 10,
+        "input_tokens": 3076,
+        "output_tokens": 318,
+        "found_target": false
+      }
+    ]
+  },
+  {
+    "task_id": "impact_analysis",
+    "mode": "with_graphctx",
+    "success": true,
+    "interactions": 1,
+    "total_input_tokens": 13152,
+    "total_output_tokens": 981,
+    "total_tokens": 14133,
+    "found_target_at_interaction": 1,
+    "elapsed_seconds": 13.005303382873535,
+    "details": [
+      {
+        "interaction": 1,
+        "input_tokens": 13152,
+        "output_tokens": 981,
+        "found_target": true
+      }
+    ]
+  },
+  {
+    "task_id": "leiden_cluster",
+    "mode": "without_graphctx",
+    "success": false,
+    "interactions": 10,
+    "total_input_tokens": 17506,
+    "total_output_tokens": 3353,
+    "total_tokens": 20859,
+    "found_target_at_interaction": null,
+    "elapsed_seconds": 23.552150011062622,
+    "details": [
+      {
+        "interaction": 1,
+        "input_tokens": 96,
+        "output_tokens": 412,
+        "found_target": false
+      },
+      {
+        "interaction": 2,
+        "input_tokens": 533,
+        "output_tokens": 329,
+        "found_target": false
+      },
+      {
+        "interaction": 3,
+        "input_tokens": 887,
+        "output_tokens": 341,
+        "found_target": false
+      },
+      {
+        "interaction": 4,
+        "input_tokens": 1253,
+        "output_tokens": 303,
+        "found_target": false
+      },
+      {
+        "interaction": 5,
+        "input_tokens": 1581,
+        "output_tokens": 316,
+        "found_target": false
+      },
+      {
+        "interaction": 6,
+        "input_tokens": 1922,
+        "output_tokens": 283,
+        "found_target": false
+      },
+      {
+        "interaction": 7,
+        "input_tokens": 2230,
+        "output_tokens": 392,
+        "found_target": false
+      },
+      {
+        "interaction": 8,
+        "input_tokens": 2647,
+        "output_tokens": 330,
+        "found_target": false
+      },
+      {
+        "interaction": 9,
+        "input_tokens": 3002,
+        "output_tokens": 328,
+        "found_target": false
+      },
+      {
+        "interaction": 10,
+        "input_tokens": 3355,
+        "output_tokens": 319,
+        "found_target": false
+      }
+    ]
+  },
+  {
+    "task_id": "leiden_cluster",
+    "mode": "with_graphctx",
+    "success": true,
+    "interactions": 1,
+    "total_input_tokens": 17304,
+    "total_output_tokens": 526,
+    "total_tokens": 17830,
+    "found_target_at_interaction": 1,
+    "elapsed_seconds": 11.518402099609375,
+    "details": [
+      {
+        "interaction": 1,
+        "input_tokens": 17304,
+        "output_tokens": 526,
+        "found_target": true
+      }
+    ]
+  },
+  {
+    "task_id": "context_assembly",
+    "mode": "without_graphctx",
+    "success": true,
+    "interactions": 1,
+    "total_input_tokens": 98,
+    "total_output_tokens": 538,
+    "total_tokens": 636,
+    "found_target_at_interaction": 1,
+    "elapsed_seconds": 3.387848377227783,
+    "details": [
+      {
+        "interaction": 1,
+        "input_tokens": 98,
+        "output_tokens": 538,
+        "found_target": true
+      }
+    ]
+  },
+  {
+    "task_id": "context_assembly",
+    "mode": "with_graphctx",
+    "success": true,
+    "interactions": 1,
+    "total_input_tokens": 11360,
+    "total_output_tokens": 394,
+    "total_tokens": 11754,
+    "found_target_at_interaction": 1,
+    "elapsed_seconds": 10.660525798797607,
+    "details": [
+      {
+        "interaction": 1,
+        "input_tokens": 11360,
+        "output_tokens": 394,
+        "found_target": true
+      }
+    ]
+  },
+  {
+    "task_id": "cochange_decay",
+    "mode": "without_graphctx",
+    "success": false,
+    "interactions": 10,
+    "total_input_tokens": 17140,
+    "total_output_tokens": 3314,
+    "total_tokens": 20454,
+    "found_target_at_interaction": null,
+    "elapsed_seconds": 23.379100561141968,
+    "details": [
+      {
+        "interaction": 1,
+        "input_tokens": 96,
+        "output_tokens": 501,
+        "found_target": false
+      },
+      {
+        "interaction": 2,
+        "input_tokens": 622,
+        "output_tokens": 269,
+        "found_target": false
+      },
+      {
+        "interaction": 3,
+        "input_tokens": 916,
+        "output_tokens": 257,
+        "found_target": false
+      },
+      {
+        "interaction": 4,
+        "input_tokens": 1198,
+        "output_tokens": 310,
+        "found_target": false
+      },
+      {
+        "interaction": 5,
+        "input_tokens": 1533,
+        "output_tokens": 310,
+        "found_target": false
+      },
+      {
+        "interaction": 6,
+        "input_tokens": 1868,
+        "output_tokens": 307,
+        "found_target": false
+      },
+      {
+        "interaction": 7,
+        "input_tokens": 2200,
+        "output_tokens": 322,
+        "found_target": false
+      },
+      {
+        "interaction": 8,
+        "input_tokens": 2547,
+        "output_tokens": 324,
+        "found_target": false
+      },
+      {
+        "interaction": 9,
+        "input_tokens": 2896,
+        "output_tokens": 343,
+        "found_target": false
+      },
+      {
+        "interaction": 10,
+        "input_tokens": 3264,
+        "output_tokens": 371,
+        "found_target": false
+      }
+    ]
+  },
+  {
+    "task_id": "cochange_decay",
+    "mode": "with_graphctx",
+    "success": true,
+    "interactions": 1,
+    "total_input_tokens": 11816,
+    "total_output_tokens": 351,
+    "total_tokens": 12167,
+    "found_target_at_interaction": 1,
+    "elapsed_seconds": 9.317744255065918,
+    "details": [
+      {
+        "interaction": 1,
+        "input_tokens": 11816,
+        "output_tokens": 351,
+        "found_target": true
+      }
+    ]
+  },
+  {
+    "task_id": "escape_hatch",
+    "mode": "without_graphctx",
+    "success": false,
+    "interactions": 10,
+    "total_input_tokens": 16522,
+    "total_output_tokens": 2975,
+    "total_tokens": 19497,
+    "found_target_at_interaction": null,
+    "elapsed_seconds": 21.80980086326599,
+    "details": [
+      {
+        "interaction": 1,
+        "input_tokens": 98,
+        "output_tokens": 412,
+        "found_target": false
+      },
+      {
+        "interaction": 2,
+        "input_tokens": 535,
+        "output_tokens": 355,
+        "found_target": false
+      },
+      {
+        "interaction": 3,
+        "input_tokens": 915,
+        "output_tokens": 263,
+        "found_target": false
+      },
+      {
+        "interaction": 4,
+        "input_tokens": 1203,
+        "output_tokens": 292,
+        "found_target": false
+      },
+      {
+        "interaction": 5,
+        "input_tokens": 1520,
+        "output_tokens": 283,
+        "found_target": false
+      },
+      {
+        "interaction": 6,
+        "input_tokens": 1828,
+        "output_tokens": 282,
+        "found_target": false
+      },
+      {
+        "interaction": 7,
+        "input_tokens": 2135,
+        "output_tokens": 299,
+        "found_target": false
+      },
+      {
+        "interaction": 8,
+        "input_tokens": 2459,
+        "output_tokens": 291,
+        "found_target": false
+      },
+      {
+        "interaction": 9,
+        "input_tokens": 2775,
+        "output_tokens": 254,
+        "found_target": false
+      },
+      {
+        "interaction": 10,
+        "input_tokens": 3054,
+        "output_tokens": 244,
+        "found_target": false
+      }
+    ]
+  },
+  {
+    "task_id": "escape_hatch",
+    "mode": "with_graphctx",
+    "success": true,
+    "interactions": 1,
+    "total_input_tokens": 11219,
+    "total_output_tokens": 585,
+    "total_tokens": 11804,
+    "found_target_at_interaction": 1,
+    "elapsed_seconds": 10.624634981155396,
+    "details": [
+      {
+        "interaction": 1,
+        "input_tokens": 11219,
+        "output_tokens": 585,
+        "found_target": true
+      }
+    ]
+  },
+  {
+    "task_id": "turboquant",
+    "mode": "without_graphctx",
+    "success": true,
+    "interactions": 1,
+    "total_input_tokens": 95,
+    "total_output_tokens": 362,
+    "total_tokens": 457,
+    "found_target_at_interaction": 1,
+    "elapsed_seconds": 2.6887810230255127,
+    "details": [
+      {
+        "interaction": 1,
+        "input_tokens": 95,
+        "output_tokens": 362,
+        "found_target": true
+      }
+    ]
+  },
+  {
+    "task_id": "turboquant",
+    "mode": "with_graphctx",
+    "success": true,
+    "interactions": 1,
+    "total_input_tokens": 10303,
+    "total_output_tokens": 471,
+    "total_tokens": 10774,
+    "found_target_at_interaction": 1,
+    "elapsed_seconds": 9.420073986053467,
+    "details": [
+      {
+        "interaction": 1,
+        "input_tokens": 10303,
+        "output_tokens": 471,
+        "found_target": true
+      }
+    ]
+  },
+  {
+    "task_id": "bridge_graph",
+    "mode": "without_graphctx",
+    "success": true,
+    "interactions": 1,
+    "total_input_tokens": 94,
+    "total_output_tokens": 387,
+    "total_tokens": 481,
+    "found_target_at_interaction": 1,
+    "elapsed_seconds": 2.6873040199279785,
+    "details": [
+      {
+        "interaction": 1,
+        "input_tokens": 94,
+        "output_tokens": 387,
+        "found_target": true
+      }
+    ]
+  },
+  {
+    "task_id": "bridge_graph",
+    "mode": "with_graphctx",
+    "success": true,
+    "interactions": 1,
+    "total_input_tokens": 14921,
+    "total_output_tokens": 580,
+    "total_tokens": 15501,
+    "found_target_at_interaction": 1,
+    "elapsed_seconds": 10.932249784469604,
+    "details": [
+      {
+        "interaction": 1,
+        "input_tokens": 14921,
+        "output_tokens": 580,
+        "found_target": true
+      }
+    ]
+  },
+  {
+    "task_id": "git_integration",
+    "mode": "without_graphctx",
+    "success": true,
+    "interactions": 1,
+    "total_input_tokens": 92,
+    "total_output_tokens": 347,
+    "total_tokens": 439,
+    "found_target_at_interaction": 1,
+    "elapsed_seconds": 2.457551956176758,
+    "details": [
+      {
+        "interaction": 1,
+        "input_tokens": 92,
+        "output_tokens": 347,
+        "found_target": true
+      }
+    ]
+  },
+  {
+    "task_id": "git_integration",
+    "mode": "with_graphctx",
+    "success": true,
+    "interactions": 1,
+    "total_input_tokens": 7029,
+    "total_output_tokens": 585,
+    "total_tokens": 7614,
+    "found_target_at_interaction": 1,
+    "elapsed_seconds": 10.035753011703491,
+    "details": [
+      {
+        "interaction": 1,
+        "input_tokens": 7029,
+        "output_tokens": 585,
+        "found_target": true
+      }
+    ]
+  }
+]
