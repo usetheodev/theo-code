@@ -14,6 +14,7 @@ pub mod plan;
 pub mod question;
 pub mod read;
 pub mod registry;
+pub mod sandbox;
 pub mod skill;
 pub mod task;
 pub mod todo;

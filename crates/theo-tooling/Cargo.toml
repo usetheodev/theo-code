@@ -16,6 +16,8 @@ similar.workspace = true
 walkdir.workspace = true
 ignore.workspace = true
 glob.workspace = true
+landlock.workspace = true
+libc.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

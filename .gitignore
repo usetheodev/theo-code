@@ -16,6 +16,8 @@
 *.dll
 *.exe
 
+ralph-loop.local.md
+
 # Cargo lock — keep for binaries, ignore for libraries
 # (we keep it: this is a binary workspace)
 # Cargo.lock

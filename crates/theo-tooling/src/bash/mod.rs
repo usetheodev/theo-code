@@ -9,11 +9,32 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use tokio::process::Command;
 
-pub struct BashTool;
+use crate::sandbox::executor::SandboxExecutor;
+use theo_domain::sandbox::SandboxConfig;
+use std::sync::Arc;
+
+pub struct BashTool {
+    sandbox_executor: Option<Arc<dyn SandboxExecutor>>,
+    sandbox_config: Option<SandboxConfig>,
+}
 
 impl BashTool {
     pub fn new() -> Self {
-        Self
+        Self {
+            sandbox_executor: None,
+            sandbox_config: None,
+        }
+    }
+
+    /// Create a BashTool with sandbox enabled.
+    pub fn with_sandbox(
+        executor: Arc<dyn SandboxExecutor>,
+        config: SandboxConfig,
+    ) -> Self {
+        Self {
+            sandbox_executor: Some(executor),
+            sandbox_config: Some(config),
+        }
     }
 
     /// Parse commands from a compound command string (e.g., "echo foo && echo bar")
@@ -180,19 +201,46 @@ impl Tool for BashTool {
             project_dir.clone()
         };
 
-        let output = Command::new("sh")
-            .arg("-c")
-            .arg(&command)
-            .current_dir(&cwd)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output()
-            .await
-            .map_err(|e| ToolError::Execution(format!("Failed to execute command: {e}")))?;
+        // If sandbox is configured, use sandboxed execution
+        let (stdout, stderr, exit_code) = if let (Some(executor), Some(config)) =
+            (&self.sandbox_executor, &self.sandbox_config)
+        {
+            let cmd = command.clone();
+            let cwd_clone = cwd.clone();
+            let config_clone = config.clone();
+            let executor_clone = Arc::clone(executor);
 
-        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-        let exit_code = output.status.code().unwrap_or(-1);
+            // SandboxExecutor is sync (uses pre_exec), so run in blocking thread
+            let sandbox_result = tokio::task::spawn_blocking(move || {
+                executor_clone.execute_sandboxed(&cmd, &cwd_clone, &config_clone)
+            })
+            .await
+            .map_err(|e| ToolError::Execution(format!("sandbox task panicked: {e}")))?
+            .map_err(|e| ToolError::Execution(format!("sandbox error: {e}")))?;
+
+            (
+                sandbox_result.stdout,
+                sandbox_result.stderr,
+                sandbox_result.exit_code,
+            )
+        } else {
+            // No sandbox — execute directly (original path)
+            let output = Command::new("sh")
+                .arg("-c")
+                .arg(&command)
+                .current_dir(&cwd)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .output()
+                .await
+                .map_err(|e| ToolError::Execution(format!("Failed to execute command: {e}")))?;
+
+            (
+                String::from_utf8_lossy(&output.stdout).to_string(),
+                String::from_utf8_lossy(&output.stderr).to_string(),
+                output.status.code().unwrap_or(-1),
+            )
+        };
 
         let combined = if stderr.is_empty() {
             stdout.clone()
