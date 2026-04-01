@@ -6,6 +6,7 @@ import { clsx } from "clsx";
 import { Check, LogOut, ExternalLink, FolderOpen, GitBranch } from "lucide-react";
 import { AppConfig, AuthStatus, AppLayoutContext } from "../../../types";
 import { DeviceAuthDialog } from "../../../components/auth/DeviceAuthDialog";
+// Anthropic uses API key — no OAuth dialog needed
 
 type ProviderId = "openai" | "anthropic" | "copilot" | "local" | "custom";
 
@@ -33,6 +34,8 @@ export function SettingsPage() {
   const [loadingModels, setLoadingModels] = useState(false);
   const [copilotDialogOpen, setCopilotDialogOpen] = useState(false);
   const [copilotStatus, setCopilotStatus] = useState<{ authenticated: boolean; domain?: string } | null>(null);
+  // Anthropic status kept for preset badge (API key auth, not OAuth)
+  const [anthropicStatus, setAnthropicStatus] = useState<{ authenticated: boolean; email?: string } | null>(null);
 
   useEffect(() => { loadState(); }, []);
 
@@ -66,23 +69,20 @@ export function SettingsPage() {
 
   async function loadState() {
     try {
-      const [cfg, authStatus, dir, copilot] = await Promise.all([
+      const [cfg, authStatus, dir, copilot, anthro] = await Promise.all([
         invoke<AppConfig>("get_config"),
         invoke<AuthStatus>("auth_status"),
         invoke<string | null>("get_project_dir"),
         invoke<{ authenticated: boolean; domain?: string }>("copilot_status").catch(() => null),
+        invoke<{ authenticated: boolean; email?: string }>("anthropic_status").catch(() => null),
       ]);
       setConfig(cfg);
       setAuth(authStatus);
       setBaseUrl(cfg.base_url);
       setModel(cfg.model);
       setProjectDir(dir || "");
-      if (copilot) {
-        setCopilotStatus(copilot);
-        if (copilot.authenticated && cfg.base_url.includes("githubcopilot")) {
-          setActiveProvider("copilot");
-        }
-      }
+      if (copilot) setCopilotStatus(copilot);
+      if (anthro) setAnthropicStatus(anthro);
       // Detect active provider from URL
       const matched = PRESETS.find((p) => cfg.base_url.includes(new URL(p.url).hostname));
       if (matched) setActiveProvider(matched.id);
@@ -243,7 +243,9 @@ export function SettingsPage() {
             <div className="flex gap-2 flex-wrap mb-4">
               {PRESETS.map((p) => {
                 const isCopilot = p.id === "copilot";
+                const isAnthropic = p.id === "anthropic";
                 const isActive = activeProvider === p.id;
+                const needsAuth = isCopilot && !copilotStatus?.authenticated;
                 return (
                   <button
                     key={p.id}
@@ -254,7 +256,6 @@ export function SettingsPage() {
                       }
                       setActiveProvider(p.id);
                       setBaseUrl(p.url);
-                      // Backend will provide default model via useEffect
                       if (isCopilot && copilotStatus?.authenticated) {
                         await invoke("copilot_apply_to_config", { model: null }).catch(() => {});
                         await loadState();
@@ -268,12 +269,9 @@ export function SettingsPage() {
                     )}
                   >
                     {p.label}
-                    {isCopilot && copilotStatus?.authenticated && (
-                      <span className="w-1.5 h-1.5 rounded-full bg-ok" />
-                    )}
-                    {isCopilot && !copilotStatus?.authenticated && (
-                      <span className="text-[10px] text-text-3">login</span>
-                    )}
+                    {(isCopilot && copilotStatus?.authenticated) && <span className="w-1.5 h-1.5 rounded-full bg-ok" />}
+                    {(isAnthropic && anthropicStatus?.authenticated) && <span className="w-1.5 h-1.5 rounded-full bg-ok" />}
+                    {needsAuth && <span className="text-[10px] text-text-3">login</span>}
                   </button>
                 );
               })}

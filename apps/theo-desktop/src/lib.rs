@@ -32,6 +32,13 @@ pub fn run() {
             commands::copilot::copilot_logout,
             commands::copilot::copilot_apply_to_config,
             commands::copilot::provider_models,
+            // Auth commands (Anthropic Console)
+            commands::anthropic_auth::anthropic_start_device_flow,
+            commands::anthropic_auth::anthropic_poll_device_flow,
+            commands::anthropic_auth::anthropic_status,
+            commands::anthropic_auth::anthropic_logout,
+            commands::anthropic_auth::anthropic_apply_to_config,
+            commands::anthropic_auth::anthropic_models,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Theo Code");
