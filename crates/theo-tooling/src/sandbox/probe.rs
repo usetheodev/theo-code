@@ -1,8 +1,15 @@
 //! Kernel feature detection for sandbox capabilities.
 
+/// Path to the bwrap binary (hardcoded, not PATH lookup).
+pub const BWRAP_PATH: &str = "/usr/bin/bwrap";
+
 /// Result of probing the kernel for sandbox support.
 #[derive(Debug, Clone)]
 pub struct SandboxCapabilities {
+    /// Whether bubblewrap (bwrap) is available.
+    pub bwrap_available: bool,
+    /// bwrap version string (empty if unavailable).
+    pub bwrap_version: String,
     /// Whether landlock is available (Linux 5.13+).
     pub landlock_available: bool,
     /// Landlock ABI version (0 = unavailable).
@@ -24,6 +31,8 @@ pub fn probe_kernel() -> SandboxCapabilities {
     #[cfg(not(target_os = "linux"))]
     {
         SandboxCapabilities {
+            bwrap_available: false,
+            bwrap_version: String::new(),
             landlock_available: false,
             landlock_abi_version: 0,
             net_ns_available: false,
@@ -36,10 +45,13 @@ fn probe_linux() -> SandboxCapabilities {
     // Try to detect landlock ABI by attempting to create a ruleset.
     // The landlock crate handles this internally, but we can check
     // by probing the ABI version through the syscall.
+    let (bwrap_available, bwrap_version) = detect_bwrap();
     let abi_version = detect_landlock_abi();
     let net_ns_available = detect_user_net_ns();
 
     SandboxCapabilities {
+        bwrap_available,
+        bwrap_version,
         landlock_available: abi_version > 0,
         landlock_abi_version: abi_version,
         net_ns_available,
@@ -62,6 +74,24 @@ fn detect_landlock_abi() -> i32 {
             1u32, // LANDLOCK_CREATE_RULESET_VERSION
         );
         if ret < 0 { 0 } else { ret as i32 }
+    }
+}
+
+/// Detect if bubblewrap (bwrap) is available at the hardcoded path.
+#[cfg(target_os = "linux")]
+fn detect_bwrap() -> (bool, String) {
+    let result = std::process::Command::new(BWRAP_PATH)
+        .arg("--version")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output();
+
+    match result {
+        Ok(output) if output.status.success() => {
+            let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            (true, version)
+        }
+        _ => (false, String::new()),
     }
 }
 
@@ -98,6 +128,16 @@ mod tests {
         // On any platform, this should return without panicking
         let _ = caps.landlock_available;
         let _ = caps.landlock_abi_version;
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn probe_detects_bwrap_when_installed() {
+        let caps = probe_kernel();
+        if std::path::Path::new(BWRAP_PATH).exists() {
+            assert!(caps.bwrap_available);
+            assert!(!caps.bwrap_version.is_empty());
+        }
     }
 
     #[cfg(target_os = "linux")]

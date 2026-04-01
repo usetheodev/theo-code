@@ -114,4 +114,87 @@ mod tests {
         assert!(cur > 0);
         assert!(max > 0);
     }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn rlimit_fsize_enforced_in_child_process() {
+        // Test that RLIMIT_FSIZE actually blocks large file creation in a child.
+        // Safe: runs in a child process, doesn't affect test runner.
+        use std::os::unix::process::CommandExt;
+        use std::process::Stdio;
+
+        let policy = ProcessPolicy {
+            max_processes: 0,
+            max_memory_bytes: 0,
+            max_cpu_seconds: 0,
+            max_file_size_bytes: 1024, // 1KB limit
+            allowed_env_vars: vec![],
+        };
+        let policy_clone = policy.clone();
+
+        let mut cmd = std::process::Command::new("sh");
+        cmd.arg("-c")
+            // Try to write 10KB — should fail with EFBIG
+            .arg("dd if=/dev/zero of=/tmp/theo_rlimit_test bs=1024 count=10 2>&1; echo exit=$?")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        unsafe {
+            cmd.pre_exec(move || apply_rlimits(&policy_clone));
+        }
+
+        let output = cmd.output().unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        // dd should fail or be limited to 1KB
+        assert!(
+            stdout.contains("File size limit exceeded")
+                || stdout.contains("exit=1")
+                || stdout.contains("exit=25") // EFBIG signal
+                || !output.status.success(),
+            "RLIMIT_FSIZE should prevent writing 10KB with 1KB limit. Got: {stdout}"
+        );
+
+        // Cleanup
+        let _ = std::fs::remove_file("/tmp/theo_rlimit_test");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn rlimit_nproc_enforced_in_child_process() {
+        // Test that RLIMIT_NPROC limits process creation in a child.
+        // Safe: runs in a child process with strict limit.
+        use std::os::unix::process::CommandExt;
+        use std::process::Stdio;
+
+        let policy = ProcessPolicy {
+            max_processes: 2, // Very restrictive
+            max_memory_bytes: 0,
+            max_cpu_seconds: 0,
+            max_file_size_bytes: 0,
+            allowed_env_vars: vec![],
+        };
+        let policy_clone = policy.clone();
+
+        let mut cmd = std::process::Command::new("sh");
+        cmd.arg("-c")
+            // Try to spawn multiple subshells — should hit NPROC limit
+            .arg("for i in 1 2 3 4 5; do sh -c 'echo $i' 2>/dev/null; done; echo done")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        unsafe {
+            cmd.pre_exec(move || apply_rlimits(&policy_clone));
+        }
+
+        let output = cmd.output().unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        // With NPROC=2, not all 5 subshells should succeed
+        // (the parent sh counts as 1, leaving room for only 1 more)
+        let line_count = stdout.lines().filter(|l| !l.is_empty()).count();
+        // We should see "done" but fewer than 5 numbered lines
+        assert!(
+            line_count < 6,
+            "RLIMIT_NPROC should limit subshell creation. Got {line_count} lines: {stdout}"
+        );
+    }
 }

@@ -5383,6 +5383,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "theo-domain",
  "theo-engine-graph",
  "thiserror 2.0.18",
 ]

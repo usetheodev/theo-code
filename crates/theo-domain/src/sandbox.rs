@@ -238,6 +238,49 @@ impl Default for AuditPolicy {
     }
 }
 
+// ── Policy Lock ─────────────────────────────────────────────────
+
+/// Policy lock for corporate environments — prevents local override of sandbox settings.
+///
+/// When locked=true, the sandbox config cannot be changed by the user.
+/// Only an admin can modify the locked config.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PolicyLock {
+    /// Whether the sandbox config is locked against local changes.
+    pub locked: bool,
+
+    /// Fields that are locked (empty = all fields locked when locked=true).
+    pub locked_fields: Vec<String>,
+
+    /// Who locked the config (admin identifier).
+    pub locked_by: Option<String>,
+
+    /// Reason for the lock.
+    pub reason: Option<String>,
+}
+
+impl Default for PolicyLock {
+    fn default() -> Self {
+        Self {
+            locked: false,
+            locked_fields: vec![],
+            locked_by: None,
+            reason: None,
+        }
+    }
+}
+
+impl PolicyLock {
+    /// Check if a specific field is locked.
+    pub fn is_field_locked(&self, field: &str) -> bool {
+        if !self.locked {
+            return false;
+        }
+        // Empty locked_fields = all fields locked
+        self.locked_fields.is_empty() || self.locked_fields.iter().any(|f| f == field)
+    }
+}
+
 // ── Execution Result ────────────────────────────────────────────────
 
 /// Result of a sandboxed execution.
@@ -654,5 +697,59 @@ mod tests {
         assert_eq!(format!("{}", FilesystemOp::Write), "write");
         assert_eq!(format!("{}", FilesystemOp::Execute), "execute");
         assert_eq!(format!("{}", FilesystemOp::Delete), "delete");
+    }
+
+    // ── PolicyLock tests ────────────────────────────────────────
+
+    #[test]
+    fn policy_lock_default_is_unlocked() {
+        let lock = PolicyLock::default();
+        assert!(!lock.locked);
+        assert!(lock.locked_fields.is_empty());
+        assert!(lock.locked_by.is_none());
+    }
+
+    #[test]
+    fn policy_lock_serde_roundtrip() {
+        let lock = PolicyLock {
+            locked: true,
+            locked_fields: vec!["enabled".to_string(), "fail_if_unavailable".to_string()],
+            locked_by: Some("admin@corp.com".to_string()),
+            reason: Some("compliance".to_string()),
+        };
+        let json = serde_json::to_string(&lock).unwrap();
+        let deserialized: PolicyLock = serde_json::from_str(&json).unwrap();
+        assert_eq!(lock.locked, deserialized.locked);
+        assert_eq!(lock.locked_fields, deserialized.locked_fields);
+        assert_eq!(lock.locked_by, deserialized.locked_by);
+    }
+
+    #[test]
+    fn policy_lock_unlocked_allows_all() {
+        let lock = PolicyLock::default();
+        assert!(!lock.is_field_locked("enabled"));
+        assert!(!lock.is_field_locked("anything"));
+    }
+
+    #[test]
+    fn policy_lock_locked_all_fields() {
+        let lock = PolicyLock {
+            locked: true,
+            locked_fields: vec![], // empty = all locked
+            ..PolicyLock::default()
+        };
+        assert!(lock.is_field_locked("enabled"));
+        assert!(lock.is_field_locked("anything"));
+    }
+
+    #[test]
+    fn policy_lock_locked_specific_fields() {
+        let lock = PolicyLock {
+            locked: true,
+            locked_fields: vec!["enabled".to_string()],
+            ..PolicyLock::default()
+        };
+        assert!(lock.is_field_locked("enabled"));
+        assert!(!lock.is_field_locked("other_field"));
     }
 }

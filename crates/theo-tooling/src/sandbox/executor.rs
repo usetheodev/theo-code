@@ -314,8 +314,10 @@ fn apply_landlock_in_child(
 
 /// Create the appropriate SandboxExecutor for the current platform.
 ///
-/// Returns `LandlockExecutor` on Linux with kernel support,
-/// or `Err` if sandbox is unavailable and fail_if_unavailable is true.
+/// Cascading preference: bwrap > landlock > noop.
+/// - bwrap: Full isolation (PID ns, net ns, mount ns, capabilities) — preferred
+/// - landlock: Filesystem isolation only — fallback on Linux without bwrap
+/// - noop: No isolation — last resort or when sandbox disabled
 pub fn create_executor(config: &SandboxConfig) -> Result<Box<dyn SandboxExecutor>, SandboxError> {
     if !config.enabled {
         return Ok(Box::new(NoopExecutor));
@@ -323,16 +325,23 @@ pub fn create_executor(config: &SandboxConfig) -> Result<Box<dyn SandboxExecutor
 
     #[cfg(target_os = "linux")]
     {
-        match LandlockExecutor::new() {
-            Ok(executor) => Ok(Box::new(executor)),
-            Err(e) => {
-                if config.fail_if_unavailable {
-                    Err(e)
-                } else {
-                    // Graceful degradation — use NoopExecutor with warning
-                    Ok(Box::new(NoopExecutor))
-                }
-            }
+        // Try bwrap first (best isolation)
+        if let Ok(executor) = super::bwrap::BwrapExecutor::new() {
+            return Ok(Box::new(executor));
+        }
+
+        // Fallback to landlock (filesystem only)
+        if let Ok(executor) = LandlockExecutor::new() {
+            return Ok(Box::new(executor));
+        }
+
+        // Neither available
+        if config.fail_if_unavailable {
+            Err(SandboxError::Unavailable(
+                "neither bwrap nor landlock available".to_string(),
+            ))
+        } else {
+            Ok(Box::new(NoopExecutor))
         }
     }
 
