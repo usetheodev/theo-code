@@ -18,13 +18,20 @@ pub fn run() {
             commands::chat::get_project_dir,
             commands::chat::update_config,
             commands::chat::get_config,
-            // Auth commands
+            // Auth commands (OpenAI)
             commands::auth::auth_login_browser,
             commands::auth::auth_start_device_flow,
             commands::auth::auth_poll_device_flow,
             commands::auth::auth_status,
             commands::auth::auth_logout,
             commands::auth::auth_apply_to_config,
+            // Auth commands (GitHub Copilot)
+            commands::copilot::copilot_start_device_flow,
+            commands::copilot::copilot_poll_device_flow,
+            commands::copilot::copilot_status,
+            commands::copilot::copilot_logout,
+            commands::copilot::copilot_apply_to_config,
+            commands::copilot::provider_models,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Theo Code");

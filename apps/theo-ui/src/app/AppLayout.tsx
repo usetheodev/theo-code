@@ -25,7 +25,12 @@ export function AppLayout() {
       setAuthStatus(auth);
       setProjectDir(dir);
 
-      if (auth.authenticated) {
+      // Apply auth config — Copilot takes priority if authenticated
+      const copilot = await invoke<{ authenticated: boolean }>("copilot_status").catch(() => null);
+      if (copilot?.authenticated) {
+        await invoke("copilot_apply_to_config", { model: null });
+        setConfig(await invoke<AppConfig>("get_config"));
+      } else if (auth.authenticated) {
         await invoke("auth_apply_to_config");
         setConfig(await invoke<AppConfig>("get_config"));
       }

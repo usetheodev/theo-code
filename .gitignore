@@ -15,7 +15,7 @@
 *.so
 *.dll
 *.exe
-
+provider
 ralph-loop.local.md
 
 # Cargo lock — keep for binaries, ignore for libraries

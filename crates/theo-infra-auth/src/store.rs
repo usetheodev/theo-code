@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 /// Persistent auth credential store.
 ///
 /// Stores tokens per provider in a JSON file at `~/.config/theo/auth.json`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AuthStore {
     path: PathBuf,
 }

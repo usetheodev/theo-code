@@ -14,9 +14,9 @@ crates/
   theo-engine-retrieval # Semantic search, embeddings, TF-IDF, graph attention
   theo-governance      # Policy engine, impact analysis, métricas
   theo-agent-runtime   # Agent loop async, decision control plane
-  theo-infra-llm       # LLM client (OpenAI-compatible, Anthropic, vLLM)
-  theo-infra-auth      # OAuth PKCE, device flow, token management
-  theo-tooling         # Tool registry: bash, edit, grep, glob, LSP, webfetch, etc.
+  theo-infra-llm       # LLM client + provider registry (25 providers, Strategy/Registry/Factory)
+  theo-infra-auth      # OAuth PKCE, device flow, token management (OpenAI + GitHub Copilot)
+  theo-tooling         # Tool registry (20 tools com schema/category) + sandbox (bwrap/landlock)
   theo-api-contracts   # DTOs e eventos para surfaces
   theo-application     # Camada de casos de uso
 
@@ -63,6 +63,9 @@ cd apps/theo-ui && npm run dev
 - Governance é obrigatória no caminho crítico, não pós-processo opcional
 - Todo tool call passa pelo Decision Control Plane antes de execução
 - State Machine governa transições de fase: LOCATE → EDIT → VERIFY → DONE
+- Internamente tudo é OA-compatible — providers convertem na fronteira
+- Sandbox é obrigatório para BashTool: bwrap > landlock > noop (cascata)
+- Tool Registry: cada tool declara schema() e category() — registry valida e gera LLM definitions
 
 ## REGRA #0 — Meeting Obrigatoria (Gate Inquebravel)
 
@@ -129,4 +132,32 @@ SENÃO → APPROVE
 - `docs/target/` — Documentação do que é planejado (futuro)
 - `docs/adr/` — Architecture Decision Records
 - `docs/roadmap/` — Roadmap do produto
+- `docs/adr/` — Architecture Decision Records (001: bounded contexts, 002: sandbox)
 - `research/` — Papers, experimentos, referências (isolado do runtime)
+
+## Sandbox
+
+Execução segura de comandos via BashTool. Cascata: bwrap > landlock > noop.
+
+- **bwrap** (bubblewrap): PID ns, net ns, mount isolation, cap drop, auto-cleanup
+- **landlock**: filesystem isolation (fallback se bwrap indisponível)
+- **rlimits**: CPU, memória, file size, nproc
+- **env sanitizer**: whitelist de vars, strip tokens (AWS, GitHub, OpenAI)
+- **command validator**: rejeita patterns perigosos antes de fork
+- **governance policy**: risk assessment por comando, sequence analyzer
+
+## LLM Providers
+
+Princípio: internamente tudo é OA-compatible. Providers convertem na fronteira.
+
+- `LlmProvider` trait (DIP) — agent-runtime depende de abstração
+- `ProviderSpec` — declaração const (12 linhas por provider OA-compatible)
+- 25 providers no catálogo: OpenAI, Anthropic, Copilot, Groq, Mistral, etc.
+- Backend é fonte de verdade para modelos — frontend busca via `provider_models`
+
+## Auth
+
+- **OpenAI**: OAuth PKCE (browser) + Device Flow (headless)
+- **GitHub Copilot**: Device Flow RFC 8628 + Enterprise support
+- Token storage: `~/.config/theo/auth.json` (0o600)
+- Copilot endpoint: `api.githubcopilot.com/chat/completions` (sem /v1/)

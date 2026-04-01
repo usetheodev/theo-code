@@ -192,6 +192,29 @@ impl LlmClient {
     }
 }
 
+/// Backward-compatible LlmProvider implementation for LlmClient.
+///
+/// This allows existing code that uses LlmClient to work with the new
+/// trait-based provider system without changes.
+#[async_trait::async_trait]
+impl crate::provider::LlmProvider for LlmClient {
+    async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse, LlmError> {
+        LlmClient::chat(self, request).await
+    }
+
+    async fn chat_stream(&self, request: &ChatRequest) -> Result<SseStream, LlmError> {
+        LlmClient::chat_stream(self, request).await
+    }
+
+    fn model(&self) -> &str {
+        &self.model
+    }
+
+    fn provider_id(&self) -> &str {
+        "legacy"
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

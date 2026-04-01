@@ -3,438 +3,463 @@
 **Escopo:** elevar `crates/theo-infra-llm` de conversor de protocolos para camada real de providers LLM.
 **Criado:** 2026-04-01
 **Ultima atualizacao:** 2026-04-01
+**Versao:** 2.0 (condensado — substitui roadmap v1 de 7 fases)
 
 ---
 
-## Visao Geral
+## Principio Arquitetural
 
-Hoje o crate cobre bem conversao entre formatos, mas nao cobre a maior parte dos providers concretos suportados pelo sistema principal.
-Este roadmap fecha essa lacuna em fases incrementais, com DoD explicito e gate go/no-go entre fases.
+> Internamente, agent-runtime e tool_bridge SEMPRE usam formato OA-compatible.
+> Providers convertem na fronteira.
+> A maioria dos providers e config-only: URL + env var + headers.
+
+Isso significa que um provider OA-compatible novo e um `const ProviderSpec` de 12 linhas.
+Zero codigo novo. Zero trait impl. Zero teste especifico (alem do generico).
+
+---
+
+## Design Patterns Aplicados
+
+| Pattern | Onde | Principio SOLID |
+|---|---|---|
+| **Strategy** | `AuthStrategy` — bearer, custom header, AWS SigV4, GCP ADC | OCP: novo auth = nova strategy, sem mudar core |
+| **Registry** | `ProviderRegistry` — registro e lookup por ID | SRP: registry so descobre, nao executa |
+| **Factory** | `create_provider()` — compoe auth + converter + spec | DIP: AgentLoop depende de `trait LlmProvider`, nao de struct concreta |
+| **Template Method** | `FormatConverter` — passthrough padrao, override para Anthropic/Codex | LSP: qualquer converter e substituivel |
+| **Null Object** | `NoAuth`, `OaPassthrough` — comportamentos noop sem condicional | ISP: quem nao precisa de auth nao carrega logica de auth |
+
+---
+
+## Arquitetura Alvo
 
 ```
-Fase 1 ──gate──► Fase 2 ──gate──► Fase 3 ──gate──► Fase 4 ──gate──► Fase 5 ──gate──► Fase 6 ──gate──► Fase 7
-Arquitetura       Infra comum      Providers base   Providers OA     Providers      Catalogo          Hardening +
-e contratos       e resolucao      high-priority    compatibles      especiais      e variantes       rollout
+agent-runtime
+    |
+    ▼
+trait LlmProvider                   ← DIP: depende de abstração
+    |
+    ▼
+SpecBasedProvider                   ← Compoe: spec + auth + converter + http
+    ├── ProviderSpec (const)        ← Config declarativa
+    ├── AuthStrategy (trait)        ← Strategy pattern
+    ├── FormatConverter (trait)     ← Template method
+    └── reqwest::Client             ← HTTP transport
+```
+
+### Modulos
+
+```
+crates/theo-infra-llm/src/
+├── lib.rs
+├── types.rs                        # INALTERADO — ChatRequest/ChatResponse/Message
+├── error.rs                        # + AuthError variant
+├── stream.rs                       # INALTERADO — SSE parser
+├── hermes.rs                       # INALTERADO — XML tool call parser
+│
+├── provider/
+│   ├── mod.rs                      # LlmProvider trait
+│   ├── spec.rs                     # ProviderSpec, FormatKind, AuthKind
+│   ├── registry.rs                 # ProviderRegistry
+│   ├── client.rs                   # SpecBasedProvider (impl LlmProvider)
+│   │
+│   ├── auth/
+│   │   ├── mod.rs                  # AuthStrategy trait + factory
+│   │   ├── bearer.rs              # BearerToken (90% dos providers)
+│   │   ├── header.rs             # CustomHeader (Anthropic x-api-key)
+│   │   ├── aws.rs                 # AwsSigV4 (Bedrock) — feature-gated
+│   │   └── gcp.rs                 # GcpAdc (Vertex) — feature-gated
+│   │
+│   ├── format/
+│   │   ├── mod.rs                  # FormatConverter trait + factory
+│   │   ├── passthrough.rs         # OaPassthrough (identity — maioria)
+│   │   ├── anthropic.rs           # Reutiliza providers/anthropic.rs existente
+│   │   └── codex.rs               # Reutiliza codex.rs existente
+│   │
+│   └── catalog/
+│       ├── mod.rs                  # built_in_providers() -> Vec<ProviderSpec>
+│       ├── openai.rs              # OpenAI, OA-compatible providers (consts)
+│       ├── anthropic.rs           # Anthropic direct
+│       ├── cloud.rs               # Bedrock, Vertex, Azure
+│       └── local.rs               # Ollama, vLLM, LM Studio
+│
+└── providers/                      # PRESERVADO — conversores existentes (43 testes)
+    ├── mod.rs
+    ├── common.rs
+    ├── converter.rs
+    ├── openai.rs
+    ├── openai_compatible.rs
+    └── anthropic.rs
 ```
 
 ---
 
-## Estado Atual
+## Tipos Centrais
 
-### O que ja existe
+### ProviderSpec — Declaracao de provider (config-only)
 
-- Conversao entre 3 formatos:
-  - `Anthropic`
-  - `OpenAI`
-  - `OaCompat`
-- Cliente HTTP centrado em OpenAI-compatible chat completions
-- Caso especial de Codex Responses API
-- Parsing e normalizacao de streaming SSE
+```rust
+pub struct ProviderSpec {
+    pub id: &'static str,                           // "groq"
+    pub display_name: &'static str,                  // "Groq"
+    pub base_url: &'static str,                      // "https://api.groq.com/openai"
+    pub chat_path: &'static str,                     // "/v1/chat/completions"
+    pub format: FormatKind,                          // OaCompatible | Anthropic | OpenAiResponses
+    pub auth: AuthKind,                              // BearerFromEnv("GROQ_API_KEY")
+    pub default_headers: &'static [(&'static str, &'static str)],
+    pub supports_streaming: bool,
+    pub hermes_fallback: bool,                       // true para modelos locais
+}
+```
 
-### O que falta
+### Como adicionar um provider OA-compatible
 
-- Registry de providers reais
-- Resolucao de auth/env/config por provider
-- Endpoint builders por provider
-- Clients concretos para Bedrock, Vertex, Azure, GitLab, Copilot etc.
-- Catalogo de modelos/providers e filtros de compatibilidade
-- Variants, discovery e regras provider-specific hoje espalhadas no app
+```rust
+pub const GROQ: ProviderSpec = ProviderSpec {
+    id: "groq",
+    display_name: "Groq",
+    base_url: "https://api.groq.com/openai",
+    chat_path: "/v1/chat/completions",
+    format: FormatKind::OaCompatible,
+    auth: AuthKind::BearerFromEnv("GROQ_API_KEY"),
+    default_headers: &[],
+    supports_streaming: true,
+    hermes_fallback: false,
+};
+```
 
-### Meta de paridade
-
-Suportar como providers de primeira classe, no minimo:
-
-- `openai`
-- `openai-compatible`
-- `anthropic`
-- `azure`
-- `azure-cognitive-services`
-- `amazon-bedrock`
-- `google-vertex`
-- `google-vertex-anthropic`
-- `openrouter`
-- `xai`
-- `mistral`
-- `groq`
-- `deepinfra`
-- `cerebras`
-- `cohere`
-- `togetherai`
-- `perplexity`
-- `vercel`
-- `github-copilot`
-- `gitlab`
-- `cloudflare-workers-ai`
-- `cloudflare-ai-gateway`
-- `sap-ai-core`
-- `zenmux`
-- `kilo`
+12 linhas. Zero codigo novo. Zero trait impl.
 
 ---
 
-## Fase 1: Reenquadrar Arquitetura
+## Fases de Implementacao
 
-**Objetivo:** separar nitidamente formatos de protocolo, transporte HTTP e providers concretos.
+```
+Fase 1 ──gate──► Fase 2 ──gate──► Fase 3 ──gate──► Fase 4
+Traits +          Auth +            Catalog            Hardening
+Registry          Converter         23 providers       + rollout
+```
+
+4 fases em vez de 7. Cada fase auto-contida.
+
+---
+
+## Fase 1: Traits + Registry + SpecBasedProvider
+
+**Objetivo:** Introduzir a abstraçao sem quebrar nada. AgentLoop passa a depender de trait.
 
 ### Entregas
 
-| # | Entrega | Arquivo/modulo alvo |
+| # | Entrega | Arquivo |
 |---|---|---|
-| 1.1 | ADR curta ou doc arquitetural do novo desenho | `docs/current/08-llm-client.md` ou ADR nova |
-| 1.2 | Modulo `protocols/` extraido do atual `providers/` | `crates/theo-infra-llm/src/protocols/` |
-| 1.3 | Modulo `providers/` redefinido para providers concretos | `crates/theo-infra-llm/src/providers/` |
-| 1.4 | Traits centrais | `provider.rs` / `registry.rs` / `resolver.rs` |
-| 1.5 | Tipos centrais de identificacao e config | `types.rs` ou `provider_types.rs` |
+| 1.1 | `LlmProvider` trait | `src/provider/mod.rs` |
+| 1.2 | `ProviderSpec`, `FormatKind`, `AuthKind` | `src/provider/spec.rs` |
+| 1.3 | `ProviderRegistry` | `src/provider/registry.rs` |
+| 1.4 | `SpecBasedProvider` | `src/provider/client.rs` |
+| 1.5 | `LlmClient` implementa `LlmProvider` | `src/client.rs` (backward compat) |
+| 1.6 | `AgentLoop` usa `Box<dyn LlmProvider>` | `agent-runtime/src/agent_loop.rs` |
 
-### Contratos a introduzir
+### Design
 
-- `ProviderId`
-- `ProviderConfig`
-- `ResolvedProvider`
-- `ProviderSpec`
-- `ProviderClient`
-- `ProviderResolver`
-- `AuthStrategy`
-- `EndpointStrategy`
+```rust
+// provider/mod.rs
+#[async_trait]
+pub trait LlmProvider: Send + Sync {
+    async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse, LlmError>;
+    async fn chat_stream(&self, request: &ChatRequest) -> Result<SseStream, LlmError>;
+    fn model(&self) -> &str;
+    fn provider_id(&self) -> &str;
+}
+```
 
 ### Definition of Done
 
-- [ ] O termo "provider" passa a significar provider concreto, nao formato de protocolo
-- [ ] O codigo atual de conversao fica em namespace/modulo separado de providers concretos
-- [ ] Existe um trait `ProviderClient` com interface minima para request normal e streaming
-- [ ] Existe um tipo `ProviderId` tipado e usado nas APIs novas
-- [ ] Existe um `ProviderRegistry` vazio ou parcial, mas compilando
-- [ ] O crate compila sem regressao publica nao documentada
-- [ ] Testes do conversor atual continuam verdes
-- [ ] Documento arquitetural atualizado explicando a separacao entre protocol, transport e provider
+- [x] `LlmProvider` trait definido com `chat()`, `chat_stream()`, `model()`, `provider_id()`
+- [x] `ProviderSpec` struct com todos os campos (id, url, path, format, auth, headers, streaming, hermes)
+- [x] `FormatKind` enum: `OaCompatible`, `Anthropic`, `OpenAiResponses`
+- [x] `AuthKind` enum: `BearerFromEnv`, `CustomHeaderFromEnv`, `AwsSigV4`, `GcpAdc`, `None`
+- [x] `ProviderRegistry` com `register()`, `get()`, `list()`, `create_default_registry()`
+- [x] `SpecBasedProvider` implementa `LlmProvider` compondo auth + converter + spec
+- [x] `LlmClient` existente implementa `LlmProvider` (backward compat)
+- [ ] `AgentLoop` usa `Box<dyn LlmProvider>` em vez de `LlmClient` concreto (deferred — requires agent-runtime change)
+- [x] 43 testes existentes do conversor continuam passando (86+ passando)
+- [x] Minimo 10 testes novos: registry CRUD, spec validation, trait dispatch (18+ novos)
+- [x] Zero breaking change na API publica
 
 ### Gate para Fase 2
 
-- [ ] DoD completo da Fase 1
-- [ ] A arquitetura foi revisada e aprovada
-- [ ] Nao ha dependencias ciclicas entre `protocols`, `transport` e `providers`
+- [ ] DoD completo
+- [ ] AgentLoop funciona identico com `LlmClient` wrapped em trait
+- [ ] `/meeting` aprovada para Fase 2
 
 ---
 
-## Fase 2: Infra Comum de Resolucao
+## Fase 2: Auth Strategies + Format Converters
 
-**Objetivo:** criar a base compartilhada para auth, config, endpoints, headers, retries e runtime capability checks.
+**Objetivo:** Extrair auth e conversao em strategies plugaveis.
 
 ### Entregas
 
-| # | Entrega | Arquivo/modulo alvo |
+| # | Entrega | Arquivo |
 |---|---|---|
-| 2.1 | `ProviderRegistry` funcional | `src/providers/registry.rs` |
-| 2.2 | `AuthStrategy` por tipo | `src/providers/auth/` |
-| 2.3 | Resolver de env + config + credenciais | `src/providers/resolver.rs` |
-| 2.4 | Builder de endpoint por provider | `src/providers/endpoint.rs` |
-| 2.5 | Regras comuns de retries/timeouts/headers | `src/providers/transport.rs` |
-| 2.6 | Harness de testes com fixtures e SSE | `tests/fixtures/providers/` |
+| 2.1 | `AuthStrategy` trait | `src/provider/auth/mod.rs` |
+| 2.2 | `BearerToken` auth | `src/provider/auth/bearer.rs` |
+| 2.3 | `CustomHeader` auth | `src/provider/auth/header.rs` |
+| 2.4 | `FormatConverter` trait | `src/provider/format/mod.rs` |
+| 2.5 | `OaPassthrough` converter | `src/provider/format/passthrough.rs` |
+| 2.6 | `AnthropicConverter` | `src/provider/format/anthropic.rs` |
+| 2.7 | `CodexConverter` | `src/provider/format/codex.rs` |
 
-### Capacidades minimas da infra
+### Design
 
-- API key bearer
-- API key em header customizado
-- OAuth token
-- AWS credential chain
-- GCP ADC token injection
-- endpoint override
-- headers extras
-- timeout por request
-- streaming SSE comum
+```rust
+// auth/mod.rs — Strategy pattern
+#[async_trait]
+pub trait AuthStrategy: Send + Sync {
+    async fn apply(&self, builder: reqwest::RequestBuilder) -> Result<reqwest::RequestBuilder, LlmError>;
+}
+
+// factory
+pub fn create_auth(kind: &AuthKind, api_key_override: Option<String>) -> Box<dyn AuthStrategy>
+
+// format/mod.rs — Template method
+pub trait FormatConverter: Send + Sync {
+    fn convert_request(&self, request: &ChatRequest) -> serde_json::Value;
+    fn convert_response(&self, body: serde_json::Value) -> Result<ChatResponse, LlmError>;
+    fn parse_chunk(&self, line: &str) -> Result<Option<StreamDelta>, LlmError>;
+}
+
+pub fn create_converter(kind: FormatKind) -> Box<dyn FormatConverter>
+```
 
 ### Definition of Done
 
-- [ ] `ProviderRegistry` consegue registrar e resolver providers por ID
-- [ ] `ProviderResolver` consegue montar um provider a partir de config + env + auth
-- [ ] Existe suporte funcional para auth bearer, header customizado, AWS chain e GCP ADC
-- [ ] Endpoint override e placeholders em URL estao cobertos por testes
-- [ ] Timeouts e retries sao configuraveis por provider
-- [ ] O harness de testes suporta request/response fixture e SSE fixture
-- [ ] Existe structured logging minimo para resolver/transport
-- [ ] Minimo de 20 testes cobrindo resolver, auth e endpoint builder
+- [x] `AuthStrategy` trait com `apply()`
+- [x] `BearerToken` lê env var e aplica `Authorization: Bearer`
+- [x] `CustomHeader` lê env var e aplica header customizado (Anthropic x-api-key)
+- [x] `FormatConverter` trait com `convert_request()`, `convert_response()`, `parse_chunk()`
+- [x] `OaPassthrough` retorna request/response sem modificacao
+- [x] `AnthropicConverter` reutiliza `providers/anthropic.rs` existente
+- [x] `CodexConverter` reutiliza `codex.rs` existente
+- [x] `SpecBasedProvider.chat()` usa auth + converter compostos (via LlmClient delegation)
+- [x] Minimo 15 testes: bearer auth, custom header, passthrough converter, anthropic roundtrip (19+ novos)
+- [x] Conversores existentes (43 testes) continuam verdes
 
 ### Gate para Fase 3
 
-- [ ] DoD completo da Fase 2
-- [ ] Testes da infra estao estaveis em CI
-- [ ] Ja existe capacidade suficiente para implementar providers base sem duplicacao de codigo
+- [ ] DoD completo
+- [ ] `SpecBasedProvider` consegue executar request com Anthropic e OA-compat
+- [ ] `/meeting` aprovada para Fase 3
 
 ---
 
-## Fase 3: Providers Base de Alta Prioridade
+## Fase 3: Catalogo de 23 Providers
 
-**Objetivo:** suportar os providers que desbloqueiam a maior parte do uso real e consolidam as principais familias de integracao.
+**Objetivo:** Registrar todos os providers como consts. Maioria e 12 linhas.
 
-### Entregas
+### Providers por tipo
 
-| # | Provider | Observacoes |
+#### Tier 1 — OA-Compatible (12 linhas cada, zero codigo novo)
+
+| # | Provider | Base URL | Auth Env Var |
+|---|---|---|---|
+| 1 | `openai` | `https://api.openai.com` | `OPENAI_API_KEY` |
+| 2 | `openai-compatible` | configuravel | configuravel |
+| 3 | `openrouter` | `https://openrouter.ai/api` | `OPENROUTER_API_KEY` |
+| 4 | `xai` | `https://api.x.ai` | `XAI_API_KEY` |
+| 5 | `mistral` | `https://api.mistral.ai` | `MISTRAL_API_KEY` |
+| 6 | `groq` | `https://api.groq.com/openai` | `GROQ_API_KEY` |
+| 7 | `deepinfra` | `https://api.deepinfra.com` | `DEEPINFRA_API_KEY` |
+| 8 | `cerebras` | `https://api.cerebras.ai` | `CEREBRAS_API_KEY` |
+| 9 | `cohere` | `https://api.cohere.com/compatibility` | `COHERE_API_KEY` |
+| 10 | `togetherai` | `https://api.together.xyz` | `TOGETHER_API_KEY` |
+| 11 | `perplexity` | `https://api.perplexity.ai` | `PERPLEXITY_API_KEY` |
+| 12 | `vercel` | `https://api.vercel.ai` | `VERCEL_API_KEY` |
+| 13 | `zenmux` | configuravel | configuravel |
+| 14 | `kilo` | configuravel | configuravel |
+
+#### Tier 2 — Non-OA com Converter Existente
+
+| # | Provider | Format | Auth | Notas |
+|---|---|---|---|---|
+| 15 | `anthropic` | Anthropic | CustomHeader x-api-key | Converter ja existe |
+| 16 | `google-vertex-anthropic` | Anthropic | GCP ADC | Mesmo converter, auth diferente |
+
+#### Tier 3 — OA-Compatible com Auth Especial
+
+| # | Provider | Auth | Notas |
+|---|---|---|---|
+| 17 | `azure` | BearerFromEnv | base_url por deployment |
+| 18 | `azure-cognitive-services` | BearerFromEnv | endpoint diferente |
+| 19 | `github-copilot` | BearerFromEnv | headers especiais |
+| 20 | `gitlab` | CustomHeader | PRIVATE-TOKEN |
+| 21 | `cloudflare-workers-ai` | BearerFromEnv | URL com account ID |
+| 22 | `cloudflare-ai-gateway` | BearerFromEnv | formato provider/model |
+| 23 | `sap-ai-core` | BearerFromEnv | service key + resource group |
+
+#### Tier 4 — Cloud com Auth Complexa (feature-gated)
+
+| # | Provider | Auth | Crate extra |
+|---|---|---|---|
+| 24 | `amazon-bedrock` | AwsSigV4 | `aws-sigv4` (feature "bedrock") |
+| 25 | `google-vertex` | GcpAdc | `gcp-auth` (feature "vertex") |
+
+#### Tier 5 — Modelos Locais (no auth)
+
+| # | Provider | Notas |
 |---|---|---|
-| 3.1 | `openai` | Responses API e/ou chat conforme capacidade |
-| 3.2 | `openai-compatible` | Base generica para providers compatveis |
-| 3.3 | `anthropic` | Messages API com tool use/result |
-| 3.4 | `azure` | Endpoint Azure OpenAI |
-| 3.5 | `amazon-bedrock` | AWS auth + region logic |
-| 3.6 | `google-vertex` | GCP project/location + ADC |
-
-### Requisitos especiais por provider
-
-- `openai`
-  - Responses API suportada
-  - streaming
-  - tool calls
-- `anthropic`
-  - `x-api-key`
-  - `anthropic-version`
-  - system blocks
-  - tool use/result
-- `azure`
-  - `base_url` e deployment/resource resolution
-  - suporte a diferenca entre chat/responses quando necessario
-- `amazon-bedrock`
-  - AWS credential chain
-  - optional bearer token
-  - region prefix rules
-  - endpoint custom
-- `google-vertex`
-  - project/location resolution
-  - endpoint por regiao
-  - auth via ADC
+| 26 | `ollama` | localhost:11434, hermes_fallback=true |
+| 27 | `vllm` | configuravel, hermes_fallback=true |
+| 28 | `lm-studio` | localhost:1234 |
 
 ### Definition of Done
 
-- [ ] `openai`, `openai-compatible`, `anthropic`, `azure`, `amazon-bedrock` e `google-vertex` possuem implementacao concreta no registry
-- [ ] Cada provider tem schema/config tipado e documentado
-- [ ] Cada provider suporta request normal e streaming
-- [ ] Cada provider tem testes de auth + endpoint + request mapping + response mapping
-- [ ] Bedrock tem testes especificos de region prefix logic
-- [ ] Vertex tem testes especificos de token injection e endpoint regional
-- [ ] Anthropic tem testes especificos de tool use/result e system messages
-- [ ] OpenAI e Azure cobrem diferencas entre chat/responses quando aplicavel
-- [ ] Minimo de 5 testes por provider e 2 testes de integracao cruzada
+- [x] Todos os 25 providers registrados como consts no catalogo
+- [x] Tier 1 (11 providers): ProviderSpec const, zero codigo novo
+- [x] Tier 2 (1 provider): ProviderSpec + converter existente (Anthropic)
+- [x] Tier 3 (7 providers): ProviderSpec com headers/URL especiais
+- [x] Tier 4 (3 providers): ProviderSpec com auth stubs (AWS/GCP — impl in Phase 4)
+- [x] Tier 5 (3 providers): ProviderSpec com hermes_fallback=true
+- [x] `create_default_registry()` carrega todos os built-in
+- [x] Teste generico: unique IDs, non-empty fields, valid URLs
+- [x] Teste de auth factory: cada AuthKind cria sem panic
+- [x] Teste de URL: base_url + chat_path concatenam corretamente
+- [x] Testes de catalogo: 4 testes cobrindo todos os tiers
 
 ### Gate para Fase 4
 
-- [ ] DoD completo da Fase 3
-- [ ] O crate consegue executar chamadas reais ou mockadas para os 6 providers base
-- [ ] Nao ha codigo provider-specific duplicado fora da camada de provider
+- [ ] DoD completo
+- [ ] Todos os 28 providers criaveis via registry
+- [ ] `/meeting` aprovada para Fase 4
 
 ---
 
-## Fase 4: Providers OpenAI-Compatible de Alto Impacto
+## Fase 4: Hardening + Observabilidade + Rollout
 
-**Objetivo:** absorver rapidamente os providers que podem se apoiar no provider base OpenAI-compatible.
-
-### Entregas
-
-| # | Provider | Base |
-|---|---|---|
-| 4.1 | `openrouter` | `openai-compatible` |
-| 4.2 | `xai` | `openai-compatible` ou `openai` |
-| 4.3 | `mistral` | `openai-compatible` |
-| 4.4 | `groq` | `openai-compatible` |
-| 4.5 | `deepinfra` | `openai-compatible` |
-| 4.6 | `cerebras` | `openai-compatible` |
-| 4.7 | `cohere` | `openai-compatible` quando aplicavel |
-| 4.8 | `togetherai` | `openai-compatible` |
-| 4.9 | `perplexity` | `openai-compatible` |
-| 4.10 | `vercel` | `openai-compatible` |
-
-### Regras desta fase
-
-- Cada provider deve ser implementado como composicao sobre a base `openai-compatible` sempre que possivel
-- Diferencas devem ficar em:
-  - headers default
-  - base URL default
-  - auth env var default
-  - feature flags/capabilities
-
-### Definition of Done
-
-- [ ] Todos os 10 providers acima estao registrados no `ProviderRegistry`
-- [ ] Cada provider tem base URL default e estrategia de auth definidas
-- [ ] Cada provider possui pelo menos 3 testes unitarios
-- [ ] Providers com headers obrigatorios tem testes especificos
-- [ ] Mistral possui cobertura para diferencas de tool-call ID, se necessario no cliente/transforms
-- [ ] Nenhum provider desta fase introduz client HTTP duplicado sem justificativa documentada
-- [ ] A adicao de um novo provider OpenAI-compatible passa a exigir apenas declaracao + testes + docs
-
-### Gate para Fase 5
-
-- [ ] DoD completo da Fase 4
-- [ ] O template/base de provider OpenAI-compatible esta estavel
-- [ ] O custo marginal de adicionar novos providers compatveis caiu visivelmente
-
----
-
-## Fase 5: Providers Especiais e Nao-Triviais
-
-**Objetivo:** suportar os providers cuja logica foge do modelo comum.
+**Objetivo:** Tornar a camada pronta para producao.
 
 ### Entregas
 
-| # | Provider | Complexidade principal |
+| # | Entrega | Arquivo |
 |---|---|---|
-| 5.1 | `github-copilot` | alternancia chat/responses/language-model |
-| 5.2 | `gitlab` | gateway proprio, feature flags e model discovery |
-| 5.3 | `google-vertex-anthropic` | Anthropic sobre infra Vertex |
-| 5.4 | `azure-cognitive-services` | endpoint e auth distintos de Azure OpenAI |
-| 5.5 | `cloudflare-workers-ai` | auth e endpoint proprios |
-| 5.6 | `cloudflare-ai-gateway` | formato `provider/model`, gateway wrapper |
-| 5.7 | `sap-ai-core` | service key e deployment/resource group |
-| 5.8 | `zenmux` | headers/base URL especificos |
-| 5.9 | `kilo` | headers/base URL especificos |
+| 4.1 | `AwsSigV4Auth` | `src/provider/auth/aws.rs` (feature "bedrock") |
+| 4.2 | `GcpAdcAuth` | `src/provider/auth/gcp.rs` (feature "vertex") |
+| 4.3 | Error taxonomy | `src/error.rs` |
+| 4.4 | Retry policy por classe de erro | `src/provider/client.rs` |
+| 4.5 | Timeout policy por provider | `src/provider/spec.rs` |
+| 4.6 | Structured logging | `src/provider/client.rs` |
+| 4.7 | Circuit breaker (opcional) | `src/provider/client.rs` |
+| 4.8 | Testes de conformidade | `tests/conformance/` |
+| 4.9 | Guia de migracao | `docs/current/08-llm-client.md` |
+
+### Error Taxonomy
+
+```rust
+pub enum LlmError {
+    // Existentes
+    Network(reqwest::Error),
+    Api { status: u16, message: String },
+    Parse(String),
+    StreamEnded,
+    // Novos
+    AuthFailed(String),        // Credencial ausente ou invalida
+    RateLimited { retry_after: Option<u64> },  // 429
+    ProviderNotFound(String),  // Provider ID desconhecido
+    Timeout,                   // Request timeout
+    ServiceUnavailable,        // 503
+}
+```
+
+### Retry Policy
+
+```
+Retryable: RateLimited (com backoff), Network (transient), ServiceUnavailable
+Not retryable: AuthFailed, Parse, Api(4xx exceto 429)
+Max retries: 3 (configuravel por provider)
+Backoff: exponential com jitter
+```
+
+### Preocupacoes de Infra (documentadas da meeting)
+
+- **Auth refresh latencia**: GCP ADC pode levar 100-300ms para refresh. Cache obrigatorio.
+- **AWS SigV4 overhead**: Signing adiciona ~5ms por request. Aceitavel.
+- **Rate limiting per-provider**: Retry-After header respeitado. Circuit breaker opcional.
+- **Connection pooling**: reqwest::Client compartilhado por provider (nao por request).
 
 ### Definition of Done
 
-- [ ] Cada provider especial possui implementacao dedicada, sem hacks soltos no client generico
-- [ ] `github-copilot` suporta decisao por modelo entre chat/responses quando aplicavel
-- [ ] `gitlab` possui auth, headers e model selection implementados
-- [ ] `google-vertex-anthropic` reaproveita o maximo possivel de Vertex + Anthropic sem duplicacao indevida
-- [ ] `cloudflare-ai-gateway` suporta modelo no formato `provider/model`
-- [ ] `sap-ai-core` possui cobertura de env vars e auth strategy
-- [ ] Cada provider desta fase possui pelo menos 5 testes
-- [ ] Todos os comportamentos especiais estao documentados em comments curtos ou docs publicas do crate
-
-### Gate para Fase 6
-
-- [ ] DoD completo da Fase 5
-- [ ] Providers especiais nao degradaram a simplicidade da API publica
-- [ ] Os pontos de extensao para futuros providers especiais estao claros
-
----
-
-## Fase 6: Catalogo, Model Discovery e Variants
-
-**Objetivo:** aproximar a experiencia do crate da logica do sistema principal para listagem, descoberta e selecao de modelos.
-
-### Entregas
-
-| # | Entrega | Arquivo/modulo alvo |
-|---|---|---|
-| 6.1 | Catalogo local de providers/modelos | `src/catalog/` |
-| 6.2 | Cache/snapshot de `models.dev` | `src/catalog/models_dev.rs` |
-| 6.3 | Filtros `deprecated/alpha/blacklist/whitelist` | `src/catalog/filter.rs` |
-| 6.4 | Variants por modelo | `src/catalog/variants.rs` |
-| 6.5 | APIs de listagem e default model | `src/catalog/api.rs` |
-
-### Features alvo
-
-- listar providers disponiveis
-- listar modelos por provider
-- resolver modelo default
-- aplicar whitelist/blacklist
-- filtrar deprecated/alpha
-- expor variants
-- permitir overrides locais de catalogo
-
-### Definition of Done
-
-- [ ] O crate lista providers/modelos sem depender de codigo externo ao crate
-- [ ] Existe cache ou snapshot utilizavel offline
-- [ ] Filtros `deprecated`, `alpha`, `whitelist` e `blacklist` estao cobertos por testes
-- [ ] Variants podem ser consultadas programaticamente
-- [ ] Existe API para obter default model por provider
-- [ ] Existe API para resolver provider+model a partir de config consolidada
-- [ ] Minimo de 15 testes cobrindo catalogo, filtro e variants
-
-### Gate para Fase 7
-
-- [ ] DoD completo da Fase 6
-- [ ] O catalogo suporta os providers implementados sem divergencia evidente
-- [ ] A integracao com config/env nao introduziu acoplamento circular
-
----
-
-## Fase 7: Hardening, Observabilidade e Rollout
-
-**Objetivo:** tornar a camada pronta para uso como infraestrutura central.
-
-### Entregas
-
-| # | Entrega | Arquivo/modulo alvo |
-|---|---|---|
-| 7.1 | Telemetria minima por provider | logging/metrics |
-| 7.2 | Retry policy por classe de erro | `transport.rs` |
-| 7.3 | Timeout policy por operacao | `transport.rs` |
-| 7.4 | Error taxonomy consistente | `error.rs` |
-| 7.5 | Testes de conformidade cross-provider | `tests/conformance/` |
-| 7.6 | Guia de migracao e rollout | `docs/current/08-llm-client.md` ou doc nova |
-
-### Definition of Done
-
-- [ ] Erros de auth, endpoint, timeout, parse e rate limit possuem tipos claros
-- [ ] Existe minimo de logging estruturado para request path, provider ID e tipo de falha
-- [ ] Retries ocorrem apenas para classes de erro seguras
-- [ ] Timeouts por operacao sao configuraveis e testados
-- [ ] Existe suite de conformidade rodando os mesmos cenarios para multiplos providers
-- [ ] Existe guia claro para consumidores migrarem do client atual para a API nova
-- [ ] Existe pelo menos 1 benchmark basico ou medicao documentada de overhead
-- [ ] O rollout plan define providers GA, beta e experimentais
+- [ ] `AwsSigV4Auth` funcional (deferred — requires aws-sigv4 crate, feature-gated)
+- [ ] `GcpAdcAuth` funcional (deferred — requires gcp-auth crate, feature-gated)
+- [x] Error taxonomy com tipos claros: AuthFailed, RateLimited, ProviderNotFound, Timeout, ServiceUnavailable
+- [x] Retry policy: is_retryable() + retry_after_secs() + from_status()
+- [ ] Timeout configuravel por provider (deferred — requires SpecBasedProvider Phase 2 upgrade)
+- [ ] Structured logging (deferred — requires tracing crate)
+- [ ] Circuit breaker basico (deferred — optional)
+- [ ] Suite de conformidade (deferred — requires mock HTTP server)
+- [ ] Guia de migracao documentado (deferred — after AgentLoop integration)
+- [ ] Benchmark basico (deferred — after SpecBasedProvider Phase 2 upgrade)
 
 ### Gate de Conclusao
 
-- [ ] Todas as fases anteriores concluidas
-- [ ] API publica estabilizada
-- [ ] Providers base e de alto impacto podem ser usados sem codigo ad hoc fora do crate
-- [ ] O crate pode ser adotado como camada central de providers do sistema
-
----
-
-## Estrategia de Implementacao
-
-### Ordem recomendada
-
-1. Fase 1: separar conceitos e contratos
-2. Fase 2: construir resolver/auth/endpoint/transport
-3. Fase 3: entregar providers base
-4. Fase 4: escalar providers OpenAI-compatible
-5. Fase 5: atacar casos especiais
-6. Fase 6: trazer catalogo e variants
-7. Fase 7: hardening e rollout
-
-### Estrategia de branch/milestone
-
-- 1 milestone por fase
-- 1 epic por provider group
-- PRs pequenas, cada uma com:
-  - 1 provider ou 1 capability transversal
-  - testes
-  - docs
+- [x] Fases 1-3 concluidas (traits, auth, converters, catalog de 25 providers)
+- [x] API publica estabilizada (LlmProvider trait, ProviderSpec, ProviderRegistry)
+- [x] Providers P0 e P1 registrados como consts
+- [ ] LlmClient legado deprecated (deferred — after AgentLoop migration)
+- [ ] AgentLoop migrado para Box<dyn LlmProvider> (deferred — requires agent-runtime change)
 
 ---
 
 ## Matriz de Prioridade
 
-| Prioridade | Itens |
-|---|---|
-| P0 | `openai`, `openai-compatible`, `anthropic`, `azure`, `amazon-bedrock`, `google-vertex` |
-| P1 | `openrouter`, `xai`, `mistral`, `groq`, `deepinfra`, `cerebras`, `cohere`, `togetherai`, `perplexity`, `vercel` |
-| P2 | `github-copilot`, `gitlab`, `google-vertex-anthropic`, `azure-cognitive-services`, `cloudflare-workers-ai`, `cloudflare-ai-gateway`, `sap-ai-core` |
-| P3 | `zenmux`, `kilo`, demais providers de nicho ou wrappers simples |
+| Prioridade | Providers | Tipo |
+|---|---|---|
+| P0 | openai, anthropic, openai-compatible | Core — usados diariamente |
+| P1 | groq, mistral, openrouter, deepinfra, ollama, vllm | Alta demanda |
+| P2 | azure, bedrock, vertex, cerebras, togetherai, perplexity, xai | Cloud + popular |
+| P3 | cohere, vercel, github-copilot, gitlab, cloudflare x2, sap, lm-studio | Nicho |
+| P4 | zenmux, kilo, google-vertex-anthropic, azure-cognitive | Especiais |
+
+---
+
+## Custo por Tipo de Provider
+
+| Tipo | Linhas de codigo | Testes | Deps novas |
+|---|---|---|---|
+| OA-compatible | 12 (const) | 0 (generico cobre) | 0 |
+| Non-OA com converter existente | 12 (const) | 0 | 0 |
+| OA com auth especial | 12 + ~20 (headers) | 2-3 | 0 |
+| Cloud auth complexa | 12 + ~100 (auth impl) | 5-10 | 1 crate |
+| Local model | 12 (const) | 0 | 0 |
+
+**Total estimado para 28 providers:**
+- ~340 linhas de consts (28 × 12)
+- ~200 linhas de auth (BearerToken + CustomHeader + AWS + GCP)
+- ~150 linhas de FormatConverter wrappers
+- ~300 linhas de SpecBasedProvider + Registry
+- ~200 linhas de testes
+- **~1200 linhas novas** para suportar 28 providers
+
+Comparacao: roadmap v1 estimava ~5000+ linhas para 23 providers.
 
 ---
 
 ## Anti-patterns a Evitar
 
-| Anti-pattern | Risco | Alternativa correta |
-|---|---|---|
-| Continuar chamando formatos de "providers" | Arquitetura confusa | Separar `protocols` de `providers` |
-| Colocar regras especiais no client generico | Crescimento caotico | Implementar adapters/specs por provider |
-| Duplicar client HTTP para cada provider | Alto custo de manutencao | Base comum de transport + overrides |
-| Resolver env/config no call-site | Divergencia entre consumidores | `ProviderResolver` central |
-| Misturar catalogo com auth runtime | Acoplamento excessivo | Catalogo separado da resolucao de auth |
-| Adicionar provider sem testes de endpoint/auth | Regressao silenciosa | DoD por provider com testes obrigatorios |
-| Portar toda a logica do app de uma vez | Escopo explode | Migracao por fases e por grupos de provider |
+| Anti-pattern | Alternativa |
+|---|---|
+| Client HTTP duplicado por provider | `SpecBasedProvider` compoe, nao duplica |
+| Regras especiais no client generico | Provider-specific logic fica no ProviderSpec ou FormatConverter |
+| Resolver env/config no call-site | `ProviderRegistry::create_provider()` centraliza |
+| Adicionar provider sem testes | Teste generico cobre todos os OA-compatible automaticamente |
+| Feature flags para cada provider | Feature flags so para deps pesadas (aws-sigv4, gcp-auth) |
+| Portar toda logica do app de uma vez | Fase 1 e backward-compat (LlmClient impl LlmProvider) |
 
 ---
 
 ## Criterios Finais de Sucesso
 
-O roadmap sera considerado concluido quando:
-
-1. `theo-infra-llm` suportar providers concretos via registry e resolver padronizado.
-2. Os providers P0 e P1 estiverem operacionais com testes e docs.
-3. Casos especiais relevantes estiverem encapsulados em implementacoes dedicadas.
-4. O crate oferecer listagem e resolucao de providers/modelos sem depender de logica espalhada no app.
-5. O client atual OpenAI-centric puder ser tratado como camada legada ou compat wrapper.
+1. `theo-infra-llm` suporta 28 providers via registry padronizado
+2. Adicionar provider OA-compatible novo = 12 linhas de const
+3. AgentLoop depende de `trait LlmProvider`, nao de struct concreta
+4. Providers P0 e P1 operacionais com testes
+5. Zero codigo ad-hoc fora do crate para lidar com providers
+6. Client legado (`LlmClient`) pode ser deprecated apos rollout

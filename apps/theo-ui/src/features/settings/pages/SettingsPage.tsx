@@ -3,14 +3,17 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useOutletContext } from "react-router-dom";
 import { clsx } from "clsx";
-import { Check, LogOut, ExternalLink, FolderOpen } from "lucide-react";
+import { Check, LogOut, ExternalLink, FolderOpen, GitBranch } from "lucide-react";
 import { AppConfig, AuthStatus, AppLayoutContext } from "../../../types";
+import { DeviceAuthDialog } from "../../../components/auth/DeviceAuthDialog";
 
-const PRESETS = [
-  { label: "OpenAI", url: "https://api.openai.com", model: "gpt-4o" },
-  { label: "o3-mini", url: "https://api.openai.com", model: "o3-mini" },
-  { label: "Anthropic", url: "https://api.anthropic.com", model: "claude-sonnet-4-20250514" },
-  { label: "Local", url: "http://localhost:8000", model: "" },
+type ProviderId = "openai" | "anthropic" | "copilot" | "local" | "custom";
+
+const PRESETS: { id: ProviderId; label: string; url: string }[] = [
+  { id: "openai", label: "OpenAI", url: "https://api.openai.com" },
+  { id: "anthropic", label: "Anthropic", url: "https://api.anthropic.com" },
+  { id: "copilot", label: "Copilot", url: "https://api.githubcopilot.com" },
+  { id: "local", label: "Local", url: "http://localhost:8000" },
 ];
 
 export function SettingsPage() {
@@ -24,21 +27,65 @@ export function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [authLoading, setAuthLoading] = useState(false);
+  const [activeProvider, setActiveProvider] = useState<ProviderId>("openai");
+  const [providerModels, setProviderModels] = useState<string[]>([]);
+  const [defaultModel, setDefaultModel] = useState("");
+  const [loadingModels, setLoadingModels] = useState(false);
+  const [copilotDialogOpen, setCopilotDialogOpen] = useState(false);
+  const [copilotStatus, setCopilotStatus] = useState<{ authenticated: boolean; domain?: string } | null>(null);
 
   useEffect(() => { loadState(); }, []);
 
+  // Fetch models when provider changes
+  useEffect(() => {
+    if (activeProvider === "local" || activeProvider === "custom") {
+      setProviderModels([]);
+      return;
+    }
+    let cancelled = false;
+    setLoadingModels(true);
+    invoke<{ models: string[]; default: string }>("provider_models", { provider: activeProvider })
+      .then((result) => {
+        if (cancelled) return;
+        setProviderModels(result.models);
+        setDefaultModel(result.default);
+        // If current model is not in the list, set the default
+        if (result.models.length > 0 && !result.models.includes(model)) {
+          setModel(result.default);
+        }
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setProviderModels([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingModels(false);
+      });
+    return () => { cancelled = true; };
+  }, [activeProvider]);
+
   async function loadState() {
     try {
-      const [cfg, authStatus, dir] = await Promise.all([
+      const [cfg, authStatus, dir, copilot] = await Promise.all([
         invoke<AppConfig>("get_config"),
         invoke<AuthStatus>("auth_status"),
         invoke<string | null>("get_project_dir"),
+        invoke<{ authenticated: boolean; domain?: string }>("copilot_status").catch(() => null),
       ]);
       setConfig(cfg);
       setAuth(authStatus);
       setBaseUrl(cfg.base_url);
       setModel(cfg.model);
       setProjectDir(dir || "");
+      if (copilot) {
+        setCopilotStatus(copilot);
+        if (copilot.authenticated && cfg.base_url.includes("githubcopilot")) {
+          setActiveProvider("copilot");
+        }
+      }
+      // Detect active provider from URL
+      const matched = PRESETS.find((p) => cfg.base_url.includes(new URL(p.url).hostname));
+      if (matched) setActiveProvider(matched.id);
     } catch (e) {
       console.error("Failed to load config:", e);
     }
@@ -135,38 +182,134 @@ export function SettingsPage() {
             )}
           </Section>
 
+          {/* Copilot Auth */}
+          <Section title="GitHub Copilot">
+            {copilotStatus?.authenticated ? (
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-ok" />
+                  <span className="text-[13px] text-text-1">
+                    Connected
+                    {copilotStatus.domain && copilotStatus.domain !== "github.com" && (
+                      <span className="text-text-3 ml-1">({copilotStatus.domain})</span>
+                    )}
+                  </span>
+                </div>
+                <button
+                  onClick={async () => {
+                    try {
+                      await invoke("copilot_logout");
+                      await loadState();
+                      await reloadState();
+                    } catch (e) {
+                      alert(`Logout failed: ${e}`);
+                    }
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] text-text-2 hover:text-err border border-border rounded-md hover:border-err/30 transition-colors"
+                >
+                  <LogOut size={12} />
+                  Disconnect
+                </button>
+              </div>
+            ) : (
+              <div>
+                <button
+                  onClick={() => setCopilotDialogOpen(true)}
+                  className="flex items-center gap-2 px-4 py-2 bg-surface-3 border border-border rounded-lg text-[13px] text-text-0 hover:bg-surface-4 transition-colors"
+                >
+                  <GitBranch size={14} />
+                  Login with GitHub Copilot
+                </button>
+                <p className="text-[11px] text-text-3 mt-2">
+                  Use your GitHub Copilot subscription
+                </p>
+              </div>
+            )}
+            <DeviceAuthDialog
+              open={copilotDialogOpen}
+              onOpenChange={setCopilotDialogOpen}
+              onSuccess={async () => {
+                await loadState();
+                await reloadState();
+                setActiveProvider("copilot");
+                setBaseUrl("https://api.githubcopilot.com");
+                // Model will be set by the useEffect that fetches provider_models
+              }}
+            />
+          </Section>
+
           {/* Provider */}
           <Section title="Provider">
             <div className="flex gap-2 flex-wrap mb-4">
-              {PRESETS.map((p, i) => {
-                const isActive = baseUrl === p.url && model === p.model;
+              {PRESETS.map((p) => {
+                const isCopilot = p.id === "copilot";
+                const isActive = activeProvider === p.id;
                 return (
                   <button
-                    key={i}
-                    onClick={() => { if (p.url) setBaseUrl(p.url); if (p.model) setModel(p.model); }}
+                    key={p.id}
+                    onClick={async () => {
+                      if (isCopilot && !copilotStatus?.authenticated) {
+                        setCopilotDialogOpen(true);
+                        return;
+                      }
+                      setActiveProvider(p.id);
+                      setBaseUrl(p.url);
+                      // Backend will provide default model via useEffect
+                      if (isCopilot && copilotStatus?.authenticated) {
+                        await invoke("copilot_apply_to_config", { model: null }).catch(() => {});
+                        await loadState();
+                      }
+                    }}
                     className={clsx(
-                      "px-3 py-1.5 text-[12px] rounded-md border transition-colors",
+                      "px-3 py-1.5 text-[12px] rounded-md border transition-colors inline-flex items-center gap-1.5",
                       isActive
                         ? "bg-brand/10 border-brand/30 text-brand font-medium"
                         : "bg-surface-2 border-border text-text-2 hover:bg-surface-3",
                     )}
                   >
                     {p.label}
+                    {isCopilot && copilotStatus?.authenticated && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-ok" />
+                    )}
+                    {isCopilot && !copilotStatus?.authenticated && (
+                      <span className="text-[10px] text-text-3">login</span>
+                    )}
                   </button>
                 );
               })}
             </div>
-            <div className="flex flex-col gap-3">
-              <Field label="Base URL" value={baseUrl} onChange={setBaseUrl} placeholder="https://api.openai.com" />
-              <Field label="Model" value={model} onChange={setModel} placeholder="gpt-4o" />
-              <Field
-                label={auth?.authenticated ? "API Key (optional)" : "API Key"}
-                value={apiKey}
-                onChange={setApiKey}
-                placeholder={config?.has_api_key ? "\u2022\u2022\u2022\u2022\u2022\u2022 (configured)" : "sk-..."}
-                type="password"
-              />
-            </div>
+            {(() => {
+              const isCopilotActive = activeProvider === "copilot";
+              const hasModelList = providerModels.length > 0;
+              return (
+                <div className="flex flex-col gap-3">
+                  <Field label="Base URL" value={baseUrl} onChange={setBaseUrl} placeholder="https://api.openai.com" />
+                  {hasModelList ? (
+                    <ModelSelect
+                      models={providerModels}
+                      value={model}
+                      onChange={setModel}
+                      loading={loadingModels}
+                    />
+                  ) : (
+                    <Field
+                      label="Model"
+                      value={model}
+                      onChange={setModel}
+                      placeholder="model name"
+                    />
+                  )}
+                  <Field
+                    label={isCopilotActive ? "API Key (managed by Copilot)" : auth?.authenticated ? "API Key (optional)" : "API Key"}
+                    value={apiKey}
+                    onChange={setApiKey}
+                    placeholder={isCopilotActive ? "OAuth token managed automatically" : config?.has_api_key ? "\u2022\u2022\u2022\u2022\u2022\u2022 (configured)" : "sk-..."}
+                    type="password"
+                    disabled={isCopilotActive && copilotStatus?.authenticated}
+                  />
+                </div>
+              );
+            })()}
           </Section>
 
           {/* Project */}
@@ -225,10 +368,86 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function Field({
-  label, value, onChange, placeholder, type = "text",
+function ModelSelect({
+  models,
+  value,
+  onChange,
+  loading = false,
 }: {
-  label: string; value: string; onChange: (v: string) => void; placeholder: string; type?: string;
+  models: string[];
+  value: string;
+  onChange: (v: string) => void;
+  loading?: boolean;
+}) {
+  const [customMode, setCustomMode] = useState(false);
+
+  if (customMode) {
+    return (
+      <div>
+        <label className="block text-[12px] text-text-2 mb-1">
+          Model
+          <button
+            onClick={() => setCustomMode(false)}
+            className="ml-2 text-brand hover:text-brand-hover transition-colors"
+          >
+            back to list
+          </button>
+        </label>
+        <input
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="custom model name"
+          className="w-full px-3 py-2 bg-surface-0 border border-border rounded-lg text-[13px] text-text-0 placeholder:text-text-3 outline-none focus:border-border-focus transition-colors"
+        />
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div>
+        <label className="block text-[12px] text-text-2 mb-1">Model</label>
+        <div className="w-full px-3 py-2 bg-surface-0 border border-border rounded-lg text-[13px] text-text-3">
+          Loading models...
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <label className="block text-[12px] text-text-2 mb-1">Model</label>
+      <select
+        value={models.includes(value) ? value : ""}
+        onChange={(e) => {
+          if (e.target.value === "__custom__") {
+            setCustomMode(true);
+            return;
+          }
+          onChange(e.target.value);
+        }}
+        className="w-full px-3 py-2 bg-surface-0 border border-border rounded-lg text-[13px] text-text-0 outline-none focus:border-border-focus transition-colors appearance-none cursor-pointer"
+      >
+        {!models.includes(value) && value && (
+          <option value="" disabled>
+            {value} (not in list)
+          </option>
+        )}
+        {models.map((m) => (
+          <option key={m} value={m}>
+            {m}
+          </option>
+        ))}
+        <option value="__custom__">Custom...</option>
+      </select>
+    </div>
+  );
+}
+
+function Field({
+  label, value, onChange, placeholder, type = "text", disabled = false,
+}: {
+  label: string; value: string; onChange: (v: string) => void; placeholder: string; type?: string; disabled?: boolean;
 }) {
   return (
     <div>
@@ -238,7 +457,11 @@ function Field({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="w-full px-3 py-2 bg-surface-0 border border-border rounded-lg text-[13px] text-text-0 placeholder:text-text-3 outline-none focus:border-border-focus transition-colors"
+        disabled={disabled}
+        className={clsx(
+          "w-full px-3 py-2 bg-surface-0 border border-border rounded-lg text-[13px] text-text-0 placeholder:text-text-3 outline-none focus:border-border-focus transition-colors",
+          disabled && "opacity-50 cursor-not-allowed",
+        )}
       />
     </div>
   );

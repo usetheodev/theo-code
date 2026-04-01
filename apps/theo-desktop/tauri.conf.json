@@ -6,8 +6,8 @@
   "build": {
     "frontendDist": "../theo-ui/dist",
     "devUrl": "http://localhost:5173",
-    "beforeDevCommand": "cd ../theo-ui && npm run dev",
-    "beforeBuildCommand": "cd ../theo-ui && npm run build"
+    "beforeDevCommand": "npm run --prefix ../apps/theo-ui dev",
+    "beforeBuildCommand": "npm run --prefix ../apps/theo-ui build"
   },
   "app": {
     "withGlobalTauri": true,
