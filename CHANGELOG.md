@@ -3,6 +3,20 @@
 ## [Unreleased]
 
 ### Added
+- Agent Runtime formal com 3 state machines, 8 invariantes, 310 testes:
+  - Fase 01: Core Types & State Machines — TaskState (9 estados), ToolCallState (7 estados), RunState (8 estados) com transições exaustivas sem wildcards, newtypes TaskId/CallId/RunId/EventId, contratos Task/ToolCallRecord/ToolResultRecord/AgentRun, trait StateMachine + transition() atômico
+  - Fase 02: Event System — DomainEvent + EventType (11 variants), EventBus sync com in-memory log bounded (max 10k), EventListener trait, catch_unwind para listeners, PrintEventListener/NullEventListener. AgentEvent/EventSink marcados #[deprecated]
+  - Fase 03: Task Lifecycle — TaskManager com create_task (Invariante 1), transition (Invariantes 4+5), queries by session/active. Thread-safe via Mutex
+  - Fase 04: Tool Call Lifecycle — ToolCallManager com enqueue (Invariante 2: call_id único), dispatch_and_execute (Invariante 3: result referencia call_id), eventos ToolCallQueued/Dispatched/Completed. Mutex liberado durante tool execution async
+  - Fase 05: Agent Run Lifecycle — AgentRunEngine com ciclo formal Initialized→Planning→Executing→Evaluating→Converged/Replanning/Aborted (Invariante 6: run_id único). Promise gate (git diff) preservado. Context loop preservado. AgentLoop::run como facade. Phase enum #[deprecated]
+  - Fase 06: Failure Model — RetryPolicy com exponential backoff + jitter, RetryExecutor genérico async com is_retryable gate, DeadLetterQueue para falhas permanentes, CorrectionStrategy enum (RetryLocal/Replan/Subtask/AgentSwap)
+  - Fase 07: Budget Enforcement — Budget (time/tokens/iterations/tool_calls), BudgetUsage com exceeds(), BudgetEnforcer com check() que publica BudgetExceeded event (Invariante 8: sem execução sem budget)
+  - Fase 08: Scheduler & Concurrency — Priority enum (Low/Normal/High/Critical) com Ord, Scheduler com BinaryHeap + FIFO tiebreaker + tokio Semaphore para concurrency control, submit/run_next/cancel/drain
+  - Fase 09: Capabilities & Security — CapabilitySet (allowed/denied tools, categories, paths, network), CapabilityGate com check_tool/check_path_write, denied_tools > allowed_categories precedência, read_only()/unrestricted() presets
+  - Fase 10: Persistence & Resume — RunSnapshot com checksum de integridade (Invariante 7: resume de snapshot consistente), SnapshotStore trait async, FileSnapshotStore (JSON em ~/.theo/snapshots/), validação de checksum no load
+  - Fase 11: Observability — RuntimeMetrics + MetricsCollector (RwLock thread-safe) com record_llm_call/tool_call/retry/run_complete, StructuredLogListener (JSON lines via EventListener), safe_div para 0/0=0.0
+  - Fase 12: Integration & Convergence — ConvergenceCriterion trait, GitDiffConvergence, EditSuccessConvergence, ConvergenceEvaluator (AllOf/AnyOf), CorrectionEngine com select_strategy baseado em failure type + attempt count
+- Roadmap executável do Agent Runtime em docs/roadmap/agent-runtime/ (13 documentos com DoDs)
 - Tool Registry: cada tool declara schema/category, registry valida e gera LLM definitions automaticamente
 - Sandbox de execução segura (ADR-002):
   - Bubblewrap (bwrap) como backend: PID ns, network isolation, capability drop, mount isolation, auto-cleanup

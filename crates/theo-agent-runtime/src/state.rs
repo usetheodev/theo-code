@@ -1,6 +1,11 @@
 use std::collections::HashSet;
 
 /// Phase of the agent state machine.
+///
+/// Deprecated: Use `theo_domain::agent_run::RunState` instead.
+/// This enum is preserved for backward compatibility with AgentState
+/// and will be removed when the migration to RunEngine is complete.
+#[deprecated(since = "0.2.0", note = "Use theo_domain::agent_run::RunState instead")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Phase {
     Explore,

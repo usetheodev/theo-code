@@ -1,7 +1,11 @@
 pub mod agent_run;
+pub mod budget;
+pub mod capability;
 pub mod error;
 pub mod event;
 pub mod identifiers;
+pub mod priority;
+pub mod retry_policy;
 pub mod permission;
 pub mod sandbox;
 pub mod session;
