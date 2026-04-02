@@ -348,6 +348,9 @@ impl AgentRunEngine {
             // ── EXECUTING phase ──
             self.transition_run(RunState::Executing);
 
+            // LLM intention text is already streamed via ContentDelta events
+            // during chat_streaming(). No need to re-emit here.
+
             messages.push(Message::assistant_with_tool_calls(
                 response.content().map(String::from),
                 tool_calls.to_vec(),

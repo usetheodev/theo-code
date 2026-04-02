@@ -1,13 +1,10 @@
-# Meeting — 2026-04-02 (Task tools: replace_all → incremental by ID)
+# Meeting — 2026-04-02 (Real Streaming for Codex)
 
 ## Proposta
-Refactor todowrite (replace_all, perde tasks) → task_create + task_update (incremental, nunca perde).
+Fix chat_streaming() Codex path: response.text().await → response.bytes_stream() incremental.
 
 ## Veredito
 **APPROVED**
 
 ## Escopo Aprovado
-- `crates/theo-tooling/src/todo/mod.rs` (rewrite)
-- `crates/theo-tooling/src/registry/mod.rs` (swap tools)
-- `crates/theo-agent-runtime/src/config.rs` (system prompt)
-- `apps/theo-cli/src/renderer.rs` (display)
+- `crates/theo-infra-llm/src/client.rs` (Codex streaming path)

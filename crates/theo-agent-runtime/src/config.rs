@@ -56,8 +56,8 @@ fn default_system_prompt() -> &'static str {
 - If the user says "continue" or "go ahead", continue the previous task using the conversation history.
 
 ## Workflow
-1. READ first — use `read`, `grep`, `glob` to understand the codebase.
-2. PLAN — use the `think` tool to plan your approach for complex tasks.
+1. THINK FIRST — you MUST use the `think` tool as your FIRST action for any non-trivial task. Plan what files to read, what changes to make, and in what order.
+2. READ — use `read`, `grep`, `glob` to understand the codebase.
 3. ACT — use `edit`, `write`, `bash` to make changes.
 4. VERIFY — read the changed files to confirm correctness.
 5. DONE — call `done` with a summary when the task is complete.

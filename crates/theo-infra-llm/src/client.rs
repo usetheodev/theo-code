@@ -204,7 +204,9 @@ impl LlmClient {
         let url = self.url();
 
         if self.is_codex() {
-            // Codex: stream SSE and parse line by line
+            // Codex: real incremental streaming via bytes_stream()
+            use futures::StreamExt;
+
             let body = codex::to_codex_body(request);
             let builder = self.apply_auth(self.http.post(&url).json(&body));
             let response = builder.send().await?;
@@ -215,29 +217,51 @@ impl LlmClient {
                 return Err(LlmError::Api { status, message: body });
             }
 
-            let full_body = response.text().await
-                .map_err(|e| LlmError::Parse(format!("read stream: {e}")))?;
+            // Stream bytes incrementally and parse SSE lines as they arrive
+            let mut byte_stream = response.bytes_stream();
+            let mut buffer = String::new();
+            let mut full_body = String::new();
 
-            // Parse SSE lines and emit deltas for reasoning
-            for line in full_body.lines() {
-                if let Some(data) = line.strip_prefix("data: ") {
-                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
-                        // Check for reasoning/thinking content in Codex events
-                        if let Some(text) = json.pointer("/delta/text").and_then(|v| v.as_str()) {
-                            if json.get("type").and_then(|v| v.as_str()) == Some("response.reasoning.delta") {
-                                on_delta(&StreamDelta::Reasoning(text.to_string()));
-                            }
-                        }
-                        // Check for output text delta
-                        if json.get("type").and_then(|v| v.as_str()) == Some("response.output_text.delta") {
-                            if let Some(text) = json.pointer("/delta").and_then(|v| v.as_str()) {
-                                on_delta(&StreamDelta::Content(text.to_string()));
+            while let Some(chunk) = byte_stream.next().await {
+                let chunk = chunk.map_err(|e| LlmError::Parse(format!("stream chunk: {e}")))?;
+                let text = String::from_utf8_lossy(&chunk);
+                buffer.push_str(&text);
+                full_body.push_str(&text);
+
+                // Process complete lines from buffer
+                while let Some(newline_pos) = buffer.find('\n') {
+                    let line = buffer[..newline_pos].to_string();
+                    buffer = buffer[newline_pos + 1..].to_string();
+
+                    if let Some(data) = line.strip_prefix("data: ") {
+                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
+                            let event_type = json.get("type").and_then(|v| v.as_str()).unwrap_or("");
+
+                            match event_type {
+                                // Reasoning/thinking deltas (real-time)
+                                "response.reasoning.delta" => {
+                                    if let Some(text) = json.pointer("/delta/text").and_then(|v| v.as_str()) {
+                                        on_delta(&StreamDelta::Reasoning(text.to_string()));
+                                    }
+                                }
+                                // Content text deltas (real-time)
+                                "response.output_text.delta" => {
+                                    if let Some(text) = json.pointer("/delta").and_then(|v| v.as_str()) {
+                                        on_delta(&StreamDelta::Content(text.to_string()));
+                                    }
+                                }
+                                // Completion signal
+                                "response.completed" => {
+                                    on_delta(&StreamDelta::Done);
+                                }
+                                _ => {}
                             }
                         }
                     }
                 }
             }
 
+            // Build ChatResponse from the accumulated SSE body
             codex::from_codex_stream(&full_body)
                 .ok_or_else(|| LlmError::Parse("failed to parse Codex stream".to_string()))
         } else {
