@@ -29,6 +29,56 @@ pub fn registry_to_definitions(registry: &ToolRegistry) -> Vec<ToolDefinition> {
         }),
     ));
 
+    // Add the `subagent` meta-tool for delegation
+    defs.push(ToolDefinition::new(
+        "subagent",
+        "Delegate work to a specialized sub-agent. Use for independent sub-problems. Roles: explorer (read-only research), implementer (make code changes), verifier (run tests/checks), reviewer (code review).",
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "role": {
+                    "type": "string",
+                    "description": "Sub-agent role: 'explorer', 'implementer', 'verifier', or 'reviewer'"
+                },
+                "objective": {
+                    "type": "string",
+                    "description": "What the sub-agent should accomplish"
+                }
+            },
+            "required": ["role", "objective"]
+        }),
+    ));
+
+    // Add the `subagent_parallel` meta-tool for concurrent delegation
+    defs.push(ToolDefinition::new(
+        "subagent_parallel",
+        "Run multiple sub-agents in parallel. All execute concurrently and results are combined. Use when tasks are independent.",
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "agents": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "role": {
+                                "type": "string",
+                                "description": "Sub-agent role: 'explorer', 'implementer', 'verifier', or 'reviewer'"
+                            },
+                            "objective": {
+                                "type": "string",
+                                "description": "What this sub-agent should accomplish"
+                            }
+                        },
+                        "required": ["role", "objective"]
+                    },
+                    "description": "Array of sub-agents to run in parallel"
+                }
+            },
+            "required": ["agents"]
+        }),
+    ));
+
     defs
 }
 
@@ -87,7 +137,7 @@ mod tests {
         let defs = registry_to_definitions(&registry);
 
         // Should have all registry tools + done
-        assert_eq!(defs.len(), registry.len() + 1); // +1 for `done`
+        assert_eq!(defs.len(), registry.len() + 3); // +3 for `done` + `subagent` + `subagent_parallel`
 
         let names: Vec<&str> = defs.iter().map(|d| d.function.name.as_str()).collect();
         assert!(names.contains(&"read"));

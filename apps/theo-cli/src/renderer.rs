@@ -20,12 +20,19 @@ impl EventListener for CliRenderer {
     fn on_event(&self, event: &DomainEvent) {
         match event.event_type {
             EventType::RunStateChanged => {
-                // Minimal state indicators — only show significant transitions
                 let to = event.payload.get("to").and_then(|v| v.as_str()).unwrap_or("?");
-                match to {
-                    "Converged" => eprintln!("\n  \x1b[32m✅ Converged\x1b[0m"),
-                    "Aborted" => eprintln!("\n  \x1b[31m⛔ Aborted\x1b[0m"),
-                    _ => {} // Planning/Executing/Evaluating/Replanning are too noisy
+                if to.starts_with("SubAgentParallel:") {
+                    let count = to.strip_prefix("SubAgentParallel:").unwrap_or("?");
+                    eprintln!("\n  \x1b[35m🤖 Spawning {count} sub-agents in parallel\x1b[0m");
+                } else if to.starts_with("SubAgent:") {
+                    let role = to.strip_prefix("SubAgent:").unwrap_or("?");
+                    eprintln!("\n  \x1b[35m🤖 Spawning {} sub-agent\x1b[0m", role);
+                } else {
+                    match to {
+                        "Converged" => eprintln!("\n  \x1b[32m✅ Converged\x1b[0m"),
+                        "Aborted" => eprintln!("\n  \x1b[31m⛔ Aborted\x1b[0m"),
+                        _ => {}
+                    }
                 }
             }
             EventType::ToolCallQueued => {
@@ -73,6 +80,18 @@ impl EventListener for CliRenderer {
 }
 
 fn render_tool_completed(event: &DomainEvent) {
+    // Detect sub-agent events by [Role] prefix in entity_id
+    let prefix = if event.entity_id.starts_with('[') {
+        if let Some(end) = event.entity_id.find(']') {
+            let role = &event.entity_id[1..end];
+            format!("\x1b[35m[{}]\x1b[0m ", role)
+        } else {
+            String::new()
+        }
+    } else {
+        String::new()
+    };
+
     let success = event.payload.get("success").and_then(|v| v.as_bool()).unwrap_or(false);
     let tool_name = event.payload.get("tool_name").and_then(|v| v.as_str()).unwrap_or("?");
     let input = &event.payload["input"];
@@ -91,12 +110,12 @@ fn render_tool_completed(event: &DomainEvent) {
         "read" => {
             let path = input.get("filePath").and_then(|v| v.as_str()).unwrap_or("?");
             let lines = output.lines().count();
-            eprintln!("  \x1b[36m•\x1b[0m Read \x1b[1m{path}\x1b[0m {status} \x1b[90m({lines} lines)\x1b[0m{duration_str}");
+            eprintln!("  {prefix}\x1b[36m•\x1b[0m Read \x1b[1m{path}\x1b[0m {status} \x1b[90m({lines} lines)\x1b[0m{duration_str}");
         }
         "write" => {
             let path = input.get("filePath").and_then(|v| v.as_str()).unwrap_or("?");
             let lines = input.get("content").and_then(|v| v.as_str()).map(|c| c.lines().count()).unwrap_or(0);
-            eprintln!("  \x1b[36m•\x1b[0m Write \x1b[1m{path}\x1b[0m {status} \x1b[90m({lines} lines)\x1b[0m{duration_str}");
+            eprintln!("  {prefix}\x1b[36m•\x1b[0m Write \x1b[1m{path}\x1b[0m {status} \x1b[90m({lines} lines)\x1b[0m{duration_str}");
             if success {
                 if let Some(content) = input.get("content").and_then(|v| v.as_str()) {
                     for line in content.lines().take(3) {
@@ -111,7 +130,7 @@ fn render_tool_completed(event: &DomainEvent) {
         }
         "edit" => {
             let path = input.get("filePath").and_then(|v| v.as_str()).unwrap_or("?");
-            eprintln!("  \x1b[36m•\x1b[0m Edit \x1b[1m{path}\x1b[0m {status}{duration_str}");
+            eprintln!("  {prefix}\x1b[36m•\x1b[0m Edit \x1b[1m{path}\x1b[0m {status}{duration_str}");
             if success {
                 if let Some(old) = input.get("oldString").and_then(|v| v.as_str()) {
                     let old_first = old.lines().next().unwrap_or("");
@@ -136,22 +155,22 @@ fn render_tool_completed(event: &DomainEvent) {
                 .collect();
             let file_list = if files.is_empty() { "patch".to_string() } else { files.join(", ") };
             let hunks = patch.lines().filter(|l| l.starts_with("@@")).count();
-            eprintln!("  \x1b[36m•\x1b[0m Patch \x1b[1m{file_list}\x1b[0m {status} \x1b[90m({hunks} hunks)\x1b[0m{duration_str}");
+            eprintln!("  {prefix}\x1b[36m•\x1b[0m Patch \x1b[1m{file_list}\x1b[0m {status} \x1b[90m({hunks} hunks)\x1b[0m{duration_str}");
         }
         "glob" => {
             let pattern = input.get("pattern").and_then(|v| v.as_str()).unwrap_or("*");
             let count = output.lines().filter(|l| !l.is_empty()).count();
-            eprintln!("  \x1b[36m•\x1b[0m Search files \x1b[90m{pattern}\x1b[0m {status} \x1b[90m({count} files)\x1b[0m{duration_str}");
+            eprintln!("  {prefix}\x1b[36m•\x1b[0m Search files \x1b[90m{pattern}\x1b[0m {status} \x1b[90m({count} files)\x1b[0m{duration_str}");
         }
         "grep" => {
             let pattern = input.get("pattern").and_then(|v| v.as_str()).unwrap_or("?");
             let count = output.lines().filter(|l| !l.is_empty()).count();
-            eprintln!("  \x1b[36m•\x1b[0m Search code \x1b[90m\"{pattern}\"\x1b[0m {status} \x1b[90m({count} matches)\x1b[0m{duration_str}");
+            eprintln!("  {prefix}\x1b[36m•\x1b[0m Search code \x1b[90m\"{pattern}\"\x1b[0m {status} \x1b[90m({count} matches)\x1b[0m{duration_str}");
         }
         "bash" => {
             let cmd = input.get("command").and_then(|v| v.as_str()).unwrap_or("?");
             let cmd_short = truncate_line(cmd, 70);
-            eprintln!("  \x1b[36m•\x1b[0m Ran \x1b[90m{cmd_short}\x1b[0m {status}{duration_str}");
+            eprintln!("  {prefix}\x1b[36m•\x1b[0m Ran \x1b[90m{cmd_short}\x1b[0m {status}{duration_str}");
             // Show first line of output for bash
             if success && !output.is_empty() {
                 let first = output.lines().next().unwrap_or("");
@@ -171,15 +190,15 @@ fn render_tool_completed(event: &DomainEvent) {
         "reflect" => {
             let confidence = input.get("confidence").and_then(|v| v.as_u64()).unwrap_or(0);
             let color = if confidence >= 70 { "32" } else if confidence >= 40 { "33" } else { "31" };
-            eprintln!("  \x1b[36m•\x1b[0m Reflect {status} \x1b[{color}m(confidence: {confidence}%)\x1b[0m");
+            eprintln!("  {prefix}\x1b[36m•\x1b[0m Reflect {status} \x1b[{color}m(confidence: {confidence}%)\x1b[0m");
         }
         "memory" => {
             let action = input.get("action").and_then(|v| v.as_str()).unwrap_or("?");
             let key = input.get("key").and_then(|v| v.as_str()).unwrap_or("");
             if key.is_empty() {
-                eprintln!("  \x1b[36m•\x1b[0m Memory {action} {status}");
+                eprintln!("  {prefix}\x1b[36m•\x1b[0m Memory {action} {status}");
             } else {
-                eprintln!("  \x1b[36m•\x1b[0m Memory {action}: \x1b[1m{key}\x1b[0m {status}");
+                eprintln!("  {prefix}\x1b[36m•\x1b[0m Memory {action}: \x1b[1m{key}\x1b[0m {status}");
             }
         }
         "task_create" => {
@@ -198,10 +217,10 @@ fn render_tool_completed(event: &DomainEvent) {
             eprintln!("  \x1b[36m📋\x1b[0m task {id} {icon} {new_status}");
         }
         "done" => {
-            eprintln!("  \x1b[36m•\x1b[0m Done {status}");
+            eprintln!("  {prefix}\x1b[36m•\x1b[0m Done {status}");
         }
         _ => {
-            eprintln!("  \x1b[36m•\x1b[0m {tool_name} {status}{duration_str}");
+            eprintln!("  {prefix}\x1b[36m•\x1b[0m {tool_name} {status}{duration_str}");
         }
     }
 }
