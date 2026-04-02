@@ -1,6 +1,10 @@
 use crate::state::Phase;
 
 /// Events emitted by the agent loop for observability.
+///
+/// Deprecated: Use `theo_domain::event::DomainEvent` + `event_bus::EventListener` instead.
+/// This type will be removed when agent_loop.rs is migrated to use EventBus.
+#[deprecated(since = "0.2.0", note = "Use theo_domain::event::DomainEvent + event_bus::EventListener")]
 #[derive(Debug, Clone)]
 pub enum AgentEvent {
     /// A token of streamed text from the LLM.
@@ -25,6 +29,9 @@ pub enum AgentEvent {
 
 /// Trait for receiving agent events.
 /// Implementations can log, display, or forward events to a UI.
+///
+/// Deprecated: Use `event_bus::EventListener` instead.
+#[deprecated(since = "0.2.0", note = "Use event_bus::EventListener")]
 pub trait EventSink: Send + Sync {
     fn emit(&self, event: AgentEvent);
 }

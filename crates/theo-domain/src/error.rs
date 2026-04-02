@@ -32,3 +32,9 @@ pub enum ToolError {
 
 pub type Result<T> = std::result::Result<T, OpenCodeError>;
 pub type ToolResult<T> = std::result::Result<T, ToolError>;
+
+#[derive(Error, Debug, Clone)]
+pub enum TransitionError {
+    #[error("invalid transition from {from} to {to}")]
+    InvalidTransition { from: String, to: String },
+}

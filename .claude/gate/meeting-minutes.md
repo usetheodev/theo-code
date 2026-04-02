@@ -1,71 +1,49 @@
-# Meeting — 2026-04-01 (Fase 01: Core Types & State Machines)
+# Meeting — 2026-04-01 (Fase 03: Task Lifecycle)
 
 ## Proposta
-Adicionar 4 novos módulos em theo-domain (identifiers.rs, task.rs, tool_call.rs, agent_run.rs)
-com 3 state machines (TaskState, ToolCallState, RunState), newtypes para IDs (TaskId, CallId,
-RunId, EventId), e contratos de dados (Task, ToolCallRecord, ToolResultRecord, AgentRun).
-~600 linhas, ~45 testes. Zero async, zero IO.
+TaskManager em theo-agent-runtime — gerenciador de ciclo de vida de Tasks.
+Wraps transitions + EventBus publish. Enforça Invariantes 1, 4 e 5.
+Correções QA incorporadas: create_task emite TaskCreated, testes expandidos para ~16,
+payload com from/to verificado, thread-safe via Mutex.
 
 ## Participantes
-- **governance** — Principal Engineer (veto absoluto)
-- **qa** — QA Staff Engineer
-- **runtime** — Staff AI Systems Engineer
-- **graphctx** — Compiler Engineer
+- **governance** — Principal Engineer (APPROVE)
+- **qa** — QA Staff Engineer (validated=false → correções incorporadas)
 
 ## Análises
 
-### Governance (APPROVE com 7 condições)
-- ToolResultRecord deve manter sufixo Record (evita colisão com ToolResult<T>)
-- SessionId reutilizado de session.rs, não redefinido
-- generate() com std::time + random leve, sem deps pesadas
-- Zero async nos novos módulos
-- Match arms exaustivos, sem wildcards
-- TransitionError com from/to para debuggability
+### Governance (APPROVE)
+- TaskManager correto em theo-agent-runtime (orquestrador, não domain)
+- Arc<EventBus> injetado (não owned) — SRP correto
+- HashMap<TaskId, Task> adequado, TaskId tem Hash+Eq
+- API de 5 métodos minimal e YAGNI-compliant
+- Task::transition() no domain faz validação, manager não duplica
 
-### QA (validated=false)
-- Plano de 45 testes é insuficiente; mínimo defensivo é ~100
-- Tabelas de transição O(N²) obrigatórias para cada state machine
-- Spec ambígua: comportamento de Blocked, TaskId::new(""), trigger de Waiting
-- Testes de atomicidade ausentes: transition() não deve mutar estado em caso de Err
-- Serde roundtrip deve usar assert_eq!, não apenas verificar que não panics
-
-### Runtime (risk=MEDIUM, APPROVE com condições)
-- Borda WaitingTool → Failed ausente no grafo (HIGH)
-- Trigger de saída de RunState::Waiting indefinido (HIGH)
-- Loop de replanning sem circuit breaker no tipo (MEDIUM)
-- Considerar Paused/Suspended para Fase 10 (MEDIUM)
-- Phase enum deve ser marcado #[deprecated] desde a Fase 01
-
-### GraphCtx (risk=MEDIUM)
-- Novos módulos não criam problemas de dependência
-- ToolCallRecord evita colisão com ToolCall de theo-infra-llm
-- Fragmentação de identifiers (session.rs vs identifiers.rs) — inconsistência latente
-- Confirmar estratégia de ID: newtype String como SessionId, sem uuid
+### QA (validated=false → corrigido)
+- 12 testes insuficientes → expandido para ~16
+- create_task deve emitir TaskCreated (Invariant 5 incompleto)
+- Running→Failed e Running→Cancelled ausentes do plano
+- active_tasks deve excluir os 3 terminais explicitamente
+- Payload do evento deve conter from/to
+- Thread safety recomendada
 
 ## Conflitos
-1. WaitingTool → Failed ausente — Runtime identifica como blocker para Fase 06
-2. RunState::Waiting sem trigger de saída — estado zombie potencial
-3. Testes 45 vs 100 — QA exige expansão significativa
-4. Paused/Suspended — Runtime recomenda para evitar retrofit na Fase 10
-5. Fragmentação de identifiers — session.rs vs identifiers.rs
+1. Invariant 5 incompleto sem TaskCreated — incorporado
+2. Terminais parcialmente cobertos — expandido para 3
+3. Payload sem verificação — adicionado teste de from/to
 
 ## Veredito
-**REJECTED**
+**APPROVED** (com correções incorporadas)
 
-Razão: QA.validated = false (testes insuficientes e spec ambígua em pontos críticos)
+## Escopo Aprovado
+- `crates/theo-agent-runtime/src/task_manager.rs` (novo)
+- `crates/theo-agent-runtime/src/lib.rs` (modificado — add pub mod)
 
-## Condições para Re-aprovação
-1. Adicionar bordas WaitingTool → Failed e WaitingInput → Failed no grafo de TaskState
-2. Definir trigger de saída de RunState::Waiting
-3. Expandir plano de testes de 45 para ~100 com tabelas O(N²)
-4. Definir contrato de IDs vazios (assert ou Result)
-5. Adicionar testes de atomicidade para transition()
-6. Documentar que loop de replanning não tem circuit breaker no tipo
-
-## Escopo (quando aprovado)
-- `crates/theo-domain/src/identifiers.rs` (novo)
-- `crates/theo-domain/src/task.rs` (novo)
-- `crates/theo-domain/src/tool_call.rs` (novo)
-- `crates/theo-domain/src/agent_run.rs` (novo)
-- `crates/theo-domain/src/lib.rs` (modificado)
-- `crates/theo-domain/src/error.rs` (modificado)
+## Condições
+1. create_task emite DomainEvent::TaskCreated
+2. transition emite DomainEvent::TaskStateChanged com payload {from, to}
+3. Mínimo 16 testes
+4. active_tasks exclui Completed, Failed E Cancelled
+5. Running→Failed e Running→Cancelled testados
+6. TaskManager thread-safe (Mutex<HashMap>)
+7. cargo check --workspace compila limpo
