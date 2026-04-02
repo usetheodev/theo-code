@@ -52,6 +52,9 @@ impl EventListener for CliRenderer {
                     eprint!("{text}");
                 }
             }
+            EventType::TodoUpdated => {
+                // Rendered inline by ToolCallCompleted for "todowrite"
+            }
             EventType::BudgetExceeded => {
                 let violation = event.payload.get("violation").and_then(|v| v.as_str()).unwrap_or("budget exceeded");
                 eprintln!("  \x1b[33m⚠️  {violation}\x1b[0m");
@@ -195,6 +198,21 @@ fn render_tool_completed(event: &DomainEvent) {
             } else {
                 eprintln!("  \x1b[36m🔧 memory\x1b[0m {action}: {key} {status}");
             }
+        }
+        "task_create" => {
+            let content = input.get("content").and_then(|v| v.as_str()).unwrap_or("?");
+            eprintln!("  \x1b[36m📋 +task\x1b[0m ⬜ {content}");
+        }
+        "task_update" => {
+            let id = input.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+            let new_status = input.get("status").and_then(|v| v.as_str()).unwrap_or("?");
+            let icon = match new_status {
+                "completed" => "✅",
+                "in_progress" => "🔄",
+                "cancelled" => "❌",
+                _ => "⬜",
+            };
+            eprintln!("  \x1b[36m📋 task {id}\x1b[0m {icon} {new_status}");
         }
         "done" => {
             eprintln!("  \x1b[36m🔧 done\x1b[0m {status}");

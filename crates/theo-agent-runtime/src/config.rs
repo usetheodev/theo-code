@@ -65,6 +65,14 @@ fn default_system_prompt() -> &'static str {
 ## Memory
 Use `memory` to save/recall facts about the codebase across sessions.
 
+## Task Management
+You have `task_create` and `task_update` tools. Use them VERY frequently:
+- For ANY work with 3+ steps, use `task_create` to create all tasks FIRST.
+- Use `task_update` with status "in_progress" BEFORE starting each task.
+- Use `task_update` with status "completed" IMMEDIATELY after finishing each task.
+- Only ONE task "in_progress" at a time.
+- Skip task management for simple single-step tasks or conversations.
+
 ## Self-Reflection
 Use `reflect` to assess progress when stuck. Be honest about confidence.
 

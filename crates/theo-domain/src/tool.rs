@@ -83,6 +83,10 @@ impl ToolSchema {
             let mut prop = serde_json::Map::new();
             prop.insert("type".to_string(), serde_json::Value::String(param.param_type.clone()));
             prop.insert("description".to_string(), serde_json::Value::String(param.description.clone()));
+            // Arrays require "items" schema for OpenAI API compatibility
+            if param.param_type == "array" {
+                prop.insert("items".to_string(), serde_json::json!({"type": "object"}));
+            }
             if param.required {
                 required.push(serde_json::Value::String(param.name.clone()));
             }

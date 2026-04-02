@@ -1,11 +1,13 @@
-# Meeting — 2026-04-02 (Budget defaults → Claude Code parity)
+# Meeting — 2026-04-02 (Task tools: replace_all → incremental by ID)
 
 ## Proposta
-Alinhar defaults com Claude Code: sem limite prático de iterações, 1M tokens, 1h time.
+Refactor todowrite (replace_all, perde tasks) → task_create + task_update (incremental, nunca perde).
 
 ## Veredito
-**APPROVED** — config change only, todos valores configuráveis pelo usuário.
+**APPROVED**
 
 ## Escopo Aprovado
-- `crates/theo-agent-runtime/src/config.rs` (max_iterations default)
-- `crates/theo-domain/src/budget.rs` (Budget::default)
+- `crates/theo-tooling/src/todo/mod.rs` (rewrite)
+- `crates/theo-tooling/src/registry/mod.rs` (swap tools)
+- `crates/theo-agent-runtime/src/config.rs` (system prompt)
+- `apps/theo-cli/src/renderer.rs` (display)

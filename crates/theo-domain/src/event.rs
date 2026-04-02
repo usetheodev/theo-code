@@ -27,6 +27,9 @@ pub enum EventType {
     // Streaming
     ReasoningDelta,
     ContentDelta,
+
+    // Task management
+    TodoUpdated,
 }
 
 impl std::fmt::Display for EventType {
@@ -45,12 +48,13 @@ impl std::fmt::Display for EventType {
             EventType::Error => write!(f, "Error"),
             EventType::ReasoningDelta => write!(f, "ReasoningDelta"),
             EventType::ContentDelta => write!(f, "ContentDelta"),
+            EventType::TodoUpdated => write!(f, "TodoUpdated"),
         }
     }
 }
 
 /// All EventType variants for iteration in tests.
-pub const ALL_EVENT_TYPES: [EventType; 13] = [
+pub const ALL_EVENT_TYPES: [EventType; 14] = [
     EventType::TaskCreated,
     EventType::TaskStateChanged,
     EventType::ToolCallQueued,
@@ -64,6 +68,7 @@ pub const ALL_EVENT_TYPES: [EventType; 13] = [
     EventType::Error,
     EventType::ReasoningDelta,
     EventType::ContentDelta,
+    EventType::TodoUpdated,
 ];
 
 /// A domain event representing a significant occurrence in the system.

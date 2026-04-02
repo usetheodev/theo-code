@@ -109,6 +109,7 @@ pub fn create_default_registry() -> ToolRegistry {
     use crate::think::ThinkTool;
     use crate::reflect::ReflectTool;
     use crate::memory::MemoryTool;
+    use crate::todo::{TaskCreateTool, TaskUpdateTool};
 
     let mut registry = ToolRegistry::new();
 
@@ -125,6 +126,8 @@ pub fn create_default_registry() -> ToolRegistry {
         Box::new(ThinkTool::new()),
         Box::new(ReflectTool::new()),
         Box::new(MemoryTool::new()),
+        Box::new(TaskCreateTool::new()),
+        Box::new(TaskUpdateTool::new()),
     ];
 
     for tool in tools {
@@ -264,7 +267,7 @@ mod tests {
         use crate::lsp::LspTool;
         use crate::websearch::WebSearchTool;
         use crate::codesearch::CodeSearchTool;
-        use crate::todo::TodoTool;
+        use crate::todo::{TaskCreateTool, TaskUpdateTool};
         use crate::invalid::InvalidTool;
         use crate::batch::BatchTool;
         use crate::multiedit::MultiEditTool;
@@ -293,7 +296,8 @@ mod tests {
             Box::new(LspTool::new()),
             Box::new(WebSearchTool::new()),
             Box::new(CodeSearchTool::new()),
-            Box::new(TodoTool::new()),
+            Box::new(TaskCreateTool::new()),
+        Box::new(TaskUpdateTool::new()),
             Box::new(InvalidTool::new()),
             Box::new(BatchTool::new()),
             Box::new(MultiEditTool::new()),
