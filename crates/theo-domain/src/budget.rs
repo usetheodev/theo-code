@@ -18,10 +18,10 @@ pub struct Budget {
 impl Default for Budget {
     fn default() -> Self {
         Self {
-            max_time_secs: 300,
-            max_tokens: 200_000,
-            max_iterations: 30,
-            max_tool_calls: 100,
+            max_time_secs: 3_600,       // 1 hour (Claude Code has no time limit)
+            max_tokens: 1_000_000,      // 1M tokens (Claude Code context window)
+            max_iterations: 200,        // Effectively no practical limit
+            max_tool_calls: 500,        // Generous tool call budget
         }
     }
 }
@@ -99,10 +99,10 @@ mod tests {
     #[test]
     fn default_budget_has_sensible_values() {
         let b = Budget::default();
-        assert_eq!(b.max_time_secs, 300);
-        assert_eq!(b.max_tokens, 200_000);
-        assert_eq!(b.max_iterations, 30);
-        assert_eq!(b.max_tool_calls, 100);
+        assert_eq!(b.max_time_secs, 3_600);
+        assert_eq!(b.max_tokens, 1_000_000);
+        assert_eq!(b.max_iterations, 200);
+        assert_eq!(b.max_tool_calls, 500);
     }
 
     #[test]

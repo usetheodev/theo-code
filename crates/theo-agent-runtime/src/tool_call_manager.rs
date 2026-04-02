@@ -184,14 +184,20 @@ impl ToolCallManager {
                 .unwrap_or_default()
         };
         let input_args = {
-            self.records.lock().expect("records lock poisoned")
+            let raw = self.records.lock().expect("records lock poisoned")
                 .get(call_id)
                 .map(|r| r.input.clone())
-                .unwrap_or(serde_json::Value::Null)
+                .unwrap_or(serde_json::Value::Null);
+            // Truncate large string fields to keep event payload reasonable
+            truncate_input_for_event(raw)
         };
         // Truncate output preview for events (avoid huge payloads)
         let output_preview = if result.output.len() > 200 {
-            format!("{}...", &result.output[..200])
+            let mut end = 200;
+            while end > 0 && !result.output.is_char_boundary(end) {
+                end -= 1;
+            }
+            format!("{}...", &result.output[..end])
         } else {
             result.output.clone()
         };
@@ -248,6 +254,27 @@ fn transition_record(
     target: ToolCallState,
 ) -> Result<(), TransitionError> {
     theo_domain::transition(&mut record.state, target)
+}
+
+/// Truncate large string fields in tool input for event payload.
+/// Keeps first ~500 chars of each string field to prevent huge events.
+/// Uses char boundary safe truncation to avoid panics on multi-byte UTF-8.
+fn truncate_input_for_event(mut input: serde_json::Value) -> serde_json::Value {
+    if let Some(obj) = input.as_object_mut() {
+        for (_key, value) in obj.iter_mut() {
+            if let Some(s) = value.as_str() {
+                if s.len() > 500 {
+                    // Find the nearest char boundary at or before 500
+                    let mut end = 500;
+                    while end > 0 && !s.is_char_boundary(end) {
+                        end -= 1;
+                    }
+                    *value = serde_json::Value::String(format!("{}...", &s[..end]));
+                }
+            }
+        }
+    }
+    input
 }
 
 fn now_millis() -> u64 {

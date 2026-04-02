@@ -31,7 +31,7 @@ pub struct AgentConfig {
 impl Default for AgentConfig {
     fn default() -> Self {
         Self {
-            max_iterations: 15,
+            max_iterations: 200,
             base_url: "http://localhost:8000".to_string(),
             api_key: None,
             model: "default".to_string(),
@@ -82,7 +82,7 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = AgentConfig::default();
-        assert_eq!(config.max_iterations, 15);
+        assert_eq!(config.max_iterations, 200);
         assert_eq!(config.temperature, 0.1);
         assert_eq!(config.context_loop_interval, 5);
         assert!(config.endpoint_override.is_none());

@@ -147,6 +147,31 @@ fn render_tool_completed(event: &DomainEvent) {
             let count = output.lines().filter(|l| !l.is_empty()).count();
             eprintln!("  \x1b[36m🔧 grep\x1b[0m \"{pattern}\" {status} \x1b[90m({count} matches)\x1b[0m{duration_str}");
         }
+        "apply_patch" => {
+            // Extract filenames from the patch text (--- a/file, +++ b/file)
+            let patch = input.get("patchText").and_then(|v| v.as_str()).unwrap_or("");
+            let files: Vec<&str> = patch.lines()
+                .filter(|l| l.starts_with("+++ ") || l.starts_with("--- "))
+                .filter_map(|l| l.strip_prefix("+++ b/").or(l.strip_prefix("+++ ")))
+                .filter(|f| *f != "/dev/null")
+                .collect();
+            let file_list = if files.is_empty() {
+                "patch".to_string()
+            } else {
+                files.join(", ")
+            };
+            let hunks = patch.lines().filter(|l| l.starts_with("@@")).count();
+            eprintln!("  \x1b[36m🔧 edit\x1b[0m {file_list} {status} \x1b[90m({hunks} hunks)\x1b[0m{duration_str}");
+            if success && !patch.is_empty() {
+                // Show first changed line
+                for line in patch.lines().take(30) {
+                    if line.starts_with('+') && !line.starts_with("+++") {
+                        eprintln!("    \x1b[32m{}\x1b[0m", truncate_line(line, 80));
+                        break;
+                    }
+                }
+            }
+        }
         "bash" => {
             let cmd = input.get("command").and_then(|v| v.as_str()).unwrap_or("?");
             let cmd_short = truncate_line(cmd, 60);
@@ -183,7 +208,11 @@ fn render_tool_completed(event: &DomainEvent) {
 fn truncate_line(s: &str, max: usize) -> String {
     let first_line = s.lines().next().unwrap_or(s);
     if first_line.len() > max {
-        format!("{}...", &first_line[..max])
+        let mut end = max;
+        while end > 0 && !first_line.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}...", &first_line[..end])
     } else {
         first_line.to_string()
     }

@@ -430,10 +430,23 @@ impl AgentRunEngine {
                             .parse_arguments()
                             .ok()
                             .and_then(|args| {
+                                // For edit/write: filePath is a direct arg
                                 args.get("filePath")
                                     .or(args.get("file_path"))
                                     .and_then(|p| p.as_str())
                                     .map(String::from)
+                                    // For apply_patch: extract from patchText
+                                    .or_else(|| {
+                                        args.get("patchText")
+                                            .and_then(|p| p.as_str())
+                                            .and_then(|patch| {
+                                                patch.lines()
+                                                    .find(|l| l.starts_with("+++ "))
+                                                    .and_then(|l| l.strip_prefix("+++ b/").or(l.strip_prefix("+++ ")))
+                                                    .filter(|f| *f != "/dev/null")
+                                                    .map(String::from)
+                                            })
+                                    })
                             })
                             .unwrap_or_default();
                         self.agent_state.record_edit_attempt(
