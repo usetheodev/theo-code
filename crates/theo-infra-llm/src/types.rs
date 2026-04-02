@@ -175,6 +175,11 @@ pub struct ChatRequest {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stream: Option<bool>,
+
+    /// Reasoning effort level: "low", "medium", "high".
+    /// Supported by OpenAI GPT models. Ignored by providers that don't support it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
 }
 
 impl ChatRequest {
@@ -187,6 +192,7 @@ impl ChatRequest {
             max_tokens: None,
             temperature: None,
             stream: None,
+            reasoning_effort: None,
         }
     }
 
@@ -203,6 +209,11 @@ impl ChatRequest {
 
     pub fn with_temperature(mut self, temperature: f32) -> Self {
         self.temperature = Some(temperature);
+        self
+    }
+
+    pub fn with_reasoning_effort(mut self, effort: impl Into<String>) -> Self {
+        self.reasoning_effort = Some(effort.into());
         self
     }
 }

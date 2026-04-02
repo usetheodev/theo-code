@@ -106,6 +106,9 @@ pub fn create_default_registry() -> ToolRegistry {
     use crate::glob::GlobTool;
     use crate::apply_patch::ApplyPatchTool;
     use crate::webfetch::WebFetchTool;
+    use crate::think::ThinkTool;
+    use crate::reflect::ReflectTool;
+    use crate::memory::MemoryTool;
 
     let mut registry = ToolRegistry::new();
 
@@ -118,6 +121,10 @@ pub fn create_default_registry() -> ToolRegistry {
         Box::new(GlobTool::new()),
         Box::new(ApplyPatchTool::new()),
         Box::new(WebFetchTool::new()),
+        // Cognitive tools
+        Box::new(ThinkTool::new()),
+        Box::new(ReflectTool::new()),
+        Box::new(MemoryTool::new()),
     ];
 
     for tool in tools {

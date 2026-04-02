@@ -1,14 +1,16 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use theo_domain::capability::CapabilityDenied;
 use theo_domain::error::TransitionError;
 use theo_domain::event::{DomainEvent, EventType};
 use theo_domain::identifiers::{CallId, TaskId};
-use theo_domain::tool::ToolContext;
+use theo_domain::tool::{ToolCategory, ToolContext};
 use theo_domain::tool_call::{ToolCallRecord, ToolCallState, ToolResultRecord};
 use theo_infra_llm::types::ToolCall;
 use theo_tooling::registry::ToolRegistry;
 
+use crate::capability_gate::CapabilityGate;
 use crate::event_bus::EventBus;
 use crate::tool_bridge;
 
@@ -24,6 +26,7 @@ pub struct ToolCallManager {
     records: Mutex<HashMap<CallId, ToolCallRecord>>,
     results: Mutex<HashMap<CallId, ToolResultRecord>>,
     event_bus: Arc<EventBus>,
+    capability_gate: Option<Arc<CapabilityGate>>,
 }
 
 impl ToolCallManager {
@@ -32,7 +35,14 @@ impl ToolCallManager {
             records: Mutex::new(HashMap::new()),
             results: Mutex::new(HashMap::new()),
             event_bus,
+            capability_gate: None,
         }
+    }
+
+    /// Sets the capability gate for tool access control.
+    pub fn with_capability_gate(mut self, gate: Arc<CapabilityGate>) -> Self {
+        self.capability_gate = Some(gate);
+        self
     }
 
     /// Enqueues a new tool call with a unique CallId (Invariant 2).
@@ -86,6 +96,20 @@ impl ToolCallManager {
         registry: &ToolRegistry,
         ctx: &ToolContext,
     ) -> Result<ToolResultRecord, ToolCallManagerError> {
+        // 0. Capability check (if gate is set)
+        {
+            let records = self.records.lock().expect("records lock poisoned");
+            if let Some(record) = records.get(call_id) {
+                if let Some(gate) = &self.capability_gate {
+                    // Determine category from registry, default to Utility
+                    let category = registry.get(&record.tool_name)
+                        .map(|t| t.category())
+                        .unwrap_or(ToolCategory::Utility);
+                    gate.check_tool(&record.tool_name, category)?;
+                }
+            }
+        }
+
         // 1. Transition Queued → Dispatched (under lock)
         let lmm_call = {
             let mut records = self.records.lock().expect("records lock poisoned");
@@ -152,7 +176,26 @@ impl ToolCallManager {
             .expect("results lock poisoned")
             .insert(call_id.clone(), result.clone());
 
-        // 7. Publish completion event
+        // 7. Publish completion event (enriched with tool details)
+        let tool_name = {
+            self.records.lock().expect("records lock poisoned")
+                .get(call_id)
+                .map(|r| r.tool_name.clone())
+                .unwrap_or_default()
+        };
+        let input_args = {
+            self.records.lock().expect("records lock poisoned")
+                .get(call_id)
+                .map(|r| r.input.clone())
+                .unwrap_or(serde_json::Value::Null)
+        };
+        // Truncate output preview for events (avoid huge payloads)
+        let output_preview = if result.output.len() > 200 {
+            format!("{}...", &result.output[..200])
+        } else {
+            result.output.clone()
+        };
+
         self.event_bus.publish(DomainEvent::new(
             EventType::ToolCallCompleted,
             call_id.as_str(),
@@ -160,6 +203,9 @@ impl ToolCallManager {
                 "status": format!("{:?}", final_state),
                 "duration_ms": duration_ms,
                 "success": success,
+                "tool_name": tool_name,
+                "input": input_args,
+                "output_preview": output_preview,
             }),
         ));
 
@@ -218,6 +264,9 @@ pub enum ToolCallManagerError {
 
     #[error("transition error: {0}")]
     Transition(#[from] TransitionError),
+
+    #[error("capability denied: {0}")]
+    CapabilityDenied(#[from] CapabilityDenied),
 }
 
 #[cfg(test)]

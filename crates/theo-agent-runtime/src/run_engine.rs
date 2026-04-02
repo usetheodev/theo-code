@@ -1,19 +1,31 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use theo_domain::agent_run::{AgentRun, RunState};
+use theo_domain::budget::Budget;
 use theo_domain::event::{DomainEvent, EventType};
 use theo_domain::identifiers::{RunId, TaskId};
+use theo_domain::retry_policy::RetryPolicy;
 use theo_domain::session::{MessageId, SessionId};
-use theo_domain::task::{AgentType, TaskState};
+use theo_domain::task::TaskState;
+use theo_domain::tool_call::ToolCallState;
 use theo_domain::tool::ToolContext;
 use theo_infra_llm::types::{ChatRequest, Message};
 use theo_infra_llm::LlmClient;
 use theo_tooling::registry::ToolRegistry;
 
 use crate::agent_loop::AgentResult;
+use crate::budget_enforcer::BudgetEnforcer;
 use crate::config::AgentConfig;
+use crate::convergence::{
+    ConvergenceEvaluator, ConvergenceMode,
+    EditSuccessConvergence, GitDiffConvergence,
+};
 use crate::event_bus::EventBus;
+use crate::metrics::{MetricsCollector, RuntimeMetrics};
+use crate::persistence::SnapshotStore;
+use crate::retry::RetryExecutor;
+use crate::snapshot::RunSnapshot;
 #[allow(deprecated)]
 use crate::state::AgentState;
 use crate::task_manager::TaskManager;
@@ -34,6 +46,10 @@ pub struct AgentRunEngine {
     registry: ToolRegistry,
     config: AgentConfig,
     project_dir: PathBuf,
+    budget_enforcer: BudgetEnforcer,
+    metrics: Arc<MetricsCollector>,
+    convergence: ConvergenceEvaluator,
+    snapshot_store: Option<Arc<dyn SnapshotStore>>,
     #[allow(deprecated)]
     agent_state: AgentState,
 }
@@ -74,6 +90,20 @@ impl AgentRunEngine {
         #[allow(deprecated)]
         let agent_state = AgentState::new();
 
+        let budget = Budget {
+            max_iterations: config.max_iterations,
+            ..Budget::default()
+        };
+        let budget_enforcer = BudgetEnforcer::new(budget, event_bus.clone(), run.run_id.as_str());
+        let metrics = Arc::new(MetricsCollector::new());
+        let convergence = ConvergenceEvaluator::new(
+            vec![
+                Box::new(GitDiffConvergence),
+                Box::new(EditSuccessConvergence),
+            ],
+            ConvergenceMode::AllOf,
+        );
+
         Self {
             run,
             task_id,
@@ -84,6 +114,10 @@ impl AgentRunEngine {
             registry,
             config,
             project_dir,
+            budget_enforcer,
+            metrics,
+            convergence,
+            snapshot_store: None,
             agent_state,
         }
     }
@@ -103,10 +137,29 @@ impl AgentRunEngine {
         self.run.iteration
     }
 
+    /// Returns a snapshot of current runtime metrics.
+    pub fn metrics(&self) -> RuntimeMetrics {
+        self.metrics.snapshot()
+    }
+
+    /// Sets the snapshot store for persistence (Invariant 7).
+    pub fn with_snapshot_store(mut self, store: Arc<dyn SnapshotStore>) -> Self {
+        self.snapshot_store = Some(store);
+        self
+    }
+
     /// Execute the full agent run cycle.
     ///
     /// Flow: Initialized → Planning → Executing → Evaluating → Converged/Replanning/Aborted
+    /// Execute with fresh messages (no session history).
     pub async fn execute(&mut self) -> AgentResult {
+        self.execute_with_history(Vec::new()).await
+    }
+
+    /// Execute with session history from previous REPL prompts.
+    /// `history` contains messages from prior runs in this session.
+    /// The current task objective is appended as the last user message.
+    pub async fn execute_with_history(&mut self, history: Vec<Message>) -> AgentResult {
         // Transition to Planning
         self.transition_run(RunState::Planning);
 
@@ -117,6 +170,36 @@ impl AgentRunEngine {
         let mut messages: Vec<Message> = vec![
             Message::system(&self.config.system_prompt),
         ];
+
+        // Inject memories from previous runs (cross-run memory)
+        let memory_root = std::env::var("HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| std::path::PathBuf::from("/tmp"))
+            .join(".config")
+            .join("theo")
+            .join("memory");
+
+        let memory_store = theo_tooling::memory::FileMemoryStore::for_project(
+            &memory_root,
+            &self.project_dir,
+        );
+        if let Ok(memories) = memory_store.list().await {
+            if !memories.is_empty() {
+                let memory_context = memories
+                    .iter()
+                    .map(|m| format!("- **{}**: {}", m.key, m.value))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                messages.push(Message::system(&format!(
+                    "## Memory from previous runs\n{memory_context}"
+                )));
+            }
+        }
+
+        // Inject session history (previous REPL prompts + responses)
+        if !history.is_empty() {
+            messages.extend(history);
+        }
 
         // Add the task objective as user message
         if let Some(task) = self.task_manager.get(&self.task_id) {
@@ -130,24 +213,26 @@ impl AgentRunEngine {
             self.run.iteration += 1;
             let iteration = self.run.iteration;
 
-            if iteration > self.config.max_iterations {
-                // Budget exhausted → abort
+            // Budget check (Invariant 8) — record iteration BEFORE check
+            self.budget_enforcer.record_iteration();
+            if let Err(violation) = self.budget_enforcer.check() {
                 self.transition_run(RunState::Aborted);
                 let _ = self.task_manager.transition(&self.task_id, TaskState::Failed);
 
                 #[allow(deprecated)]
                 let summary = format!(
-                    "Max iterations ({}) reached. Edits succeeded: {}. Files: {}",
-                    self.config.max_iterations,
+                    "Budget exceeded: {}. Edits succeeded: {}. Files: {}",
+                    violation,
                     self.agent_state.edits_succeeded,
                     self.agent_state.edits_files.join(", ")
                 );
 
+                self.metrics.record_run_complete(false);
                 return AgentResult {
                     success: self.agent_state.edits_succeeded > 0,
                     summary,
                     files_edited: self.agent_state.edits_files.clone(),
-                    iterations_used: self.config.max_iterations,
+                    iterations_used: iteration,
                 };
             }
 
@@ -173,39 +258,90 @@ impl AgentRunEngine {
             // LLM call
             self.transition_run(RunState::Planning);
 
-            let request = ChatRequest::new(&self.config.model, messages.clone())
+            let mut request = ChatRequest::new(&self.config.model, messages.clone())
                 .with_tools(tool_defs.clone())
                 .with_max_tokens(self.config.max_tokens)
                 .with_temperature(self.config.temperature);
 
-            let response = match self.client.chat(&request).await {
-                Ok(resp) => resp,
-                Err(e) => {
-                    // Retry once
-                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                    match self.client.chat(&request).await {
-                        Ok(resp) => resp,
-                        Err(_) => {
-                            self.transition_run(RunState::Aborted);
-                            let _ = self.task_manager.transition(&self.task_id, TaskState::Failed);
-                            return AgentResult {
-                                success: false,
-                                summary: format!("LLM error: {e}"),
-                                files_edited: self.agent_state.edits_files.clone(),
-                                iterations_used: iteration,
-                            };
-                        }
+            if let Some(ref effort) = self.config.reasoning_effort {
+                request = request.with_reasoning_effort(effort);
+            }
+
+            // Publish LLM call start (triggers "Thinking..." in CLI)
+            self.event_bus.publish(DomainEvent::new(
+                EventType::LlmCallStart,
+                self.run.run_id.as_str(),
+                serde_json::json!({"iteration": iteration}),
+            ));
+
+            let llm_start = std::time::Instant::now();
+            let event_bus_for_stream = self.event_bus.clone();
+            let run_id_for_stream = self.run.run_id.as_str().to_string();
+
+            // Use streaming with delta callback for real-time reasoning display
+            let response = self.client.chat_streaming(&request, |delta| {
+                match delta {
+                    theo_infra_llm::stream::StreamDelta::Reasoning(text) => {
+                        event_bus_for_stream.publish(DomainEvent::new(
+                            EventType::ReasoningDelta,
+                            &run_id_for_stream,
+                            serde_json::json!({"text": text}),
+                        ));
                     }
+                    theo_infra_llm::stream::StreamDelta::Content(text) => {
+                        event_bus_for_stream.publish(DomainEvent::new(
+                            EventType::ContentDelta,
+                            &run_id_for_stream,
+                            serde_json::json!({"text": text}),
+                        ));
+                    }
+                    _ => {}
+                }
+            }).await;
+
+            let response = match response {
+                Ok(resp) => {
+                    let llm_duration = llm_start.elapsed().as_millis() as u64;
+                    let tokens = resp.usage.as_ref().map(|u| u.total_tokens as u64).unwrap_or(0);
+                    // Record tokens in budget and metrics
+                    self.budget_enforcer.record_tokens(tokens);
+                    self.metrics.record_llm_call(llm_duration, tokens);
+                    resp
+                }
+                Err(e) => {
+                    self.transition_run(RunState::Aborted);
+                    let _ = self.task_manager.transition(&self.task_id, TaskState::Failed);
+                    self.metrics.record_run_complete(false);
+                    return AgentResult {
+                        success: false,
+                        summary: format!("LLM error: {e}"),
+                        files_edited: self.agent_state.edits_files.clone(),
+                        iterations_used: iteration,
+                    };
                 }
             };
 
             let tool_calls = response.tool_calls();
 
-            // No tool calls → text response, continue planning
+            // No tool calls → text-only response (OpenCode pattern)
+            // LLM decided to respond with text, not use tools.
+            // This handles conversational messages ("hello") and informational queries.
             if tool_calls.is_empty() {
                 let content = response.content().unwrap_or("").to_string();
+                if !content.is_empty() {
+                    // Text-only response → return as result (like OpenCode finish_reason="stop")
+                    self.transition_run(RunState::Converged);
+                    let _ = self.task_manager.transition(&self.task_id, TaskState::Completed);
+                    self.metrics.record_run_complete(true);
+                    return AgentResult {
+                        success: true,
+                        summary: content,
+                        files_edited: self.agent_state.edits_files.clone(),
+                        iterations_used: iteration,
+                    };
+                }
+                // Empty content → LLM gave nothing, continue to next iteration
                 messages.push(Message::assistant(content));
-                // Stay in planning, next iteration
                 continue;
             }
 
@@ -222,7 +358,9 @@ impl AgentRunEngine {
             for call in tool_calls {
                 let name = &call.function.name;
 
-                // Handle `done` meta-tool in EVALUATING phase
+                // Handle `done` meta-tool — always accept (OpenCode pattern)
+                // No git diff gate. The LLM decides when the task is complete.
+                // Works in projects with or without git.
                 if name == "done" {
                     self.transition_run(RunState::Evaluating);
 
@@ -232,33 +370,26 @@ impl AgentRunEngine {
                         .and_then(|args| args.get("summary").and_then(|s| s.as_str()).map(String::from))
                         .unwrap_or_else(|| "Task completed.".to_string());
 
-                    // Promise gate: check real changes
-                    if has_real_changes(&self.project_dir).await {
-                        self.transition_run(RunState::Converged);
-                        let _ = self.task_manager.transition(&self.task_id, TaskState::Completed);
+                    self.transition_run(RunState::Converged);
+                    let _ = self.task_manager.transition(&self.task_id, TaskState::Completed);
+                    self.metrics.record_run_complete(true);
 
-                        should_return = Some(AgentResult {
-                            success: true,
-                            summary,
-                            files_edited: self.agent_state.edits_files.clone(),
-                            iterations_used: iteration,
-                        });
-                        break;
-                    } else {
-                        // Blocked → replan
-                        #[allow(deprecated)]
-                        self.agent_state.record_done_blocked();
-                        messages.push(Message::tool_result(
-                            &call.id,
-                            "done",
-                            "BLOCKED: No real changes detected (git diff is empty). You must make actual code changes before calling done(). Re-read the task and try again.",
-                        ));
-                        self.transition_run(RunState::Replanning);
-                        continue;
-                    }
+                    should_return = Some(AgentResult {
+                        success: true,
+                        summary,
+                        files_edited: self.agent_state.edits_files.clone(),
+                        iterations_used: iteration,
+                    });
+                    break;
                 }
 
-                // Execute regular tool via ToolCallManager
+                // Execute regular tool via ToolCallManager (Invariants 2, 3, 5)
+                let tool_call_id = self.tool_call_manager.enqueue(
+                    self.task_id.clone(),
+                    name.clone(),
+                    call.parse_arguments().unwrap_or_default(),
+                );
+
                 let ctx = ToolContext {
                     session_id: SessionId::new("agent"),
                     message_id: MessageId::new(&format!("iter_{iteration}")),
@@ -268,8 +399,20 @@ impl AgentRunEngine {
                     project_dir: self.project_dir.clone(),
                 };
 
-                let (result_msg, success) =
-                    tool_bridge::execute_tool_call(&self.registry, call, &ctx).await;
+                let tool_result = self.tool_call_manager
+                    .dispatch_and_execute(&tool_call_id, &self.registry, &ctx)
+                    .await;
+
+                let (success, output) = match &tool_result {
+                    Ok(r) => (r.status == ToolCallState::Succeeded, r.output.clone()),
+                    Err(e) => (false, format!("Tool call error: {}", e)),
+                };
+
+                // Record tool call in budget and metrics
+                self.budget_enforcer.record_tool_call();
+                self.metrics.record_tool_call(name, 0, success);
+
+                let result_msg = Message::tool_result(&call.id, name, &output);
 
                 // Update agent state (preserved for context loop diagnostics)
                 #[allow(deprecated)]
@@ -296,7 +439,7 @@ impl AgentRunEngine {
                         self.agent_state.record_edit_attempt(
                             &file,
                             success,
-                            if success { None } else { Some(result_msg.content.clone().unwrap_or_default()) },
+                            if success { None } else { Some(output.clone()) },
                         );
                     }
                     _ => {}
@@ -311,6 +454,23 @@ impl AgentRunEngine {
 
             // ── EVALUATING phase ──
             self.transition_run(RunState::Evaluating);
+
+            // Save snapshot if store is configured (Invariant 7)
+            if let Some(ref store) = self.snapshot_store {
+                if let Some(task) = self.task_manager.get(&self.task_id) {
+                    let snapshot = RunSnapshot::new(
+                        self.run.clone(),
+                        task,
+                        vec![], // tool_calls aggregated by ToolCallManager, not stored here
+                        vec![], // tool_results same
+                        self.event_bus.events(),
+                        self.budget_enforcer.usage(),
+                        vec![], // messages not persisted in snapshot for now
+                        vec![], // DLQ entries
+                    );
+                    let _ = store.save(&self.run.run_id, &snapshot).await;
+                }
+            }
 
             // After executing tools, evaluate and loop back to Planning
             self.transition_run(RunState::Replanning);
@@ -337,23 +497,6 @@ impl AgentRunEngine {
     }
 }
 
-/// Check if the project has real uncommitted changes via git diff.
-async fn has_real_changes(project_dir: &Path) -> bool {
-    let output = tokio::process::Command::new("git")
-        .args(["diff", "--stat"])
-        .current_dir(project_dir)
-        .output()
-        .await;
-
-    match output {
-        Ok(out) => {
-            let stdout = String::from_utf8_lossy(&out.stdout);
-            !stdout.trim().is_empty()
-        }
-        Err(_) => true,
-    }
-}
-
 fn now_millis() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -365,6 +508,7 @@ fn now_millis() -> u64 {
 mod tests {
     use super::*;
     use crate::event_bus::CapturingListener;
+    use theo_domain::task::AgentType;
 
     struct TestSetup {
         bus: Arc<EventBus>,

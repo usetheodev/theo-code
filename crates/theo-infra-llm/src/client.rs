@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::codex;
 use crate::error::LlmError;
 use crate::hermes;
-use crate::stream::SseStream;
+use crate::stream::{SseStream, StreamCollector, StreamDelta};
 use crate::types::*;
 
 /// Client for OpenAI-compatible chat completions API.
@@ -184,6 +184,95 @@ impl LlmClient {
         }
 
         Ok(SseStream::new(response.bytes_stream()))
+    }
+
+    /// Streaming chat with delta callback.
+    ///
+    /// Returns the complete ChatResponse after streaming finishes.
+    /// Calls `on_delta` for each StreamDelta received — useful for
+    /// displaying reasoning/content in real-time.
+    ///
+    /// Works for both OA-compatible and Codex endpoints.
+    pub async fn chat_streaming<F>(
+        &self,
+        request: &ChatRequest,
+        mut on_delta: F,
+    ) -> Result<ChatResponse, LlmError>
+    where
+        F: FnMut(&StreamDelta),
+    {
+        let url = self.url();
+
+        if self.is_codex() {
+            // Codex: stream SSE and parse line by line
+            let body = codex::to_codex_body(request);
+            let builder = self.apply_auth(self.http.post(&url).json(&body));
+            let response = builder.send().await?;
+            let status = response.status().as_u16();
+
+            if status >= 400 {
+                let body = response.text().await.unwrap_or_default();
+                return Err(LlmError::Api { status, message: body });
+            }
+
+            let full_body = response.text().await
+                .map_err(|e| LlmError::Parse(format!("read stream: {e}")))?;
+
+            // Parse SSE lines and emit deltas for reasoning
+            for line in full_body.lines() {
+                if let Some(data) = line.strip_prefix("data: ") {
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
+                        // Check for reasoning/thinking content in Codex events
+                        if let Some(text) = json.pointer("/delta/text").and_then(|v| v.as_str()) {
+                            if json.get("type").and_then(|v| v.as_str()) == Some("response.reasoning.delta") {
+                                on_delta(&StreamDelta::Reasoning(text.to_string()));
+                            }
+                        }
+                        // Check for output text delta
+                        if json.get("type").and_then(|v| v.as_str()) == Some("response.output_text.delta") {
+                            if let Some(text) = json.pointer("/delta").and_then(|v| v.as_str()) {
+                                on_delta(&StreamDelta::Content(text.to_string()));
+                            }
+                        }
+                    }
+                }
+            }
+
+            codex::from_codex_stream(&full_body)
+                .ok_or_else(|| LlmError::Parse("failed to parse Codex stream".to_string()))
+        } else {
+            // OA-compatible: use SseStream
+            use futures::StreamExt;
+
+            let mut req = request.clone();
+            req.stream = Some(true);
+            let builder = self.apply_auth(self.http.post(&url).json(&req));
+            let response = builder.send().await?;
+            let status = response.status().as_u16();
+
+            if status >= 400 {
+                let body = response.text().await.unwrap_or_default();
+                return Err(LlmError::Api { status, message: body });
+            }
+
+            let mut stream = SseStream::new(response.bytes_stream());
+            let mut collector = StreamCollector::new();
+
+            while let Some(result) = stream.next().await {
+                match result {
+                    Ok(delta) => {
+                        on_delta(&delta);
+                        collector.push(&delta);
+                        if matches!(delta, StreamDelta::Done) {
+                            break;
+                        }
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+
+            Ok(collector.finish())
+        }
     }
 
     /// Build a ChatRequest with this client's model pre-filled.

@@ -10,7 +10,12 @@ theo-engine-retrieval.workspace = true
 theo-governance.workspace = true
 theo-engine-parser.workspace = true
 theo-tooling.workspace = true
+theo-application.workspace = true
+theo-agent-runtime.workspace = true
+theo-infra-auth = { path = "../../crates/theo-infra-auth" }
+theo-infra-llm = { path = "../../crates/theo-infra-llm" }
 tokio.workspace = true
+rustyline.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 walkdir.workspace = true

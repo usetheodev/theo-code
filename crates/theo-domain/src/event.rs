@@ -23,6 +23,10 @@ pub enum EventType {
     LlmCallEnd,
     BudgetExceeded,
     Error,
+
+    // Streaming
+    ReasoningDelta,
+    ContentDelta,
 }
 
 impl std::fmt::Display for EventType {
@@ -39,12 +43,14 @@ impl std::fmt::Display for EventType {
             EventType::LlmCallEnd => write!(f, "LlmCallEnd"),
             EventType::BudgetExceeded => write!(f, "BudgetExceeded"),
             EventType::Error => write!(f, "Error"),
+            EventType::ReasoningDelta => write!(f, "ReasoningDelta"),
+            EventType::ContentDelta => write!(f, "ContentDelta"),
         }
     }
 }
 
 /// All EventType variants for iteration in tests.
-pub const ALL_EVENT_TYPES: [EventType; 11] = [
+pub const ALL_EVENT_TYPES: [EventType; 13] = [
     EventType::TaskCreated,
     EventType::TaskStateChanged,
     EventType::ToolCallQueued,
@@ -56,6 +62,8 @@ pub const ALL_EVENT_TYPES: [EventType; 11] = [
     EventType::LlmCallEnd,
     EventType::BudgetExceeded,
     EventType::Error,
+    EventType::ReasoningDelta,
+    EventType::ContentDelta,
 ];
 
 /// A domain event representing a significant occurrence in the system.

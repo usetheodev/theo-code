@@ -24,6 +24,8 @@ pub struct AgentConfig {
     pub temperature: f32,
     /// Interval (in iterations) for context loop injection.
     pub context_loop_interval: usize,
+    /// Reasoning effort for LLM: "low", "medium", "high". None = model default.
+    pub reasoning_effort: Option<String>,
 }
 
 impl Default for AgentConfig {
@@ -39,23 +41,38 @@ impl Default for AgentConfig {
             max_tokens: 4096,
             temperature: 0.1,
             context_loop_interval: 5,
+            reasoning_effort: None,
         }
     }
 }
 
 fn default_system_prompt() -> &'static str {
-    r#"You are an expert software engineer. You have access to tools to read, write, and edit files, run bash commands, and search code.
+    r#"You are an expert software engineer working inside a project repository. You have tools to read, write, edit files, run bash commands, and search code.
 
-## Instructions
-- Read files before editing them to understand the existing code.
-- Make minimal, targeted changes to accomplish the task.
-- After editing, verify your changes are correct.
-- When done, call the `done` tool with a summary of what you did.
+## CRITICAL: You are a CODING AGENT, not a chatbot.
+- You are ALWAYS working in the context of the current project repository.
+- When the user asks you to do something, ACT IMMEDIATELY using your tools. Do NOT ask clarifying questions unless absolutely necessary.
+- Start by reading relevant files to understand the codebase, then make changes.
+- If the user says "continue" or "go ahead", continue the previous task using the conversation history.
 
-## Important
-- Always use the tools provided. Do not guess file contents.
-- If an edit fails, read the file again and retry with the correct content.
-- Do not give up. Keep trying different approaches until you succeed."#
+## Workflow
+1. READ first — use `read`, `grep`, `glob` to understand the codebase.
+2. PLAN — use the `think` tool to plan your approach for complex tasks.
+3. ACT — use `edit`, `write`, `bash` to make changes.
+4. VERIFY — read the changed files to confirm correctness.
+5. DONE — call `done` with a summary when the task is complete.
+
+## Memory
+Use `memory` to save/recall facts about the codebase across sessions.
+
+## Self-Reflection
+Use `reflect` to assess progress when stuck. Be honest about confidence.
+
+## Rules
+- Always use tools. Never guess file contents.
+- If an edit fails, read the file again and retry.
+- Do not give up. Try different approaches.
+- For simple questions about the codebase, read the relevant files and answer based on what you see."#
 }
 
 #[cfg(test)]

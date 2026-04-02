@@ -96,7 +96,13 @@ pub fn to_codex_body(request: &ChatRequest) -> serde_json::Value {
         body["tools"] = serde_json::json!(tools);
         body["tool_choice"] = serde_json::json!("auto");
     }
-    // Note: Codex endpoint does NOT support max_output_tokens
+
+    // Reasoning effort (Codex Responses API format)
+    if let Some(ref effort) = request.reasoning_effort {
+        body["reasoning"] = serde_json::json!({
+            "effort": effort,
+        });
+    }
 
     body
 }

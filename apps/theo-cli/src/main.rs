@@ -2,6 +2,9 @@
 mod extract;
 #[allow(dead_code)]
 mod pipeline;
+mod commands;
+mod renderer;
+mod repl;
 
 use std::path::Path;
 use std::time::Instant;
@@ -12,6 +15,7 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
 
     match args.get(1).map(|s| s.as_str()) {
+        Some("agent") => cmd_agent(&args[2..]),
         Some("context") => cmd_context(&args[2..]),
         Some("impact") => cmd_impact(&args[2..]),
         Some("stats") => cmd_stats(&args[2..]),
@@ -21,13 +25,143 @@ fn main() {
 }
 
 fn print_usage() {
-    eprintln!("theo-code v0.1.0 — GRAPHCTX context engine");
+    eprintln!("theo-code v0.1.0 — Theo Code Agent");
     eprintln!();
     eprintln!("Usage:");
-    eprintln!("  theo-code context <repo-path> <query>   Assemble context for a task");
-    eprintln!("  theo-code impact <repo-path> <file>     Analyze impact of editing a file");
-    eprintln!("  theo-code stats <repo-path>             Show graph statistics");
-    eprintln!("  theo-code --version                     Show version");
+    eprintln!("  theo-code agent [--repo <path>] [--provider <id>] [--model <name>]");
+    eprintln!("                                        Interactive agent REPL");
+    eprintln!("  theo-code context <repo-path> <query>  Assemble context for a task");
+    eprintln!("  theo-code impact <repo-path> <file>    Analyze impact of editing a file");
+    eprintln!("  theo-code stats <repo-path>            Show graph statistics");
+    eprintln!("  theo-code --version                    Show version");
+}
+
+fn cmd_agent(args: &[String]) {
+    // Parse agent args
+    let mut repo: Option<String> = None;
+    let mut provider_id: Option<String> = None;
+    let mut model: Option<String> = None;
+    let mut max_iter: Option<usize> = None;
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--repo" => { repo = args.get(i + 1).cloned(); i += 2; }
+            "--provider" => { provider_id = args.get(i + 1).cloned(); i += 2; }
+            "--model" => { model = args.get(i + 1).cloned(); i += 2; }
+            "--max-iter" => { max_iter = args.get(i + 1).and_then(|s| s.parse().ok()); i += 2; }
+            _ => { i += 1; }
+        }
+    }
+
+    // Default to current directory
+    let project_dir = repo
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| ".".into()));
+
+    if !project_dir.exists() {
+        eprintln!("Error: directory does not exist: {}", project_dir.display());
+        std::process::exit(1);
+    }
+
+    // Build agent config with provider resolution
+    let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
+    rt.block_on(async {
+        let (config, provider_name) = resolve_agent_config(
+            provider_id.as_deref(),
+            model.as_deref(),
+            max_iter,
+        ).await;
+
+        let mut repl = repl::Repl::new(config, project_dir, provider_name);
+        repl.run().await;
+    });
+}
+
+async fn resolve_agent_config(
+    provider_id: Option<&str>,
+    model: Option<&str>,
+    max_iter: Option<usize>,
+) -> (theo_agent_runtime::AgentConfig, String) {
+    use theo_infra_llm::provider::registry::create_default_registry as create_provider_registry;
+
+    let mut config = theo_agent_runtime::AgentConfig::default();
+    let mut provider_name = "default".to_string();
+
+    // Try OAuth first (if no explicit provider)
+    let mut api_key: Option<String> = None;
+    let mut oauth_applied = false;
+
+    if provider_id.is_none() {
+        let auth = theo_infra_auth::OpenAIAuth::with_default_store();
+        if let Ok(Some(tokens)) = auth.get_tokens() {
+            if !tokens.is_expired() {
+                api_key = Some(tokens.access_token.clone());
+                oauth_applied = true;
+            }
+        }
+    }
+
+    let registry = create_provider_registry();
+
+    if let Some(pid) = provider_id {
+        // Explicit --provider
+        if let Some(spec) = registry.get(pid) {
+            config.base_url = spec.base_url.to_string();
+            config.endpoint_override = Some(spec.endpoint_url());
+            config.api_key = api_key.or_else(|| {
+                spec.api_key_env_var().and_then(|var| std::env::var(var).ok())
+            });
+            provider_name = spec.display_name.to_string();
+        } else {
+            eprintln!("Unknown provider: {pid}");
+            std::process::exit(1);
+        }
+    } else if oauth_applied {
+        // Auto-detect: OAuth → chatgpt-codex
+        if let Some(spec) = registry.get("chatgpt-codex") {
+            config.base_url = spec.base_url.to_string();
+            config.endpoint_override = Some(spec.endpoint_url());
+            config.api_key = api_key;
+            provider_name = spec.display_name.to_string();
+
+            // Add ChatGPT-Account-Id header
+            let auth = theo_infra_auth::OpenAIAuth::with_default_store();
+            if let Ok(Some(tokens)) = auth.get_tokens() {
+                if let Some(ref account_id) = tokens.account_id {
+                    config.extra_headers.insert(
+                        "ChatGPT-Account-Id".to_string(),
+                        account_id.clone(),
+                    );
+                }
+            }
+        }
+    } else if let Ok(key) = std::env::var("OPENAI_API_KEY") {
+        if let Some(spec) = registry.get("openai") {
+            config.base_url = spec.base_url.to_string();
+            config.endpoint_override = Some(spec.endpoint_url());
+            config.api_key = Some(key);
+            provider_name = "OpenAI".to_string();
+        }
+    }
+
+    // Apply model override
+    if let Some(m) = model {
+        config.model = m.to_string();
+    } else if oauth_applied && config.model == "default" {
+        config.model = "gpt-5.3-codex".to_string();
+    }
+
+    if let Some(n) = max_iter {
+        config.max_iterations = n;
+    }
+
+    // Default reasoning effort for capable models
+    if config.reasoning_effort.is_none() {
+        config.reasoning_effort = Some("medium".to_string());
+    }
+
+    (config, provider_name)
 }
 
 fn build_fresh(

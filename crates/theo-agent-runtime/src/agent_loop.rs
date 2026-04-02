@@ -1,16 +1,23 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use theo_domain::session::{MessageId, SessionId};
-use theo_domain::tool::ToolContext;
-use theo_infra_llm::types::{ChatRequest, Message};
+use theo_domain::event::DomainEvent;
+use theo_domain::session::SessionId;
+use theo_domain::task::AgentType;
 use theo_infra_llm::LlmClient;
 use theo_tooling::registry::ToolRegistry;
 
 use crate::config::AgentConfig;
+use crate::event_bus::{EventBus, EventListener};
+#[allow(deprecated)]
 use crate::events::{AgentEvent, EventSink};
+use crate::run_engine::AgentRunEngine;
+use crate::task_manager::TaskManager;
+use crate::tool_call_manager::ToolCallManager;
+
+// Keep these imports for backward compat of existing tests
+#[allow(deprecated)]
 use crate::state::{AgentState, Phase};
-use crate::tool_bridge;
 
 /// Result of an agent loop execution.
 #[derive(Debug, Clone)]
@@ -22,32 +29,37 @@ pub struct AgentResult {
 }
 
 /// The main agent loop that orchestrates LLM ↔ tool execution.
+///
+/// This is now a thin facade over `AgentRunEngine`. All execution logic
+/// lives in `run_engine.rs`. This struct preserves the original API
+/// for backward compatibility with CLI and desktop binaries.
 pub struct AgentLoop {
-    client: LlmClient,
+    client_base_url: String,
+    client_api_key: Option<String>,
+    client_model: String,
+    client_endpoint_override: Option<String>,
+    client_extra_headers: Vec<(String, String)>,
     registry: ToolRegistry,
     config: AgentConfig,
+    #[allow(deprecated)]
     event_sink: Arc<dyn EventSink>,
 }
 
 impl AgentLoop {
+    #[allow(deprecated)]
     pub fn new(
         config: AgentConfig,
         registry: ToolRegistry,
         event_sink: Arc<dyn EventSink>,
     ) -> Self {
-        let mut client = LlmClient::new(
-            &config.base_url,
-            config.api_key.clone(),
-            &config.model,
-        );
-        if let Some(ref endpoint) = config.endpoint_override {
-            client = client.with_endpoint(endpoint);
-        }
-        for (k, v) in &config.extra_headers {
-            client = client.with_header(k, v);
-        }
         Self {
-            client,
+            client_base_url: config.base_url.clone(),
+            client_api_key: config.api_key.clone(),
+            client_model: config.model.clone(),
+            client_endpoint_override: config.endpoint_override.clone(),
+            client_extra_headers: config.extra_headers.iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
             registry,
             config,
             event_sink,
@@ -55,207 +67,167 @@ impl AgentLoop {
     }
 
     /// Run the agent loop on a task.
+    ///
+    /// Delegates entirely to `AgentRunEngine::execute()`.
+    #[allow(deprecated)]
     pub async fn run(&self, task: &str, project_dir: &Path) -> AgentResult {
-        let mut state = AgentState::new();
-        let mut messages: Vec<Message> = vec![
-            Message::system(&self.config.system_prompt),
-            Message::user(task),
-        ];
+        // Create EventBus and bridge old EventSink
+        let event_bus = Arc::new(EventBus::new());
+        let bridge = Arc::new(EventSinkBridge::new(self.event_sink.clone()));
+        event_bus.subscribe(bridge);
 
-        let tool_defs = tool_bridge::registry_to_definitions(&self.registry);
-        let (abort_tx, abort_rx) = tokio::sync::watch::channel(false);
+        // Create managers
+        let task_manager = Arc::new(TaskManager::new(event_bus.clone()));
+        let tool_call_manager = Arc::new(ToolCallManager::new(event_bus.clone()));
 
-        for iteration in 1..=self.config.max_iterations {
-            // Context loop injection
-            if iteration > 1 && iteration % self.config.context_loop_interval == 0 {
-                let ctx_msg = state.build_context_loop(iteration, self.config.max_iterations, task);
-                self.event_sink.emit(AgentEvent::ContextLoop {
-                    iteration,
-                    message: ctx_msg.clone(),
-                });
-                messages.push(Message::user(ctx_msg));
-            }
-
-            // Phase transitions
-            let old_phase = state.phase;
-            state.maybe_transition(iteration, self.config.max_iterations);
-            if state.phase != old_phase {
-                self.event_sink.emit(AgentEvent::PhaseChange {
-                    from: old_phase,
-                    to: state.phase,
-                });
-            }
-
-            // Phase-specific nudges
-            if let Some(nudge) = phase_nudge(&state, iteration, self.config.max_iterations) {
-                messages.push(Message::user(nudge));
-            }
-
-            // LLM call
-            self.event_sink.emit(AgentEvent::LlmCallStart { iteration });
-
-            let request = ChatRequest::new(&self.config.model, messages.clone())
-                .with_tools(tool_defs.clone())
-                .with_max_tokens(self.config.max_tokens)
-                .with_temperature(self.config.temperature);
-
-            let response = match self.client.chat(&request).await {
-                Ok(resp) => resp,
-                Err(e) => {
-                    self.event_sink.emit(AgentEvent::Error(format!("LLM error: {e}")));
-                    // Retry once on transient errors
-                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                    match self.client.chat(&request).await {
-                        Ok(resp) => resp,
-                        Err(e) => {
-                            self.event_sink.emit(AgentEvent::Error(format!("LLM error (retry failed): {e}")));
-                            break;
-                        }
-                    }
-                }
-            };
-
-            self.event_sink.emit(AgentEvent::LlmCallEnd { iteration });
-
-            // Process content
-            if let Some(content) = response.content() {
-                if !content.is_empty() {
-                    self.event_sink.emit(AgentEvent::Token(content.to_string()));
-                }
-            }
-
-            let tool_calls = response.tool_calls();
-
-            // No tool calls → assistant text response, append and continue
-            if tool_calls.is_empty() {
-                let content = response.content().unwrap_or("").to_string();
-                messages.push(Message::assistant(content));
-                continue;
-            }
-
-            // Append assistant message with tool calls
-            messages.push(Message::assistant_with_tool_calls(
-                response.content().map(String::from),
-                tool_calls.to_vec(),
-            ));
-
-            // Execute each tool call
-            for call in tool_calls {
-                let name = &call.function.name;
-
-                // Handle `done` meta-tool
-                if name == "done" {
-                    let summary = call
-                        .parse_arguments()
-                        .ok()
-                        .and_then(|args| args.get("summary").and_then(|s| s.as_str()).map(String::from))
-                        .unwrap_or_else(|| "Task completed.".to_string());
-
-                    // Promise gate: check if there are real changes
-                    if has_real_changes(project_dir).await {
-                        self.event_sink.emit(AgentEvent::Done {
-                            success: true,
-                            summary: summary.clone(),
-                        });
-                        return AgentResult {
-                            success: true,
-                            summary,
-                            files_edited: state.edits_files.clone(),
-                            iterations_used: iteration,
-                        };
-                    } else {
-                        state.record_done_blocked();
-                        self.event_sink.emit(AgentEvent::Error(
-                            "done() blocked: no real changes detected in git diff. Keep working.".to_string(),
-                        ));
-                        messages.push(Message::tool_result(
-                            &call.id,
-                            "done",
-                            "BLOCKED: No real changes detected (git diff is empty). You must make actual code changes before calling done(). Re-read the task and try again.",
-                        ));
-                        continue;
-                    }
-                }
-
-                // Execute regular tool
-                self.event_sink.emit(AgentEvent::ToolStart {
-                    name: name.clone(),
-                    args: call.parse_arguments().unwrap_or_default(),
-                });
-
-                let ctx = ToolContext {
-                    session_id: SessionId::new("agent"),
-                    message_id: MessageId::new(&format!("iter_{iteration}")),
-                    call_id: call.id.clone(),
-                    agent: "main".to_string(),
-                    abort: abort_rx.clone(),
-                    project_dir: project_dir.to_path_buf(),
-                };
-
-                let (result_msg, success) =
-                    tool_bridge::execute_tool_call(&self.registry, call, &ctx).await;
-
-                let output = result_msg.content.clone().unwrap_or_default();
-                self.event_sink.emit(AgentEvent::ToolEnd {
-                    name: name.clone(),
-                    success,
-                    output: output.clone(),
-                });
-
-                // Update state based on tool
-                match name.as_str() {
-                    "read" => {
-                        if let Ok(args) = call.parse_arguments() {
-                            if let Some(path) = args.get("filePath").and_then(|p| p.as_str()) {
-                                state.record_read(path);
-                            }
-                        }
-                    }
-                    "grep" | "glob" => state.record_search(),
-                    "edit" | "write" | "apply_patch" => {
-                        let file = call
-                            .parse_arguments()
-                            .ok()
-                            .and_then(|args| {
-                                args.get("filePath")
-                                    .or(args.get("file_path"))
-                                    .and_then(|p| p.as_str())
-                                    .map(String::from)
-                            })
-                            .unwrap_or_default();
-                        state.record_edit_attempt(&file, success, if success { None } else { Some(output.clone()) });
-                    }
-                    _ => {}
-                }
-
-                messages.push(result_msg);
-            }
-        }
-
-        // Max iterations reached
-        let _ = abort_tx.send(true);
-        let summary = format!(
-            "Max iterations ({}) reached. Edits succeeded: {}. Files: {}",
-            self.config.max_iterations,
-            state.edits_succeeded,
-            state.edits_files.join(", ")
+        // Create task
+        let task_id = task_manager.create_task(
+            SessionId::new("agent"),
+            AgentType::Coder,
+            task.to_string(),
         );
 
-        self.event_sink.emit(AgentEvent::Done {
-            success: state.edits_succeeded > 0,
-            summary: summary.clone(),
-        });
+        // Build LLM client (same logic as old AgentLoop::new)
+        let mut client = LlmClient::new(
+            &self.client_base_url,
+            self.client_api_key.clone(),
+            &self.client_model,
+        );
+        if let Some(ref endpoint) = self.client_endpoint_override {
+            client = client.with_endpoint(endpoint);
+        }
+        for (k, v) in &self.client_extra_headers {
+            client = client.with_header(k, v);
+        }
 
-        AgentResult {
-            success: state.edits_succeeded > 0,
-            summary,
-            files_edited: state.edits_files,
-            iterations_used: self.config.max_iterations,
+        // Create and execute RunEngine
+        // ToolRegistry doesn't impl Clone, so we create a fresh default registry
+        let registry = theo_tooling::registry::create_default_registry();
+        let mut engine = AgentRunEngine::new(
+            task_id,
+            task_manager,
+            tool_call_manager,
+            event_bus,
+            client,
+            registry,
+            self.config.clone(),
+            project_dir.to_path_buf(),
+        );
+
+        engine.execute().await
+    }
+
+    /// Run with session history and external EventBus.
+    ///
+    /// The caller provides an EventBus with listeners already subscribed
+    /// (e.g., CliRenderer for real-time output). The EventSinkBridge is
+    /// also subscribed for backward compat.
+    #[allow(deprecated)]
+    pub async fn run_with_history(
+        &self,
+        task: &str,
+        project_dir: &Path,
+        history: Vec<theo_infra_llm::types::Message>,
+        external_bus: Option<Arc<EventBus>>,
+    ) -> AgentResult {
+        let event_bus = external_bus.unwrap_or_else(|| Arc::new(EventBus::new()));
+        let bridge = Arc::new(EventSinkBridge::new(self.event_sink.clone()));
+        event_bus.subscribe(bridge);
+
+        let task_manager = Arc::new(TaskManager::new(event_bus.clone()));
+        let tool_call_manager = Arc::new(ToolCallManager::new(event_bus.clone()));
+
+        let task_id = task_manager.create_task(
+            SessionId::new("agent"),
+            AgentType::Coder,
+            task.to_string(),
+        );
+
+        let mut client = LlmClient::new(
+            &self.client_base_url,
+            self.client_api_key.clone(),
+            &self.client_model,
+        );
+        if let Some(ref endpoint) = self.client_endpoint_override {
+            client = client.with_endpoint(endpoint);
+        }
+        for (k, v) in &self.client_extra_headers {
+            client = client.with_header(k, v);
+        }
+
+        let registry = theo_tooling::registry::create_default_registry();
+        let mut engine = AgentRunEngine::new(
+            task_id,
+            task_manager,
+            tool_call_manager,
+            event_bus,
+            client,
+            registry,
+            self.config.clone(),
+            project_dir.to_path_buf(),
+        );
+
+        engine.execute_with_history(history).await
+    }
+}
+
+/// Bridge that maps DomainEvent → AgentEvent for backward compatibility.
+///
+/// Implements EventListener (new system) and forwards to EventSink (old system).
+#[allow(deprecated)]
+struct EventSinkBridge {
+    sink: Arc<dyn EventSink>,
+}
+
+#[allow(deprecated)]
+impl EventSinkBridge {
+    fn new(sink: Arc<dyn EventSink>) -> Self {
+        Self { sink }
+    }
+}
+
+#[allow(deprecated)]
+impl EventListener for EventSinkBridge {
+    fn on_event(&self, event: &DomainEvent) {
+        // Map DomainEvent to AgentEvent for backward compat
+        let agent_event = match event.event_type {
+            theo_domain::event::EventType::LlmCallStart => {
+                let iteration = event.payload.get("iteration")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as usize;
+                Some(AgentEvent::LlmCallStart { iteration })
+            }
+            theo_domain::event::EventType::LlmCallEnd => {
+                let iteration = event.payload.get("iteration")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0) as usize;
+                Some(AgentEvent::LlmCallEnd { iteration })
+            }
+            theo_domain::event::EventType::RunStateChanged => {
+                // Map to PhaseChange for display purposes
+                None // RunState changes don't map 1:1 to old Phase changes
+            }
+            theo_domain::event::EventType::Error => {
+                let msg = event.payload.get("error")
+                    .or(event.payload.get("reason"))
+                    .or(event.payload.get("violation"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown error")
+                    .to_string();
+                Some(AgentEvent::Error(msg))
+            }
+            _ => None, // Other domain events don't have AgentEvent equivalents
+        };
+
+        if let Some(ae) = agent_event {
+            self.sink.emit(ae);
         }
     }
 }
 
 /// Check if the project has real uncommitted changes via git diff.
+/// Kept as free function for backward compatibility with existing tests.
+#[allow(dead_code)]
 async fn has_real_changes(project_dir: &Path) -> bool {
     let output = tokio::process::Command::new("git")
         .args(["diff", "--stat"])
@@ -268,11 +240,13 @@ async fn has_real_changes(project_dir: &Path) -> bool {
             let stdout = String::from_utf8_lossy(&out.stdout);
             !stdout.trim().is_empty()
         }
-        Err(_) => true, // If git fails, assume changes exist
+        Err(_) => true,
     }
 }
 
 /// Generate a phase-specific nudge message if appropriate.
+/// Kept as free function for backward compatibility with existing tests.
+#[allow(deprecated, dead_code)]
 fn phase_nudge(state: &AgentState, iteration: usize, max_iterations: usize) -> Option<String> {
     let two_thirds = (max_iterations * 2) / 3;
 
@@ -302,6 +276,7 @@ mod tests {
         assert!(!result.success);
     }
 
+    #[allow(deprecated)]
     #[test]
     fn test_phase_nudge_urgent() {
         let mut state = AgentState::new();
@@ -311,10 +286,37 @@ mod tests {
         assert!(nudge.unwrap().contains("URGENT"));
     }
 
+    #[allow(deprecated)]
     #[test]
     fn test_phase_nudge_none_in_explore() {
         let state = AgentState::new();
         let nudge = phase_nudge(&state, 1, 15);
         assert!(nudge.is_none());
+    }
+
+    #[allow(deprecated)]
+    #[test]
+    fn test_agent_loop_new_backward_compat() {
+        use crate::events::NullEventSink;
+        let config = AgentConfig::default();
+        let registry = theo_tooling::registry::create_default_registry();
+        let sink: Arc<dyn EventSink> = Arc::new(NullEventSink);
+        let _loop = AgentLoop::new(config, registry, sink);
+        // Compilation is the test
+    }
+
+    #[test]
+    fn test_event_sink_bridge_does_not_panic() {
+        use crate::events::NullEventSink;
+        use theo_domain::event::{EventType, ALL_EVENT_TYPES};
+
+        let sink: Arc<dyn EventSink> = Arc::new(NullEventSink);
+        let bridge = EventSinkBridge::new(sink);
+
+        // All event types should not panic
+        for et in &ALL_EVENT_TYPES {
+            let event = DomainEvent::new(*et, "test", serde_json::Value::Null);
+            bridge.on_event(&event);
+        }
     }
 }

@@ -10,6 +10,8 @@ use std::task::{Context, Poll};
 pub enum StreamDelta {
     /// A text content chunk.
     Content(String),
+    /// A reasoning/thinking chunk from the LLM's internal reasoning.
+    Reasoning(String),
     /// A partial tool call update.
     ToolCallDelta {
         index: usize,
@@ -45,6 +47,10 @@ impl StreamCollector {
     pub fn push(&mut self, delta: &StreamDelta) {
         match delta {
             StreamDelta::Content(text) => self.content.push_str(text),
+            StreamDelta::Reasoning(_) => {
+                // Reasoning is observed/displayed but not accumulated into the response content.
+                // The LLM's reasoning is internal — the final content/tool_calls are what matter.
+            }
             StreamDelta::ToolCallDelta {
                 index,
                 id,
@@ -142,6 +148,13 @@ pub fn parse_sse_line(line: &str) -> Option<StreamDelta> {
         .get("choices")?
         .get(0)?
         .get("delta")?;
+
+    // Check for reasoning/thinking (OpenAI extended thinking)
+    if let Some(reasoning) = delta.get("reasoning").and_then(|r| r.as_str()) {
+        if !reasoning.is_empty() {
+            return Some(StreamDelta::Reasoning(reasoning.to_string()));
+        }
+    }
 
     // Check for content
     if let Some(content) = delta.get("content").and_then(|c| c.as_str()) {
