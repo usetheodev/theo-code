@@ -436,7 +436,10 @@ impl PilotLoop {
     }
 
     fn update_counters(&mut self, result: &AgentResult, progress: &GitProgress) {
-        let has_real_progress = !result.files_edited.is_empty() || progress.sha_changed || progress.files_changed > 0;
+        // Defense in depth: filter empty strings from files_edited.
+        // apply_patch with non-standard format can produce "" entries.
+        let has_real_files = result.files_edited.iter().any(|f| !f.is_empty());
+        let has_real_progress = has_real_files || progress.sha_changed || progress.files_changed > 0;
 
         // Completion signals: only count if there was real work
         if result.success && has_real_progress {
@@ -545,13 +548,15 @@ impl PilotLoop {
             prompt.push_str(
                 "\n## Instructions\n\
                  Continue working on the promise. Only call done() when ALL criteria in the Definition of Done are met.\n\
-                 If you encounter a blocker you cannot resolve, call done() and explain what is blocking.\n"
+                 If you encounter a blocker you cannot resolve, call done() and explain what is blocking.\n\
+                 IMPORTANT: Do NOT create tasks that already exist. Check task history before calling task_create.\n"
             );
         } else {
             prompt.push_str(
                 "\n## Instructions\n\
                  Continue working on the promise. When ALL work is done, call done() with a summary.\n\
-                 If you encounter a blocker you cannot resolve, call done() and explain in the summary.\n"
+                 If you encounter a blocker you cannot resolve, call done() and explain in the summary.\n\
+                 IMPORTANT: Do NOT create tasks that already exist. Check task history before calling task_create.\n"
             );
         }
 
@@ -848,6 +853,46 @@ exit_signal_threshold = 3
     }
 
     // -- Promise Loader --
+
+    #[test]
+    fn exit_completion_signal_ignores_empty_string_files_edited() {
+        let mut pilot = make_test_pilot("test");
+        let no_progress = GitProgress { sha_changed: false, files_changed: 0 };
+        // files_edited has items but they're all empty strings (apply_patch bug)
+        let empty_files_done = AgentResult {
+            success: true, summary: "done".into(),
+            files_edited: vec!["".into(), "".into()],
+            iterations_used: 1, was_streamed: false, tokens_used: 0,
+        };
+
+        pilot.update_counters(&empty_files_done, &no_progress);
+        assert_eq!(pilot.consecutive_completion_signals, 0, "empty strings should not count as progress");
+
+        pilot.update_counters(&empty_files_done, &no_progress);
+        assert!(pilot.evaluate_exit(&empty_files_done).is_none(), "should not exit with empty files");
+    }
+
+    #[test]
+    fn exit_completion_signal_counts_when_any_real_file_present() {
+        let mut pilot = make_test_pilot("test");
+        let no_progress = GitProgress { sha_changed: false, files_changed: 0 };
+        // Mix of empty and real files — real file should make it count
+        let mixed_files = AgentResult {
+            success: true, summary: "done".into(),
+            files_edited: vec!["".into(), "src/lib.rs".into()],
+            iterations_used: 1, was_streamed: false, tokens_used: 100,
+        };
+
+        pilot.update_counters(&mixed_files, &no_progress);
+        assert_eq!(pilot.consecutive_completion_signals, 1, "real file should count as progress");
+    }
+
+    #[test]
+    fn loop_prompt_contains_anti_duplicate_task_instruction() {
+        let pilot = make_test_pilot("test");
+        let prompt = pilot.build_loop_prompt(0, 0);
+        assert!(prompt.contains("Do NOT create tasks that already exist"));
+    }
 
     #[test]
     fn load_promise_from_prompt_md() {

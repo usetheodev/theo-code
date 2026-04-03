@@ -99,7 +99,10 @@ impl AgentState {
         self.edit_attempts += 1;
         if success {
             self.edits_succeeded += 1;
-            self.edits_files.push(file.to_string());
+            // Guard: don't record empty strings (apply_patch with non-standard format)
+            if !file.is_empty() {
+                self.edits_files.push(file.to_string());
+            }
         } else if let Some(reason) = failure_reason {
             self.edit_failures.push(reason);
         }
@@ -223,5 +226,20 @@ mod tests {
         let state = AgentState::new();
         let msg = state.build_context_loop(13, 15, "task");
         assert!(msg.contains("EMERGENCY"));
+    }
+
+    #[test]
+    fn record_edit_attempt_empty_string_not_added_to_files() {
+        let mut state = AgentState::new();
+        state.record_edit_attempt("", true, None);
+        assert_eq!(state.edits_succeeded, 1);
+        assert!(state.edits_files.is_empty(), "empty string should not be added to edits_files");
+    }
+
+    #[test]
+    fn record_edit_attempt_real_path_added_to_files() {
+        let mut state = AgentState::new();
+        state.record_edit_attempt("src/main.rs", true, None);
+        assert_eq!(state.edits_files, vec!["src/main.rs"]);
     }
 }
