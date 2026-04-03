@@ -168,9 +168,26 @@ impl AgentRunEngine {
         let _ = self.task_manager.transition(&self.task_id, TaskState::Ready);
         let _ = self.task_manager.transition(&self.task_id, TaskState::Running);
 
+        // System prompt: .theo/system-prompt.md replaces default, or use config default
+        let system_prompt = if !self.config.is_subagent {
+            crate::project_config::load_system_prompt(&self.project_dir)
+                .unwrap_or_else(|| self.config.system_prompt.clone())
+        } else {
+            self.config.system_prompt.clone()
+        };
+
         let mut messages: Vec<Message> = vec![
-            Message::system(&self.config.system_prompt),
+            Message::system(&system_prompt),
         ];
+
+        // Project context: .theo/theo.md prepended as separate system message
+        if !self.config.is_subagent {
+            if let Some(context) = crate::project_config::load_project_context(&self.project_dir) {
+                messages.push(Message::system(&format!(
+                    "## Project Context\n{context}"
+                )));
+            }
+        }
 
         // Inject memories from previous runs (cross-run memory)
         let memory_root = std::env::var("HOME")
@@ -234,6 +251,10 @@ impl AgentRunEngine {
             messages.push(Message::user(&task.objective));
         }
 
+        // Doom loop detector — tracks recent tool calls to detect repetition
+        let mut doom_tracker = self.config.doom_loop_threshold
+            .map(|t| DoomLoopTracker::new(t));
+
         // Layer 1: Schema stripping — sub-agents get filtered tool definitions
         // that exclude delegation meta-tools (subagent, subagent_parallel, skill).
         let tool_defs = if self.config.is_subagent {
@@ -267,6 +288,8 @@ impl AgentRunEngine {
                     summary,
                     files_edited: self.agent_state.edits_files.clone(),
                     iterations_used: iteration,
+                    was_streamed: false,
+                    tokens_used: self.metrics.snapshot().total_tokens_used,
                 };
             }
 
@@ -351,6 +374,8 @@ impl AgentRunEngine {
                         summary: format!("LLM error: {e}"),
                         files_edited: self.agent_state.edits_files.clone(),
                         iterations_used: iteration,
+                        was_streamed: false,
+                        tokens_used: self.metrics.snapshot().total_tokens_used,
                     };
                 }
             };
@@ -364,6 +389,8 @@ impl AgentRunEngine {
                 let content = response.content().unwrap_or("").to_string();
                 if !content.is_empty() {
                     // Text-only response → return as result (like OpenCode finish_reason="stop")
+                    // was_streamed=true: this content was already displayed via ContentDelta
+                    // during chat_streaming(). The REPL must NOT re-print it.
                     self.transition_run(RunState::Converged);
                     let _ = self.task_manager.transition(&self.task_id, TaskState::Completed);
                     self.metrics.record_run_complete(true);
@@ -372,6 +399,8 @@ impl AgentRunEngine {
                         summary: content,
                         files_edited: self.agent_state.edits_files.clone(),
                         iterations_used: iteration,
+                        was_streamed: true,
+                        tokens_used: self.metrics.snapshot().total_tokens_used,
                     };
                 }
                 // Empty content → LLM gave nothing, continue to next iteration
@@ -416,6 +445,8 @@ impl AgentRunEngine {
                         summary,
                         files_edited: self.agent_state.edits_files.clone(),
                         iterations_used: iteration,
+                        was_streamed: false,
+                        tokens_used: self.metrics.snapshot().total_tokens_used,
                     });
                     break;
                 }
@@ -632,6 +663,28 @@ impl AgentRunEngine {
                 self.budget_enforcer.record_tool_call();
                 self.metrics.record_tool_call(name, 0, success);
 
+                // Doom loop detection: check if this call repeats identically
+                if let Some(ref mut tracker) = doom_tracker {
+                    let args = call.parse_arguments().unwrap_or_default();
+                    if tracker.record(name, &args) {
+                        let warning = format!(
+                            "⚠️ DOOM LOOP DETECTED: You have called '{}' with identical arguments {} times in a row. \
+                             You are stuck in a loop. Try a DIFFERENT approach or tool.",
+                            name, self.config.doom_loop_threshold.unwrap_or(3)
+                        );
+                        self.event_bus.publish(DomainEvent::new(
+                            EventType::Error,
+                            self.run.run_id.as_str(),
+                            serde_json::json!({
+                                "type": "doom_loop",
+                                "tool_name": name,
+                                "threshold": self.config.doom_loop_threshold,
+                            }),
+                        ));
+                        messages.push(Message::user(&warning));
+                    }
+                }
+
                 let result_msg = Message::tool_result(&call.id, name, &output);
 
                 // Update agent state (preserved for context loop diagnostics)
@@ -726,6 +779,48 @@ impl AgentRunEngine {
                     "to": format!("{:?}", target),
                 }),
             ));
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Doom Loop Detection
+// ---------------------------------------------------------------------------
+
+/// Tracks recent tool calls to detect doom loops (identical calls repeated).
+/// Uses a ring buffer of (tool_name, args_hash) tuples.
+struct DoomLoopTracker {
+    recent: std::collections::VecDeque<(String, u64)>,
+    threshold: usize,
+}
+
+impl DoomLoopTracker {
+    fn new(threshold: usize) -> Self {
+        Self {
+            recent: std::collections::VecDeque::with_capacity(threshold + 1),
+            threshold,
+        }
+    }
+
+    /// Record a tool call. Returns true if a doom loop is detected.
+    fn record(&mut self, tool_name: &str, args: &serde_json::Value) -> bool {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        tool_name.hash(&mut hasher);
+        args.to_string().hash(&mut hasher);
+        let hash = hasher.finish();
+
+        self.recent.push_back((tool_name.to_string(), hash));
+        if self.recent.len() > self.threshold {
+            self.recent.pop_front();
+        }
+
+        // Detect: all entries in the buffer are identical
+        if self.recent.len() == self.threshold {
+            let first = &self.recent[0];
+            self.recent.iter().all(|entry| entry.1 == first.1)
+        } else {
+            false
         }
     }
 }
@@ -934,6 +1029,8 @@ mod tests {
             summary: "done".to_string(),
             files_edited: vec!["src/main.rs".to_string()],
             iterations_used: 5,
+            was_streamed: false,
+            tokens_used: 0,
         };
         assert!(result.success);
         assert_eq!(result.summary, "done");
@@ -952,5 +1049,50 @@ mod tests {
         let sink: Arc<dyn EventSink> = Arc::new(NullEventSink);
         let _loop = AgentLoop::new(config, registry, sink);
         // Compilation is the test — if this compiles, backward compat is preserved
+    }
+
+    // -----------------------------------------------------------------------
+    // Doom loop detection
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn doom_loop_detected_after_threshold_identical_calls() {
+        let mut tracker = DoomLoopTracker::new(3);
+        let args = serde_json::json!({"filePath": "/tmp/test"});
+        assert!(!tracker.record("read", &args));
+        assert!(!tracker.record("read", &args));
+        assert!(tracker.record("read", &args), "3rd identical call should trigger doom loop");
+    }
+
+    #[test]
+    fn doom_loop_no_false_positive_same_tool_different_inputs() {
+        let mut tracker = DoomLoopTracker::new(3);
+        assert!(!tracker.record("read", &serde_json::json!({"filePath": "a.rs"})));
+        assert!(!tracker.record("read", &serde_json::json!({"filePath": "b.rs"})));
+        assert!(!tracker.record("read", &serde_json::json!({"filePath": "c.rs"})));
+        // Different inputs → no doom loop
+    }
+
+    #[test]
+    fn doom_loop_counter_resets_on_different_tool() {
+        let mut tracker = DoomLoopTracker::new(3);
+        let args = serde_json::json!({"filePath": "/tmp/test"});
+        assert!(!tracker.record("read", &args));
+        assert!(!tracker.record("read", &args));
+        assert!(!tracker.record("bash", &serde_json::json!({"command": "ls"}))); // different tool
+        assert!(!tracker.record("read", &args)); // counter reset by interleaving
+    }
+
+    #[test]
+    fn doom_loop_threshold_configurable() {
+        let config = AgentConfig::default();
+        assert_eq!(config.doom_loop_threshold, Some(3));
+
+        let mut tracker = DoomLoopTracker::new(5);
+        let args = serde_json::json!({});
+        for _ in 0..4 {
+            assert!(!tracker.record("bash", &args));
+        }
+        assert!(tracker.record("bash", &args), "5th call should trigger with threshold=5");
     }
 }

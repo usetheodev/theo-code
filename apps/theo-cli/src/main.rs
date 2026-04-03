@@ -3,6 +3,7 @@ mod extract;
 #[allow(dead_code)]
 mod pipeline;
 mod commands;
+mod pilot;
 mod renderer;
 mod repl;
 
@@ -16,6 +17,7 @@ fn main() {
 
     match args.get(1).map(|s| s.as_str()) {
         Some("agent") => cmd_agent(&args[2..]),
+        Some("pilot") => cmd_pilot(&args[2..]),
         Some("context") => cmd_context(&args[2..]),
         Some("impact") => cmd_impact(&args[2..]),
         Some("stats") => cmd_stats(&args[2..]),
@@ -30,6 +32,8 @@ fn print_usage() {
     eprintln!("Usage:");
     eprintln!("  theo-code agent [--repo <path>] [--provider <id>] [--model <name>]");
     eprintln!("                                        Interactive agent REPL");
+    eprintln!("  theo-code pilot <promise> [--complete <criteria>] [--calls <N>] [--rate <N>]");
+    eprintln!("                                        Autonomous loop until promise fulfilled");
     eprintln!("  theo-code context <repo-path> <query>  Assemble context for a task");
     eprintln!("  theo-code impact <repo-path> <file>    Analyze impact of editing a file");
     eprintln!("  theo-code stats <repo-path>            Show graph statistics");
@@ -75,6 +79,71 @@ fn cmd_agent(args: &[String]) {
 
         let mut repl = repl::Repl::new(config, project_dir, provider_name);
         repl.run().await;
+    });
+}
+
+fn cmd_pilot(args: &[String]) {
+    let mut repo: Option<String> = None;
+    let mut provider_id: Option<String> = None;
+    let mut model: Option<String> = None;
+    let mut max_calls: Option<usize> = None;
+    let mut rate: Option<usize> = None;
+    let mut complete: Option<String> = None;
+
+    let mut i = 0;
+    let mut positional: Vec<String> = Vec::new();
+    while i < args.len() {
+        match args[i].as_str() {
+            "--repo" => { repo = args.get(i + 1).cloned(); i += 2; }
+            "--provider" => { provider_id = args.get(i + 1).cloned(); i += 2; }
+            "--model" => { model = args.get(i + 1).cloned(); i += 2; }
+            "--calls" => { max_calls = args.get(i + 1).and_then(|s| s.parse().ok()); i += 2; }
+            "--rate" => { rate = args.get(i + 1).and_then(|s| s.parse().ok()); i += 2; }
+            "--complete" => { complete = args.get(i + 1).cloned(); i += 2; }
+            other if !other.starts_with("--") => { positional.push(other.to_string()); i += 1; }
+            _ => { i += 1; }
+        }
+    }
+
+    let project_dir = repo
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| ".".into()));
+
+    if !project_dir.exists() {
+        eprintln!("Error: directory does not exist: {}", project_dir.display());
+        std::process::exit(1);
+    }
+
+    let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
+    rt.block_on(async {
+        let (config, _provider_name) = resolve_agent_config(
+            provider_id.as_deref(),
+            model.as_deref(),
+            None,
+        ).await;
+
+        // Load pilot config from .theo/config.toml
+        let mut pilot_config = theo_agent_runtime::pilot::PilotConfig::load(&project_dir);
+
+        // CLI overrides
+        if let Some(calls) = max_calls {
+            pilot_config.max_total_calls = calls;
+        }
+        if let Some(r) = rate {
+            pilot_config.max_loops_per_hour = r;
+        }
+
+        // Resolve promise
+        let promise = pilot::resolve_promise(&positional, &project_dir);
+        let Some(promise) = promise else {
+            eprintln!("Error: No promise provided.");
+            eprintln!("Usage: theo-code pilot \"your promise here\"");
+            eprintln!("   or: create .theo/PROMPT.md with the promise");
+            std::process::exit(1);
+        };
+
+        let result = pilot::run_pilot(config, pilot_config, project_dir, promise, complete).await;
+        std::process::exit(if result.success { 0 } else { 1 });
     });
 }
 

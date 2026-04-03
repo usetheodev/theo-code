@@ -1,64 +1,53 @@
-# Meeting — 2026-04-02 (Fix: Sub-agent Recursive Spawning)
+# Meeting — 2026-04-03 (theo pilot — Autonomous Development Loop)
 
 ## Proposta
-Fix de 3 bugs que causam spawning recursivo infinito de sub-agentes:
-1. `SubAgentManager::new()` sempre seta `depth=0`, nunca propaga depth do parent
-2. Sub-agentes recebem meta-tools (`skill`, `subagent`, `subagent_parallel`) no schema LLM
-3. Sub-agentes recebem skills summary injetado no boot via `execute_with_history()`
-
-Solução evidence-based (3-layer defense):
-- Layer 1: Schema stripping — `registry_to_definitions_for_subagent()` exclui 3 meta-tools de delegação (mantém `done`)
-- Layer 2: Prompt isolation — skip skills injection quando `is_subagent=true`
-- Layer 3: `is_subagent` flag no `AgentConfig`, setado em `SubAgentManager::spawn()`
-
-Evidências: Claude Code (hard block depth=1 + tool stripping), OpenCode (permission-based tool denial + task:false), OpenDev/arxiv 2603.05344 (schema-level filtering), CrewAI (delegation ping-pong post-mortem), Codex (max_depth=1 default), AgentOrchestra/arxiv 2506.12508 (hierarchical tool access).
+`theo pilot` — novo módulo PilotLoop que orquestra AgentLoop em ciclos contínuos até cumprir uma "promise". Inspirado nos patterns do Ralph (8k+ stars). Adição pura, zero mudança no RunEngine/AgentLoop.
 
 ## Participantes
 - `governance` — veredito de governança
 - `qa` — validação de testabilidade
-- `runtime` — análise de agent loop, async, state machine
-- `tooling` — segurança de tool execution e schema
+- `runtime` — análise async, state management
+- `infra` — custo, resiliência, limites operacionais
 
 ## Análises
 
 ### Governance
-REJECT inicial — identificou discrepância entre proposta (fix recursão) e diff anterior (Skills System). Ponto válido mas a proposta DESTA meeting é especificamente o fix de recursão, não o Skills System (já implementado em meeting anterior).
+REJECT por diff uncommitted no workspace. Design do pilot é válido conceitualmente. Recomenda commitar features pendentes antes.
 
 ### QA
-validated=false condicional. Exige 6 testes novos HIGH priority:
-1. `subagent_tool_defs_exclude_recursive_tools`
-2. `subagent_tool_defs_include_done`
-3. `subagent_tool_defs_count_is_registry_plus_one`
-4. `is_subagent_false_by_default`
-5. `spawn_sets_is_subagent_true` (verificável indiretamente)
-6. `spawn_parallel_sub_agents_are_subagents` (verificável indiretamente)
+validated=true. Exige: (1) Clock injetável para circuit breaker, (2) ProgressDetector trait para git, (3) ~15 testes para circuit breaker + exit conditions. Base 199 testes green.
 
 ### Runtime
-risk_level=HIGH. Confirmou os 3 bugs de recursão. Identificou bugs adicionais fora do escopo:
-- capability_set() nunca aplicada ao registry
-- spawn_parallel() retorna out-of-order
-- Implementers paralelos sem locking de filesystem
+risk=HIGH. Identificou: (1) abort_tx é dead code — Ctrl+C não interrompe, (2) session trim perde objetivo original, (3) EventBus cresce se compartilhado, (4) AgentLoop ignora registry injetado. Recomenda: promise como System message fixa, EventBus novo por loop.
 
-### Tooling
-Propõe `registry_to_definitions_for_capabilities(registry, capabilities)` com CapabilitySet integrado. Confirma que `done` DEVE estar disponível para sub-agentes. Alerta que schema deve refletir runtime capabilities.
+### Infra
+risk=CRITICAL. max_total_calls=0 é ilimitado — custo descontrolado. Ambiguidade entre "LLM calls" vs "loop iterations". Circuit breaker permissivo (3 loops). Exige: defaults conservadores, max_tokens_per_session, observability.
 
 ## Conflitos
-1. **Governance vs Proposta**: Governance analisa diff anterior (Skills System), não a proposta atual (fix recursão). Override fundamentado: são mudanças distintas.
-2. **Tooling scope creep**: Propõe integrar CapabilitySet no tool_bridge. Adiado para fix futuro — schema stripping dos 3 meta-tools resolve o bug imediato.
-3. **QA bloqueante**: Exige 6 testes. Aceito como condição obrigatória.
+1. Governance REJECT por diff (override: meeting avalia design, não working tree)
+2. max_total_calls: 0 vs 1000 vs 50 → DECISÃO: default 50
+3. Rate limit naming: calls vs loops → DECISÃO: max_loops_per_hour (conta iterations)
+4. Clock injetável: trait vs parametrizado → DECISÃO: parametrizado (simples)
+5. Completion signal vazio: done() sem mudanças → DECISÃO: só conta se files_edited > 0
 
 ## Veredito
 **APPROVED**
 
 ## Escopo Aprovado
-- `crates/theo-agent-runtime/src/config.rs` (adicionar campo `is_subagent: bool`)
-- `crates/theo-agent-runtime/src/subagent/mod.rs` (setar `sub_config.is_subagent = true` em `spawn()`)
-- `crates/theo-agent-runtime/src/run_engine.rs` (condicional skills injection + tool_defs filtering)
-- `crates/theo-agent-runtime/src/tool_bridge.rs` (nova fn `registry_to_definitions_for_subagent()`)
+- `crates/theo-agent-runtime/src/pilot.rs` (NOVO — PilotLoop, PilotConfig, CircuitBreaker, PilotResult, ExitReason)
+- `crates/theo-agent-runtime/src/lib.rs` (pub mod pilot)
+- `crates/theo-agent-runtime/src/project_config.rs` (PilotConfig TOML parsing na section [pilot])
+- `apps/theo-cli/src/pilot.rs` (NOVO — CLI runner, PilotRenderer)
+- `apps/theo-cli/src/main.rs` (cmd_pilot subcommand, print_usage update)
 
 ## Condições
-1. **Obrigatório**: 6 testes novos (listados acima pela QA)
-2. **Obrigatório**: `done` meta-tool DEVE permanecer disponível para sub-agentes
-3. **Obrigatório**: `cargo test` 100% verde após mudanças
-4. **Obrigatório**: `cargo check --workspace` sem erros novos
-5. **Registrar tech debt**: capability_set() não aplicada ao registry, spawn_parallel order bug, Implementer parallel locking
+1. max_total_calls default = 50 (NÃO ilimitado)
+2. max_loops_per_hour default = 20
+3. Promise injetada como System message fixa (não no histórico rotativo)
+4. EventBus novo por loop iteration
+5. Completion signal só conta se files_edited > 0 ou git progress detected
+6. Circuit breaker testável via parâmetro (cooldown_elapsed: bool)
+7. Graceful shutdown: pilot loop deve checar flag de interrupção entre iterações
+8. Git progress detection com fallback gracioso (projetos sem git)
+9. cargo test 100% verde
+10. Mínimo 10 testes: circuit breaker (5), exit conditions (3), rate limit (2)

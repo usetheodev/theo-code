@@ -187,6 +187,8 @@ impl SubAgentManager {
                 summary: "Sub-agent depth limit reached. Sub-agents cannot spawn sub-agents.".to_string(),
                 files_edited: vec![],
                 iterations_used: 0,
+                was_streamed: false,
+                tokens_used: 0,
             };
         }
 
@@ -197,6 +199,9 @@ impl SubAgentManager {
         // Mark as sub-agent: prevents receiving delegation tools and skills.
         // This is the primary defense against recursive spawning.
         sub_config.is_subagent = true;
+        // Set capability restrictions based on role.
+        // This activates CapabilityGate in the sub-agent's ToolCallManager.
+        sub_config.capability_set = Some(role.capability_set());
 
         // Create sub-agent EventBus with prefixed listener
         let sub_bus = Arc::new(crate::event_bus::EventBus::new());
@@ -244,6 +249,8 @@ impl SubAgentManager {
                 ),
                 files_edited: vec![],
                 iterations_used: 0,
+                was_streamed: false,
+                tokens_used: 0,
             },
         }
         }) // close Box::pin(async move {
@@ -281,6 +288,8 @@ impl SubAgentManager {
                     summary: format!("Sub-agent task panicked: {e}"),
                     files_edited: vec![],
                     iterations_used: 0,
+                    was_streamed: false,
+                    tokens_used: 0,
                 }),
             }
         }

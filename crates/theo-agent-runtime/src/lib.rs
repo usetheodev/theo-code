@@ -9,6 +9,8 @@ pub mod events;
 pub mod metrics;
 pub mod observability;
 pub mod persistence;
+pub mod pilot;
+pub mod project_config;
 pub mod retry;
 pub mod snapshot;
 pub mod run_engine;

@@ -30,14 +30,13 @@ pub fn bundled_skills() -> Vec<SkillDefinition> {
             mode: SkillMode::SubAgent { role: SubAgentRole::Verifier },
             instructions: r#"## Test Skill
 
-1. Detect the project's test framework (cargo test, npm test, pytest, etc.).
-2. Run the test suite.
-3. If tests fail, analyze the failures:
-   - Which tests failed?
-   - What was expected vs actual?
-   - What file/line is the issue?
-4. Report results clearly: passed, failed, skipped counts.
-5. If all pass, confirm with a summary."#.into(),
+Run the project's test suite directly. Do NOT create tasks for this — just execute.
+
+1. Look at the project root for Cargo.toml, package.json, pyproject.toml, etc. to detect the framework.
+2. Run tests: `cargo test`, `npm test`, `pytest`, etc.
+3. Report: passed/failed/skipped counts. If failures, show which tests failed and why (file:line, expected vs actual).
+
+Be direct. Skip task management overhead for this workflow."#.into(),
         },
         SkillDefinition {
             name: "review".into(),
@@ -88,6 +87,101 @@ pub fn bundled_skills() -> Vec<SkillDefinition> {
 4. Use examples if helpful.
 5. Keep the explanation concise but complete."#.into(),
         },
+        SkillDefinition {
+            name: "fix".into(),
+            trigger: "when the user asks to fix a bug, debug an error, resolve an issue, or repair broken code".into(),
+            mode: SkillMode::InContext,
+            instructions: r#"## Fix Skill
+
+1. Understand the bug: read the error message, stack trace, or user description carefully.
+2. Locate the source: use `grep`, `read`, and `glob` to find the relevant code.
+3. Diagnose: use `think` to reason about the root cause before making changes.
+4. Fix: make the minimal change that resolves the issue.
+5. Verify: run tests or the failing command to confirm the fix works.
+6. Report: explain what was wrong and what you changed.
+
+## Rules
+- Fix the root cause, not the symptom.
+- Make the smallest possible change.
+- If unsure about the cause, ask the user before editing."#.into(),
+        },
+        SkillDefinition {
+            name: "refactor".into(),
+            trigger: "when the user asks to refactor, clean up, reorganize, simplify, or improve code structure".into(),
+            mode: SkillMode::InContext,
+            instructions: r#"## Refactor Skill
+
+1. Read the code to refactor thoroughly. Understand what it does before changing it.
+2. Plan: use `think` to outline the refactoring steps.
+3. Refactor incrementally — one change at a time, verify after each.
+4. Preserve behavior: the refactored code must do exactly the same thing.
+5. Run tests after refactoring to confirm nothing broke.
+
+## Rules
+- NEVER change behavior during a refactor. If the user wants new features, that's a separate task.
+- Prefer small, focused changes over large rewrites.
+- If tests don't exist for the code being refactored, mention this risk."#.into(),
+        },
+        SkillDefinition {
+            name: "pr".into(),
+            trigger: "when the user asks to create a pull request, open a PR, push changes, or submit for review".into(),
+            mode: SkillMode::InContext,
+            instructions: r#"## Pull Request Skill
+
+1. Run `git status` and `git diff --stat` to understand what will be in the PR.
+2. If on main/master, create a feature branch: `git checkout -b feat/description`.
+3. Stage and commit changes (follow Conventional Commits).
+4. Push: `git push -u origin <branch>`.
+5. Create PR: `gh pr create --title "..." --body "..."` with:
+   - Clear title (under 70 chars)
+   - Summary of changes
+   - Test plan
+
+## Rules
+- NEVER push directly to main/master.
+- NEVER force push.
+- If `gh` is not installed, tell the user to install it or create the PR manually.
+- Include a test plan in the PR body."#.into(),
+        },
+        SkillDefinition {
+            name: "doc".into(),
+            trigger: "when the user asks to document, write docs, generate documentation, add comments, or update README".into(),
+            mode: SkillMode::InContext,
+            instructions: r#"## Documentation Skill
+
+1. Identify what needs documentation (module, function, API, architecture).
+2. Read the code thoroughly to understand it.
+3. Write clear documentation:
+   - For code: add doc comments (/// in Rust, /** */ in JS/TS, docstrings in Python).
+   - For README: explain purpose, setup, usage, architecture.
+   - For API: document endpoints, request/response formats, error codes.
+4. Keep docs close to the code they describe.
+5. Use examples where helpful.
+
+## Rules
+- Write for the reader, not the writer.
+- Don't document the obvious (getters, simple constructors).
+- DO document: why (not just what), edge cases, non-obvious behavior."#.into(),
+        },
+        SkillDefinition {
+            name: "deps".into(),
+            trigger: "when the user asks to check dependencies, audit packages, find vulnerabilities, or review Cargo.toml/package.json".into(),
+            mode: SkillMode::SubAgent { role: SubAgentRole::Explorer },
+            instructions: r#"## Dependencies Skill
+
+Analyze project dependencies. Do NOT create tasks — just execute directly.
+
+1. Read dependency files: Cargo.toml, Cargo.lock, package.json, package-lock.json, etc.
+2. Run audit tools if available:
+   - Rust: `cargo audit` (if installed), `cargo outdated`
+   - Node: `npm audit`, `npm outdated`
+3. Report:
+   - Total dependency count
+   - Known vulnerabilities (critical/high/medium/low)
+   - Outdated packages with available updates
+   - Unused dependencies (if detectable)
+4. Recommend actions for critical findings."#.into(),
+        },
     ]
 }
 
@@ -98,7 +192,7 @@ mod tests {
     #[test]
     fn bundled_skills_count() {
         let skills = bundled_skills();
-        assert_eq!(skills.len(), 5);
+        assert_eq!(skills.len(), 10);
     }
 
     #[test]

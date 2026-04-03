@@ -30,6 +30,13 @@ pub struct AgentConfig {
     /// meta-tools (subagent, subagent_parallel, skill) or skills summary injection.
     /// This prevents recursive spawning. Default: false.
     pub is_subagent: bool,
+    /// Capability set for this agent. Controls which tools are allowed.
+    /// None = unrestricted (all tools allowed). Set by SubAgentManager for sub-agents.
+    pub capability_set: Option<theo_domain::capability::CapabilitySet>,
+    /// Doom loop detection threshold. If the same tool call (name + args) is
+    /// repeated this many times consecutively, a warning is injected.
+    /// None = disabled. Default: Some(3).
+    pub doom_loop_threshold: Option<usize>,
 }
 
 impl Default for AgentConfig {
@@ -47,6 +54,8 @@ impl Default for AgentConfig {
             context_loop_interval: 5,
             reasoning_effort: None,
             is_subagent: false,
+            capability_set: None,
+            doom_loop_threshold: Some(3),
         }
     }
 }

@@ -119,27 +119,40 @@ impl Repl {
             self.session_messages.drain(..excess);
         }
 
-        // Show LLM response
+        // Show LLM response (only if not already displayed via streaming).
+        // Text-only responses are streamed via ContentDelta in real-time,
+        // so re-printing the summary would duplicate the output.
         eprintln!();
-        if !result.summary.is_empty() {
+        if !result.summary.is_empty() && !result.was_streamed {
             eprintln!("{}", result.summary);
             eprintln!();
         }
 
-        // Result status (only show for coding tasks that edited files)
+        // Result status with token usage
+        let token_str = if result.tokens_used > 0 {
+            format!(", \x1b[90m{}tokens\x1b[0m", format_tokens(result.tokens_used))
+        } else {
+            String::new()
+        };
+
         if result.success && !result.files_edited.is_empty() {
             eprintln!(
-                "\x1b[32m✓ Done\x1b[0m — {} iterations, {} files: {}",
+                "\x1b[32m✓ Done\x1b[0m — {} iterations, {} files: {}{}",
                 result.iterations_used,
                 result.files_edited.len(),
                 result.files_edited.join(", "),
+                token_str,
             );
             eprintln!();
         } else if !result.success {
             eprintln!(
-                "\x1b[31m✗ Failed\x1b[0m — {} iterations",
+                "\x1b[31m✗ Failed\x1b[0m — {} iterations{}",
                 result.iterations_used,
+                token_str,
             );
+            eprintln!();
+        } else if result.tokens_used > 0 {
+            eprintln!("\x1b[90m{} tokens\x1b[0m", format_tokens(result.tokens_used));
             eprintln!();
         }
     }
@@ -152,5 +165,15 @@ impl Repl {
         );
         eprintln!("Project: {}", self.project_dir.display());
         eprintln!();
+    }
+}
+
+fn format_tokens(tokens: u64) -> String {
+    if tokens >= 1_000_000 {
+        format!("{:.1}M", tokens as f64 / 1_000_000.0)
+    } else if tokens >= 1_000 {
+        format!("{:.1}k", tokens as f64 / 1_000.0)
+    } else {
+        format!("{}", tokens)
     }
 }

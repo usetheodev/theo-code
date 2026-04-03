@@ -7,6 +7,7 @@ use theo_domain::task::AgentType;
 use theo_infra_llm::LlmClient;
 use theo_tooling::registry::ToolRegistry;
 
+use crate::capability_gate::CapabilityGate;
 use crate::config::AgentConfig;
 use crate::event_bus::{EventBus, EventListener};
 #[allow(deprecated)]
@@ -26,6 +27,13 @@ pub struct AgentResult {
     pub summary: String,
     pub files_edited: Vec<String>,
     pub iterations_used: usize,
+    /// True when the summary was already displayed via ContentDelta streaming.
+    /// The REPL should NOT re-print the summary in this case to avoid duplication.
+    /// Only set for text-only responses (no tool calls) where content == summary.
+    pub was_streamed: bool,
+    /// Total tokens consumed during this run (LLM input + output).
+    /// Collected by MetricsCollector, surfaced for display.
+    pub tokens_used: u64,
 }
 
 /// The main agent loop that orchestrates LLM ↔ tool execution.
@@ -78,7 +86,13 @@ impl AgentLoop {
 
         // Create managers
         let task_manager = Arc::new(TaskManager::new(event_bus.clone()));
-        let tool_call_manager = Arc::new(ToolCallManager::new(event_bus.clone()));
+        let tcm = ToolCallManager::new(event_bus.clone());
+        let tool_call_manager = Arc::new(if let Some(ref caps) = self.config.capability_set {
+            let gate = Arc::new(CapabilityGate::new(caps.clone(), event_bus.clone()));
+            tcm.with_capability_gate(gate)
+        } else {
+            tcm
+        });
 
         // Create task
         let task_id = task_manager.create_task(
@@ -135,7 +149,13 @@ impl AgentLoop {
         event_bus.subscribe(bridge);
 
         let task_manager = Arc::new(TaskManager::new(event_bus.clone()));
-        let tool_call_manager = Arc::new(ToolCallManager::new(event_bus.clone()));
+        let tcm = ToolCallManager::new(event_bus.clone());
+        let tool_call_manager = Arc::new(if let Some(ref caps) = self.config.capability_set {
+            let gate = Arc::new(CapabilityGate::new(caps.clone(), event_bus.clone()));
+            tcm.with_capability_gate(gate)
+        } else {
+            tcm
+        });
 
         let task_id = task_manager.create_task(
             SessionId::new("agent"),
@@ -272,6 +292,8 @@ mod tests {
             summary: "test".to_string(),
             files_edited: vec![],
             iterations_used: 0,
+            was_streamed: false,
+            tokens_used: 0,
         };
         assert!(!result.success);
     }
