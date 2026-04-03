@@ -30,7 +30,7 @@ fn print_usage() {
     eprintln!("theo-code v0.1.0 — Theo Code Agent");
     eprintln!();
     eprintln!("Usage:");
-    eprintln!("  theo-code agent [--repo <path>] [--provider <id>] [--model <name>]");
+    eprintln!("  theo-code agent [--repo <path>] [--provider <id>] [--model <name>] [--mode <agent|plan|ask>]");
     eprintln!("                                        Interactive agent REPL");
     eprintln!("  theo-code pilot <promise> [--complete <criteria>] [--calls <N>] [--rate <N>]");
     eprintln!("                                        Autonomous loop until promise fulfilled");
@@ -46,6 +46,7 @@ fn cmd_agent(args: &[String]) {
     let mut provider_id: Option<String> = None;
     let mut model: Option<String> = None;
     let mut max_iter: Option<usize> = None;
+    let mut mode: Option<String> = None;
 
     let mut i = 0;
     while i < args.len() {
@@ -54,6 +55,7 @@ fn cmd_agent(args: &[String]) {
             "--provider" => { provider_id = args.get(i + 1).cloned(); i += 2; }
             "--model" => { model = args.get(i + 1).cloned(); i += 2; }
             "--max-iter" => { max_iter = args.get(i + 1).and_then(|s| s.parse().ok()); i += 2; }
+            "--mode" => { mode = args.get(i + 1).cloned(); i += 2; }
             _ => { i += 1; }
         }
     }
@@ -78,6 +80,14 @@ fn cmd_agent(args: &[String]) {
         ).await;
 
         let mut repl = repl::Repl::new(config, project_dir, provider_name);
+        if let Some(ref mode_str) = mode {
+            if let Some(m) = theo_agent_runtime::config::AgentMode::from_str(mode_str) {
+                repl = repl.with_mode(m);
+            } else {
+                eprintln!("Unknown mode: {}. Use: agent, plan, ask", mode_str);
+                std::process::exit(1);
+            }
+        }
         repl.run().await;
     });
 }

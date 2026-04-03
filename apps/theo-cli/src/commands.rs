@@ -168,6 +168,13 @@ fn print_help() {
     eprintln!("    /memory search Q   Search memories by keyword");
     eprintln!("    /memory delete K   Delete a memory by key");
     eprintln!("    /skills            List available skills");
+    eprintln!("    /mode              Show current mode");
+    eprintln!("    /mode <agent|plan|ask>  Change interaction mode");
+    eprintln!();
+    eprintln!("  \x1b[1mModes:\x1b[0m");
+    eprintln!("    agent              Full autonomy — act immediately (default)");
+    eprintln!("    plan               Create plan first, wait for approval");
+    eprintln!("    ask                Ask clarifying questions first");
     eprintln!();
     eprintln!("  \x1b[1mAgent:\x1b[0m");
     eprintln!("    Type any text to send a task to the agent.");

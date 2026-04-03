@@ -1,5 +1,95 @@
 use std::collections::HashMap;
 
+// ---------------------------------------------------------------------------
+// AgentMode — interaction style
+// ---------------------------------------------------------------------------
+
+/// Interaction mode that controls how the agent approaches tasks.
+/// Implemented via system prompt — zero changes to RunEngine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentMode {
+    /// Full autonomy: Read → Think → Act → Verify → Done.
+    Agent,
+    /// Creates a detailed plan FIRST, presents it, waits for user approval.
+    Plan,
+    /// Asks clarifying questions FIRST, waits for answers, then acts.
+    Ask,
+}
+
+impl Default for AgentMode {
+    fn default() -> Self {
+        AgentMode::Agent
+    }
+}
+
+impl AgentMode {
+    /// Parse mode from string (CLI --mode flag, /mode command).
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "agent" => Some(AgentMode::Agent),
+            "plan" => Some(AgentMode::Plan),
+            "ask" => Some(AgentMode::Ask),
+            _ => None,
+        }
+    }
+
+    pub fn display_name(&self) -> &str {
+        match self {
+            AgentMode::Agent => "agent",
+            AgentMode::Plan => "plan",
+            AgentMode::Ask => "ask",
+        }
+    }
+}
+
+impl std::fmt::Display for AgentMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.display_name())
+    }
+}
+
+/// Returns the system prompt for a given mode.
+/// Agent mode uses the full default prompt.
+/// Plan and Ask modes wrap the base prompt with mode-specific instructions.
+pub fn system_prompt_for_mode(mode: AgentMode) -> String {
+    match mode {
+        AgentMode::Agent => default_system_prompt().to_string(),
+        AgentMode::Plan => format!(
+            r#"{}
+
+## MODE: PLAN
+You are in PLAN mode. Before doing ANY work:
+1. THINK about the task thoroughly using the `think` tool.
+2. Read relevant files to understand the current state.
+3. Create a DETAILED PLAN with numbered steps, files to change, and expected outcomes.
+4. Present the plan to the user as a text response.
+5. Do NOT use edit, write, apply_patch, or bash (except for read-only commands) until the user says "go", "ok", "execute", "proceed", or similar approval.
+6. After approval, execute the plan step by step.
+
+If the user asks to modify the plan, adjust it and present again."#,
+            default_system_prompt()
+        ),
+        AgentMode::Ask => format!(
+            r#"{}
+
+## MODE: ASK
+You are in ASK mode. Before doing ANY work:
+1. Read enough code to understand the context (use read, grep, glob).
+2. Identify what is UNCLEAR or AMBIGUOUS about the request.
+3. Ask 2-5 focused, specific questions to clarify requirements.
+4. Present the questions as a text response. Do NOT use edit, write, apply_patch, or bash (except read-only) yet.
+5. After the user answers, switch to full execution: act on the answers immediately.
+
+Ask questions that matter — don't ask about things you can determine by reading the code."#,
+            default_system_prompt()
+        ),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// AgentConfig
+// ---------------------------------------------------------------------------
+
 /// Configuration for the agent loop.
 #[derive(Debug, Clone)]
 pub struct AgentConfig {
@@ -129,5 +219,51 @@ mod tests {
     fn is_subagent_false_by_default() {
         let config = AgentConfig::default();
         assert!(!config.is_subagent, "main agents must NOT be marked as sub-agents");
+    }
+
+    #[test]
+    fn agent_mode_default_is_agent() {
+        assert_eq!(AgentMode::default(), AgentMode::Agent);
+    }
+
+    #[test]
+    fn agent_mode_from_str_parses_all_modes() {
+        assert_eq!(AgentMode::from_str("agent"), Some(AgentMode::Agent));
+        assert_eq!(AgentMode::from_str("plan"), Some(AgentMode::Plan));
+        assert_eq!(AgentMode::from_str("ask"), Some(AgentMode::Ask));
+        assert_eq!(AgentMode::from_str("PLAN"), Some(AgentMode::Plan));
+        assert_eq!(AgentMode::from_str("invalid"), None);
+    }
+
+    #[test]
+    fn system_prompts_are_distinct_per_mode() {
+        let agent = system_prompt_for_mode(AgentMode::Agent);
+        let plan = system_prompt_for_mode(AgentMode::Plan);
+        let ask = system_prompt_for_mode(AgentMode::Ask);
+        assert_ne!(agent, plan);
+        assert_ne!(agent, ask);
+        assert_ne!(plan, ask);
+    }
+
+    #[test]
+    fn plan_mode_prompt_contains_plan_instructions() {
+        let prompt = system_prompt_for_mode(AgentMode::Plan);
+        assert!(prompt.contains("MODE: PLAN"));
+        assert!(prompt.contains("DETAILED PLAN"));
+        assert!(prompt.contains("Do NOT use edit"));
+    }
+
+    #[test]
+    fn ask_mode_prompt_contains_ask_instructions() {
+        let prompt = system_prompt_for_mode(AgentMode::Ask);
+        assert!(prompt.contains("MODE: ASK"));
+        assert!(prompt.contains("clarifying questions"));
+        assert!(prompt.contains("Do NOT use edit"));
+    }
+
+    #[test]
+    fn agent_mode_prompt_is_default() {
+        let prompt = system_prompt_for_mode(AgentMode::Agent);
+        assert_eq!(prompt, AgentConfig::default().system_prompt);
     }
 }

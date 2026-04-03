@@ -1,7 +1,7 @@
-# Meeting — 2026-04-03 (Fix 3 Pilot Bugs)
+# Meeting — 2026-04-03 (Agent Modes: Agent/Plan/Ask)
 
 ## Proposta
-Fix 3 bugs: files_edited vazio (apply_patch), tasks duplicadas, exit prematura.
+3 modos de interação: Agent (default), Plan, Ask via system prompt + config.
 
 ## Participantes
 - governance, qa
@@ -10,10 +10,13 @@ Fix 3 bugs: files_edited vazio (apply_patch), tasks duplicadas, exit prematura.
 **APPROVED**
 
 ## Escopo Aprovado
-- crates/theo-agent-runtime/src/run_engine.rs (filtrar empty strings)
-- crates/theo-agent-runtime/src/state.rs (guard em record_edit_attempt)
-- crates/theo-agent-runtime/src/pilot.rs (has_real_progress fix + anti-duplicate instruction)
+- crates/theo-agent-runtime/src/config.rs (enum AgentMode, system_prompt_for_mode fn)
+- apps/theo-cli/src/repl.rs (mode state, prompt override antes de execute_task)
+- apps/theo-cli/src/commands.rs (/mode handler — mode state no Repl, não no config)
+- apps/theo-cli/src/main.rs (--mode flag)
 
 ## Condições
-- Testes novos: empty files_edited não conta como progresso
+- Opção A: mode vive no Repl, system_prompt sobrescrito antes de cada execute_task
+- AgentMode::default() == Agent testado
+- 3 prompts distintos testados
 - cargo test 100% verde

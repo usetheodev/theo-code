@@ -6,6 +6,7 @@ use std::sync::Arc;
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 
+use theo_agent_runtime::config::{AgentMode, system_prompt_for_mode};
 use theo_agent_runtime::event_bus::EventBus;
 #[allow(deprecated)]
 use theo_agent_runtime::events::PrintEventSink;
@@ -25,6 +26,8 @@ pub struct Repl {
     config: AgentConfig,
     project_dir: PathBuf,
     provider_name: String,
+    /// Current interaction mode (Agent, Plan, Ask).
+    mode: AgentMode,
     /// Session history — persists between prompts in the REPL.
     session_messages: Vec<Message>,
 }
@@ -37,8 +40,22 @@ impl Repl {
             config,
             project_dir,
             provider_name,
+            mode: AgentMode::default(),
             session_messages: Vec::new(),
         }
+    }
+
+    /// Create REPL with a specific initial mode.
+    pub fn with_mode(mut self, mode: AgentMode) -> Self {
+        self.mode = mode;
+        self
+    }
+
+    /// Set the current interaction mode. Updates system prompt.
+    pub fn set_mode(&mut self, mode: AgentMode) {
+        self.mode = mode;
+        self.config.system_prompt = system_prompt_for_mode(mode);
+        eprintln!("  Mode: \x1b[36m{}\x1b[0m", mode);
     }
 
     pub async fn run(&mut self) {
@@ -55,6 +72,22 @@ impl Repl {
                     let _ = self.editor.add_history_entry(&line);
 
                     if line.starts_with('/') {
+                        // Handle /mode locally (needs mutable self)
+                        if line.starts_with("/mode") {
+                            let parts: Vec<&str> = line.splitn(2, ' ').collect();
+                            if let Some(mode_str) = parts.get(1) {
+                                if let Some(mode) = AgentMode::from_str(mode_str.trim()) {
+                                    self.set_mode(mode);
+                                } else {
+                                    eprintln!("  Unknown mode: {}. Use: agent, plan, ask", mode_str);
+                                }
+                            } else {
+                                eprintln!("  Current mode: \x1b[36m{}\x1b[0m", self.mode);
+                                eprintln!("  Usage: /mode <agent|plan|ask>");
+                            }
+                            continue;
+                        }
+
                         let should_exit = handle_command(
                             &line,
                             &self.config,
@@ -86,6 +119,9 @@ impl Repl {
 
     async fn execute_task(&mut self, task: &str) {
         eprintln!();
+
+        // Apply current mode's system prompt before each execution
+        self.config.system_prompt = system_prompt_for_mode(self.mode);
 
         // Create EventBus with CLI renderer for real-time feedback
         let event_bus = Arc::new(EventBus::new());
@@ -160,8 +196,8 @@ impl Repl {
     fn print_banner(&self) {
         eprintln!("\x1b[1mtheo v0.1.0\x1b[0m — type /help for commands");
         eprintln!(
-            "Provider: {} | Model: {}",
-            self.provider_name, self.config.model
+            "Provider: {} | Model: {} | Mode: \x1b[36m{}\x1b[0m",
+            self.provider_name, self.config.model, self.mode
         );
         eprintln!("Project: {}", self.project_dir.display());
         eprintln!();
