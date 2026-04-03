@@ -3,6 +3,7 @@
 use std::path::Path;
 
 use theo_agent_runtime::AgentConfig;
+use theo_agent_runtime::skill::SkillRegistry;
 use theo_tooling::memory::FileMemoryStore;
 
 /// Handle a slash command. Returns true if the REPL should exit.
@@ -44,6 +45,9 @@ pub async fn handle_command(
         "/memory" => {
             let action = parts.get(1).copied().unwrap_or("list");
             handle_memory(action, parts.get(2).copied(), project_dir).await;
+        }
+        "/skills" => {
+            handle_skills(project_dir);
         }
         _ => {
             eprintln!("  Unknown command: {cmd}");
@@ -107,6 +111,53 @@ async fn handle_memory(action: &str, arg: Option<&str>, project_dir: &Path) {
     }
 }
 
+fn handle_skills(project_dir: &Path) {
+    let mut registry = SkillRegistry::new();
+    registry.load_bundled();
+
+    let project_skills = project_dir.join(".theo").join("skills");
+    if project_skills.exists() {
+        registry.load_from_dir(&project_skills);
+    }
+
+    let user_skills = std::env::var("HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::path::PathBuf::from("/tmp"))
+        .join(".config")
+        .join("theo")
+        .join("skills");
+    if user_skills.exists() {
+        registry.load_from_dir(&user_skills);
+    }
+
+    let skills = registry.list();
+    if skills.is_empty() {
+        eprintln!("  No skills available.");
+        return;
+    }
+
+    eprintln!("  \x1b[1mAvailable Skills:\x1b[0m");
+    for skill in skills {
+        let mode_str = match &skill.mode {
+            theo_agent_runtime::skill::SkillMode::InContext => "in-context",
+            theo_agent_runtime::skill::SkillMode::SubAgent { role } => {
+                // Can't easily return &str from format!, use leak-free approach
+                match role {
+                    theo_agent_runtime::subagent::SubAgentRole::Explorer => "sub-agent:explorer",
+                    theo_agent_runtime::subagent::SubAgentRole::Implementer => "sub-agent:implementer",
+                    theo_agent_runtime::subagent::SubAgentRole::Verifier => "sub-agent:verifier",
+                    theo_agent_runtime::subagent::SubAgentRole::Reviewer => "sub-agent:reviewer",
+                }
+            }
+        };
+        eprintln!(
+            "    \x1b[36m{}\x1b[0m ({}) — {}",
+            skill.name, mode_str, skill.trigger
+        );
+    }
+    eprintln!("  ({} total)", skills.len());
+}
+
 fn print_help() {
     eprintln!("  \x1b[1mCommands:\x1b[0m");
     eprintln!("    /help              Show this help");
@@ -116,6 +167,7 @@ fn print_help() {
     eprintln!("    /memory list       List all memories for this project");
     eprintln!("    /memory search Q   Search memories by keyword");
     eprintln!("    /memory delete K   Delete a memory by key");
+    eprintln!("    /skills            List available skills");
     eprintln!();
     eprintln!("  \x1b[1mAgent:\x1b[0m");
     eprintln!("    Type any text to send a task to the agent.");

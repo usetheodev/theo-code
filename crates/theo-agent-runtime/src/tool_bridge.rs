@@ -49,6 +49,22 @@ pub fn registry_to_definitions(registry: &ToolRegistry) -> Vec<ToolDefinition> {
         }),
     ));
 
+    // Add the `skill` meta-tool for invoking packaged capabilities
+    defs.push(ToolDefinition::new(
+        "skill",
+        "Invoke a specialized skill workflow. Skills provide expert instructions for common tasks like commit, test, review, build, explain. Use when the task matches a skill's trigger.",
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Skill name to invoke (e.g., 'commit', 'test', 'review', 'build', 'explain')"
+                }
+            },
+            "required": ["name"]
+        }),
+    ));
+
     // Add the `subagent_parallel` meta-tool for concurrent delegation
     defs.push(ToolDefinition::new(
         "subagent_parallel",
@@ -79,6 +95,40 @@ pub fn registry_to_definitions(registry: &ToolRegistry) -> Vec<ToolDefinition> {
         }),
     ));
 
+    defs
+}
+
+/// Generate tool definitions for sub-agents.
+///
+/// Sub-agents receive ONLY registry tools + `done`. They do NOT receive
+/// delegation meta-tools (`subagent`, `subagent_parallel`, `skill`).
+/// This prevents recursive spawning — the gold standard pattern used by
+/// Claude Code, OpenCode, and OpenDev (arxiv 2603.05344).
+pub fn registry_to_definitions_for_subagent(registry: &ToolRegistry) -> Vec<ToolDefinition> {
+    let mut defs: Vec<ToolDefinition> = registry
+        .definitions()
+        .into_iter()
+        .map(|def| ToolDefinition::new(def.id, &def.description, def.schema.to_json_schema()))
+        .collect();
+
+    // `done` is CRITICAL for sub-agents — it's how they signal completion.
+    // Without it, sub-agents loop until max_iterations or timeout.
+    defs.push(ToolDefinition::new(
+        "done",
+        "Call when the task is complete. Requires a summary of what was accomplished.",
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "summary": {
+                    "type": "string",
+                    "description": "Brief summary of what was accomplished"
+                }
+            },
+            "required": ["summary"]
+        }),
+    ));
+
+    // No subagent, subagent_parallel, or skill — sub-agents cannot delegate.
     defs
 }
 
@@ -136,14 +186,58 @@ mod tests {
         let registry = create_default_registry();
         let defs = registry_to_definitions(&registry);
 
-        // Should have all registry tools + done
-        assert_eq!(defs.len(), registry.len() + 3); // +3 for `done` + `subagent` + `subagent_parallel`
+        // Should have all registry tools + meta-tools
+        assert_eq!(defs.len(), registry.len() + 4); // +4 for `done` + `subagent` + `skill` + `subagent_parallel`
 
         let names: Vec<&str> = defs.iter().map(|d| d.function.name.as_str()).collect();
         assert!(names.contains(&"read"));
         assert!(names.contains(&"bash"));
         assert!(names.contains(&"edit"));
         assert!(names.contains(&"done")); // meta-tool
+    }
+
+    #[test]
+    fn subagent_tool_defs_exclude_recursive_tools() {
+        let registry = create_default_registry();
+        let defs = registry_to_definitions_for_subagent(&registry);
+        let names: Vec<&str> = defs.iter().map(|d| d.function.name.as_str()).collect();
+
+        // Must NOT contain delegation meta-tools
+        assert!(!names.contains(&"subagent"), "sub-agents must not see 'subagent' tool");
+        assert!(!names.contains(&"subagent_parallel"), "sub-agents must not see 'subagent_parallel' tool");
+        assert!(!names.contains(&"skill"), "sub-agents must not see 'skill' tool");
+    }
+
+    #[test]
+    fn subagent_tool_defs_include_done() {
+        let registry = create_default_registry();
+        let defs = registry_to_definitions_for_subagent(&registry);
+        let names: Vec<&str> = defs.iter().map(|d| d.function.name.as_str()).collect();
+
+        // done MUST be present — it's how sub-agents signal completion
+        assert!(names.contains(&"done"), "sub-agents must have 'done' tool");
+    }
+
+    #[test]
+    fn subagent_tool_defs_count_is_registry_plus_one() {
+        let registry = create_default_registry();
+        let defs = registry_to_definitions_for_subagent(&registry);
+
+        // Sub-agents get registry tools + done only (+1)
+        assert_eq!(defs.len(), registry.len() + 1, "sub-agent defs = registry + done");
+    }
+
+    #[test]
+    fn subagent_tool_defs_preserve_all_regular_tools() {
+        let registry = create_default_registry();
+        let defs = registry_to_definitions_for_subagent(&registry);
+        let names: Vec<&str> = defs.iter().map(|d| d.function.name.as_str()).collect();
+
+        // Regular tools must still be available
+        assert!(names.contains(&"read"), "sub-agents must have 'read'");
+        assert!(names.contains(&"bash"), "sub-agents must have 'bash'");
+        assert!(names.contains(&"edit"), "sub-agents must have 'edit'");
+        assert!(names.contains(&"grep"), "sub-agents must have 'grep'");
     }
 
     #[test]

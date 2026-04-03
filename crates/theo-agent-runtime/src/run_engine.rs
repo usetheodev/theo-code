@@ -29,6 +29,7 @@ use crate::snapshot::RunSnapshot;
 #[allow(deprecated)]
 use crate::state::AgentState;
 use crate::task_manager::TaskManager;
+use crate::skill::SkillRegistry;
 use crate::tool_bridge;
 use crate::tool_call_manager::ToolCallManager;
 
@@ -196,6 +197,33 @@ impl AgentRunEngine {
             }
         }
 
+        // Inject available skills into system context (main agent only).
+        // Sub-agents do NOT receive skills — they execute their direct objective.
+        // This is Layer 2 of recursive spawning prevention (prompt isolation).
+        if !self.config.is_subagent {
+            let mut skill_registry = SkillRegistry::new();
+            skill_registry.load_bundled();
+            let project_skills = self.project_dir.join(".theo").join("skills");
+            if project_skills.exists() {
+                skill_registry.load_from_dir(&project_skills);
+            }
+            let user_skills = std::env::var("HOME")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|_| std::path::PathBuf::from("/tmp"))
+                .join(".config")
+                .join("theo")
+                .join("skills");
+            if user_skills.exists() {
+                skill_registry.load_from_dir(&user_skills);
+            }
+            let skills_summary = skill_registry.triggers_summary();
+            if !skills_summary.is_empty() {
+                messages.push(Message::system(&format!(
+                    "## Skills\nYou have specialized skills that you SHOULD invoke when the task matches:\n{skills_summary}\n\nWhen the user's request matches a skill trigger, use the `skill` tool to invoke it."
+                )));
+            }
+        }
+
         // Inject session history (previous REPL prompts + responses)
         if !history.is_empty() {
             messages.extend(history);
@@ -206,7 +234,13 @@ impl AgentRunEngine {
             messages.push(Message::user(&task.objective));
         }
 
-        let tool_defs = tool_bridge::registry_to_definitions(&self.registry);
+        // Layer 1: Schema stripping — sub-agents get filtered tool definitions
+        // that exclude delegation meta-tools (subagent, subagent_parallel, skill).
+        let tool_defs = if self.config.is_subagent {
+            tool_bridge::registry_to_definitions_for_subagent(&self.registry)
+        } else {
+            tool_bridge::registry_to_definitions(&self.registry)
+        };
         let (_abort_tx, abort_rx) = tokio::sync::watch::channel(false);
 
         loop {
@@ -492,6 +526,81 @@ impl AgentRunEngine {
                         ));
                         continue;
                     }
+                }
+
+                // Handle `skill` meta-tool — invoke a packaged skill
+                if name == "skill" {
+                    let args = call.parse_arguments().unwrap_or_default();
+                    let skill_name = args.get("name").and_then(|v| v.as_str()).unwrap_or("");
+
+                    // Build a temporary registry to look up the skill
+                    let mut skill_registry = SkillRegistry::new();
+                    skill_registry.load_bundled();
+                    let project_skills = self.project_dir.join(".theo").join("skills");
+                    if project_skills.exists() {
+                        skill_registry.load_from_dir(&project_skills);
+                    }
+
+                    if let Some(skill) = skill_registry.get(skill_name) {
+                        match &skill.mode {
+                            crate::skill::SkillMode::InContext => {
+                                // Inject skill instructions into conversation
+                                messages.push(Message::system(&skill.instructions));
+                                messages.push(Message::tool_result(
+                                    &call.id,
+                                    "skill",
+                                    &format!("Skill '{}' loaded. Follow the instructions above.", skill_name),
+                                ));
+                            }
+                            crate::skill::SkillMode::SubAgent { role } => {
+                                // Spawn sub-agent with skill instructions as prompt
+                                self.event_bus.publish(DomainEvent::new(
+                                    EventType::RunStateChanged,
+                                    self.run.run_id.as_str(),
+                                    serde_json::json!({
+                                        "from": "Executing",
+                                        "to": format!("Skill:{}:{}", skill_name, role.display_name()),
+                                    }),
+                                ));
+
+                                let manager = crate::subagent::SubAgentManager::new(
+                                    self.config.clone(),
+                                    self.event_bus.clone(),
+                                    self.project_dir.clone(),
+                                );
+
+                                let sub_result = manager.spawn(*role, &skill.instructions, None).await;
+
+                                let result_msg = if sub_result.success {
+                                    format!("[Skill '{}' completed] {}", skill_name, sub_result.summary)
+                                } else {
+                                    format!("[Skill '{}' failed] {}", skill_name, sub_result.summary)
+                                };
+
+                                for file in &sub_result.files_edited {
+                                    if !file.is_empty() {
+                                        self.agent_state.record_edit_attempt(file, true, None);
+                                    }
+                                }
+
+                                messages.push(Message::tool_result(&call.id, "skill", &result_msg));
+                            }
+                        }
+                    } else {
+                        let available: Vec<String> = {
+                            skill_registry.list().iter().map(|s| s.name.clone()).collect()
+                        };
+                        messages.push(Message::tool_result(
+                            &call.id,
+                            "skill",
+                            &format!(
+                                "Unknown skill: '{}'. Available skills: {}",
+                                skill_name,
+                                available.join(", ")
+                            ),
+                        ));
+                    }
+                    continue;
                 }
 
                 // Execute regular tool via ToolCallManager (Invariants 2, 3, 5)

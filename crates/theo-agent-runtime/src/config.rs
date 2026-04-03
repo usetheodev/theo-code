@@ -26,6 +26,10 @@ pub struct AgentConfig {
     pub context_loop_interval: usize,
     /// Reasoning effort for LLM: "low", "medium", "high". None = model default.
     pub reasoning_effort: Option<String>,
+    /// Whether this agent is a sub-agent. Sub-agents do NOT receive delegation
+    /// meta-tools (subagent, subagent_parallel, skill) or skills summary injection.
+    /// This prevents recursive spawning. Default: false.
+    pub is_subagent: bool,
 }
 
 impl Default for AgentConfig {
@@ -42,6 +46,7 @@ impl Default for AgentConfig {
             temperature: 0.1,
             context_loop_interval: 5,
             reasoning_effort: None,
+            is_subagent: false,
         }
     }
 }
@@ -86,6 +91,10 @@ For complex tasks with independent sub-problems, delegate to sub-agents:
 Use `subagent_parallel` to run multiple sub-agents concurrently when tasks are independent.
 Use delegation when the task has independent parts or needs focused analysis.
 
+## Skills
+You have auto-invocable skills for common tasks. When the user's request matches a skill, invoke it with the `skill` tool.
+Skills inject specialized instructions or delegate to a focused sub-agent. Available skills are listed in the system context.
+
 ## Rules
 - Always use tools. Never guess file contents.
 - If an edit fails, read the file again and retry.
@@ -105,5 +114,11 @@ mod tests {
         assert_eq!(config.context_loop_interval, 5);
         assert!(config.endpoint_override.is_none());
         assert!(config.extra_headers.is_empty());
+    }
+
+    #[test]
+    fn is_subagent_false_by_default() {
+        let config = AgentConfig::default();
+        assert!(!config.is_subagent, "main agents must NOT be marked as sub-agents");
     }
 }

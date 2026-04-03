@@ -13,6 +13,7 @@ pub mod retry;
 pub mod snapshot;
 pub mod run_engine;
 pub mod scheduler;
+pub mod skill;
 pub mod subagent;
 pub mod state;
 pub mod task_manager;

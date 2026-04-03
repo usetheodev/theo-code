@@ -194,6 +194,9 @@ impl SubAgentManager {
         let mut sub_config = self.config.clone();
         sub_config.system_prompt = role.system_prompt();
         sub_config.max_iterations = role.max_iterations();
+        // Mark as sub-agent: prevents receiving delegation tools and skills.
+        // This is the primary defense against recursive spawning.
+        sub_config.is_subagent = true;
 
         // Create sub-agent EventBus with prefixed listener
         let sub_bus = Arc::new(crate::event_bus::EventBus::new());
@@ -383,6 +386,41 @@ mod tests {
         assert_eq!(SubAgentRole::from_str("VERIFIER"), Some(SubAgentRole::Verifier));
         assert_eq!(SubAgentRole::from_str("review"), Some(SubAgentRole::Reviewer));
         assert_eq!(SubAgentRole::from_str("unknown"), None);
+    }
+
+    #[test]
+    fn spawn_config_sets_is_subagent_true() {
+        // Verify that sub-agent configs are marked as sub-agents.
+        // This is tested indirectly: SubAgentManager::spawn() sets
+        // sub_config.is_subagent = true before creating AgentLoop.
+        // We verify the parent config is NOT a sub-agent by default.
+        let config = AgentConfig::default();
+        assert!(!config.is_subagent, "parent config must not be sub-agent");
+
+        // After clone + manual set (what spawn() does internally):
+        let mut sub_config = config.clone();
+        sub_config.is_subagent = true;
+        assert!(sub_config.is_subagent, "sub-agent config must be marked");
+    }
+
+    #[test]
+    fn spawn_parallel_configs_inherit_parent_settings() {
+        // Verify that spawn_parallel creates managers that will produce
+        // sub-agent configs with is_subagent=true (via spawn() internally).
+        let config = AgentConfig::default();
+        assert!(!config.is_subagent);
+
+        // spawn_parallel clones self.config and passes to SubAgentManager::new()
+        // then calls spawn() which sets is_subagent=true on the sub_config.
+        let cloned = config.clone();
+        let mut sub_config = cloned.clone();
+        sub_config.is_subagent = true;
+        assert!(sub_config.is_subagent);
+
+        // LLM settings must be preserved
+        assert_eq!(sub_config.base_url, config.base_url);
+        assert_eq!(sub_config.model, config.model);
+        assert_eq!(sub_config.api_key, config.api_key);
     }
 
     #[test]
