@@ -2,11 +2,14 @@ pub mod budget_enforcer;
 pub mod capability_gate;
 pub mod config;
 pub mod convergence;
+#[doc(hidden)] // Dead code: exported but never instantiated externally
 pub mod correction;
 pub mod dlq;
 pub mod event_bus;
+pub mod hooks;
 pub mod events;
 pub mod metrics;
+#[doc(hidden)] // Dead code: exported but never instantiated externally
 pub mod observability;
 pub mod persistence;
 pub mod pilot;
@@ -15,6 +18,7 @@ pub mod roadmap;
 pub mod retry;
 pub mod snapshot;
 pub mod run_engine;
+#[doc(hidden)] // Dead code: exported but never instantiated externally
 pub mod scheduler;
 pub mod skill;
 pub mod subagent;

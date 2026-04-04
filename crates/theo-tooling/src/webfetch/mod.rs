@@ -13,6 +13,51 @@ impl WebFetchTool {
         Self
     }
 
+    /// SSRF protection: reject dangerous URLs before fetching.
+    fn validate_url(url: &str) -> Result<(), ToolError> {
+        // Only allow http/https schemes
+        if !url.starts_with("http://") && !url.starts_with("https://") {
+            return Err(ToolError::Execution(format!(
+                "URL scheme not allowed: {url}. Only http:// and https:// are permitted."
+            )));
+        }
+
+        // Extract host from URL
+        let host = url
+            .strip_prefix("http://").or_else(|| url.strip_prefix("https://"))
+            .and_then(|rest| rest.split('/').next())
+            .and_then(|host_port| host_port.split(':').next())
+            .unwrap_or("");
+
+        // Block private IP ranges and metadata endpoints
+        let blocked_hosts = [
+            "127.0.0.1", "localhost", "0.0.0.0",
+            "169.254.169.254",  // AWS IMDS
+            "metadata.google.internal",  // GCP metadata
+            "metadata.internal",
+        ];
+        if blocked_hosts.contains(&host) {
+            return Err(ToolError::Execution(format!(
+                "URL host blocked (SSRF protection): {host}"
+            )));
+        }
+
+        // Block private IP ranges by prefix
+        let blocked_prefixes = ["10.", "172.16.", "172.17.", "172.18.", "172.19.",
+            "172.20.", "172.21.", "172.22.", "172.23.", "172.24.", "172.25.",
+            "172.26.", "172.27.", "172.28.", "172.29.", "172.30.", "172.31.",
+            "192.168.", "169.254."];
+        for prefix in &blocked_prefixes {
+            if host.starts_with(prefix) {
+                return Err(ToolError::Execution(format!(
+                    "URL host blocked (private IP): {host}"
+                )));
+            }
+        }
+
+        Ok(())
+    }
+
     fn is_image_content_type(content_type: &str) -> bool {
         let ct = content_type.to_lowercase();
         ct.starts_with("image/") && !ct.contains("svg")
@@ -61,6 +106,9 @@ impl Tool for WebFetchTool {
     ) -> Result<ToolOutput, ToolError> {
         let url = require_string(&args, "url")?;
         let _format = optional_string(&args, "format").unwrap_or_else(|| "markdown".to_string());
+
+        // SSRF protection: validate URL before fetching
+        Self::validate_url(&url)?;
 
         permissions.record(PermissionRequest {
             permission: PermissionType::WebFetch,

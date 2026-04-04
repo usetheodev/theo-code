@@ -113,8 +113,38 @@ pub fn create_default_registry() -> ToolRegistry {
 
     let mut registry = ToolRegistry::new();
 
+    // Activate sandbox for BashTool — bwrap > landlock > noop cascade.
+    // Allow build tools (cargo, rustc) inside sandbox via read-only mounts.
+    let mut sandbox_config = theo_domain::sandbox::SandboxConfig::default();
+
+    // Mount cargo/rustup toolchains as read-only so build tools work inside sandbox
+    if let Ok(home) = std::env::var("HOME") {
+        let cargo_dir = format!("{home}/.cargo");
+        let rustup_dir = format!("{home}/.rustup");
+        if std::path::Path::new(&cargo_dir).exists() {
+            sandbox_config.filesystem.allowed_read.push(cargo_dir);
+        }
+        if std::path::Path::new(&rustup_dir).exists() {
+            sandbox_config.filesystem.allowed_read.push(rustup_dir);
+        }
+    }
+    // Allow build tool env vars through the sanitizer
+    sandbox_config.process.allowed_env_vars.extend(vec![
+        "CARGO_HOME".to_string(),
+        "RUSTUP_HOME".to_string(),
+        "RUSTFLAGS".to_string(),
+        "CARGO_TARGET_DIR".to_string(),
+    ]);
+    let bash_tool = match crate::sandbox::executor::create_executor(&sandbox_config) {
+        Ok(executor) => Box::new(BashTool::with_sandbox(std::sync::Arc::from(executor), sandbox_config)) as Box<dyn Tool>,
+        Err(_) => {
+            eprintln!("[theo] Warning: sandbox unavailable — BashTool running without isolation");
+            Box::new(BashTool::new()) as Box<dyn Tool>
+        }
+    };
+
     let tools: Vec<Box<dyn Tool>> = vec![
-        Box::new(BashTool::new()),
+        bash_tool,
         Box::new(ReadTool::new()),
         Box::new(WriteTool::new()),
         Box::new(EditTool::new()),

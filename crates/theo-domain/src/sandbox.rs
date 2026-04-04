@@ -177,10 +177,11 @@ pub struct ProcessPolicy {
 }
 
 /// Default allowed environment variables (safe, no secrets).
+/// Note: LD_PRELOAD and LD_LIBRARY_PATH intentionally excluded — they break
+/// sandbox isolation by allowing preloading of arbitrary shared libraries.
 pub const DEFAULT_ALLOWED_ENV_VARS: &[&str] = &[
     "PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "TERM", "SHELL",
     "TMPDIR", "TMP", "TEMP", "XDG_RUNTIME_DIR",
-    "LD_LIBRARY_PATH", "LD_PRELOAD",
 ];
 
 /// Environment variable prefixes that are ALWAYS stripped.

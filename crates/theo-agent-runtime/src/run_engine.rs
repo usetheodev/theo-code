@@ -250,6 +250,16 @@ impl AgentRunEngine {
             messages.push(Message::user(&task.objective));
         }
 
+        // Initialize hook runner for pre/post tool hooks
+        let hook_runner = if !self.config.is_subagent {
+            Some(crate::hooks::HookRunner::new(
+                &self.project_dir,
+                crate::hooks::HookConfig::default(),
+            ))
+        } else {
+            None // Sub-agents don't run hooks
+        };
+
         // Doom loop detector — tracks recent tool calls to detect repetition
         let mut doom_tracker = self.config.doom_loop_threshold
             .map(|t| DoomLoopTracker::new(t));
@@ -839,6 +849,22 @@ impl AgentRunEngine {
                     }
                 }
 
+                // ── PRE-HOOK: tool.before ──
+                if let Some(ref runner) = hook_runner {
+                    let hook_args = call.parse_arguments().unwrap_or_default();
+                    let event = crate::hooks::tool_hook_event(
+                        "tool.before", name, &hook_args, &self.project_dir,
+                    );
+                    let hook_result = runner.run_pre_hook("tool.before", &event).await;
+                    if !hook_result.allowed {
+                        messages.push(Message::tool_result(
+                            &call.id, name,
+                            &format!("BLOCKED by hook: {}", hook_result.output.trim()),
+                        ));
+                        continue;
+                    }
+                }
+
                 // Execute regular tool via ToolCallManager (Invariants 2, 3, 5)
                 let tool_args = match call.parse_arguments() {
                     Ok(args) => args,
@@ -966,6 +992,15 @@ impl AgentRunEngine {
                 }
 
                 messages.push(result_msg);
+
+                // ── POST-HOOK: tool.after ──
+                if let Some(ref runner) = hook_runner {
+                    let hook_args = call.parse_arguments().unwrap_or_default();
+                    let event = crate::hooks::tool_hook_event(
+                        "tool.after", name, &hook_args, &self.project_dir,
+                    );
+                    runner.run_post_hook("tool.after", &event).await;
+                }
             }
 
             if let Some(result) = should_return {

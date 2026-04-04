@@ -1,14 +1,28 @@
-# Meeting — 2026-04-04 (Error Recovery Wiring)
+# Meeting — 2026-04-04 (Hooks System)
 
 ## Proposta
-Conectar RetryExecutor + RetryPolicy + LlmError::is_retryable() — tudo existe mas está desconectado.
+Hooks system para extensibilidade. Plugin loading ADIADO (YAGNI).
+
+## Participantes
+- governance
+
+## Conflitos
+- Plugins rejeitados (YAGNI — zero use cases concretos)
+- run_engine.rs refactor desejável mas não bloqueante
 
 ## Veredito
-**APPROVED**
+**APPROVED** (Hooks only)
 
 ## Escopo Aprovado
-- crates/theo-infra-llm/src/client.rs (from_status em vez de Api genérico)
-- crates/theo-agent-runtime/src/run_engine.rs (retry wrapper + parse_arguments error reporting)
+- crates/theo-agent-runtime/src/hooks.rs (NOVO — HookRunner + HookConfig)
+- crates/theo-agent-runtime/src/lib.rs (pub mod hooks)
+- crates/theo-agent-runtime/src/run_engine.rs (hook calls via HookRunner)
+- crates/theo-agent-runtime/src/project_config.rs (hook config from .theo/config.toml)
 
 ## Condições
-- cargo test 100% verde, 0 warnings
+- Hooks herdam SandboxConfig (segurança)
+- Timeout 5s default, 30s max
+- Pre-hooks podem bloquear (exit != 0)
+- Post-hooks fire-and-forget
+- Mínimo 5 testes
+- 0 warnings
