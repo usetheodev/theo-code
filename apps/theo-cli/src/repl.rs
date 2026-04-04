@@ -11,6 +11,7 @@ use theo_agent_runtime::event_bus::EventBus;
 #[allow(deprecated)]
 use theo_agent_runtime::events::PrintEventSink;
 use theo_agent_runtime::{AgentConfig, AgentLoop};
+use theo_domain::graph_context::GraphContextProvider;
 use theo_infra_llm::types::Message;
 use theo_tooling::registry::create_default_registry;
 
@@ -30,6 +31,8 @@ pub struct Repl {
     mode: AgentMode,
     /// Session history — persists between prompts in the REPL.
     session_messages: Vec<Message>,
+    /// GRAPHCTX — initialized once, shared across all turns (read-only after init).
+    graph_context: Option<Arc<dyn GraphContextProvider>>,
 }
 
 impl Repl {
@@ -42,6 +45,7 @@ impl Repl {
             provider_name,
             mode: AgentMode::default(),
             session_messages: Vec::new(),
+            graph_context: None,
         }
     }
 
@@ -58,15 +62,36 @@ impl Repl {
         eprintln!("  Mode: \x1b[36m{}\x1b[0m", mode);
     }
 
+    /// Initialize GRAPHCTX once for the session. Called before first task.
+    async fn ensure_graph_context(&mut self) {
+        if self.graph_context.is_some() {
+            return;
+        }
+        let service = Arc::new(
+            theo_application::use_cases::graph_context_service::GraphContextService::new(),
+        );
+        match service.initialize(&self.project_dir).await {
+            Ok(()) => {
+                eprintln!("[theo] GRAPHCTX initialized");
+                self.graph_context = Some(service);
+            }
+            Err(e) => {
+                eprintln!("[theo] GRAPHCTX unavailable (degraded): {e}");
+            }
+        }
+    }
+
     /// Execute a single prompt and exit (no REPL loop).
     /// Used for `theo agent "task here"` single-shot mode.
     pub async fn execute_single(&mut self, prompt: &str) {
         self.print_banner();
+        self.ensure_graph_context().await;
         self.execute_task(prompt).await;
     }
 
     pub async fn run(&mut self) {
         self.print_banner();
+        self.ensure_graph_context().await;
 
         loop {
             match self.editor.readline("\x1b[36mtheo>\x1b[0m ") {
@@ -136,11 +161,14 @@ impl Repl {
         let renderer = Arc::new(CliRenderer::new());
         event_bus.subscribe(renderer);
 
-        // Create agent
+        // Create agent with GRAPHCTX if available
         #[allow(deprecated)]
         let event_sink = Arc::new(PrintEventSink);
         let registry = create_default_registry();
-        let agent = AgentLoop::new(self.config.clone(), registry, event_sink);
+        let mut agent = AgentLoop::new(self.config.clone(), registry, event_sink);
+        if let Some(ref gc) = self.graph_context {
+            agent = agent.with_graph_context(gc.clone());
+        }
 
         // Execute with session history + external EventBus
         let result = agent

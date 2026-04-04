@@ -8,7 +8,15 @@ theo-domain.workspace = true
 theo-agent-runtime.workspace = true
 theo-tooling.workspace = true
 theo-api-contracts.workspace = true
+theo-engine-graph.workspace = true
+theo-engine-parser.workspace = true
+theo-engine-retrieval.workspace = true
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+async-trait.workspace = true
+ignore.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

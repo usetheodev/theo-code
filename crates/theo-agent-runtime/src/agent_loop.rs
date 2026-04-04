@@ -52,6 +52,7 @@ pub struct AgentLoop {
     config: AgentConfig,
     #[allow(deprecated)]
     event_sink: Arc<dyn EventSink>,
+    graph_context: Option<Arc<dyn theo_domain::graph_context::GraphContextProvider>>,
 }
 
 impl AgentLoop {
@@ -72,7 +73,17 @@ impl AgentLoop {
             registry,
             config,
             event_sink,
+            graph_context: None,
         }
+    }
+
+    /// Set the graph context provider for code intelligence injection.
+    pub fn with_graph_context(
+        mut self,
+        provider: Arc<dyn theo_domain::graph_context::GraphContextProvider>,
+    ) -> Self {
+        self.graph_context = Some(provider);
+        self
     }
 
     /// Run the agent loop on a task.
@@ -115,8 +126,11 @@ impl AgentLoop {
             client = client.with_header(k, v);
         }
 
-        // Create and execute RunEngine
-        let registry = Arc::new(theo_tooling::registry::create_default_registry());
+        // Create registry with plugin tools
+        let mut registry = theo_tooling::registry::create_default_registry();
+        load_plugin_tools(&mut registry, project_dir);
+        let registry = Arc::new(registry);
+
         let mut engine = AgentRunEngine::new(
             task_id,
             task_manager,
@@ -127,6 +141,9 @@ impl AgentLoop {
             self.config.clone(),
             project_dir.to_path_buf(),
         );
+        if let Some(ref gc) = self.graph_context {
+            engine = engine.with_graph_context(gc.clone());
+        }
 
         engine.execute().await
     }
@@ -175,7 +192,10 @@ impl AgentLoop {
             client = client.with_header(k, v);
         }
 
-        let registry = Arc::new(theo_tooling::registry::create_default_registry());
+        let mut registry = theo_tooling::registry::create_default_registry();
+        load_plugin_tools(&mut registry, project_dir);
+        let registry = Arc::new(registry);
+
         let mut engine = AgentRunEngine::new(
             task_id,
             task_manager,
@@ -186,6 +206,9 @@ impl AgentLoop {
             self.config.clone(),
             project_dir.to_path_buf(),
         );
+        if let Some(ref gc) = self.graph_context {
+            engine = engine.with_graph_context(gc.clone());
+        }
 
         engine.execute_with_history(history).await
     }
@@ -247,6 +270,28 @@ impl EventListener for EventSinkBridge {
 
 /// Check if the project has real uncommitted changes via git diff.
 /// Kept as free function for backward compatibility with existing tests.
+/// Load plugin tools from .theo/plugins/ into the registry.
+fn load_plugin_tools(registry: &mut theo_tooling::registry::ToolRegistry, project_dir: &Path) {
+    let plugins = crate::plugin::load_plugins(project_dir);
+    let mut tool_specs = Vec::new();
+    for plugin in &plugins {
+        for (spec, script_path) in &plugin.tool_scripts {
+            let params: Vec<theo_domain::tool::ToolParam> = spec.params.iter().map(|p| {
+                theo_domain::tool::ToolParam {
+                    name: p.name.clone(),
+                    param_type: p.param_type.clone(),
+                    description: p.description.clone(),
+                    required: p.required,
+                }
+            }).collect();
+            tool_specs.push((spec.name.clone(), spec.description.clone(), script_path.clone(), params));
+        }
+    }
+    if !tool_specs.is_empty() {
+        theo_tooling::registry::register_plugin_tools(registry, tool_specs);
+    }
+}
+
 #[allow(dead_code)]
 async fn has_real_changes(project_dir: &Path) -> bool {
     let output = tokio::process::Command::new("git")

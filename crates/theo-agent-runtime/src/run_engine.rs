@@ -47,9 +47,10 @@ pub struct AgentRunEngine {
     project_dir: PathBuf,
     budget_enforcer: BudgetEnforcer,
     metrics: Arc<MetricsCollector>,
-    #[allow(dead_code)] // Will be used when GRAPHCTX is wired to agent
+    #[allow(dead_code)] // Will be used for convergence detection in pilot loop
     convergence: ConvergenceEvaluator,
     snapshot_store: Option<Arc<dyn SnapshotStore>>,
+    graph_context: Option<Arc<dyn theo_domain::graph_context::GraphContextProvider>>,
     #[allow(deprecated)]
     agent_state: AgentState,
 }
@@ -118,8 +119,18 @@ impl AgentRunEngine {
             metrics,
             convergence,
             snapshot_store: None,
+            graph_context: None,
             agent_state,
         }
+    }
+
+    /// Sets the graph context provider for code intelligence injection.
+    pub fn with_graph_context(
+        mut self,
+        provider: Arc<dyn theo_domain::graph_context::GraphContextProvider>,
+    ) -> Self {
+        self.graph_context = Some(provider);
+        self
     }
 
     /// Returns the run_id.
@@ -185,6 +196,44 @@ impl AgentRunEngine {
                 messages.push(Message::system(&format!(
                     "## Project Context\n{context}"
                 )));
+            }
+        }
+
+        // GRAPHCTX: inject code intelligence context (between project context and memories).
+        // Graceful degradation: if query fails or times out, log warning and continue.
+        if let Some(ref provider) = self.graph_context {
+            let task_objective = self.task_manager.get(&self.task_id)
+                .map(|t| t.objective.clone())
+                .unwrap_or_default();
+
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                provider.query_context(&task_objective, 4000),
+            )
+            .await
+            {
+                Ok(Ok(result)) => {
+                    let text = result.to_prompt_text();
+                    if !text.is_empty() {
+                        messages.push(Message::system(&format!(
+                            "## Code Intelligence Context\n{text}"
+                        )));
+                    }
+                }
+                Ok(Err(e)) => {
+                    self.event_bus.publish(DomainEvent::new(
+                        EventType::Error,
+                        self.run.run_id.as_str(),
+                        serde_json::json!({"type": "graphctx_query_failed", "error": e.to_string()}),
+                    ));
+                }
+                Err(_timeout) => {
+                    self.event_bus.publish(DomainEvent::new(
+                        EventType::Error,
+                        self.run.run_id.as_str(),
+                        serde_json::json!({"type": "graphctx_query_timeout", "timeout_secs": 5}),
+                    ));
+                }
             }
         }
 

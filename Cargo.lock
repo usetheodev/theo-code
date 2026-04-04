@@ -5354,11 +5354,17 @@ dependencies = [
 name = "theo-application"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "ignore",
  "serde",
  "serde_json",
+ "tempfile",
  "theo-agent-runtime",
  "theo-api-contracts",
  "theo-domain",
+ "theo-engine-graph",
+ "theo-engine-parser",
+ "theo-engine-retrieval",
  "theo-tooling",
  "thiserror 2.0.18",
  "tokio",

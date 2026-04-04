@@ -5,7 +5,10 @@ use std::sync::Arc;
 
 use theo_agent_runtime::events::EventSink;
 use theo_agent_runtime::{AgentConfig, AgentLoop, AgentResult};
+use theo_domain::graph_context::GraphContextProvider;
 use theo_tooling::registry::create_default_registry;
+
+use super::graph_context_service::GraphContextService;
 
 /// Errors that can occur when running an agent session.
 #[derive(Debug, thiserror::Error)]
@@ -20,6 +23,9 @@ pub enum RunSessionError {
 ///
 /// This is the primary entry point for any surface (CLI, desktop, API)
 /// to run the agent. Surfaces should NOT call AgentLoop directly.
+///
+/// Initializes GRAPHCTX (code intelligence) before running the agent.
+/// If graph build fails, the agent runs without code context (graceful degradation).
 pub async fn run_agent_session(
     config: AgentConfig,
     task: &str,
@@ -36,8 +42,27 @@ pub async fn run_agent_session(
         ));
     }
 
+    // Initialize GRAPHCTX — build code graph for context injection.
+    // Runs in spawn_blocking with timeout; failure is non-fatal.
+    let graph_context: Option<Arc<dyn GraphContextProvider>> = {
+        let service = Arc::new(GraphContextService::new());
+        match service.initialize(project_dir).await {
+            Ok(()) => {
+                eprintln!("[theo] GRAPHCTX initialized ({} ready)", if service.is_ready() { "graph" } else { "no graph" });
+                Some(service)
+            }
+            Err(e) => {
+                eprintln!("[theo] GRAPHCTX init failed (degraded mode): {e}");
+                None
+            }
+        }
+    };
+
     let registry = create_default_registry();
-    let agent = AgentLoop::new(config, registry, event_sink);
+    let mut agent = AgentLoop::new(config, registry, event_sink);
+    if let Some(gc) = graph_context {
+        agent = agent.with_graph_context(gc);
+    }
     let result = agent.run(task, project_dir).await;
 
     Ok(result)

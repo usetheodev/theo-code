@@ -3,6 +3,7 @@ pub mod budget;
 pub mod capability;
 pub mod error;
 pub mod event;
+pub mod graph_context;
 pub mod identifiers;
 pub mod priority;
 pub mod retry_policy;

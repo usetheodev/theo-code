@@ -13,6 +13,7 @@ pub mod metrics;
 pub mod observability;
 pub mod persistence;
 pub mod pilot;
+pub mod plugin;
 pub mod project_config;
 pub mod roadmap;
 pub mod retry;

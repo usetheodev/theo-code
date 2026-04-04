@@ -158,6 +158,14 @@ pub fn create_default_registry() -> ToolRegistry {
         Box::new(MemoryTool::new()),
         Box::new(TaskCreateTool::new()),
         Box::new(TaskUpdateTool::new()),
+        // Builtin plugins — typed operations
+        Box::new(crate::git::GitStatusTool),
+        Box::new(crate::git::GitDiffTool),
+        Box::new(crate::git::GitLogTool),
+        Box::new(crate::git::GitCommitTool),
+        Box::new(crate::env_info::EnvInfoTool),
+        Box::new(crate::http_client::HttpGetTool),
+        Box::new(crate::http_client::HttpPostTool),
     ];
 
     for tool in tools {
@@ -168,6 +176,23 @@ pub fn create_default_registry() -> ToolRegistry {
     }
 
     registry
+}
+
+/// Load plugin tools into an existing registry.
+/// Called after create_default_registry() with discovered plugins.
+pub fn register_plugin_tools(
+    registry: &mut ToolRegistry,
+    plugin_tools: Vec<(String, String, std::path::PathBuf, Vec<theo_domain::tool::ToolParam>)>,
+) {
+    use crate::shell_tool::ShellTool;
+
+    for (name, description, script_path, params) in plugin_tools {
+        let tool = Box::new(ShellTool::new(name.clone(), description, script_path, params));
+        match registry.register(tool) {
+            Ok(()) => eprintln!("[theo] Plugin tool registered: {name}"),
+            Err(e) => eprintln!("[theo] Warning: plugin tool '{name}' failed to register: {e}"),
+        }
+    }
 }
 
 #[cfg(test)]
