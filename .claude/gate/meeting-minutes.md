@@ -1,24 +1,27 @@
-# Meeting — 2026-04-03 (Dogfood Improvements: 6 items)
+# Meeting — 2026-04-04 (Runtime Guards)
 
 ## Proposta
-6 melhorias encontradas no dogfood (item 2 removido — já corrigido).
+Hard enforcement: Plan mode guard, Doom loop abort, AgentMode no config.
 
 ## Participantes
 - governance
+
+## Conflitos
+- Ask guard removido do RunEngine (vive no REPL)
+- Batch bypass: guard aplicado dentro do batch handler também
+- AgentMode adicionado ao AgentConfig como pré-requisito
 
 ## Veredito
 **APPROVED**
 
 ## Escopo Aprovado
-- apps/theo-cli/src/main.rs (item 1: --prompt inline para agent)
-- apps/theo-cli/src/repl.rs (item 1: single-shot mode + item 7: spacing fix)
-- crates/theo-agent-runtime/src/pilot.rs (item 3: loop summary print)
-- crates/theo-agent-runtime/src/run_engine.rs (item 4: metrics.record_delegated_tokens)
-- crates/theo-agent-runtime/src/metrics.rs (item 4: new method)
-- crates/theo-agent-runtime/src/subagent/mod.rs (item 6: project_dir in prompts)
-- .claude/skills/dogfood/SKILL.md (item 5: Ask mode test)
+- crates/theo-agent-runtime/src/config.rs (mode: AgentMode field)
+- crates/theo-agent-runtime/src/run_engine.rs (Plan guard + batch guard + doom abort)
+- apps/theo-cli/src/repl.rs (propagar mode ao config)
 
 ## Condições
-- Item 4: teste unitário para record_delegated_tokens
-- Item 7: verificar spacing com grep
+- Plan guard: whitelist read-only tools, block write tools exceto .theo/plans/
+- Batch: validar cada call contra mesma whitelist
+- Doom: abort em threshold*2
+- Testes: plan_guard_blocks_edit, plan_guard_allows_roadmap_write, doom_abort_at_double_threshold
 - cargo test 100% verde, 0 warnings

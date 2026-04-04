@@ -241,6 +241,7 @@ impl Tool for TaskUpdateTool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
     use crate::test_helpers::*;
 
     #[test]

@@ -192,28 +192,12 @@ async fn get_changed_file_count(project_dir: &Path) -> usize {
 }
 
 // ---------------------------------------------------------------------------
-// Fix Plan Parser
+// Fix Plan Parser (delegates to roadmap::parse_checkbox_progress)
 // ---------------------------------------------------------------------------
 
 fn parse_fix_plan(project_dir: &Path) -> (usize, usize) {
     let path = project_dir.join(".theo").join("fix_plan.md");
-    let content = match std::fs::read_to_string(&path) {
-        Ok(c) => c,
-        Err(_) => return (0, 0),
-    };
-
-    let mut completed = 0;
-    let mut total = 0;
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("- [x]") || trimmed.starts_with("- [X]") {
-            completed += 1;
-            total += 1;
-        } else if trimmed.starts_with("- [ ]") {
-            total += 1;
-        }
-    }
-    (completed, total)
+    roadmap::parse_checkbox_progress_from_file(&path)
 }
 
 // ---------------------------------------------------------------------------
@@ -534,19 +518,18 @@ impl PilotLoop {
         match &self.circuit_state {
             CircuitBreakerState::Closed => None,
             CircuitBreakerState::Open => {
-                // Check if cooldown elapsed → transition to HalfOpen
-                let cooldown_elapsed = self.circuit_open_since
-                    .map(|since| since.elapsed().as_secs() >= self.pilot_config.circuit_breaker_cooldown_secs)
-                    .unwrap_or(false);
+                let elapsed_secs = self.circuit_open_since
+                    .map(|since| since.elapsed().as_secs())
+                    .unwrap_or(0);
 
-                if cooldown_elapsed {
+                if should_transition_to_halfopen(elapsed_secs, self.pilot_config.circuit_breaker_cooldown_secs) {
                     self.circuit_state = CircuitBreakerState::HalfOpen;
-                    None // Allow one try
+                    None
                 } else {
                     Some("no progress detected, waiting for cooldown".to_string())
                 }
             }
-            CircuitBreakerState::HalfOpen => None, // Allow one try
+            CircuitBreakerState::HalfOpen => None,
         }
     }
 
@@ -729,6 +712,12 @@ impl EventListener for EventForwarder {
     fn on_event(&self, event: &DomainEvent) {
         self.target.publish(event.clone());
     }
+}
+
+/// Pure function: should circuit breaker transition from Open to HalfOpen?
+/// Extracted for deterministic testing without wall-clock dependency.
+fn should_transition_to_halfopen(elapsed_secs: u64, cooldown_secs: u64) -> bool {
+    elapsed_secs >= cooldown_secs
 }
 
 // ---------------------------------------------------------------------------
@@ -1026,6 +1015,20 @@ exit_signal_threshold = 3
     }
 
     // -- Helper --
+
+    // -- Cooldown pure function tests --
+
+    #[test]
+    fn cooldown_transitions_when_elapsed_exceeds_threshold() {
+        assert!(should_transition_to_halfopen(300, 300)); // exactly at threshold
+        assert!(should_transition_to_halfopen(301, 300)); // past threshold
+    }
+
+    #[test]
+    fn cooldown_does_not_transition_before_threshold() {
+        assert!(!should_transition_to_halfopen(0, 300));
+        assert!(!should_transition_to_halfopen(299, 300));
+    }
 
     fn make_test_pilot(promise: &str) -> PilotLoop {
         PilotLoop::new(

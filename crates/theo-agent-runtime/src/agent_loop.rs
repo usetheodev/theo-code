@@ -116,8 +116,7 @@ impl AgentLoop {
         }
 
         // Create and execute RunEngine
-        // ToolRegistry doesn't impl Clone, so we create a fresh default registry
-        let registry = theo_tooling::registry::create_default_registry();
+        let registry = Arc::new(theo_tooling::registry::create_default_registry());
         let mut engine = AgentRunEngine::new(
             task_id,
             task_manager,
@@ -176,7 +175,7 @@ impl AgentLoop {
             client = client.with_header(k, v);
         }
 
-        let registry = theo_tooling::registry::create_default_registry();
+        let registry = Arc::new(theo_tooling::registry::create_default_registry());
         let mut engine = AgentRunEngine::new(
             task_id,
             task_manager,

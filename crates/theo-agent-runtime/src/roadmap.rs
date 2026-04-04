@@ -234,6 +234,36 @@ fn parse_field_line(line: &str) -> Option<(&str, &str)> {
 }
 
 // ---------------------------------------------------------------------------
+// Checkbox Progress Parser (shared between fix_plan and roadmap)
+// ---------------------------------------------------------------------------
+
+/// Parse markdown checkbox progress from content string.
+/// Counts `- [x]`/`- [X]` as completed and `- [ ]` as pending.
+/// Returns (completed, total). Used by both fix_plan.md and roadmap tracking.
+pub fn parse_checkbox_progress(content: &str) -> (usize, usize) {
+    let mut completed = 0;
+    let mut total = 0;
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("- [x]") || trimmed.starts_with("- [X]") {
+            completed += 1;
+            total += 1;
+        } else if trimmed.starts_with("- [ ]") {
+            total += 1;
+        }
+    }
+    (completed, total)
+}
+
+/// Parse checkbox progress from a file path. Returns (0, 0) if file doesn't exist.
+pub fn parse_checkbox_progress_from_file(path: &std::path::Path) -> (usize, usize) {
+    match std::fs::read_to_string(path) {
+        Ok(content) => parse_checkbox_progress(&content),
+        Err(_) => (0, 0),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Errors
 // ---------------------------------------------------------------------------
 
@@ -455,6 +485,27 @@ Something here
     fn mark_task_completed_file_not_found_returns_error() {
         let err = mark_task_completed(Path::new("/nonexistent/roadmap.md"), 1).unwrap_err();
         assert!(matches!(err, RoadmapError::Io(_)));
+    }
+
+    // -- Checkbox progress parser tests --
+
+    #[test]
+    fn checkbox_progress_counts_correctly() {
+        let content = "# Tasks\n- [x] Done\n- [ ] Pending\n- [X] Also done\n";
+        let (completed, total) = parse_checkbox_progress(content);
+        assert_eq!(completed, 2);
+        assert_eq!(total, 3);
+    }
+
+    #[test]
+    fn checkbox_progress_empty_returns_zero() {
+        assert_eq!(parse_checkbox_progress(""), (0, 0));
+        assert_eq!(parse_checkbox_progress("no checkboxes here"), (0, 0));
+    }
+
+    #[test]
+    fn checkbox_progress_from_file_missing() {
+        assert_eq!(parse_checkbox_progress_from_file(Path::new("/nonexistent")), (0, 0));
     }
 
     #[test]

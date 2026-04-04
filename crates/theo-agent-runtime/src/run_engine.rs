@@ -42,7 +42,7 @@ pub struct AgentRunEngine {
     tool_call_manager: Arc<ToolCallManager>,
     event_bus: Arc<EventBus>,
     client: LlmClient,
-    registry: ToolRegistry,
+    registry: Arc<ToolRegistry>,
     config: AgentConfig,
     project_dir: PathBuf,
     budget_enforcer: BudgetEnforcer,
@@ -63,7 +63,7 @@ impl AgentRunEngine {
         tool_call_manager: Arc<ToolCallManager>,
         event_bus: Arc<EventBus>,
         client: LlmClient,
-        registry: ToolRegistry,
+        registry: Arc<ToolRegistry>,
         config: AgentConfig,
         project_dir: PathBuf,
     ) -> Self {
@@ -653,26 +653,27 @@ impl AgentRunEngine {
                         const MAX_BATCH: usize = 25;
                         const BLOCKED: &[&str] = &["batch", "done", "subagent", "subagent_parallel", "skill"];
 
-                        let mut batch_output = String::new();
                         let total = calls.len().min(MAX_BATCH);
 
+                        // Build futures for parallel execution via join_all
+                        // Blocked tools get immediate error results
+                        let registry = self.registry.clone(); // Arc::clone — cheap
+                        let mut futures = Vec::new();
+                        let mut blocked_results: Vec<(usize, String, String)> = Vec::new(); // (index, name, error)
+
                         for (i, batch_call) in calls.iter().take(MAX_BATCH).enumerate() {
-                            let tool_name = batch_call.get("tool").and_then(|v| v.as_str()).unwrap_or("?");
+                            let tool_name = batch_call.get("tool").and_then(|v| v.as_str()).unwrap_or("?").to_string();
                             let tool_args = batch_call.get("args").cloned().unwrap_or(serde_json::json!({}));
 
-                            // Block meta-tools and self-recursion
-                            if BLOCKED.contains(&tool_name) {
-                                batch_output.push_str(&format!(
-                                    "[{}/{}] {}: error — cannot use '{}' inside batch\n",
-                                    i + 1, total, tool_name, tool_name
-                                ));
+                            if BLOCKED.contains(&tool_name.as_str()) {
+                                blocked_results.push((i, tool_name.clone(), format!("cannot use '{}' inside batch", tool_name)));
                                 continue;
                             }
 
-                            // Execute via tool_bridge (sequential, no LLM round-trip)
+                            let reg = registry.clone();
                             let batch_tool_call = theo_infra_llm::types::ToolCall::new(
                                 &format!("batch_{}_{}", call.id, i),
-                                tool_name,
+                                &tool_name,
                                 &tool_args.to_string(),
                             );
                             let batch_ctx = ToolContext {
@@ -684,10 +685,25 @@ impl AgentRunEngine {
                                 project_dir: self.project_dir.clone(),
                             };
 
-                            let (msg, success) = tool_bridge::execute_tool_call(
-                                &self.registry, &batch_tool_call, &batch_ctx,
-                            ).await;
+                            futures.push(async move {
+                                let (msg, success) = tool_bridge::execute_tool_call(
+                                    &reg, &batch_tool_call, &batch_ctx,
+                                ).await;
+                                (i, tool_name, tool_args, msg, success)
+                            });
+                        }
 
+                        // Execute all non-blocked calls in parallel (join_all preserves order)
+                        let results = futures::future::join_all(futures).await;
+
+                        // Combine blocked + executed results, sorted by index
+                        let mut all_results: Vec<(usize, String, String, bool)> = Vec::new();
+
+                        for (i, name, err) in blocked_results {
+                            all_results.push((i, name, format!("error — {}", err), false));
+                        }
+
+                        for (i, tool_name, tool_args, msg, success) in results {
                             let output = msg.content.unwrap_or_default();
                             let status = if success { "ok" } else { "error" };
                             let preview = if output.len() > 200 {
@@ -698,19 +714,20 @@ impl AgentRunEngine {
                                 output.clone()
                             };
 
-                            batch_output.push_str(&format!(
-                                "[{}/{}] {}({}): {} — {}\n",
-                                i + 1, total, tool_name,
-                                truncate_batch_args(&tool_args), status, preview
+                            all_results.push((
+                                i,
+                                tool_name.clone(),
+                                format!("{}({}): {} — {}", tool_name, truncate_batch_args(&tool_args), status, preview),
+                                success,
                             ));
 
                             // Track in budget/metrics
                             self.budget_enforcer.record_tool_call();
-                            self.metrics.record_tool_call(tool_name, 0, success);
+                            self.metrics.record_tool_call(&tool_name, 0, success);
 
                             // Track edits
                             #[allow(deprecated)]
-                            if success && matches!(tool_name, "edit" | "write" | "apply_patch") {
+                            if success && matches!(tool_name.as_str(), "edit" | "write" | "apply_patch") {
                                 let file = tool_args.get("filePath")
                                     .and_then(|p| p.as_str())
                                     .unwrap_or("");
@@ -718,6 +735,14 @@ impl AgentRunEngine {
                                     self.agent_state.record_edit_attempt(file, true, None);
                                 }
                             }
+                        }
+
+                        // Sort by original index for deterministic output
+                        all_results.sort_by_key(|(i, _, _, _)| *i);
+
+                        let mut batch_output = String::new();
+                        for (i, _name, display, _success) in &all_results {
+                            batch_output.push_str(&format!("[{}/{}] {}\n", i + 1, total, display));
                         }
 
                         if calls.len() > MAX_BATCH {
@@ -748,6 +773,28 @@ impl AgentRunEngine {
                             "Error: 'calls' array is required. Example: batch(calls: [{tool: \"read\", args: {filePath: \"a.rs\"}}])",
                         ));
                         continue;
+                    }
+                }
+
+                // ── PLAN MODE GUARD ──
+                // In Plan mode, block write tools except writes to .theo/plans/
+                if self.config.mode == crate::config::AgentMode::Plan {
+                    let is_write_tool = matches!(name.as_str(), "edit" | "write" | "apply_patch");
+                    if is_write_tool {
+                        let is_roadmap_write = name == "write"
+                            && call.parse_arguments().ok()
+                                .and_then(|a| a.get("filePath").and_then(|p| p.as_str()).map(String::from))
+                                .map(|p| p.contains(".theo/plans/"))
+                                .unwrap_or(false);
+
+                        if !is_roadmap_write {
+                            messages.push(Message::tool_result(
+                                &call.id, name,
+                                "BLOCKED by Plan mode guard: You can only write to .theo/plans/. \
+                                 Write the roadmap first. Source code edits are not allowed until user approves.",
+                            ));
+                            continue;
+                        }
                     }
                 }
 
@@ -994,7 +1041,7 @@ mod tests {
             AgentRunEngine::new(
                 task_id, self.tm.clone(), self.tcm.clone(), self.bus.clone(),
                 LlmClient::new("http://localhost:9999", None, "test"),
-                theo_tooling::registry::create_default_registry(),
+                Arc::new(theo_tooling::registry::create_default_registry()),
                 AgentConfig::default(),
                 PathBuf::from("/tmp"),
             )

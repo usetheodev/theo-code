@@ -193,6 +193,9 @@ pub struct AgentConfig {
     pub context_loop_interval: usize,
     /// Reasoning effort for LLM: "low", "medium", "high". None = model default.
     pub reasoning_effort: Option<String>,
+    /// Agent interaction mode (Agent, Plan, Ask). Controls runtime guards.
+    /// Default: Agent (no guards — full autonomy).
+    pub mode: AgentMode,
     /// Whether this agent is a sub-agent. Sub-agents do NOT receive delegation
     /// meta-tools (subagent, subagent_parallel, skill) or skills summary injection.
     /// This prevents recursive spawning. Default: false.
@@ -220,6 +223,7 @@ impl Default for AgentConfig {
             temperature: 0.1,
             context_loop_interval: 5,
             reasoning_effort: None,
+            mode: AgentMode::default(),
             is_subagent: false,
             capability_set: None,
             doom_loop_threshold: Some(3),

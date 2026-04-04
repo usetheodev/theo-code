@@ -127,8 +127,9 @@ impl Repl {
     async fn execute_task(&mut self, task: &str) {
         eprintln!();
 
-        // Apply current mode's system prompt before each execution
+        // Apply current mode's system prompt + mode field before each execution
         self.config.system_prompt = system_prompt_for_mode(self.mode);
+        self.config.mode = self.mode;
 
         // Create EventBus with CLI renderer for real-time feedback
         let event_bus = Arc::new(EventBus::new());
