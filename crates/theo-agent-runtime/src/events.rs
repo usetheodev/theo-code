@@ -1,3 +1,7 @@
+//! Deprecated event system — kept for backward compatibility.
+//! Use `theo_domain::event::DomainEvent` + `event_bus::EventListener` instead.
+#![allow(deprecated)]
+
 use crate::state::Phase;
 
 /// Events emitted by the agent loop for observability.

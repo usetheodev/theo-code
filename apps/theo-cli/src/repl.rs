@@ -58,6 +58,13 @@ impl Repl {
         eprintln!("  Mode: \x1b[36m{}\x1b[0m", mode);
     }
 
+    /// Execute a single prompt and exit (no REPL loop).
+    /// Used for `theo agent "task here"` single-shot mode.
+    pub async fn execute_single(&mut self, prompt: &str) {
+        self.print_banner();
+        self.execute_task(prompt).await;
+    }
+
     pub async fn run(&mut self) {
         self.print_banner();
 
@@ -166,7 +173,7 @@ impl Repl {
 
         // Result status with token usage
         let token_str = if result.tokens_used > 0 {
-            format!(", \x1b[90m{}tokens\x1b[0m", format_tokens(result.tokens_used))
+            format!(", \x1b[90m{} tokens\x1b[0m", format_tokens(result.tokens_used))
         } else {
             String::new()
         };

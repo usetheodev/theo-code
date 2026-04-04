@@ -5,7 +5,6 @@ use theo_domain::agent_run::{AgentRun, RunState};
 use theo_domain::budget::Budget;
 use theo_domain::event::{DomainEvent, EventType};
 use theo_domain::identifiers::{RunId, TaskId};
-use theo_domain::retry_policy::RetryPolicy;
 use theo_domain::session::{MessageId, SessionId};
 use theo_domain::task::TaskState;
 use theo_domain::tool_call::ToolCallState;
@@ -24,7 +23,6 @@ use crate::convergence::{
 use crate::event_bus::EventBus;
 use crate::metrics::{MetricsCollector, RuntimeMetrics};
 use crate::persistence::SnapshotStore;
-use crate::retry::RetryExecutor;
 use crate::snapshot::RunSnapshot;
 #[allow(deprecated)]
 use crate::state::AgentState;
@@ -49,6 +47,7 @@ pub struct AgentRunEngine {
     project_dir: PathBuf,
     budget_enforcer: BudgetEnforcer,
     metrics: Arc<MetricsCollector>,
+    #[allow(dead_code)] // Will be used when GRAPHCTX is wired to agent
     convergence: ConvergenceEvaluator,
     snapshot_store: Option<Arc<dyn SnapshotStore>>,
     #[allow(deprecated)]
@@ -491,6 +490,10 @@ impl AgentRunEngine {
                         }
                     }
 
+                    // Aggregate sub-agent tokens into parent budget + metrics
+                    self.budget_enforcer.record_tokens(sub_result.tokens_used);
+                    self.metrics.record_delegated_tokens(sub_result.tokens_used);
+
                     messages.push(Message::tool_result(&call.id, "subagent", &result_msg));
                     continue;
                 }
@@ -545,6 +548,9 @@ impl AgentRunEngine {
                                     self.agent_state.record_edit_attempt(file, true, None);
                                 }
                             }
+                            // Aggregate parallel sub-agent tokens into parent budget + metrics
+                            self.budget_enforcer.record_tokens(result.tokens_used);
+                            self.metrics.record_delegated_tokens(result.tokens_used);
                         }
 
                         messages.push(Message::tool_result(&call.id, "subagent_parallel", &combined));
@@ -614,6 +620,10 @@ impl AgentRunEngine {
                                     }
                                 }
 
+                                // Aggregate skill sub-agent tokens into parent budget + metrics
+                                self.budget_enforcer.record_tokens(sub_result.tokens_used);
+                                self.metrics.record_delegated_tokens(sub_result.tokens_used);
+
                                 messages.push(Message::tool_result(&call.id, "skill", &result_msg));
                             }
                         }
@@ -632,6 +642,113 @@ impl AgentRunEngine {
                         ));
                     }
                     continue;
+                }
+
+                // Handle `batch` meta-tool — execute N calls in 1 turn
+                if name == "batch" {
+                    let args = call.parse_arguments().unwrap_or_default();
+                    let calls_array = args.get("calls").and_then(|v| v.as_array());
+
+                    if let Some(calls) = calls_array {
+                        const MAX_BATCH: usize = 25;
+                        const BLOCKED: &[&str] = &["batch", "done", "subagent", "subagent_parallel", "skill"];
+
+                        let mut batch_output = String::new();
+                        let total = calls.len().min(MAX_BATCH);
+
+                        for (i, batch_call) in calls.iter().take(MAX_BATCH).enumerate() {
+                            let tool_name = batch_call.get("tool").and_then(|v| v.as_str()).unwrap_or("?");
+                            let tool_args = batch_call.get("args").cloned().unwrap_or(serde_json::json!({}));
+
+                            // Block meta-tools and self-recursion
+                            if BLOCKED.contains(&tool_name) {
+                                batch_output.push_str(&format!(
+                                    "[{}/{}] {}: error — cannot use '{}' inside batch\n",
+                                    i + 1, total, tool_name, tool_name
+                                ));
+                                continue;
+                            }
+
+                            // Execute via tool_bridge (sequential, no LLM round-trip)
+                            let batch_tool_call = theo_infra_llm::types::ToolCall::new(
+                                &format!("batch_{}_{}", call.id, i),
+                                tool_name,
+                                &tool_args.to_string(),
+                            );
+                            let batch_ctx = ToolContext {
+                                session_id: SessionId::new("batch"),
+                                message_id: MessageId::new(&format!("batch_{}", i)),
+                                call_id: batch_tool_call.id.clone(),
+                                agent: "main".to_string(),
+                                abort: abort_rx.clone(),
+                                project_dir: self.project_dir.clone(),
+                            };
+
+                            let (msg, success) = tool_bridge::execute_tool_call(
+                                &self.registry, &batch_tool_call, &batch_ctx,
+                            ).await;
+
+                            let output = msg.content.unwrap_or_default();
+                            let status = if success { "ok" } else { "error" };
+                            let preview = if output.len() > 200 {
+                                let mut end = 200;
+                                while end > 0 && !output.is_char_boundary(end) { end -= 1; }
+                                format!("{}...", &output[..end])
+                            } else {
+                                output.clone()
+                            };
+
+                            batch_output.push_str(&format!(
+                                "[{}/{}] {}({}): {} — {}\n",
+                                i + 1, total, tool_name,
+                                truncate_batch_args(&tool_args), status, preview
+                            ));
+
+                            // Track in budget/metrics
+                            self.budget_enforcer.record_tool_call();
+                            self.metrics.record_tool_call(tool_name, 0, success);
+
+                            // Track edits
+                            #[allow(deprecated)]
+                            if success && matches!(tool_name, "edit" | "write" | "apply_patch") {
+                                let file = tool_args.get("filePath")
+                                    .and_then(|p| p.as_str())
+                                    .unwrap_or("");
+                                if !file.is_empty() {
+                                    self.agent_state.record_edit_attempt(file, true, None);
+                                }
+                            }
+                        }
+
+                        if calls.len() > MAX_BATCH {
+                            batch_output.push_str(&format!(
+                                "\n⚠ {} calls exceeded max batch size of {}. Only first {} executed.\n",
+                                calls.len(), MAX_BATCH, MAX_BATCH
+                            ));
+                        }
+
+                        // Publish batch completion event
+                        self.event_bus.publish(DomainEvent::new(
+                            EventType::ToolCallCompleted,
+                            call.id.as_str(),
+                            serde_json::json!({
+                                "tool_name": "batch",
+                                "success": true,
+                                "input": { "count": total },
+                                "output_preview": format!("Batch: {total} calls executed"),
+                                "duration_ms": 0,
+                            }),
+                        ));
+
+                        messages.push(Message::tool_result(&call.id, "batch", &batch_output));
+                        continue;
+                    } else {
+                        messages.push(Message::tool_result(
+                            &call.id, "batch",
+                            "Error: 'calls' array is required. Example: batch(calls: [{tool: \"read\", args: {filePath: \"a.rs\"}}])",
+                        ));
+                        continue;
+                    }
                 }
 
                 // Execute regular tool via ToolCallManager (Invariants 2, 3, 5)
@@ -781,6 +898,21 @@ impl AgentRunEngine {
             ));
         }
     }
+}
+
+/// Truncate batch call args for display (e.g., filePath only).
+fn truncate_batch_args(args: &serde_json::Value) -> String {
+    if let Some(path) = args.get("filePath").and_then(|v| v.as_str()) {
+        return path.to_string();
+    }
+    if let Some(cmd) = args.get("command").and_then(|v| v.as_str()) {
+        let short = if cmd.len() > 40 { &cmd[..40] } else { cmd };
+        return short.to_string();
+    }
+    if let Some(pattern) = args.get("pattern").and_then(|v| v.as_str()) {
+        return format!("\"{}\"", pattern);
+    }
+    "...".to_string()
 }
 
 // ---------------------------------------------------------------------------

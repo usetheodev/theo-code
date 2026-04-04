@@ -66,6 +66,14 @@ impl MetricsCollector {
         m.llm_call_count += 1;
     }
 
+    /// Record tokens consumed by a delegated sub-agent or skill.
+    /// Acumulates tokens WITHOUT incrementing total_llm_calls
+    /// (sub-agent calls are not LLM calls of the parent).
+    pub fn record_delegated_tokens(&self, tokens: u64) {
+        let mut m = self.metrics.write().expect("metrics write lock poisoned");
+        m.total_tokens_used += tokens;
+    }
+
     pub fn record_tool_call(&self, _tool_name: &str, duration_ms: u64, success: bool) {
         let mut m = self.metrics.write().expect("metrics write lock poisoned");
         m.total_tool_calls += 1;
@@ -221,5 +229,17 @@ mod tests {
         let m = collector.snapshot();
         assert_eq!(m.total_llm_calls, 1000);
         assert_eq!(m.total_tool_calls, 1000);
+    }
+
+    #[test]
+    fn record_delegated_tokens_adds_tokens_without_incrementing_calls() {
+        let collector = MetricsCollector::new();
+        collector.record_llm_call(100, 1000); // parent call
+        collector.record_delegated_tokens(500); // sub-agent tokens
+        collector.record_delegated_tokens(300); // another sub-agent
+
+        let m = collector.snapshot();
+        assert_eq!(m.total_tokens_used, 1800, "tokens should include parent + delegated");
+        assert_eq!(m.total_llm_calls, 1, "delegated tokens should NOT increment llm_calls");
     }
 }

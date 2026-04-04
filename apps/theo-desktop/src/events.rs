@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 use tauri::{AppHandle, Emitter};
 use theo_agent_runtime::events::{AgentEvent, EventSink};
 pub use theo_api_contracts::events::FrontendEvent;

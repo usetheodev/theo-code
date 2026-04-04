@@ -3,7 +3,7 @@
 //! Two tools: `task_create` (adds a task) and `task_update` (changes status by ID).
 //! Tasks are never lost — updates are by position ID, not replace-all.
 
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};

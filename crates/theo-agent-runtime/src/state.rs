@@ -1,3 +1,7 @@
+//! Deprecated agent state — kept for context loop diagnostics.
+//! Use `theo_domain::agent_run::RunState` instead.
+#![allow(deprecated)]
+
 use std::collections::HashSet;
 
 /// Phase of the agent state machine.

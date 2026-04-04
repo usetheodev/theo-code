@@ -1,22 +1,24 @@
-# Meeting — 2026-04-03 (Agent Modes: Agent/Plan/Ask)
+# Meeting — 2026-04-03 (Dogfood Improvements: 6 items)
 
 ## Proposta
-3 modos de interação: Agent (default), Plan, Ask via system prompt + config.
+6 melhorias encontradas no dogfood (item 2 removido — já corrigido).
 
 ## Participantes
-- governance, qa
+- governance
 
 ## Veredito
 **APPROVED**
 
 ## Escopo Aprovado
-- crates/theo-agent-runtime/src/config.rs (enum AgentMode, system_prompt_for_mode fn)
-- apps/theo-cli/src/repl.rs (mode state, prompt override antes de execute_task)
-- apps/theo-cli/src/commands.rs (/mode handler — mode state no Repl, não no config)
-- apps/theo-cli/src/main.rs (--mode flag)
+- apps/theo-cli/src/main.rs (item 1: --prompt inline para agent)
+- apps/theo-cli/src/repl.rs (item 1: single-shot mode + item 7: spacing fix)
+- crates/theo-agent-runtime/src/pilot.rs (item 3: loop summary print)
+- crates/theo-agent-runtime/src/run_engine.rs (item 4: metrics.record_delegated_tokens)
+- crates/theo-agent-runtime/src/metrics.rs (item 4: new method)
+- crates/theo-agent-runtime/src/subagent/mod.rs (item 6: project_dir in prompts)
+- .claude/skills/dogfood/SKILL.md (item 5: Ask mode test)
 
 ## Condições
-- Opção A: mode vive no Repl, system_prompt sobrescrito antes de cada execute_task
-- AgentMode::default() == Agent testado
-- 3 prompts distintos testados
-- cargo test 100% verde
+- Item 4: teste unitário para record_delegated_tokens
+- Item 7: verificar spacing com grep
+- cargo test 100% verde, 0 warnings

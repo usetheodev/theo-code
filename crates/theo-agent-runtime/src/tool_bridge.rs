@@ -95,6 +95,36 @@ pub fn registry_to_definitions(registry: &ToolRegistry) -> Vec<ToolDefinition> {
         }),
     ));
 
+    // Add the `batch` meta-tool for parallel execution (CodeAct-inspired)
+    defs.push(ToolDefinition::new(
+        "batch",
+        "Execute multiple tool calls in a single turn. Use for independent operations like reading multiple files. Max 25 calls. Cannot include batch/done/subagent/skill inside.",
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "calls": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "tool": {
+                                "type": "string",
+                                "description": "Tool name (e.g., 'read', 'grep', 'glob', 'bash')"
+                            },
+                            "args": {
+                                "type": "object",
+                                "description": "Arguments for the tool"
+                            }
+                        },
+                        "required": ["tool", "args"]
+                    },
+                    "description": "Array of tool calls to execute (max 25)"
+                }
+            },
+            "required": ["calls"]
+        }),
+    ));
+
     defs
 }
 
@@ -129,6 +159,29 @@ pub fn registry_to_definitions_for_subagent(registry: &ToolRegistry) -> Vec<Tool
     ));
 
     // No subagent, subagent_parallel, or skill — sub-agents cannot delegate.
+    // But sub-agents CAN use batch for efficiency (it's not delegation).
+    defs.push(ToolDefinition::new(
+        "batch",
+        "Execute multiple tool calls in a single turn. Use for independent operations like reading multiple files. Max 25 calls.",
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "calls": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "tool": { "type": "string" },
+                            "args": { "type": "object" }
+                        },
+                        "required": ["tool", "args"]
+                    }
+                }
+            },
+            "required": ["calls"]
+        }),
+    ));
+
     defs
 }
 
@@ -187,7 +240,7 @@ mod tests {
         let defs = registry_to_definitions(&registry);
 
         // Should have all registry tools + meta-tools
-        assert_eq!(defs.len(), registry.len() + 4); // +4 for `done` + `subagent` + `skill` + `subagent_parallel`
+        assert_eq!(defs.len(), registry.len() + 5); // +5 for `done` + `subagent` + `skill` + `subagent_parallel` + `batch`
 
         let names: Vec<&str> = defs.iter().map(|d| d.function.name.as_str()).collect();
         assert!(names.contains(&"read"));
@@ -223,8 +276,8 @@ mod tests {
         let registry = create_default_registry();
         let defs = registry_to_definitions_for_subagent(&registry);
 
-        // Sub-agents get registry tools + done only (+1)
-        assert_eq!(defs.len(), registry.len() + 1, "sub-agent defs = registry + done");
+        // Sub-agents get registry tools + done + batch (+2)
+        assert_eq!(defs.len(), registry.len() + 2, "sub-agent defs = registry + done + batch");
     }
 
     #[test]

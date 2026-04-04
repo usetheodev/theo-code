@@ -9,8 +9,6 @@ use std::sync::Arc;
 
 use theo_domain::capability::CapabilitySet;
 use theo_infra_llm::types::Message;
-use theo_tooling::registry::ToolRegistry;
-
 use crate::agent_loop::{AgentLoop, AgentResult};
 use crate::config::AgentConfig;
 use crate::event_bus::EventBus;
@@ -211,9 +209,13 @@ impl SubAgentManager {
         });
         sub_bus.subscribe(prefixed);
 
-        // Add role identifier to system prompt
+        // Add role identifier + project_dir restriction to system prompt
         sub_config.system_prompt = format!(
-            "[{}] {}", role.display_name(), sub_config.system_prompt
+            "[{}] {}\n\nIMPORTANT: You MUST only operate within the project directory: {}. \
+             Do NOT search, read, or access files outside this directory.",
+            role.display_name(),
+            sub_config.system_prompt,
+            self.project_dir.display()
         );
 
         // Create agent with default registry (CapabilityGate handles restrictions)

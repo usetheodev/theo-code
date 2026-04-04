@@ -30,8 +30,8 @@ fn print_usage() {
     eprintln!("theo-code v0.1.0 — Theo Code Agent");
     eprintln!();
     eprintln!("Usage:");
-    eprintln!("  theo-code agent [--repo <path>] [--provider <id>] [--model <name>] [--mode <agent|plan|ask>]");
-    eprintln!("                                        Interactive agent REPL");
+    eprintln!("  theo-code agent [<prompt>] [--repo <path>] [--provider <id>] [--mode <agent|plan|ask>]");
+    eprintln!("                                        Interactive REPL or single-shot with inline prompt");
     eprintln!("  theo-code pilot <promise> [--complete <criteria>] [--calls <N>] [--rate <N>]");
     eprintln!("                                        Autonomous loop until promise fulfilled");
     eprintln!("  theo-code context <repo-path> <query>  Assemble context for a task");
@@ -49,6 +49,7 @@ fn cmd_agent(args: &[String]) {
     let mut mode: Option<String> = None;
 
     let mut i = 0;
+    let mut positional: Vec<String> = Vec::new();
     while i < args.len() {
         match args[i].as_str() {
             "--repo" => { repo = args.get(i + 1).cloned(); i += 2; }
@@ -56,9 +57,17 @@ fn cmd_agent(args: &[String]) {
             "--model" => { model = args.get(i + 1).cloned(); i += 2; }
             "--max-iter" => { max_iter = args.get(i + 1).and_then(|s| s.parse().ok()); i += 2; }
             "--mode" => { mode = args.get(i + 1).cloned(); i += 2; }
+            other if !other.starts_with("--") => { positional.push(other.to_string()); i += 1; }
             _ => { i += 1; }
         }
     }
+
+    // Inline prompt: `theo agent "task here"` runs single-shot (no REPL)
+    let inline_prompt = if !positional.is_empty() {
+        Some(positional.join(" "))
+    } else {
+        None
+    };
 
     // Default to current directory
     let project_dir = repo
@@ -88,7 +97,13 @@ fn cmd_agent(args: &[String]) {
                 std::process::exit(1);
             }
         }
-        repl.run().await;
+
+        // Single-shot mode: execute inline prompt and exit (no REPL)
+        if let Some(prompt) = inline_prompt {
+            repl.execute_single(&prompt).await;
+        } else {
+            repl.run().await;
+        }
     });
 }
 

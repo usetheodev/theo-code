@@ -34,6 +34,9 @@ pub async fn run_pilot(
     let cli_renderer = Arc::new(CliRenderer::new());
     event_bus.subscribe(cli_renderer);
 
+    // Check if there's a roadmap to execute from (before moving project_dir)
+    let roadmap_path = theo_agent_runtime::roadmap::find_latest_roadmap(&project_dir);
+
     // Create pilot loop
     let mut pilot = PilotLoop::new(config, pilot_config, project_dir, promise, complete, event_bus);
 
@@ -46,8 +49,20 @@ pub async fn run_pilot(
         }
     });
 
-    // Run
-    let result = pilot.run().await;
+    // Execute from roadmap if available, otherwise normal loop
+    let result = if let Some(ref rmap) = roadmap_path {
+        let tasks = theo_agent_runtime::roadmap::parse_roadmap(rmap).unwrap_or_default();
+        let pending = tasks.iter().filter(|t| !t.completed).count();
+        if pending > 0 {
+            eprintln!("  Roadmap: \x1b[36m{}\x1b[0m ({} pending tasks)", rmap.display(), pending);
+            eprintln!();
+            pilot.run_from_roadmap(rmap).await
+        } else {
+            pilot.run().await
+        }
+    } else {
+        pilot.run().await
+    };
 
     // Print final summary
     eprintln!();
@@ -143,6 +158,24 @@ impl EventListener for PilotRenderer {
                 if iteration == 1 {
                     let loop_num = self.loop_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
                     eprintln!("\n\x1b[1m── Pilot Loop {} ──\x1b[0m", loop_num);
+                }
+            }
+            EventType::RunStateChanged => {
+                // Pilot loop summary: "PilotLoopComplete:N:files:tokens:iters"
+                if let Some(to) = event.payload.get("to").and_then(|v| v.as_str()) {
+                    if let Some(data) = to.strip_prefix("PilotLoopComplete:") {
+                        let parts: Vec<&str> = data.split(':').collect();
+                        if parts.len() >= 4 {
+                            let loop_n = parts[0];
+                            let files = parts[1];
+                            let tokens = parts[2].parse::<u64>().unwrap_or(0);
+                            let iters = parts[3];
+                            eprintln!(
+                                "\x1b[90m── Loop {} complete: {} files, {} tokens, {} iterations ──\x1b[0m",
+                                loop_n, files, format_tokens(tokens), iters
+                            );
+                        }
+                    }
                 }
             }
             _ => {} // CliRenderer handles all other events

@@ -13,6 +13,7 @@ use serde::Deserialize;
 
 use crate::agent_loop::{AgentLoop, AgentResult};
 use crate::config::AgentConfig;
+use crate::roadmap;
 use crate::event_bus::EventBus;
 #[allow(deprecated)]
 use crate::events::NullEventSink;
@@ -398,11 +399,125 @@ impl PilotLoop {
             // Update counters based on result
             self.update_counters(&result, &progress);
 
+            // Publish loop summary for CLI display
+            self.parent_event_bus.publish(theo_domain::event::DomainEvent::new(
+                theo_domain::event::EventType::RunStateChanged,
+                "pilot",
+                serde_json::json!({
+                    "from": "Executing",
+                    "to": format!(
+                        "PilotLoopComplete:{}:{}:{}:{}",
+                        self.loop_count,
+                        result.files_edited.len(),
+                        result.tokens_used,
+                        result.iterations_used
+                    ),
+                }),
+            ));
+
             // Evaluate exit
             if let Some(reason) = self.evaluate_exit(&result) {
                 return self.build_result(reason);
             }
         }
+    }
+
+    /// Execute tasks from a roadmap file sequentially.
+    /// Each task becomes one pilot loop iteration with the task prompt.
+    /// After successful execution, the task is marked ✅ in the roadmap file.
+    pub async fn run_from_roadmap(&mut self, roadmap_path: &Path) -> PilotResult {
+        let tasks = match roadmap::parse_roadmap(roadmap_path) {
+            Ok(t) => t,
+            Err(e) => return self.build_result(ExitReason::Error(format!("Failed to parse roadmap: {e}"))),
+        };
+
+        let pending: Vec<_> = tasks.iter().filter(|t| !t.completed).collect();
+        if pending.is_empty() {
+            return self.build_result(ExitReason::FixPlanComplete);
+        }
+
+        // Record initial git SHA
+        self.last_git_sha = get_git_sha(&self.project_dir).await;
+
+        for task in &pending {
+            // Check interrupt
+            if self.interrupted.load(std::sync::atomic::Ordering::Acquire) {
+                return self.build_result(ExitReason::UserInterrupt);
+            }
+
+            // Check max calls
+            if self.pilot_config.max_total_calls > 0
+                && self.loop_count >= self.pilot_config.max_total_calls
+            {
+                return self.build_result(ExitReason::MaxCallsReached);
+            }
+
+            // Check rate limit
+            if !self.check_rate_limit() {
+                return self.build_result(ExitReason::RateLimitExhausted);
+            }
+
+            // Check circuit breaker
+            if let Some(reason) = self.check_circuit_breaker() {
+                return self.build_result(ExitReason::CircuitBreakerOpen(reason));
+            }
+
+            self.loop_count += 1;
+            let sha_before = get_git_sha(&self.project_dir).await;
+
+            // Build task prompt from roadmap task
+            let task_prompt = task.to_agent_prompt();
+
+            // Create fresh EventBus per iteration
+            let loop_bus = Arc::new(EventBus::new());
+            let forwarder = Arc::new(EventForwarder {
+                target: self.parent_event_bus.clone(),
+            });
+            loop_bus.subscribe(forwarder);
+
+            // Execute
+            #[allow(deprecated)]
+            let event_sink = Arc::new(NullEventSink);
+            let registry = create_default_registry();
+            let agent = AgentLoop::new(self.agent_config.clone(), registry, event_sink);
+
+            let result = agent
+                .run_with_history(
+                    &task_prompt,
+                    &self.project_dir,
+                    self.session_messages.clone(),
+                    Some(loop_bus),
+                )
+                .await;
+
+            // Track
+            self.total_tokens += result.tokens_used;
+            for file in &result.files_edited {
+                if !file.is_empty() && !self.total_files_edited.contains(file) {
+                    self.total_files_edited.push(file.clone());
+                }
+            }
+
+            // Session history
+            self.session_messages.push(Message::user(&task_prompt));
+            self.session_messages.push(Message::assistant(&result.summary));
+            if self.session_messages.len() > MAX_SESSION_MESSAGES {
+                let excess = self.session_messages.len() - MAX_SESSION_MESSAGES;
+                self.session_messages.drain(..excess);
+            }
+
+            // Git progress
+            let progress = detect_git_progress(&self.project_dir, &sha_before).await;
+            self.last_git_sha = get_git_sha(&self.project_dir).await;
+            self.update_counters(&result, &progress);
+
+            // Mark task completed in roadmap file
+            if result.success {
+                let _ = roadmap::mark_task_completed(roadmap_path, task.number);
+            }
+        }
+
+        self.build_result(ExitReason::PromiseFulfilled)
     }
 
     fn check_rate_limit(&mut self) -> bool {

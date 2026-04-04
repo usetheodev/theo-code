@@ -47,6 +47,7 @@ pub struct AgentLoop {
     client_model: String,
     client_endpoint_override: Option<String>,
     client_extra_headers: Vec<(String, String)>,
+    #[allow(dead_code)] // Stored for backward compat; runtime uses create_default_registry()
     registry: ToolRegistry,
     config: AgentConfig,
     #[allow(deprecated)]

@@ -34,6 +34,7 @@ impl Default for SchedulerConfig {
 struct ScheduledTask {
     task_id: TaskId,
     priority: Priority,
+    #[allow(dead_code)] // Stored for fairness window analysis
     enqueued_at: Instant,
     sequence: u64,
 }

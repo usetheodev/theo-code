@@ -1,3 +1,12 @@
+//! BatchTool — execute multiple tool calls in a single LLM turn.
+//!
+//! Inspired by CodeAct (arxiv:2402.01030) and OpenCode's BatchTool.
+//! The LLM calls batch(calls: [...]) and the RunEngine executes all
+//! calls sequentially without LLM round-trips between them.
+//!
+//! This is a meta-tool: execution happens in RunEngine, not here.
+//! This module provides the schema definition only.
+
 use async_trait::async_trait;
 use theo_domain::error::ToolError;
 use theo_domain::tool::{
@@ -19,7 +28,7 @@ impl Tool for BatchTool {
     }
 
     fn description(&self) -> &str {
-        "Execute multiple tool calls in parallel (experimental)"
+        "Execute multiple tool calls in a single turn for efficiency. Use when you need to perform independent operations like reading multiple files, running multiple searches, etc. Max 25 calls per batch."
     }
 
     fn schema(&self) -> ToolSchema {
@@ -27,7 +36,7 @@ impl Tool for BatchTool {
             params: vec![ToolParam {
                 name: "calls".to_string(),
                 param_type: "array".to_string(),
-                description: "Array of tool calls to execute in parallel (max 25)".to_string(),
+                description: "Array of tool calls. Each item: {\"tool\": \"tool_name\", \"args\": {tool_arguments}}. Max 25 calls. Cannot include batch, done, subagent, subagent_parallel, or skill.".to_string(),
                 required: true,
             }],
         }
@@ -43,7 +52,10 @@ impl Tool for BatchTool {
         _ctx: &ToolContext,
         _permissions: &mut PermissionCollector,
     ) -> Result<ToolOutput, ToolError> {
-        // TODO: Implement batch tool execution (up to 25 parallel calls)
-        Err(ToolError::Execution("Batch tool not yet implemented".to_string()))
+        // Meta-tool: execution handled by RunEngine intercept, not here.
+        // If we reach here, the RunEngine didn't intercept — return error.
+        Err(ToolError::Execution(
+            "batch is a meta-tool handled by the RunEngine. This should not be called directly.".to_string(),
+        ))
     }
 }

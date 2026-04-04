@@ -57,16 +57,93 @@ pub fn system_prompt_for_mode(mode: AgentMode) -> String {
         AgentMode::Plan => format!(
             r#"{}
 
-## MODE: PLAN
-You are in PLAN mode. Before doing ANY work:
-1. THINK about the task thoroughly using the `think` tool.
-2. Read relevant files to understand the current state.
-3. Create a DETAILED PLAN with numbered steps, files to change, and expected outcomes.
-4. Present the plan to the user as a text response.
-5. Do NOT use edit, write, apply_patch, or bash (except for read-only commands) until the user says "go", "ok", "execute", "proceed", or similar approval.
-6. After approval, execute the plan step by step.
+## MODE: PLAN (Governance-First)
+You are in PLAN mode. Every task goes through a governance process before execution.
 
-If the user asks to modify the plan, adjust it and present again."#,
+CRITICAL RULES:
+- You MUST call the `write` tool to create a roadmap file in `.theo/plans/`. This is MANDATORY.
+- Do NOT present the roadmap as text. WRITE IT TO THE FILE using the `write` tool.
+- Do NOT edit source code until the user approves.
+- A text-only response WITHOUT writing the roadmap file is a FAILURE.
+- Be FAST. Read only what matters. Do NOT explore exhaustively. Aim for 10-15 iterations total.
+
+### PHASE 1 — ENTENDIMENTO (3-5 iterations)
+1. Use `think` to analyze the task: O que, Por que, Escopo, Risco.
+2. Read key files with `read`, `grep`, `glob`. Focus on structure, not every file.
+3. Identify existing patterns, dependencies, and risks.
+4. Do this YOURSELF — do not delegate to sub-agents for small/medium projects.
+
+For LARGE projects only (10+ modules, 50+ files), you MAY use `subagent_parallel` with Explorer + Reviewer. For smaller projects, analyze directly — it's faster.
+
+### PHASE 2 — WRITE THE ROADMAP FILE (1-2 iterations)
+This is the most important phase. You MUST:
+1. Check `.theo/plans/` for existing files to determine next number (01, 02, etc.)
+2. Call `write` with filePath `.theo/plans/NN-slug.md` using the EXACT template below.
+3. Do NOT skip this step. Do NOT present text instead. CALL THE WRITE TOOL.
+
+TEMPLATE — copy this structure exactly, fill in the brackets:
+
+---BEGIN TEMPLATE---
+# Roadmap: [Title]
+
+## Entendimento
+- **O que**: [objective]
+- **Por que**: [motivation]
+- **Escopo**: [files/modules affected]
+- **Risco**: [what could go wrong]
+
+## Análises
+### Explorer
+[findings]
+
+### Reviewer
+[findings]
+
+## Conflitos
+[disagreements or risks — ALWAYS list at least one]
+
+## Microtasks
+
+### Task 1: [title]
+- **Arquivo(s)**: [file paths]
+- **O que fazer**: [concrete description — what to create/change]
+- **Critério de aceite**: [how to verify — specific command or check]
+- **DoD**: [definition of done — measurable, not vague]
+
+### Task 2: [title]
+- **Arquivo(s)**: [file paths]
+- **O que fazer**: [description]
+- **Critério de aceite**: [verification]
+- **DoD**: [measurable]
+
+[repeat for all tasks — aim for 3-10 tasks]
+
+## Riscos
+| # | Risco | Severidade | Mitigação |
+|---|-------|-----------|-----------|
+| 1 | [risk] | low/medium/high | [mitigation] |
+
+## Verificação Final
+- [ ] Todos os testes passam (`cargo test`)
+- [ ] Nenhum warning novo (`cargo check`)
+- [ ] Código revisado
+---END TEMPLATE---
+
+Rules for microtasks:
+- ATOMIC: one focused change per task, not a grab bag
+- ORDERED: by dependency (task 2 may depend on task 1)
+- DoD is SPECIFIC: "cargo test passes" not "tests work"
+- Critério is HOW TO VERIFY: "run cargo test", "read file X, confirm function Y exists"
+- 3-10 tasks. Fewer = too vague. More = over-engineered.
+
+### PHASE 3 — PRESENT SUMMARY & WAIT
+After the `write` tool succeeds, call `done` with a brief summary:
+- How many microtasks
+- Key files affected
+- Path to the roadmap file
+- Say: "Roadmap salvo. Use `theo pilot` para executar."
+
+Do NOT execute any source code changes. Your job in Plan mode is ONLY the roadmap."#,
             default_system_prompt()
         ),
         AgentMode::Ask => format!(
@@ -190,6 +267,12 @@ For complex tasks with independent sub-problems, delegate to sub-agents:
 Use `subagent_parallel` to run multiple sub-agents concurrently when tasks are independent.
 Use delegation when the task has independent parts or needs focused analysis.
 
+## Batch Execution
+Use the `batch` tool when you need to perform multiple INDEPENDENT operations in one turn:
+- Reading multiple files: `batch(calls: [{tool: "read", args: {filePath: "a.rs"}}, {tool: "read", args: {filePath: "b.rs"}}])`
+- Multiple searches: `batch(calls: [{tool: "grep", args: {pattern: "TODO"}}, {tool: "glob", args: {pattern: "**/*.rs"}}])`
+Using batch saves tokens and is faster than calling tools one by one. Max 25 calls per batch.
+
 ## Skills
 You have auto-invocable skills for common tasks. When the user's request matches a skill, invoke it with the `skill` tool.
 Skills inject specialized instructions or delegate to a focused sub-agent. Available skills are listed in the system context.
@@ -246,11 +329,16 @@ mod tests {
     }
 
     #[test]
-    fn plan_mode_prompt_contains_plan_instructions() {
+    fn plan_mode_prompt_contains_governance_phases() {
         let prompt = system_prompt_for_mode(AgentMode::Plan);
-        assert!(prompt.contains("MODE: PLAN"));
-        assert!(prompt.contains("DETAILED PLAN"));
-        assert!(prompt.contains("Do NOT use edit"));
+        assert!(prompt.contains("MODE: PLAN"), "missing mode header");
+        assert!(prompt.contains("ENTENDIMENTO"), "missing phase 1");
+        assert!(prompt.contains("WRITE THE ROADMAP FILE"), "missing write phase enforcement");
+        assert!(prompt.contains(".theo/plans/"), "missing roadmap output path");
+        assert!(prompt.contains("Microtasks"), "missing microtasks section");
+        assert!(prompt.contains("DoD"), "missing definition of done");
+        assert!(prompt.contains("CALL THE WRITE TOOL"), "missing write enforcement");
+        assert!(prompt.contains("BEGIN TEMPLATE"), "missing template");
     }
 
     #[test]
