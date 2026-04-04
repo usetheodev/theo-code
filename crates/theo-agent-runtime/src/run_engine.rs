@@ -334,32 +334,65 @@ impl AgentRunEngine {
             let event_bus_for_stream = self.event_bus.clone();
             let run_id_for_stream = self.run.run_id.as_str().to_string();
 
-            // Use streaming with delta callback for real-time reasoning display
-            let response = self.client.chat_streaming(&request, |delta| {
-                match delta {
-                    theo_infra_llm::stream::StreamDelta::Reasoning(text) => {
-                        event_bus_for_stream.publish(DomainEvent::new(
-                            EventType::ReasoningDelta,
-                            &run_id_for_stream,
-                            serde_json::json!({"text": text}),
-                        ));
-                    }
-                    theo_infra_llm::stream::StreamDelta::Content(text) => {
-                        event_bus_for_stream.publish(DomainEvent::new(
-                            EventType::ContentDelta,
-                            &run_id_for_stream,
-                            serde_json::json!({"text": text}),
-                        ));
-                    }
-                    _ => {}
-                }
-            }).await;
+            // LLM call with retry for retryable errors (429, 503, 504, network)
+            let retry_policy = theo_domain::retry_policy::RetryPolicy::default_llm();
+            let max_retries = retry_policy.max_retries;
+            let mut llm_result = None;
 
-            let response = match response {
+            for attempt in 0..=max_retries {
+                let eb = event_bus_for_stream.clone();
+                let rid = run_id_for_stream.clone();
+
+                let response = self.client.chat_streaming(&request, |delta| {
+                    match delta {
+                        theo_infra_llm::stream::StreamDelta::Reasoning(text) => {
+                            eb.publish(DomainEvent::new(
+                                EventType::ReasoningDelta, &rid,
+                                serde_json::json!({"text": text}),
+                            ));
+                        }
+                        theo_infra_llm::stream::StreamDelta::Content(text) => {
+                            eb.publish(DomainEvent::new(
+                                EventType::ContentDelta, &rid,
+                                serde_json::json!({"text": text}),
+                            ));
+                        }
+                        _ => {}
+                    }
+                }).await;
+
+                match response {
+                    Ok(resp) => {
+                        llm_result = Some(Ok(resp));
+                        break;
+                    }
+                    Err(ref e) if e.is_retryable() && attempt < max_retries => {
+                        let delay = retry_policy.delay_for_attempt(attempt);
+                        self.event_bus.publish(DomainEvent::new(
+                            EventType::Error,
+                            self.run.run_id.as_str(),
+                            serde_json::json!({
+                                "type": "retry",
+                                "attempt": attempt + 1,
+                                "max_retries": max_retries,
+                                "error": e.to_string(),
+                                "delay_ms": delay.as_millis() as u64,
+                            }),
+                        ));
+                        tokio::time::sleep(delay).await;
+                        continue;
+                    }
+                    Err(e) => {
+                        llm_result = Some(Err(e));
+                        break;
+                    }
+                }
+            }
+
+            let response = match llm_result.unwrap() {
                 Ok(resp) => {
                     let llm_duration = llm_start.elapsed().as_millis() as u64;
                     let tokens = resp.usage.as_ref().map(|u| u.total_tokens as u64).unwrap_or(0);
-                    // Record tokens in budget and metrics
                     self.budget_enforcer.record_tokens(tokens);
                     self.metrics.record_llm_call(llm_duration, tokens);
                     resp
@@ -670,6 +703,14 @@ impl AgentRunEngine {
                                 continue;
                             }
 
+                            // Plan mode guard inside batch: block write tools
+                            if self.config.mode == crate::config::AgentMode::Plan
+                                && matches!(tool_name.as_str(), "edit" | "write" | "apply_patch")
+                            {
+                                blocked_results.push((i, tool_name.clone(), "BLOCKED by Plan mode guard — no source edits in batch during planning".to_string()));
+                                continue;
+                            }
+
                             let reg = registry.clone();
                             let batch_tool_call = theo_infra_llm::types::ToolCall::new(
                                 &format!("batch_{}_{}", call.id, i),
@@ -799,10 +840,21 @@ impl AgentRunEngine {
                 }
 
                 // Execute regular tool via ToolCallManager (Invariants 2, 3, 5)
+                let tool_args = match call.parse_arguments() {
+                    Ok(args) => args,
+                    Err(e) => {
+                        // Report parse error to LLM so it can fix and retry
+                        messages.push(Message::tool_result(
+                            &call.id, name,
+                            &format!("Failed to parse arguments: {e}. Please retry with valid JSON."),
+                        ));
+                        continue;
+                    }
+                };
                 let tool_call_id = self.tool_call_manager.enqueue(
                     self.task_id.clone(),
                     name.clone(),
-                    call.parse_arguments().unwrap_or_default(),
+                    tool_args,
                 );
 
                 let ctx = ToolContext {
@@ -846,6 +898,24 @@ impl AgentRunEngine {
                             }),
                         ));
                         messages.push(Message::user(&warning));
+
+                        // Hard abort after 2x threshold (warning wasn't enough)
+                        if tracker.should_abort() {
+                            self.transition_run(RunState::Aborted);
+                            let _ = self.task_manager.transition(&self.task_id, TaskState::Failed);
+                            self.metrics.record_run_complete(false);
+                            return AgentResult {
+                                success: false,
+                                summary: format!(
+                                    "Doom loop abort: '{}' called identically {} times. Agent is stuck.",
+                                    name, self.config.doom_loop_threshold.unwrap_or(3) * 2
+                                ),
+                                files_edited: self.agent_state.edits_files.clone(),
+                                iterations_used: iteration,
+                                was_streamed: false,
+                                tokens_used: self.metrics.snapshot().total_tokens_used,
+                            };
+                        }
                     }
                 }
 
@@ -971,6 +1041,9 @@ fn truncate_batch_args(args: &serde_json::Value) -> String {
 struct DoomLoopTracker {
     recent: std::collections::VecDeque<(String, u64)>,
     threshold: usize,
+    /// How many times the doom loop was detected consecutively.
+    /// First detection = warning. Second detection (threshold*2) = hard abort.
+    hit_count: usize,
 }
 
 impl DoomLoopTracker {
@@ -978,7 +1051,13 @@ impl DoomLoopTracker {
         Self {
             recent: std::collections::VecDeque::with_capacity(threshold + 1),
             threshold,
+            hit_count: 0,
         }
+    }
+
+    /// Returns true if a hard abort should happen (2x threshold consecutive identical calls).
+    fn should_abort(&self) -> bool {
+        self.hit_count >= 2
     }
 
     /// Record a tool call. Returns true if a doom loop is detected.
@@ -997,8 +1076,15 @@ impl DoomLoopTracker {
         // Detect: all entries in the buffer are identical
         if self.recent.len() == self.threshold {
             let first = &self.recent[0];
-            self.recent.iter().all(|entry| entry.1 == first.1)
+            let is_loop = self.recent.iter().all(|entry| entry.1 == first.1);
+            if is_loop {
+                self.hit_count += 1;
+            } else {
+                self.hit_count = 0;
+            }
+            is_loop
         } else {
+            self.hit_count = 0;
             false
         }
     }

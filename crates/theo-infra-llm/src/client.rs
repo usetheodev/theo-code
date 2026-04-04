@@ -100,10 +100,8 @@ impl LlmClient {
 
         if status >= 400 {
             let body = response.text().await.unwrap_or_default();
-            return Err(LlmError::Api {
-                status,
-                message: body,
-            });
+            // Use from_status to correctly classify 429/503/504 as retryable
+            return Err(LlmError::from_status(status, body));
         }
 
         let mut chat_response: ChatResponse = response
@@ -146,10 +144,7 @@ impl LlmClient {
 
         if status >= 400 {
             let body = response.text().await.unwrap_or_default();
-            return Err(LlmError::Api {
-                status,
-                message: body,
-            });
+            return Err(LlmError::from_status(status, body));
         }
 
         // Read the full SSE stream and collect events
@@ -177,10 +172,7 @@ impl LlmClient {
 
         if status >= 400 {
             let body = response.text().await.unwrap_or_default();
-            return Err(LlmError::Api {
-                status,
-                message: body,
-            });
+            return Err(LlmError::from_status(status, body));
         }
 
         Ok(SseStream::new(response.bytes_stream()))
@@ -214,7 +206,7 @@ impl LlmClient {
 
             if status >= 400 {
                 let body = response.text().await.unwrap_or_default();
-                return Err(LlmError::Api { status, message: body });
+                return Err(LlmError::from_status(status, body));
             }
 
             // Stream bytes incrementally and parse SSE lines as they arrive
@@ -276,7 +268,7 @@ impl LlmClient {
 
             if status >= 400 {
                 let body = response.text().await.unwrap_or_default();
-                return Err(LlmError::Api { status, message: body });
+                return Err(LlmError::from_status(status, body));
             }
 
             let mut stream = SseStream::new(response.bytes_stream());

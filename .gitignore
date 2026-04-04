@@ -17,6 +17,7 @@
 *.exe
 provider
 ralph-loop.local.md
+review-output
 
 # Cargo lock — keep for binaries, ignore for libraries
 # (we keep it: this is a binary workspace)
@@ -271,3 +272,4 @@ benches/target/
 *.orig
 *.patch
 .sass-cache/
+.claude/review-loop.local.md
