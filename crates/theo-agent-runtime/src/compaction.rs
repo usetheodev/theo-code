@@ -9,6 +9,20 @@
 
 use theo_infra_llm::types::{Message, Role};
 
+/// Structured context for semantic compaction summaries.
+/// Passed by the runtime to enrich the compaction summary with progress info.
+#[derive(Debug, Clone, Default)]
+pub struct CompactionContext {
+    /// Current task objective (e.g., "Fix login bug").
+    pub task_objective: String,
+    /// Current phase in the workflow (e.g., "EDIT", "VERIFY").
+    pub current_phase: String,
+    /// Files identified as targets for editing.
+    pub target_files: Vec<String>,
+    /// Recent errors encountered (last 2-3, truncated).
+    pub recent_errors: Vec<String>,
+}
+
 /// Number of recent messages to always preserve fully.
 const PRESERVE_TAIL: usize = 6;
 
@@ -73,6 +87,15 @@ fn truncate_utf8(s: &str, max_chars: usize) -> String {
 /// 5. Previous compaction summaries are replaced (idempotent)
 /// 6. A compaction summary is inserted as a user message
 pub fn compact_if_needed(messages: &mut Vec<Message>, context_window_tokens: usize) {
+    compact_if_needed_with_context(messages, context_window_tokens, None);
+}
+
+/// Compact with optional semantic context for richer summaries.
+pub fn compact_if_needed_with_context(
+    messages: &mut Vec<Message>,
+    context_window_tokens: usize,
+    context: Option<&CompactionContext>,
+) {
     if messages.is_empty() || context_window_tokens == 0 {
         return;
     }
@@ -219,8 +242,31 @@ pub fn compact_if_needed(messages: &mut Vec<Message>, context_window_tokens: usi
         format!(" Tools used: {}.", tools_used.join(", "))
     };
 
+    // Build semantic summary with optional progress context.
+    let progress_str = if let Some(ctx) = context {
+        let mut parts = Vec::new();
+        if !ctx.task_objective.is_empty() {
+            let obj = truncate_utf8(&ctx.task_objective, 100);
+            parts.push(format!(" Task: {obj}."));
+        }
+        if !ctx.current_phase.is_empty() {
+            parts.push(format!(" Phase: {}.", ctx.current_phase));
+        }
+        if !ctx.target_files.is_empty() {
+            let targets: Vec<&str> = ctx.target_files.iter().take(5).map(|s| s.as_str()).collect();
+            parts.push(format!(" Targets: {}.", targets.join(", ")));
+        }
+        if !ctx.recent_errors.is_empty() {
+            let errs: Vec<String> = ctx.recent_errors.iter().take(2).map(|e| truncate_utf8(e, 80)).collect();
+            parts.push(format!(" Errors: {}.", errs.join("; ")));
+        }
+        parts.join("")
+    } else {
+        String::new()
+    };
+
     let summary = format!(
-        "{COMPACTED_PREFIX}Conversation history was compressed ({compacted_turns} older messages truncated).{tools_str}{files_str} Recent messages are preserved in full."
+        "{COMPACTED_PREFIX}Conversation history was compressed ({compacted_turns} older messages truncated).{progress_str}{tools_str}{files_str} Recent messages are preserved in full."
     );
 
     // Insert after the last system message, before the preserved tail.
@@ -440,5 +486,52 @@ mod tests {
         let len_before = msgs.len();
         compact_if_needed(&mut msgs, window_no_compact);
         assert_eq!(msgs.len(), len_before, "Should not compact at 79%");
+    }
+
+    #[test]
+    fn semantic_compaction_includes_progress_context() {
+        let mut msgs = make_messages(20, 2000);
+        let ctx = CompactionContext {
+            task_objective: "Fix authentication bug in login flow".to_string(),
+            current_phase: "EDIT".to_string(),
+            target_files: vec!["src/auth.rs".to_string(), "src/login.rs".to_string()],
+            recent_errors: vec!["unresolved import `auth::Token`".to_string()],
+        };
+
+        compact_if_needed_with_context(&mut msgs, 1_000, Some(&ctx));
+
+        let summary = msgs
+            .iter()
+            .find(|m| {
+                m.content
+                    .as_deref()
+                    .is_some_and(|c| c.starts_with(COMPACTED_PREFIX))
+            })
+            .expect("Expected compaction summary");
+
+        let content = summary.content.as_deref().unwrap();
+        assert!(content.contains("Fix authentication bug"), "Summary should contain task objective");
+        assert!(content.contains("Phase: EDIT"), "Summary should contain phase");
+        assert!(content.contains("src/auth.rs"), "Summary should contain target files");
+        assert!(content.contains("unresolved import"), "Summary should contain recent errors");
+    }
+
+    #[test]
+    fn semantic_compaction_without_context_matches_original() {
+        let mut msgs_with = make_messages(20, 2000);
+        let mut msgs_without = msgs_with.clone();
+
+        compact_if_needed(&mut msgs_without, 1_000);
+        compact_if_needed_with_context(&mut msgs_with, 1_000, None);
+
+        // Both should produce the same summary
+        let summary_with = msgs_with.iter().find(|m| m.content.as_deref().is_some_and(|c| c.starts_with(COMPACTED_PREFIX)));
+        let summary_without = msgs_without.iter().find(|m| m.content.as_deref().is_some_and(|c| c.starts_with(COMPACTED_PREFIX)));
+
+        assert_eq!(
+            summary_with.and_then(|m| m.content.as_deref()),
+            summary_without.and_then(|m| m.content.as_deref()),
+            "compact_if_needed should be identical to compact_if_needed_with_context(None)"
+        );
     }
 }

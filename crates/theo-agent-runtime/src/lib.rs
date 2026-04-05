@@ -21,6 +21,7 @@ pub mod roadmap;
 pub mod retry;
 pub mod snapshot;
 pub mod run_engine;
+pub mod session_bootstrap;
 #[doc(hidden)] // Dead code: exported but never instantiated externally
 pub mod scheduler;
 pub mod skill;

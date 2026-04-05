@@ -45,8 +45,8 @@ pub async fn run_agent_session(
     // Initialize GRAPHCTX — fire-and-forget background build.
     // Disabled entirely when THEO_NO_GRAPHCTX=1.
     let graph_context: Option<Arc<dyn GraphContextProvider>> =
-        if std::env::var("THEO_GRAPHCTX").is_err() {
-            None // Disabled by default. Set THEO_GRAPHCTX=1 to enable.
+        if std::env::var("THEO_NO_GRAPHCTX").is_ok() {
+            None // Enabled by default. Set THEO_NO_GRAPHCTX=1 to disable.
         } else {
             let service = Arc::new(GraphContextService::new());
             let _ = service.initialize(project_dir).await;

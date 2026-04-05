@@ -17,7 +17,7 @@ use crate::agent_loop::AgentResult;
 use crate::budget_enforcer::BudgetEnforcer;
 use crate::config::AgentConfig;
 use crate::convergence::{
-    ConvergenceEvaluator, ConvergenceMode,
+    check_git_changes, ConvergenceContext, ConvergenceEvaluator, ConvergenceMode,
     EditSuccessConvergence, GitDiffConvergence,
 };
 use crate::event_bus::EventBus;
@@ -47,8 +47,8 @@ pub struct AgentRunEngine {
     project_dir: PathBuf,
     budget_enforcer: BudgetEnforcer,
     metrics: Arc<MetricsCollector>,
-    #[allow(dead_code)] // Will be used for convergence detection in pilot loop
     convergence: ConvergenceEvaluator,
+    done_attempts: u32,
     snapshot_store: Option<Arc<dyn SnapshotStore>>,
     graph_context: Option<Arc<dyn theo_domain::graph_context::GraphContextProvider>>,
     #[allow(deprecated)]
@@ -118,6 +118,7 @@ impl AgentRunEngine {
             budget_enforcer,
             metrics,
             convergence,
+            done_attempts: 0,
             snapshot_store: None,
             graph_context: None,
             agent_state,
@@ -494,11 +495,13 @@ impl AgentRunEngine {
             for call in tool_calls {
                 let name = &call.function.name;
 
-                // Handle `done` meta-tool — always accept (OpenCode pattern)
-                // No git diff gate. The LLM decides when the task is complete.
-                // Works in projects with or without git.
+                // Handle `done` meta-tool with multi-layer verification:
+                // 1. Convergence pre-filter (git diff must show real changes)
+                // 2. Cargo test on affected crate (timeout 60s, fallback cargo check)
+                // 3. done_attempts counter (max 3 blocks before hard fail)
                 if name == "done" {
                     self.transition_run(RunState::Evaluating);
+                    self.done_attempts += 1;
 
                     let summary = call
                         .parse_arguments()
@@ -506,43 +509,125 @@ impl AgentRunEngine {
                         .and_then(|args| args.get("summary").and_then(|s| s.as_str()).map(String::from))
                         .unwrap_or_else(|| "Task completed.".to_string());
 
-                    // Clean state sensor: verify project compiles before accepting done.
-                    // Best-effort: skip if not Rust, timeout 30s, never hard-abort.
+                    // Gate 0: done_attempts hard limit — avoid burning entire budget
+                    const MAX_DONE_ATTEMPTS: u32 = 3;
+                    if self.done_attempts > MAX_DONE_ATTEMPTS {
+                        // Exceeded max attempts — accept with warning
+                        self.transition_run(RunState::Converged);
+                        let _ = self.task_manager.transition(&self.task_id, TaskState::Completed);
+                        self.metrics.record_run_complete(true);
+                        should_return = Some(AgentResult {
+                            success: true,
+                            summary: format!("{} [accepted after {} done attempts]", summary, self.done_attempts),
+                            files_edited: self.agent_state.edits_files.clone(),
+                            iterations_used: iteration,
+                            was_streamed: false,
+                            tokens_used: self.metrics.snapshot().total_tokens_used,
+                        });
+                        break;
+                    }
+
+                    // Gate 1: Convergence pre-filter — verify real changes exist
+                    let has_changes = check_git_changes(&self.project_dir).await;
+                    let convergence_ctx = ConvergenceContext {
+                        has_git_changes: has_changes,
+                        edits_succeeded: self.agent_state.edits_files.len(),
+                        done_requested: true,
+                        iteration,
+                        max_iterations: self.config.max_iterations,
+                    };
+                    if !self.convergence.evaluate(&convergence_ctx) {
+                        let pending = self.convergence.pending_criteria(&convergence_ctx);
+                        messages.push(Message::tool_result(
+                            &call.id,
+                            "done",
+                            &format!(
+                                "BLOCKED: convergence criteria not met: {}. Make real changes before calling done.",
+                                pending.join(", ")
+                            ),
+                        ));
+                        self.transition_run(RunState::Replanning);
+                        continue;
+                    }
+
+                    // Gate 2: Clean state sensor — verify project builds and tests pass.
+                    // Best-effort: skip if not Rust, timeout 60s, never hard-abort.
                     if self.project_dir.join("Cargo.toml").exists() {
-                        let check_result = tokio::time::timeout(
-                            std::time::Duration::from_secs(30),
+                        // Determine which crate was affected for targeted test
+                        let test_args = if let Some(first_file) = self.agent_state.edits_files.first() {
+                            // Try to find crate name from edited file path
+                            let crate_name = std::path::Path::new(first_file)
+                                .components()
+                                .zip(std::path::Path::new(first_file).components().skip(1))
+                                .find(|(a, _)| {
+                                    let s = a.as_os_str().to_string_lossy();
+                                    s == "crates" || s == "apps"
+                                })
+                                .map(|(_, b)| b.as_os_str().to_string_lossy().to_string());
+                            if let Some(name) = crate_name {
+                                vec!["test".to_string(), "-p".to_string(), name, "--no-fail-fast".to_string()]
+                            } else {
+                                vec!["test".to_string(), "--no-fail-fast".to_string()]
+                            }
+                        } else {
+                            // No files edited — just cargo check as sanity
+                            vec!["check".to_string(), "--message-format=short".to_string()]
+                        };
+
+                        let test_result = tokio::time::timeout(
+                            std::time::Duration::from_secs(60),
                             tokio::process::Command::new("cargo")
-                                .args(["check", "--message-format=short"])
+                                .args(&test_args)
                                 .current_dir(&self.project_dir)
                                 .output(),
                         )
                         .await;
 
-                        let check_failed = match check_result {
+                        let check_failed = match test_result {
                             Ok(Ok(output)) if !output.status.success() => {
                                 let stderr = String::from_utf8_lossy(&output.stderr);
-                                Some(stderr.to_string())
+                                let stdout = String::from_utf8_lossy(&output.stdout);
+                                let combined = format!("{}\n{}", stderr, stdout);
+                                Some(combined)
                             }
-                            _ => None, // Success, timeout, or command not found — pass through.
+                            Ok(Ok(_)) => None,  // Tests passed
+                            Ok(Err(_)) => None, // Command not found — pass through
+                            Err(_) => {
+                                // Timeout — fallback to cargo check with 30s
+                                let fallback = tokio::time::timeout(
+                                    std::time::Duration::from_secs(30),
+                                    tokio::process::Command::new("cargo")
+                                        .args(["check", "--message-format=short"])
+                                        .current_dir(&self.project_dir)
+                                        .output(),
+                                )
+                                .await;
+                                match fallback {
+                                    Ok(Ok(output)) if !output.status.success() => {
+                                        Some(String::from_utf8_lossy(&output.stderr).to_string())
+                                    }
+                                    _ => None, // Fallback passed or timed out — accept
+                                }
+                            }
                         };
 
                         if let Some(errors) = check_failed {
-                            // Block done: inject errors as tool result, continue loop.
                             let error_preview = if errors.len() > 2000 {
                                 format!("{}...\n[truncated]", &errors[..errors.char_indices().nth(2000).map(|(i,_)| i).unwrap_or(errors.len())])
                             } else {
                                 errors
                             };
+                            let cmd_str = test_args.join(" ");
                             messages.push(Message::tool_result(
                                 &call.id,
                                 "done",
                                 &format!(
-                                    "BLOCKED: cargo check failed. Fix the compilation errors before calling done.\n\n{}",
-                                    error_preview
+                                    "BLOCKED: `cargo {}` failed (attempt {}/{}). Fix the errors before calling done.\n\n{}",
+                                    cmd_str, self.done_attempts, MAX_DONE_ATTEMPTS, error_preview
                                 ),
                             ));
                             self.transition_run(RunState::Replanning);
-                            continue; // Back to loop — agent sees the errors and can fix.
+                            continue;
                         }
                     }
 

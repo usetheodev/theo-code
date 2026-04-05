@@ -1,64 +1,57 @@
-# Meeting — 2026-04-05 (Fase 0 Harness Engineering — Fundação)
+# Meeting — 2026-04-05 (Fase 1 Harness Engineering — CRITICAL Gaps)
 
 ## Proposta
-Fase 0 do plano de Harness Engineering — Fundação. 4 tasks para resolver bugs ativos e debt que bloqueiam fases seguintes, identificados por auditoria de 4 agentes contra pesquisas de Harness Engineering (Anthropic, OpenAI, Martin Fowler, Dex Horthy).
+4 tasks CRITICAL: GRAPHCTX default ON, done gate com cargo test, compaction semântica, session bootstrap.
 
 ## Participantes
-- **governance** (Principal Engineer) — APPROVE com condições
-- **qa** (QA Staff Engineer) — APPROVE com condições (404 testes baseline)
-- **graphctx** (Compiler Engineer) — APPROVE (revelou 4 deps escondidas na Pipeline)
-- **runtime** (Staff AI Engineer) — APPROVE (confirmou 4 testes tautológicos)
+- **governance** — APPROVE com condições (confiança 82%)
+- **qa** — APPROVE com condições (292 testes baseline)
+- **runtime** — APPROVE, risk MEDIUM (6 issues identificados)
+- **graphctx** — APPROVE (3 arquivos confirmados, boot impact negligenciável)
 
 ## Análises
 
 ### Governance
-Confirmou violação de boundary. Alertou que Pipeline tem 560 linhas — refactor é cirurgia delicada. Sugeriu ordem 0.3→0.5→0.2→0.4. Condição: cargo test verde após cada task.
+Aprova todas. Exige: file locking em progress.json, CompactionContext desacoplado, fallback cargo check no timeout, done_attempts counter.
 
 ### QA
-404 testes passando como baseline. Confirmou 4 testes tautológicos. theo-application tem 10 testes (corrigido de 0 relatado). Risco de regressão MEDIO na task 0.1 original.
-
-### GraphCtx
-Revelou que Pipeline tem 21 funções públicas e 4 dependências escondidas (bincode, rayon, Community tipo concreto, duplicação extract.rs/graph_context_service.rs). Argumentou que boundary test deve ser workspace-level, não em theo-governance (SRP).
+Aprova. Alerta que cargo test é 10-60s+ vs cargo check 3-10s. Exige testes para cada path: timeout, skip non-Rust, graphctx on/off.
 
 ### Runtime
-Confirmou 3 testes tautológicos + 1 compilation-only mascarado. Sugeriu asserts específicos para cada caso. Risco LOW.
+Aprova com MEDIUM risk. Alertas: cargo test irrestrito pode levar 3-10min; done→block loop sem counter; std::fs em async é antipadrão. Propõe: cargo test -p <crate>, done_attempts max 3, tokio::fs/spawn_blocking.
+
+### GraphCtx
+Aprova. Confirmou 3 arquivos com guard (repl.rs, pilot.rs, run_agent_session.rs). Boot impact negligenciável — graph build é async com cap de 500 files e timeout 60s. CodebaseContextTool retorna vazio enquanto building.
 
 ## Conflitos
-1. **Localização boundary test**: proposta (theo-governance) vs GraphCtx (workspace-level). Resolução: workspace-level — SRP.
-2. **Escopo task 0.1**: refactor completo de Pipeline é grande demais para Fase 0. Resolução: reduzir para boundary test que DETECTA violação. Refactor vai para Fase 1.
-3. **Ponto cego (advocacia do diabo)**: task 0.1 original pode bloquear todo o plano se falhar. Reduzir escopo mitiga risco.
+1. cargo test scope: workspace (proposta) vs per-crate (runtime). Resolução: `cargo test -p <crate>` com timeout 60s
+2. ConvergenceEvaluator: remover dead_code (proposta) vs manter até wiring (governance). Resolução: ativar como pré-filtro, manter allow onde necessário
+3. done loop: sem counter (proposta) vs max 3 attempts (runtime). Resolução: max 3
 
 ## Veredito
 **APPROVED**
 
-## Escopo Aprovado (ordem de execução)
+## Escopo Aprovado
 
-### Task 0.3 — Fix paths errados em agents/skills
-- `.claude/agents/governance.md`
-- `.claude/agents/qa.md`
-- `.claude/agents/runtime.md`
-- `.claude/agents/graphctx.md`
-- `.claude/agents/arch-validator.md`
-- `.claude/agents/crate-explorer.md`
-- `.claude/agents/test-writer.md`
-- `.claude/skills/agent-check/SKILL.md`
-- Qualquer outro arquivo em `.claude/` com path `theo-code/theo-code`
+### Task 1.1 — GRAPHCTX default ON
+- `apps/theo-cli/src/repl.rs`
+- `apps/theo-cli/src/pilot.rs`
+- `crates/theo-application/src/use_cases/run_agent_session.rs`
 
-### Task 0.5 — Meeting gate refinement
-- `.claude/hooks/meeting-gate.sh`
-
-### Task 0.2 — Teste estrutural de boundary (workspace-level)
-- `tests/boundary_test.rs` (novo, workspace root)
-
-### Task 0.4 — Fix testes tautológicos
-- `crates/theo-agent-runtime/src/tool_call_manager.rs`
-- `crates/theo-agent-runtime/src/agent_loop.rs`
+### Task 1.2 — Done gate com cargo test
 - `crates/theo-agent-runtime/src/run_engine.rs`
 
+### Task 1.3 — Compaction semântica
+- `crates/theo-agent-runtime/src/compaction.rs`
+
+### Task 1.4 — Session bootstrap
+- `crates/theo-agent-runtime/src/run_engine.rs`
+- `crates/theo-agent-runtime/src/session_bootstrap.rs` (novo)
+- `crates/theo-agent-runtime/src/lib.rs` (registrar módulo)
+
 ## Condições
-1. `cargo check` sem warnings novos após cada task
-2. `cargo test` verde após cada task individual
-3. Task 0.5: bypass DEVE continuar para `.claude/gate/*` — testar que /meeting funciona
-4. Task 0.4: cada assert substituído DEVE poder falhar — proibido tautologia
-5. Task 0.2: boundary test determinístico via leitura de Cargo.toml
-6. Não acumular tasks sem validação
+1. Task 1.1: alterar nos 3 arquivos (repl.rs, pilot.rs, run_agent_session.rs). Opt-out via THEO_NO_GRAPHCTX=1
+2. Task 1.2: cargo test -p <crate-afetado> com timeout 60s, fallback cargo check. done_attempts max 3. ConvergenceEvaluator como pré-filtro (git diff vazio → bloquear done)
+3. Task 1.3: CompactionContext como parâmetro, não AgentState direto. Sumário max 150 tokens
+4. Task 1.4: I/O async (tokio::fs ou spawn_blocking). Timeout 2s no boot. File locking no progress.json. Testes TDD
+5. cargo check + cargo test -p theo-agent-runtime verde após cada task

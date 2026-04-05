@@ -78,8 +78,8 @@ impl Repl {
         if self.graph_context.is_some() {
             return;
         }
-        if std::env::var("THEO_GRAPHCTX").is_err() {
-            return; // Disabled by default. Set THEO_GRAPHCTX=1 to enable.
+        if std::env::var("THEO_NO_GRAPHCTX").is_ok() {
+            return; // Enabled by default. Set THEO_NO_GRAPHCTX=1 to disable.
         }
         let service = Arc::new(
             theo_application::use_cases::graph_context_service::GraphContextService::new(),
