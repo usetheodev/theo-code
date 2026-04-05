@@ -1,0 +1,58 @@
+#!/bin/bash
+# Pre-commit drift detection — runs cargo clippy + cargo test on affected crates.
+# Install: git config core.hooksPath .githooks
+set -euo pipefail
+
+# Find which crates have staged changes
+CHANGED_FILES=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null || true)
+
+if [ -z "$CHANGED_FILES" ]; then
+    exit 0
+fi
+
+# Extract unique crate names from changed file paths
+AFFECTED_CRATES=""
+for file in $CHANGED_FILES; do
+    case "$file" in
+        crates/*/*)
+            crate=$(echo "$file" | cut -d'/' -f2)
+            if [ -f "crates/$crate/Cargo.toml" ]; then
+                AFFECTED_CRATES="$AFFECTED_CRATES $crate"
+            fi
+            ;;
+        apps/*/*)
+            crate=$(echo "$file" | cut -d'/' -f2)
+            if [ -f "apps/$crate/Cargo.toml" ]; then
+                AFFECTED_CRATES="$AFFECTED_CRATES $crate"
+            fi
+            ;;
+    esac
+done
+
+# Deduplicate
+AFFECTED_CRATES=$(echo "$AFFECTED_CRATES" | tr ' ' '\n' | sort -u | tr '\n' ' ')
+
+if [ -z "$AFFECTED_CRATES" ]; then
+    exit 0
+fi
+
+echo "[pre-commit] Affected crates: $AFFECTED_CRATES"
+
+# Run cargo clippy on affected crates (warnings are warnings, not errors)
+for crate in $AFFECTED_CRATES; do
+    echo "[pre-commit] clippy: $crate"
+    if ! cargo clippy -p "$crate" --lib --quiet 2>/dev/null; then
+        echo "[pre-commit] WARNING: clippy issues in $crate (non-blocking)"
+    fi
+done
+
+# Run cargo test on affected crates (failures block commit)
+for crate in $AFFECTED_CRATES; do
+    echo "[pre-commit] test: $crate"
+    if ! cargo test -p "$crate" --lib --quiet 2>&1 | tail -3; then
+        echo "[pre-commit] BLOCKED: tests failed in $crate"
+        exit 1
+    fi
+done
+
+echo "[pre-commit] All checks passed."

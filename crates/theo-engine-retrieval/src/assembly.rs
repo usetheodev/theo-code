@@ -37,10 +37,9 @@ pub struct ContextPayload {
 // Token estimation
 // ---------------------------------------------------------------------------
 
-/// Rough token count: word_count * 1.3, ceiling.
+/// Token estimation using unified domain function.
 fn estimate_tokens(text: &str) -> usize {
-    let words = text.split_whitespace().count();
-    ((words as f64) * 1.3).ceil() as usize
+    theo_domain::tokens::estimate_tokens(text)
 }
 
 // ---------------------------------------------------------------------------

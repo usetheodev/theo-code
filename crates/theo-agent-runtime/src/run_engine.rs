@@ -583,6 +583,41 @@ impl AgentRunEngine {
                         continue;
                     }
 
+                    // Review suggestion: if diff is large, suggest reviewing before accepting.
+                    // Non-blocking — just a hint to encourage careful review.
+                    if self.agent_state.edits_files.len() > 3 {
+                        let diff_stat = tokio::process::Command::new("git")
+                            .args(["diff", "--stat"])
+                            .current_dir(&self.project_dir)
+                            .output()
+                            .await;
+                        if let Ok(output) = diff_stat {
+                            let stat = String::from_utf8_lossy(&output.stdout);
+                            let lines_changed: usize = stat.lines()
+                                .filter_map(|l| {
+                                    // Parse "N insertions(+), M deletions(-)" from last line
+                                    if l.contains("insertion") || l.contains("deletion") {
+                                        l.split_whitespace()
+                                            .filter_map(|w| w.parse::<usize>().ok())
+                                            .sum::<usize>()
+                                            .into()
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .sum();
+                            if lines_changed > 100 {
+                                messages.push(Message::user(
+                                    &format!(
+                                        "Note: This change touches {} files with ~{} lines changed. \
+                                         Consider reviewing the diff carefully before finalizing.",
+                                        self.agent_state.edits_files.len(), lines_changed
+                                    )
+                                ));
+                            }
+                        }
+                    }
+
                     // Gate 2: Clean state sensor — verify project builds and tests pass.
                     // Best-effort: skip if not Rust, timeout 60s, never hard-abort.
                     if self.project_dir.join("Cargo.toml").exists() {

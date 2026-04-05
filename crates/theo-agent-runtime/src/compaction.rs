@@ -39,18 +39,23 @@ const COMPACTED_PREFIX: &str = "[COMPACTED] ";
 // Token estimation
 // ---------------------------------------------------------------------------
 
-/// Estimate token count for a single message (~4 chars per token).
+/// Estimate token count for a single message using unified token estimation.
 fn estimate_message_tokens(m: &Message) -> usize {
-    let content_len = m.content.as_deref().unwrap_or("").len();
-    let tool_calls_len: usize = m
+    let content = m.content.as_deref().unwrap_or("");
+    let tool_calls_text: String = m
         .tool_calls
         .as_deref()
         .unwrap_or(&[])
         .iter()
-        .map(|tc| tc.function.arguments.len() + tc.function.name.len() + tc.id.len())
-        .sum();
-    // Role + overhead ~10 tokens per message.
-    (content_len + tool_calls_len) / 4 + 10
+        .map(|tc| format!("{} {} {}", tc.id, tc.function.name, tc.function.arguments))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let combined = if tool_calls_text.is_empty() {
+        content.to_string()
+    } else {
+        format!("{content} {tool_calls_text}")
+    };
+    theo_domain::tokens::estimate_message_tokens(&combined)
 }
 
 /// Estimate total tokens in a message vec.
