@@ -166,6 +166,8 @@ pub fn create_default_registry() -> ToolRegistry {
         Box::new(crate::env_info::EnvInfoTool),
         Box::new(crate::http_client::HttpGetTool),
         Box::new(crate::http_client::HttpPostTool),
+        // Code intelligence — on-demand codebase structure map
+        Box::new(crate::codebase_context::CodebaseContextTool::new()),
     ];
 
     for tool in tools {

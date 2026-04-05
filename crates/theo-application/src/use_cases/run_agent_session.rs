@@ -42,20 +42,13 @@ pub async fn run_agent_session(
         ));
     }
 
-    // Initialize GRAPHCTX — build code graph for context injection.
-    // Runs in spawn_blocking with timeout; failure is non-fatal.
+    // Initialize GRAPHCTX — fire-and-forget background build.
+    // Agent starts immediately; graph context becomes available when build completes.
     let graph_context: Option<Arc<dyn GraphContextProvider>> = {
         let service = Arc::new(GraphContextService::new());
-        match service.initialize(project_dir).await {
-            Ok(()) => {
-                eprintln!("[theo] GRAPHCTX initialized ({} ready)", if service.is_ready() { "graph" } else { "no graph" });
-                Some(service)
-            }
-            Err(e) => {
-                eprintln!("[theo] GRAPHCTX init failed (degraded mode): {e}");
-                None
-            }
-        }
+        let _ = service.initialize(project_dir).await; // Returns immediately.
+        eprintln!("[theo] GRAPHCTX building in background");
+        Some(service)
     };
 
     let registry = create_default_registry();

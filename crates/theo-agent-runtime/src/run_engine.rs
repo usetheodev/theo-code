@@ -199,43 +199,9 @@ impl AgentRunEngine {
             }
         }
 
-        // GRAPHCTX: inject code intelligence context (between project context and memories).
-        // Graceful degradation: if query fails or times out, log warning and continue.
-        if let Some(ref provider) = self.graph_context {
-            let task_objective = self.task_manager.get(&self.task_id)
-                .map(|t| t.objective.clone())
-                .unwrap_or_default();
-
-            match tokio::time::timeout(
-                std::time::Duration::from_secs(5),
-                provider.query_context(&task_objective, 4000),
-            )
-            .await
-            {
-                Ok(Ok(result)) => {
-                    let text = result.to_prompt_text();
-                    if !text.is_empty() {
-                        messages.push(Message::system(&format!(
-                            "## Code Intelligence Context\n{text}"
-                        )));
-                    }
-                }
-                Ok(Err(e)) => {
-                    self.event_bus.publish(DomainEvent::new(
-                        EventType::Error,
-                        self.run.run_id.as_str(),
-                        serde_json::json!({"type": "graphctx_query_failed", "error": e.to_string()}),
-                    ));
-                }
-                Err(_timeout) => {
-                    self.event_bus.publish(DomainEvent::new(
-                        EventType::Error,
-                        self.run.run_id.as_str(),
-                        serde_json::json!({"type": "graphctx_query_timeout", "timeout_secs": 5}),
-                    ));
-                }
-            }
-        }
+        // GRAPHCTX is available as the `codebase_context` tool — the LLM calls it on-demand.
+        // No automatic injection: the LLM decides when it needs code structure context.
+        // The graph_context provider is passed to tools via ToolContext.graph_context.
 
         // Inject memories from previous runs (cross-run memory)
         let memory_root = std::env::var("HOME")
@@ -369,6 +335,12 @@ impl AgentRunEngine {
             // Phase transitions (legacy, preserved for context loop diagnostics)
             #[allow(deprecated)]
             self.agent_state.maybe_transition(iteration, self.config.max_iterations);
+
+            // Context compaction: compress history if approaching context window limit.
+            crate::compaction::compact_if_needed(
+                &mut messages,
+                self.config.context_window_tokens,
+            );
 
             // LLM call
             self.transition_run(RunState::Planning);
@@ -783,6 +755,7 @@ impl AgentRunEngine {
                                 agent: "main".to_string(),
                                 abort: abort_rx.clone(),
                                 project_dir: self.project_dir.clone(),
+                                graph_context: self.graph_context.clone(),
                             };
 
                             futures.push(async move {
@@ -939,6 +912,7 @@ impl AgentRunEngine {
                     agent: "main".to_string(),
                     abort: abort_rx.clone(),
                     project_dir: self.project_dir.clone(),
+                    graph_context: self.graph_context.clone(),
                 };
 
                 let tool_result = self.tool_call_manager
@@ -1062,14 +1036,27 @@ impl AgentRunEngine {
             // Save snapshot if store is configured (Invariant 7)
             if let Some(ref store) = self.snapshot_store {
                 if let Some(task) = self.task_manager.get(&self.task_id) {
+                    // Collect real tool calls and results for this task.
+                    let tool_calls = self.tool_call_manager.calls_for_task(&self.task_id);
+                    let tool_results: Vec<theo_domain::tool_call::ToolResultRecord> = tool_calls
+                        .iter()
+                        .filter_map(|tc| self.tool_call_manager.get_result(&tc.call_id))
+                        .collect();
+
+                    // Serialize conversation messages.
+                    let messages_json: Vec<serde_json::Value> = messages
+                        .iter()
+                        .filter_map(|m| serde_json::to_value(m).ok())
+                        .collect();
+
                     let snapshot = RunSnapshot::new(
                         self.run.clone(),
                         task,
-                        vec![], // tool_calls aggregated by ToolCallManager, not stored here
-                        vec![], // tool_results same
+                        tool_calls,
+                        tool_results,
                         self.event_bus.events(),
                         self.budget_enforcer.usage(),
-                        vec![], // messages not persisted in snapshot for now
+                        messages_json,
                         vec![], // DLQ entries
                     );
                     let _ = store.save(&self.run.run_id, &snapshot).await;

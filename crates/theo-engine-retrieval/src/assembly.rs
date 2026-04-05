@@ -48,14 +48,42 @@ fn estimate_tokens(text: &str) -> usize {
 // ---------------------------------------------------------------------------
 
 /// Build the text representation for a community from its node signatures.
+///
+/// For File nodes: emits signatures of child Symbol/Test nodes (via Contains edges)
+/// so the LLM sees function/struct signatures, not just file paths.
+/// For Symbol nodes: emits signature or name directly.
 fn community_content(community: &Community, graph: &CodeGraph) -> String {
     let mut lines: Vec<String> = vec![format!("# {}", community.name)];
     for node_id in &community.node_ids {
         if let Some(node) = graph.get_node(node_id) {
-            if let Some(sig) = &node.signature {
-                lines.push(sig.clone());
-            } else {
-                lines.push(node.name.clone());
+            match node.node_type {
+                NodeType::File => {
+                    // Emit child signatures (symbols contained in this file).
+                    let children = graph.contains_children(node_id);
+                    if children.is_empty() {
+                        // No symbols extracted — fall back to file path.
+                        lines.push(node.name.clone());
+                    } else {
+                        lines.push(format!("## {}", node.name));
+                        for child_id in children {
+                            if let Some(child) = graph.get_node(child_id) {
+                                if let Some(sig) = &child.signature {
+                                    lines.push(sig.clone());
+                                } else {
+                                    lines.push(child.name.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {
+                    // Symbol, Test, Import, Type — emit signature or name.
+                    if let Some(sig) = &node.signature {
+                        lines.push(sig.clone());
+                    } else {
+                        lines.push(node.name.clone());
+                    }
+                }
             }
         }
     }

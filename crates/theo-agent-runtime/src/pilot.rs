@@ -250,6 +250,12 @@ pub struct PilotLoop {
 
     // Interrupt flag
     interrupted: Arc<std::sync::atomic::AtomicBool>,
+
+    // GRAPHCTX — shared across pilot loops (read-only after init)
+    graph_context: Option<Arc<dyn theo_domain::graph_context::GraphContextProvider>>,
+
+    // Heuristic reflector for failure classification and corrective guidance
+    reflector: crate::reflector::HeuristicReflector,
 }
 
 const MAX_SESSION_MESSAGES: usize = 100;
@@ -284,7 +290,18 @@ impl PilotLoop {
             circuit_open_since: None,
             last_git_sha: None,
             interrupted: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            graph_context: None,
+            reflector: crate::reflector::HeuristicReflector::new(),
         }
+    }
+
+    /// Set the graph context provider for code intelligence.
+    pub fn with_graph_context(
+        mut self,
+        provider: Arc<dyn theo_domain::graph_context::GraphContextProvider>,
+    ) -> Self {
+        self.graph_context = Some(provider);
+        self
     }
 
     /// Returns a clone of the interrupt flag for external signal handlers.
@@ -342,11 +359,14 @@ impl PilotLoop {
             });
             loop_bus.subscribe(forwarder);
 
-            // Create fresh agent per iteration
+            // Create fresh agent per iteration with GRAPHCTX
             #[allow(deprecated)]
             let event_sink = Arc::new(NullEventSink);
             let registry = create_default_registry();
-            let agent = AgentLoop::new(self.agent_config.clone(), registry, event_sink);
+            let mut agent = AgentLoop::new(self.agent_config.clone(), registry, event_sink);
+            if let Some(ref gc) = self.graph_context {
+                agent = agent.with_graph_context(gc.clone());
+            }
 
             // Execute
             let result = agent
@@ -459,11 +479,14 @@ impl PilotLoop {
             });
             loop_bus.subscribe(forwarder);
 
-            // Execute
+            // Execute with GRAPHCTX
             #[allow(deprecated)]
             let event_sink = Arc::new(NullEventSink);
             let registry = create_default_registry();
-            let agent = AgentLoop::new(self.agent_config.clone(), registry, event_sink);
+            let mut agent = AgentLoop::new(self.agent_config.clone(), registry, event_sink);
+            if let Some(ref gc) = self.graph_context {
+                agent = agent.with_graph_context(gc.clone());
+            }
 
             let result = agent
                 .run_with_history(
@@ -662,26 +685,12 @@ impl PilotLoop {
     }
 
     fn build_corrective_guidance(&self) -> Option<String> {
-        if self.consecutive_no_progress >= 2 {
-            return Some(format!(
-                "WARNING: You have not made file changes in {} consecutive loops. \
-                 Focus on EDITING code, not just reading. Make concrete changes.",
-                self.consecutive_no_progress
-            ));
-        }
-
-        if self.consecutive_same_error >= 2 {
-            if let Some(ref err) = self.last_error {
-                let err_preview = if err.len() > 200 { &err[..200] } else { err };
-                return Some(format!(
-                    "WARNING: You keep getting the same error ({} times): {}...\n\
-                     Stop retrying the same approach. Try something DIFFERENT.",
-                    self.consecutive_same_error, err_preview
-                ));
-            }
-        }
-
-        None
+        self.reflector.corrective_guidance(
+            self.consecutive_no_progress,
+            self.consecutive_same_error,
+            self.last_error.as_deref(),
+            false, // Called during loop — not after success.
+        )
     }
 
     fn build_result(&self, reason: ExitReason) -> PilotResult {

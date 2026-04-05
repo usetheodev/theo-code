@@ -587,10 +587,23 @@ fn resolve_by_name(
 /// Walk a directory and create FileData entries for all source files.
 /// This is a lightweight alternative when Intently is not available.
 /// It only creates File nodes (no symbol extraction).
+/// Directories always excluded from graph indexing.
+const EXCLUDED_DIRS: &[&str] = &[
+    "target", "node_modules", "vendor", "dist", "build",
+    "__pycache__", ".venv", "venv", ".next", ".nuxt",
+];
+
 pub fn walk_files(repo_root: &Path) -> Vec<FileData> {
     let walker = ignore::WalkBuilder::new(repo_root)
         .hidden(true)
         .git_ignore(true)
+        .filter_entry(|entry| {
+            if entry.file_type().map_or(false, |ft| ft.is_dir()) {
+                let name = entry.file_name().to_str().unwrap_or("");
+                return !EXCLUDED_DIRS.contains(&name);
+            }
+            true
+        })
         .build();
 
     let mut files = Vec::new();

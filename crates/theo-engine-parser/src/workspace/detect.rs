@@ -43,7 +43,7 @@ fn expand_globs(root: &Path, patterns: &[String]) -> Vec<PathBuf> {
                 }
             }
             Err(e) => {
-                eprintln!("[warn] pattern={}, error={}: invalid glob pattern in workspace manifest", pattern, e);
+                log::debug!("[warn] pattern={}, error={}: invalid glob pattern in workspace manifest", pattern, e);
             }
         }
     }
@@ -89,7 +89,7 @@ pub(crate) fn detect_pnpm(root: &Path) -> Option<WorkspaceLayout> {
     let parsed: PnpmWorkspaceYaml = match serde_yaml::from_str(&contents) {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("[warn] path={}, error={}: malformed pnpm-workspace.yaml, falling back to single-project mode", manifest_path.display(), e);
+            log::debug!("[warn] path={}, error={}: malformed pnpm-workspace.yaml, falling back to single-project mode", manifest_path.display(), e);
             return None;
         }
     };
@@ -130,7 +130,7 @@ pub(crate) fn detect_npm(root: &Path) -> Option<WorkspaceLayout> {
     let parsed: serde_json::Value = match serde_json::from_str(&contents) {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("[warn] path={}, error={}: malformed package.json, falling back to single-project mode", manifest_path.display(), e);
+            log::debug!("[warn] path={}, error={}: malformed package.json, falling back to single-project mode", manifest_path.display(), e);
             return None;
         }
     };
@@ -190,7 +190,7 @@ pub(crate) fn detect_cargo(root: &Path) -> Option<WorkspaceLayout> {
     let parsed: toml::Value = match contents.parse() {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("[warn] path={}, error={}: malformed Cargo.toml, falling back to single-project mode", manifest_path.display(), e);
+            log::debug!("[warn] path={}, error={}: malformed Cargo.toml, falling back to single-project mode", manifest_path.display(), e);
             return None;
         }
     };
@@ -363,7 +363,7 @@ pub(crate) fn detect_uv(root: &Path) -> Option<WorkspaceLayout> {
     let parsed: toml::Value = match contents.parse() {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("[warn] path={}, error={}: malformed pyproject.toml, falling back to single-project mode", manifest_path.display(), e);
+            log::debug!("[warn] path={}, error={}: malformed pyproject.toml, falling back to single-project mode", manifest_path.display(), e);
             return None;
         }
     };

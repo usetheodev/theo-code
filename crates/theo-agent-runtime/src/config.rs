@@ -207,6 +207,10 @@ pub struct AgentConfig {
     /// repeated this many times consecutively, a warning is injected.
     /// None = disabled. Default: Some(3).
     pub doom_loop_threshold: Option<usize>,
+    /// Context window size in tokens for the target model.
+    /// Used by compaction to decide when to compress history.
+    /// Default: 128_000 (covers most modern models).
+    pub context_window_tokens: usize,
 }
 
 impl Default for AgentConfig {
@@ -227,6 +231,7 @@ impl Default for AgentConfig {
             is_subagent: false,
             capability_set: None,
             doom_loop_threshold: Some(3),
+            context_window_tokens: 128_000,
         }
     }
 }
@@ -280,6 +285,13 @@ Using batch saves tokens and is faster than calling tools one by one. Max 25 cal
 ## Skills
 You have auto-invocable skills for common tasks. When the user's request matches a skill, invoke it with the `skill` tool.
 Skills inject specialized instructions or delegate to a focused sub-agent. Available skills are listed in the system context.
+
+## Codebase Context (Code Intelligence)
+You have a `codebase_context` tool that provides a map of the codebase: function signatures, struct definitions, module layout.
+- You MUST call `codebase_context` BEFORE editing multiple files or performing refactoring across modules.
+- For complex tasks involving cross-module changes, call it first with a query describing what you need.
+- For simple single-file tasks (fix typo, add one function), skip it — use read/grep instead.
+- If it says "building", wait a few seconds and call again.
 
 ## Rules
 - Always use tools. Never guess file contents.

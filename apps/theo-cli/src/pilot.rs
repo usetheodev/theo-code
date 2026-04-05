@@ -6,6 +6,7 @@ use std::sync::Arc;
 use theo_agent_runtime::event_bus::EventBus;
 use theo_agent_runtime::pilot::{PilotConfig, PilotLoop, PilotResult, load_promise};
 use theo_agent_runtime::AgentConfig;
+use theo_domain::graph_context::GraphContextProvider;
 
 use crate::renderer::CliRenderer;
 
@@ -37,8 +38,21 @@ pub async fn run_pilot(
     // Check if there's a roadmap to execute from (before moving project_dir)
     let roadmap_path = theo_agent_runtime::roadmap::find_latest_roadmap(&project_dir);
 
+    // Initialize GRAPHCTX — fire-and-forget background build.
+    let graph_context: Option<Arc<dyn theo_domain::graph_context::GraphContextProvider>> = {
+        let service = Arc::new(
+            theo_application::use_cases::graph_context_service::GraphContextService::new(),
+        );
+        let _ = service.initialize(&project_dir).await; // Returns immediately.
+        eprintln!("[theo] GRAPHCTX building in background");
+        Some(service)
+    };
+
     // Create pilot loop
     let mut pilot = PilotLoop::new(config, pilot_config, project_dir, promise, complete, event_bus);
+    if let Some(gc) = graph_context {
+        pilot = pilot.with_graph_context(gc);
+    }
 
     // Setup Ctrl+C handler
     let interrupt = pilot.interrupt_flag();

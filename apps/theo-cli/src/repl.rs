@@ -1,5 +1,7 @@
 //! Interactive REPL for the Theo Agent with session persistence.
 
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -38,13 +40,21 @@ pub struct Repl {
 impl Repl {
     pub fn new(config: AgentConfig, project_dir: PathBuf, provider_name: String) -> Self {
         let editor = DefaultEditor::new().expect("failed to create editor");
+        // Restore session from disk (graceful — empty on missing/corrupt).
+        let session_messages = load_session(&project_dir);
+        if !session_messages.is_empty() {
+            eprintln!(
+                "[theo] Restored session ({} messages)",
+                session_messages.len()
+            );
+        }
         Self {
             editor,
             config,
             project_dir,
             provider_name,
             mode: AgentMode::default(),
-            session_messages: Vec::new(),
+            session_messages,
             graph_context: None,
         }
     }
@@ -62,7 +72,7 @@ impl Repl {
         eprintln!("  Mode: \x1b[36m{}\x1b[0m", mode);
     }
 
-    /// Initialize GRAPHCTX once for the session. Called before first task.
+    /// Initialize GRAPHCTX once for the session (fire-and-forget background build).
     async fn ensure_graph_context(&mut self) {
         if self.graph_context.is_some() {
             return;
@@ -70,15 +80,9 @@ impl Repl {
         let service = Arc::new(
             theo_application::use_cases::graph_context_service::GraphContextService::new(),
         );
-        match service.initialize(&self.project_dir).await {
-            Ok(()) => {
-                eprintln!("[theo] GRAPHCTX initialized");
-                self.graph_context = Some(service);
-            }
-            Err(e) => {
-                eprintln!("[theo] GRAPHCTX unavailable (degraded): {e}");
-            }
-        }
+        let _ = service.initialize(&self.project_dir).await; // Returns immediately.
+        eprintln!("[theo] GRAPHCTX building in background");
+        self.graph_context = Some(service);
     }
 
     /// Execute a single prompt and exit (no REPL loop).
@@ -128,6 +132,7 @@ impl Repl {
                         )
                         .await;
                         if should_exit {
+                            save_session(&self.project_dir, &self.session_messages);
                             break;
                         }
                     } else {
@@ -138,10 +143,12 @@ impl Repl {
                     eprintln!("  ^C — type /exit to quit");
                 }
                 Err(ReadlineError::Eof) => {
+                    save_session(&self.project_dir, &self.session_messages);
                     eprintln!("Goodbye.");
                     break;
                 }
                 Err(e) => {
+                    save_session(&self.project_dir, &self.session_messages);
                     eprintln!("Error: {e}");
                     break;
                 }
@@ -190,6 +197,9 @@ impl Repl {
             let excess = self.session_messages.len() - MAX_SESSION_MESSAGES;
             self.session_messages.drain(..excess);
         }
+
+        // Persist session after each task (crash safety).
+        save_session(&self.project_dir, &self.session_messages);
 
         // Show LLM response (only if not already displayed via streaming).
         // Text-only responses are streamed via ContentDelta in real-time,
@@ -247,5 +257,145 @@ fn format_tokens(tokens: u64) -> String {
         format!("{:.1}k", tokens as f64 / 1_000.0)
     } else {
         format!("{}", tokens)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Session persistence
+// ---------------------------------------------------------------------------
+
+/// Compute a stable hash of the project dir for session file naming.
+fn project_hash(project_dir: &std::path::Path) -> String {
+    let mut hasher = DefaultHasher::new();
+    project_dir.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
+
+/// Path to the session file for a given project.
+fn session_path(project_dir: &std::path::Path) -> PathBuf {
+    let base = std::env::var("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("/tmp"))
+        .join(".config")
+        .join("theo")
+        .join("sessions");
+    base.join(format!("{}.json", project_hash(project_dir)))
+}
+
+/// Load session messages from disk. Returns empty vec on any error (graceful).
+fn load_session(project_dir: &std::path::Path) -> Vec<Message> {
+    let path = session_path(project_dir);
+    let Ok(data) = std::fs::read_to_string(&path) else {
+        return Vec::new();
+    };
+    match serde_json::from_str::<Vec<Message>>(&data) {
+        Ok(mut messages) => {
+            // Cap at MAX_SESSION_MESSAGES.
+            if messages.len() > MAX_SESSION_MESSAGES {
+                let excess = messages.len() - MAX_SESSION_MESSAGES;
+                messages.drain(..excess);
+            }
+            messages
+        }
+        Err(_) => {
+            // Corrupt JSON — start fresh, don't crash.
+            Vec::new()
+        }
+    }
+}
+
+/// Save session messages to disk. Best-effort, failures are silent.
+fn save_session(project_dir: &std::path::Path, messages: &[Message]) {
+    let path = session_path(project_dir);
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    // Only save the last MAX_SESSION_MESSAGES.
+    let to_save = if messages.len() > MAX_SESSION_MESSAGES {
+        &messages[messages.len() - MAX_SESSION_MESSAGES..]
+    } else {
+        messages
+    };
+    if let Ok(json) = serde_json::to_string_pretty(to_save) {
+        let _ = std::fs::write(&path, json);
+    }
+}
+
+/// Clear the persisted session for a project (used by /clear command).
+#[allow(dead_code)]
+pub fn clear_session(project_dir: &std::path::Path) {
+    let path = session_path(project_dir);
+    let _ = std::fs::remove_file(path);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn project_hash_is_deterministic() {
+        let h1 = project_hash(std::path::Path::new("/tmp/project-a"));
+        let h2 = project_hash(std::path::Path::new("/tmp/project-a"));
+        assert_eq!(h1, h2);
+    }
+
+    #[test]
+    fn project_hash_differs_for_different_dirs() {
+        let h1 = project_hash(std::path::Path::new("/tmp/project-a"));
+        let h2 = project_hash(std::path::Path::new("/tmp/project-b"));
+        assert_ne!(h1, h2);
+    }
+
+    #[test]
+    fn save_and_load_roundtrip() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path().join("my-project");
+        std::fs::create_dir_all(&project).unwrap();
+
+        let messages = vec![
+            Message::user("hello"),
+            Message::assistant("world"),
+        ];
+        save_session(&project, &messages);
+
+        let loaded = load_session(&project);
+        assert_eq!(loaded.len(), 2);
+    }
+
+    #[test]
+    fn load_returns_empty_on_missing_file() {
+        let loaded = load_session(std::path::Path::new("/tmp/nonexistent-project-xyz"));
+        assert!(loaded.is_empty());
+    }
+
+    #[test]
+    fn load_returns_empty_on_corrupt_json() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path().join("corrupt-project");
+        std::fs::create_dir_all(&project).unwrap();
+
+        // Write corrupt JSON to session path.
+        let path = session_path(&project);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "NOT VALID JSON {{{").unwrap();
+
+        let loaded = load_session(&project);
+        assert!(loaded.is_empty());
+    }
+
+    #[test]
+    fn save_caps_at_max_session_messages() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path().join("big-session");
+        std::fs::create_dir_all(&project).unwrap();
+
+        // Create 120 messages (above MAX_SESSION_MESSAGES=100).
+        let messages: Vec<Message> = (0..120)
+            .map(|i| Message::user(&format!("msg {i}")))
+            .collect();
+        save_session(&project, &messages);
+
+        let loaded = load_session(&project);
+        assert_eq!(loaded.len(), MAX_SESSION_MESSAGES);
     }
 }

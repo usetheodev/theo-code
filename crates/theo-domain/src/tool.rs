@@ -1,9 +1,11 @@
 use crate::error::ToolError;
+use crate::graph_context::GraphContextProvider;
 use crate::permission::PermissionRequest;
 use crate::session::{MessageId, SessionId};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 /// Result of a tool execution
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -139,7 +141,7 @@ pub struct ToolDefinition {
 // ── Tool Context ────────────────────────────────────────────────────
 
 /// Context provided to tools during execution
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ToolContext {
     pub session_id: SessionId,
     pub message_id: MessageId,
@@ -147,6 +149,19 @@ pub struct ToolContext {
     pub agent: String,
     pub abort: tokio::sync::watch::Receiver<bool>,
     pub project_dir: PathBuf,
+    /// Code intelligence provider (injected by RunEngine if available).
+    pub graph_context: Option<Arc<dyn GraphContextProvider>>,
+}
+
+impl std::fmt::Debug for ToolContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ToolContext")
+            .field("session_id", &self.session_id)
+            .field("call_id", &self.call_id)
+            .field("project_dir", &self.project_dir)
+            .field("graph_context", &self.graph_context.as_ref().map(|_| "..."))
+            .finish()
+    }
 }
 
 impl ToolContext {
@@ -159,6 +174,7 @@ impl ToolContext {
             agent: "build".to_string(),
             abort: rx,
             project_dir,
+            graph_context: None,
         }
     }
 }

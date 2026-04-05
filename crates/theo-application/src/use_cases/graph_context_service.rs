@@ -4,8 +4,9 @@
 //! Lives in `theo-application` (not `theo-agent-runtime`) to respect bounded
 //! context boundaries — the runtime only sees the trait from `theo-domain`.
 
-use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use theo_domain::graph_context::{
@@ -30,7 +31,8 @@ use theo_engine_retrieval::search::MultiSignalScorer;
 // ---------------------------------------------------------------------------
 
 /// Max time for graph build (clustering can be slow for large repos).
-const BUILD_TIMEOUT: Duration = Duration::from_secs(30);
+/// 60s accommodates debug builds; release builds are ~5-10x faster.
+const BUILD_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Cache validity period.
 const CACHE_MAX_AGE: Duration = Duration::from_secs(3600); // 1 hour
@@ -39,7 +41,7 @@ const CACHE_MAX_AGE: Duration = Duration::from_secs(3600); // 1 hour
 const LEIDEN_RESOLUTION: f64 = 1.0;
 
 // ---------------------------------------------------------------------------
-// Internal state
+// Internal state machine
 // ---------------------------------------------------------------------------
 
 struct GraphState {
@@ -48,24 +50,39 @@ struct GraphState {
     scorer: MultiSignalScorer,
 }
 
+/// Explicit state machine for background graph build lifecycle.
+enum GraphBuildState {
+    /// No initialization started yet.
+    Uninitialized,
+    /// Build running in background. Agent operates without context.
+    Building,
+    /// Graph built and ready for queries.
+    Ready(GraphState),
+    /// Build failed. Agent operates without context.
+    Failed(String),
+}
+
 // ---------------------------------------------------------------------------
 // Service
 // ---------------------------------------------------------------------------
 
-/// Orchestrates parser → graph → retrieval pipeline.
+/// Orchestrates parser → graph → retrieval pipeline with background build.
 ///
-/// Thread-safe via interior mutability (Mutex on state). The state is built
-/// once during `initialize()` and then read-only during `query_context()`.
+/// `initialize()` returns immediately, dispatching the build to a background
+/// tokio task. The agent starts without code context and gains it when the
+/// build completes. `query_context()` returns empty while Building, context
+/// when Ready, and error when Failed.
 pub struct GraphContextService {
-    state: Mutex<Option<GraphState>>,
-    project_dir: Mutex<Option<PathBuf>>,
+    state: Arc<tokio::sync::RwLock<GraphBuildState>>,
+    /// Ensures only one build runs at a time.
+    build_in_progress: Arc<AtomicBool>,
 }
 
 impl GraphContextService {
     pub fn new() -> Self {
         Self {
-            state: Mutex::new(None),
-            project_dir: Mutex::new(None),
+            state: Arc::new(tokio::sync::RwLock::new(GraphBuildState::Uninitialized)),
+            build_in_progress: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -78,53 +95,88 @@ impl Default for GraphContextService {
 
 #[async_trait::async_trait]
 impl GraphContextProvider for GraphContextService {
+    /// Starts graph build in background and returns immediately.
+    ///
+    /// If a build is already in progress, this is a no-op.
+    /// If cache exists and is fresh, loads synchronously (fast path).
     async fn initialize(&self, project_dir: &Path) -> Result<(), GraphContextError> {
+        // Fast path: already ready or building.
+        {
+            let current = self.state.read().await;
+            if matches!(*current, GraphBuildState::Ready(_) | GraphBuildState::Building) {
+                return Ok(());
+            }
+        }
+
+        // Try cache first (synchronous, fast).
         let dir = project_dir.to_path_buf();
         let cache_path = dir.join(".theo").join("graph.bin");
 
-        // Try loading from cache first.
         if let Some(graph) = try_load_cache(&cache_path) {
             let (communities, scorer) = build_index(&graph);
-            *self.state.lock().unwrap() = Some(GraphState {
+            let mut state = self.state.write().await;
+            *state = GraphBuildState::Ready(GraphState {
                 graph,
                 communities,
                 scorer,
             });
-            *self.project_dir.lock().unwrap() = Some(dir);
             return Ok(());
         }
 
-        // Build from scratch — CPU-bound, runs in spawn_blocking with timeout.
-        let dir_clone = dir.clone();
-        let result = tokio::time::timeout(BUILD_TIMEOUT, tokio::task::spawn_blocking(move || {
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                build_graph_from_project(&dir_clone)
-            }))
-        }))
-        .await;
-
-        match result {
-            Ok(Ok(Ok((graph, communities, scorer)))) => {
-                // Atomic cache write: tmp → rename.
-                save_cache_atomic(&cache_path, &graph);
-
-                *self.state.lock().unwrap() = Some(GraphState {
-                    graph,
-                    communities,
-                    scorer,
-                });
-                *self.project_dir.lock().unwrap() = Some(dir);
-                Ok(())
-            }
-            Ok(Ok(Err(panic_info))) => Err(GraphContextError::BuildFailed(format!(
-                "panic during graph build: {:?}",
-                panic_info
-            ))),
-            Ok(Err(join_err)) => Err(GraphContextError::BuildFailed(format!(
-                "spawn_blocking failed: {join_err}"
-            ))),
-            Err(_timeout) => Err(GraphContextError::Timeout(BUILD_TIMEOUT.as_secs())),
+        // Prevent concurrent builds.
+        if self.build_in_progress.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
+            return Ok(()); // Another build already running.
         }
+
+        // Transition to Building.
+        {
+            let mut state = self.state.write().await;
+            *state = GraphBuildState::Building;
+        }
+
+        // Spawn background build — fire and forget.
+        let state_ref = self.state.clone();
+        let build_flag = self.build_in_progress.clone();
+        let dir_clone = dir.clone();
+
+        tokio::spawn(async move {
+            let result = tokio::time::timeout(
+                BUILD_TIMEOUT,
+                tokio::task::spawn_blocking(move || {
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        build_graph_from_project(&dir_clone)
+                    }))
+                }),
+            )
+            .await;
+
+            let mut state = state_ref.write().await;
+            match result {
+                Ok(Ok(Ok((graph, communities, scorer)))) => {
+                    save_cache_atomic(&cache_path, &graph);
+                    *state = GraphBuildState::Ready(GraphState {
+                        graph,
+                        communities,
+                        scorer,
+                    });
+                }
+                Ok(Ok(Err(_panic))) => {
+                    *state = GraphBuildState::Failed("panic during graph build".into());
+                }
+                Ok(Err(join_err)) => {
+                    *state = GraphBuildState::Failed(format!("spawn_blocking failed: {join_err}"));
+                }
+                Err(_timeout) => {
+                    *state = GraphBuildState::Failed(format!(
+                        "build timed out after {}s",
+                        BUILD_TIMEOUT.as_secs()
+                    ));
+                }
+            }
+            build_flag.store(false, Ordering::SeqCst);
+        });
+
+        Ok(())
     }
 
     async fn query_context(
@@ -132,25 +184,38 @@ impl GraphContextProvider for GraphContextService {
         query: &str,
         budget_tokens: usize,
     ) -> Result<GraphContextResult, GraphContextError> {
-        let state_guard = self.state.lock().unwrap();
-        let state = state_guard
-            .as_ref()
-            .ok_or(GraphContextError::NotInitialized)?;
+        let state = self.state.read().await;
 
-        if budget_tokens == 0 || query.is_empty() {
-            return Ok(GraphContextResult {
-                blocks: vec![],
-                total_tokens: 0,
-                budget_tokens,
-                exploration_hints: String::new(),
-            });
+        let empty = Ok(GraphContextResult {
+            blocks: vec![],
+            total_tokens: 0,
+            budget_tokens,
+            exploration_hints: String::new(),
+        });
+
+        match &*state {
+            GraphBuildState::Uninitialized => return Err(GraphContextError::NotInitialized),
+            GraphBuildState::Building => return empty, // Agent runs without context.
+            GraphBuildState::Failed(e) => return Err(GraphContextError::BuildFailed(e.clone())),
+            GraphBuildState::Ready(_) => {} // Fall through to query.
         }
 
-        // Score + assemble (fast, ~20-30ms).
-        let scored = state.scorer.score(query, &state.communities, &state.graph);
-        let payload = assembly::assemble_greedy(&scored, &state.graph, budget_tokens);
+        if budget_tokens == 0 || query.is_empty() {
+            return empty;
+        }
 
-        // Convert ContextPayload → GraphContextResult.
+        // Safe: we checked Ready above.
+        let graph_state = match &*state {
+            GraphBuildState::Ready(gs) => gs,
+            _ => unreachable!(),
+        };
+
+        // Score + assemble (fast, ~20-30ms).
+        let scored = graph_state
+            .scorer
+            .score(query, &graph_state.communities, &graph_state.graph);
+        let payload = assembly::assemble_greedy(&scored, &graph_state.graph, budget_tokens);
+
         let blocks: Vec<ContextBlock> = payload
             .items
             .iter()
@@ -171,7 +236,11 @@ impl GraphContextProvider for GraphContextService {
     }
 
     fn is_ready(&self) -> bool {
-        self.state.lock().unwrap().is_some()
+        // Non-blocking check via try_read.
+        self.state
+            .try_read()
+            .map(|s| matches!(*s, GraphBuildState::Ready(_)))
+            .unwrap_or(false)
     }
 }
 
@@ -198,21 +267,81 @@ fn build_graph_from_project(
     (graph, communities, scorer)
 }
 
+/// Directories to always exclude from graph indexing.
+const EXCLUDED_DIRS: &[&str] = &[
+    "target", "node_modules", "vendor", "dist", "build",
+    "__pycache__", ".venv", "venv", ".next", ".nuxt",
+];
+
+/// Maximum files to parse. Prevents timeout on huge monorepos.
+const MAX_FILES_TO_PARSE: usize = 500;
+
+/// Detect the dominant language of the project from manifest files.
+fn detect_project_language(project_dir: &Path) -> Option<&'static str> {
+    if project_dir.join("Cargo.toml").exists() {
+        Some("rs")
+    } else if project_dir.join("go.mod").exists() || project_dir.join("go.work").exists() {
+        Some("go")
+    } else if project_dir.join("pyproject.toml").exists() || project_dir.join("requirements.txt").exists() {
+        Some("py")
+    } else if project_dir.join("package.json").exists() {
+        Some("ts") // covers TS and JS projects
+    } else {
+        None
+    }
+}
+
 /// Walk project, parse each file with tree-sitter, convert to FileData.
+///
+/// Prioritizes the project's primary language: if a Cargo.toml exists,
+/// .rs files are parsed first, then other languages up to MAX_FILES_TO_PARSE.
 fn parse_project_files(project_dir: &Path) -> Vec<FileData> {
-    let walker = ignore::WalkBuilder::new(project_dir)
-        .hidden(true)
-        .git_ignore(true)
-        .build();
+    let primary_ext = detect_project_language(project_dir);
 
-    let mut file_data_list = Vec::new();
+    let collect_paths = || {
+        let walker = ignore::WalkBuilder::new(project_dir)
+            .hidden(true)
+            .git_ignore(true)
+            .filter_entry(|entry| {
+                if entry.file_type().map_or(false, |ft| ft.is_dir()) {
+                    let name = entry.file_name().to_str().unwrap_or("");
+                    return !EXCLUDED_DIRS.contains(&name);
+                }
+                true
+            })
+            .build();
 
-    for entry in walker.flatten() {
-        let path = entry.path();
-        if !path.is_file() {
-            continue;
+        let mut primary = Vec::new();
+        let mut secondary = Vec::new();
+
+        for entry in walker.flatten() {
+            let path = entry.into_path();
+            if !path.is_file() {
+                continue;
+            }
+            if ts::detect_language(&path).is_none() {
+                continue;
+            }
+            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+            if primary_ext.is_some_and(|pe| ext == pe || (pe == "ts" && (ext == "tsx" || ext == "js" || ext == "jsx"))) {
+                primary.push(path);
+            } else {
+                secondary.push(path);
+            }
         }
 
+        // Primary language first, then secondary, capped.
+        primary.truncate(MAX_FILES_TO_PARSE);
+        let remaining = MAX_FILES_TO_PARSE.saturating_sub(primary.len());
+        secondary.truncate(remaining);
+        primary.extend(secondary);
+        primary
+    };
+
+    let paths = collect_paths();
+    let mut file_data_list = Vec::with_capacity(paths.len());
+
+    for path in &paths {
         let Some(language) = ts::detect_language(path) else {
             continue;
         };
@@ -428,6 +557,20 @@ fn save_cache_atomic(cache_path: &Path, graph: &CodeGraph) {
 mod tests {
     use super::*;
 
+    /// Helper: wait for the service to become ready (background build to complete).
+    async fn wait_ready(service: &GraphContextService, timeout_secs: u64) -> bool {
+        tokio::time::timeout(Duration::from_secs(timeout_secs), async {
+            loop {
+                if service.is_ready() {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .is_ok()
+    }
+
     #[test]
     fn convert_symbol_kind_covers_all_variants() {
         let variants = [
@@ -459,14 +602,38 @@ mod tests {
         }
     }
 
+    // --- State machine transition tests ---
+
     #[tokio::test]
-    async fn initialize_empty_dir_succeeds_with_empty_graph() {
+    async fn building_transitions_to_ready() {
         let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("src")).unwrap();
+        std::fs::write(tmp.path().join("src/main.rs"), "fn main() {}").unwrap();
+
         let service = GraphContextService::new();
-        let result = service.initialize(tmp.path()).await;
-        // Empty dir produces empty graph — graceful, not an error.
-        assert!(result.is_ok());
+        assert!(!service.is_ready()); // Uninitialized
+
+        service.initialize(tmp.path()).await.unwrap(); // Returns immediately
+
+        // Wait for background build to complete.
+        assert!(wait_ready(&service, 30).await, "Build did not complete in 30s");
         assert!(service.is_ready());
+    }
+
+    #[tokio::test]
+    async fn query_during_building_returns_empty() {
+        let tmp = tempfile::tempdir().unwrap();
+        // Create enough files to make build take >0ms
+        std::fs::create_dir_all(tmp.path().join("src")).unwrap();
+        std::fs::write(tmp.path().join("src/main.rs"), "fn main() { println!(\"hello\"); }").unwrap();
+
+        let service = GraphContextService::new();
+        service.initialize(tmp.path()).await.unwrap();
+
+        // Immediately query — may still be Building.
+        let result = service.query_context("test", 4000).await;
+        // Should be Ok(empty) if Building, or Ok(context) if already Ready.
+        assert!(result.is_ok());
     }
 
     #[tokio::test]
@@ -477,13 +644,29 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn query_with_zero_budget_returns_empty() {
-        // Need a real initialized service for this test — skip if engines heavy.
-        // Instead, test the logic path via a mock-like approach.
+    async fn query_after_ready_returns_context() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("src")).unwrap();
+        std::fs::write(
+            tmp.path().join("src/main.rs"),
+            "fn main() {}\nfn add(a: i32, b: i32) -> i32 { a + b }\n",
+        ).unwrap();
+
         let service = GraphContextService::new();
-        // Not initialized → NotInitialized error. That's correct behavior.
-        // The zero-budget path is tested when state exists; we verify the early return code.
-        let _ = service.query_context("test", 0).await;
+        service.initialize(tmp.path()).await.unwrap();
+        assert!(wait_ready(&service, 30).await);
+
+        let result = service.query_context("add function", 4000).await.unwrap();
+        assert!(result.total_tokens <= result.budget_tokens);
+    }
+
+    #[tokio::test]
+    async fn double_initialize_is_noop() {
+        let tmp = tempfile::tempdir().unwrap();
+        let service = GraphContextService::new();
+        service.initialize(tmp.path()).await.unwrap();
+        // Second call while building — should be no-op.
+        service.initialize(tmp.path()).await.unwrap();
     }
 
     #[test]
@@ -495,5 +678,22 @@ mod tests {
     #[test]
     fn cache_miss_on_nonexistent_path() {
         assert!(try_load_cache(Path::new("/tmp/nonexistent_graph.bin")).is_none());
+    }
+
+    #[tokio::test]
+    async fn integration_real_project_produces_context() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("src")).unwrap();
+        std::fs::write(
+            tmp.path().join("src/main.rs"),
+            "fn main() { println!(\"hello\"); }\nfn add(a: i32, b: i32) -> i32 { a + b }\n",
+        ).unwrap();
+
+        let service = GraphContextService::new();
+        service.initialize(tmp.path()).await.unwrap();
+        assert!(wait_ready(&service, 30).await, "Build did not complete");
+
+        let result = service.query_context("add function", 4000).await.unwrap();
+        assert!(result.total_tokens <= result.budget_tokens);
     }
 }

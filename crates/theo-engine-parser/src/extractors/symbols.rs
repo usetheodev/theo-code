@@ -123,8 +123,8 @@ pub fn extract_symbols(
 ) -> Vec<Symbol> {
     // Diagnostic: warn if tree-sitter produced parse errors (grammar may be outdated)
     if tree.root_node().has_error() {
-        eprintln!(
-            "[warn] lang={}, file={}: tree-sitter produced parse errors — grammar may be outdated for this language version",
+        log::debug!(
+            "lang={}, file={}: tree-sitter produced parse errors — grammar may be outdated for this language version",
             language, file_path.display()
         );
     }
@@ -138,8 +138,8 @@ pub fn extract_symbols(
     let query = match tree_sitter::Query::new(&ts_language, query_source) {
         Ok(q) => q,
         Err(e) => {
-            eprintln!(
-                "[warn] lang={}, error={}: failed to compile symbol query, returning empty symbols",
+            log::debug!(
+                "lang={}, error={}: failed to compile symbol query, returning empty symbols",
                 language, e
             );
             return Vec::new();
@@ -195,8 +195,8 @@ pub fn extract_symbols(
 
     // Diagnostic: warn when a non-trivial file yields zero symbols
     if symbols.is_empty() && source.lines().count() > 10 {
-        eprintln!(
-            "[warn] lang={}, file={}, lines={}: zero symbols extracted from non-trivial file — check grammar compatibility",
+        log::debug!(
+            "lang={}, file={}, lines={}: zero symbols extracted from non-trivial file — check grammar compatibility",
             language, file_path.display(), source.lines().count()
         );
     }

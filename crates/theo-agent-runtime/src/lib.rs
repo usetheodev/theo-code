@@ -1,5 +1,6 @@
 pub mod budget_enforcer;
 pub mod capability_gate;
+pub mod compaction;
 pub mod config;
 pub mod convergence;
 #[doc(hidden)] // Dead code: exported but never instantiated externally
@@ -13,6 +14,7 @@ pub mod metrics;
 pub mod observability;
 pub mod persistence;
 pub mod pilot;
+pub mod reflector;
 pub mod plugin;
 pub mod project_config;
 pub mod roadmap;
