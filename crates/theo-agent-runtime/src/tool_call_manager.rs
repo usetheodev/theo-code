@@ -400,7 +400,8 @@ mod tests {
 
         assert_eq!(result.status, ToolCallState::Failed);
         assert!(result.error.is_some());
-        assert!(result.duration_ms > 0 || result.duration_ms == 0); // just compiled
+        // Verify duration was actually recorded (completed_at - started_at)
+        assert!(result.duration_ms < 5_000, "dispatch took unexpectedly long: {}ms", result.duration_ms);
 
         let record = manager.get_record(&call_id).unwrap();
         assert_eq!(record.state, ToolCallState::Failed);

@@ -9,8 +9,9 @@ INPUT=$(cat)
 TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // ""')
 FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // ""')
 
-# Permite edições em arquivos do .claude/ (configuração, atas, gate)
-if [[ "$FILE_PATH" == *".claude/"* ]]; then
+# Permite edições apenas em .claude/gate/ (atas e status do meeting)
+# Outros diretórios .claude/ (rules, hooks, agents, skills) exigem meeting
+if [[ "$FILE_PATH" == *".claude/gate/"* ]]; then
   exit 0
 fi
 

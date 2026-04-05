@@ -27,6 +27,6 @@ Reporte como checklist com status:
 - WARN — item tem observações
 - FAIL — item precisa de ação
 
-Diretório: `/home/paulo/Projetos/usetheo/theo-code/theo-code`
+Diretório: `/home/paulo/Projetos/usetheo/theo-code`
 
 Argumento: $ARGUMENTS

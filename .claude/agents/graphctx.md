@@ -70,4 +70,4 @@ git log --pretty=format: --name-only -- <arquivo> | sort | uniq -c | sort -rn | 
 }
 ```
 
-Diretorio do workspace: `/home/paulo/Projetos/usetheo/theo-code/theo-code`
+Diretorio do workspace: `/home/paulo/Projetos/usetheo/theo-code`

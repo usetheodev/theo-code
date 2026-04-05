@@ -23,6 +23,6 @@ Analise as mudanças recentes e atualize o CHANGELOG.md.
 - NÃO inclua refatorações internas sem impacto externo
 - NÃO use descrições vagas: "melhorias", "ajustes", "refatoração"
 
-Diretório: `/home/paulo/Projetos/usetheo/theo-code/theo-code`
+Diretório: `/home/paulo/Projetos/usetheo/theo-code`
 
 Argumento: $ARGUMENTS

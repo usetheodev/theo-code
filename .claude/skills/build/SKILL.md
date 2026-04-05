@@ -14,7 +14,7 @@ Execute o build conforme o argumento:
 - "desktop": `cd apps/theo-desktop && cargo tauri build`
 - "check": `cargo check` (mais rápido, só verifica compilação)
 
-Diretório do workspace: `/home/paulo/Projetos/usetheo/theo-code/theo-code`
+Diretório do workspace: `/home/paulo/Projetos/usetheo/theo-code`
 
 Se o build falhar:
 1. Leia o erro completo

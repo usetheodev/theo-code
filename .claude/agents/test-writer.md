@@ -28,4 +28,4 @@ Analise o código especificado e escreva testes unitários.
 - Use `assert_eq!` com mensagens descritivas
 - `unwrap()` é permitido em testes
 
-Diretório: `/home/paulo/Projetos/usetheo/theo-code/theo-code/`
+Diretório: `/home/paulo/Projetos/usetheo/theo-code/`

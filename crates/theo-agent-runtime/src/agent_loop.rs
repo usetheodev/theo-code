@@ -368,8 +368,11 @@ mod tests {
         let config = AgentConfig::default();
         let registry = theo_tooling::registry::create_default_registry();
         let sink: Arc<dyn EventSink> = Arc::new(NullEventSink);
-        let _loop = AgentLoop::new(config, registry, sink);
-        // Compilation is the test
+        let agent_loop = AgentLoop::new(config.clone(), registry, sink);
+
+        // Verify constructor propagates config correctly
+        assert_eq!(agent_loop.client_model, config.model);
+        assert!(agent_loop.graph_context.is_none(), "graph_context should be None by default");
     }
 
     #[test]

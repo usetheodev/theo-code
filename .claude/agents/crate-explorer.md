@@ -18,6 +18,6 @@ Analise o crate especificado e retorne um relatório estruturado.
 5. **Testes**: quantos testes existem, o que cobrem
 6. **Tamanho**: linhas de código (excluindo testes)
 
-Diretório base: `/home/paulo/Projetos/usetheo/theo-code/theo-code/crates/`
+Diretório base: `/home/paulo/Projetos/usetheo/theo-code/crates/`
 
 Retorne o relatório em formato estruturado e conciso.

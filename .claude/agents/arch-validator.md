@@ -27,6 +27,6 @@ Para cada `Cargo.toml` em `crates/*/Cargo.toml` e `apps/*/Cargo.toml`:
 - Verifique contra as regras acima
 - Reporte violações
 
-Diretório: `/home/paulo/Projetos/usetheo/theo-code/theo-code/`
+Diretório: `/home/paulo/Projetos/usetheo/theo-code/`
 
 Retorne: lista de violações encontradas (ou "Nenhuma violação" se ok).

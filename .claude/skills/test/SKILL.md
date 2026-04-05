@@ -13,7 +13,7 @@ Execute os testes conforme o argumento:
 - Nome de teste específico: `cargo test <nome_do_teste>`
 - "changed": identifique crates com arquivos modificados (`git diff --name-only`) e rode testes apenas desses crates
 
-Diretório do workspace: `/home/paulo/Projetos/usetheo/theo-code/theo-code`
+Diretório do workspace: `/home/paulo/Projetos/usetheo/theo-code`
 
 Se algum teste falhar:
 1. Mostre o nome do teste que falhou

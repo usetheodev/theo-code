@@ -68,4 +68,4 @@ Async:
 }
 ```
 
-Diretorio do workspace: `/home/paulo/Projetos/usetheo/theo-code/theo-code`
+Diretorio do workspace: `/home/paulo/Projetos/usetheo/theo-code`
