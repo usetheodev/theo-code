@@ -1,5 +1,5 @@
 [package]
-name = "theo-code"
+name = "theo"
 version.workspace = true
 edition.workspace = true
 
@@ -15,6 +15,7 @@ theo-agent-runtime.workspace = true
 theo-infra-auth = { path = "../../crates/theo-infra-auth" }
 theo-infra-llm = { path = "../../crates/theo-infra-llm" }
 tokio.workspace = true
+clap.workspace = true
 rustyline.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -1,262 +1,293 @@
 <p align="center">
-  <h1 align="center">Theo Code</h1>
+  <h1 align="center">Theo</h1>
   <p align="center">
-    <strong>Governance-first runtime for AI coding agents</strong>
+    <strong>The harness-first autonomous coding agent</strong>
   </p>
   <p align="center">
-    The LLM decides <em>what</em> to do — Theo Code governs <em>if</em> it can, <em>how</em> to record it, and <em>when</em> to stop.
+    The model writes code. Theo makes it work&hairsp;—&hairsp;sandboxed, context-aware, self-improving.
   </p>
   <p align="center">
-    <a href="https://github.com/usetheodev/theo-code/actions"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/usetheodev/theo-code/ci.yml?style=flat-square&label=CI"></a>
     <a href="https://github.com/usetheodev/theo-code/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache%202.0-blue?style=flat-square"></a>
     <a href="https://github.com/usetheodev/theo-code"><img alt="Rust" src="https://img.shields.io/badge/rust-2024%20edition-orange?style=flat-square&logo=rust"></a>
-    <a href="https://github.com/usetheodev/theo-code"><img alt="Tests" src="https://img.shields.io/badge/tests-2647%20passing-brightgreen?style=flat-square"></a>
+    <a href="https://github.com/usetheodev/theo-code"><img alt="Tests" src="https://img.shields.io/badge/tests-1630%2B%20passing-brightgreen?style=flat-square"></a>
+    <a href="https://github.com/usetheodev/theo-code"><img alt="Providers" src="https://img.shields.io/badge/LLM%20providers-25-purple?style=flat-square"></a>
   </p>
 </p>
 
 ---
 
-## Why Theo Code?
+## What is Theo?
 
-AI coding agents (Claude Code, Codex, Cursor) are powerful writers — but they operate without guardrails. They can edit any file, run any command, and mark a task as "done" without proof. **Theo Code is the governance layer that sits on top**, monitoring every action in real-time and enforcing safety policies before damage happens.
+Theo is an **open-source, terminal-native coding agent** built in Rust. Unlike tools that bet everything on a single model, Theo focuses on what actually determines success: **the harness** — the sandbox, tools, context management, safety, and feedback loops that surround the model.
 
-Three core mechanisms make this work:
+```bash
+theo                              # Interactive REPL
+theo "fix the auth bug"           # Single-shot task
+theo --mode plan "design caching" # Plan before acting
+theo pilot "implement feature X"  # Fully autonomous loop
+theo init                         # AI-powered project setup
+```
 
-| Mechanism | What it does | Why it matters |
+Theo works with **any OpenAI-compatible model** — GPT, Claude, Codex, Ollama, Groq, Mistral, and 20+ more. The model is pluggable. The harness is the product.
+
+## Why Harness Engineering?
+
+> *"Agent = Model + Harness. Most of the gains come from the harness."*
+> — Martin Fowler, 2025
+
+Every coding agent uses the same models. What separates the ones that work from the ones that don't is **everything around the model**: how it sees your code, how it's sandboxed, how context is managed, how failures are detected, and how the system improves over time.
+
+Theo is the first coding agent designed **harness-first**:
+
+| Harness Layer | What Theo Does | Why It Matters |
 |---|---|---|
-| **GRAPHCTX** | Multi-language code graph (16 languages) that gives the agent precise file targets | Agents stop guessing which files to edit |
-| **State Machine** | Deterministic phases (LOCATE → EDIT → VERIFY → DONE) with git-diff proof gates | `done()` is blocked until real changes exist |
-| **Context Loops** | Periodic summaries of what was done, what failed, and what to do next | Prevents drift in long-running sessions |
+| **Sandbox** | bwrap/landlock/seccomp cascade, SSRF blocking, env sanitization | Agent can't escape or exfiltrate data |
+| **Code Intelligence** | 16-language parser + code graph + semantic search (on-demand) | Agent sees the right files, not all files |
+| **Context Engineering** | Compaction, just-in-time retrieval, context loops, token budgeting | Sessions stay coherent past 20+ turns |
+| **Feedback Loops** | Doom loop detection, circuit breaker, heuristic reflector | Agent self-corrects instead of looping forever |
+| **Memory** | Cross-session persistence, learnings, trajectory snapshots | Agent resumes where it left off |
+| **Safety** | Governance engine, policy evaluation, command validation | Every tool call is assessed before execution |
 
-These mechanisms together achieved **50% on SWE-bench Lite** with Qwen3-30B — a 30B parameter model outperforming GPT-4-based systems.
+## Quick Start
 
-## SWE-bench Results
+### Install
 
-| System | Model | SWE-bench Lite |
-|---|---|---|
-| SWE-Agent | GPT-4 | 18% |
-| Agentless | GPT-4o | 27% |
-| Aider | Claude 3.5 Sonnet | 27% |
-| **Theo Code** | **Qwen3-30B** | **50%** |
-| OpenHands | Claude 3.5 Sonnet | 53% |
+```bash
+# From source
+git clone https://github.com/usetheodev/theo-code.git
+cd theo-code
+cargo install --path apps/theo-cli
 
-> Theo Code achieves competitive results with a **significantly smaller model** by combining structured governance with precise code intelligence — not brute-force token scale.
+# Verify
+theo --version
+```
+
+### Configure
+
+Theo auto-detects your LLM provider:
+
+```bash
+# Option 1: OpenAI API key
+export OPENAI_API_KEY=sk-...
+
+# Option 2: Ollama (local, free)
+ollama serve  # Theo auto-detects localhost:11434
+
+# Option 3: Any OpenAI-compatible endpoint
+export OPENAI_API_KEY=your-key
+theo --provider groq "fix the bug"
+```
+
+### First Run
+
+```bash
+cd your-project
+
+# Initialize project context (AI-powered analysis)
+theo init
+
+# Start coding
+theo "add input validation to the create endpoint"
+```
+
+On first run in any project, Theo automatically creates `.theo/theo.md` with your project's structure, language, and conventions.
+
+## Features
+
+### Agent Modes
+
+```bash
+theo                              # Agent mode — full autonomy
+theo --mode plan "design X"       # Plan mode — analyze before acting
+theo --mode ask "explain auth"    # Ask mode — questions first, action later
+```
+
+### Pilot — Autonomous Loop
+
+Theo Pilot runs continuously until a promise is fulfilled, with circuit breaker protection:
+
+```bash
+theo pilot "implement user authentication" \
+  --complete "all tests pass and login works" \
+  --calls 10
+```
+
+Features: circuit breaker (stops on repeated failures), dual-exit gate (done signal + git progress), corrective guidance (self-improving via heuristic reflector), roadmap execution.
+
+### Code Intelligence (GRAPHCTX)
+
+Theo's `codebase_context` tool gives the model a structural map of your code — on-demand, not always-on:
+
+```
+Agent: "I need to understand the auth system"
+  → calls codebase_context("authentication flow")
+  → receives: function signatures, struct definitions, module layout
+  → edits the RIGHT files with full context
+```
+
+Built on: Tree-Sitter (16 languages), MCPH code graph, Leiden community detection, BM25 + neural embeddings, graph attention propagation.
+
+### 21+ Built-in Tools
+
+| Category | Tools |
+|---|---|
+| **Core** | `bash` (sandboxed), `read`, `write`, `edit`, `grep`, `glob`, `apply_patch` |
+| **Intelligence** | `codebase_context`, `webfetch`, `think`, `reflect`, `memory` |
+| **Git** | `git_status`, `git_diff`, `git_log`, `git_commit` (with safety checks) |
+| **HTTP** | `http_get`, `http_post` (with SSRF protection) |
+| **Meta** | `batch` (parallel execution), `subagent`, `skill`, `done` |
+
+### Sub-Agents
+
+Delegate work to specialized sub-agents that run in parallel:
+
+```
+Main Agent: "I need to fix the bug and add tests"
+  → spawns explorer sub-agent (reads code, finds root cause)
+  → spawns implementer sub-agent (applies fix)
+  → spawns verifier sub-agent (runs tests)
+```
+
+3-layer recursive spawning prevention: schema stripping + prompt isolation + capability gate.
+
+### Skills
+
+10 bundled skills for common workflows: `commit`, `test`, `review`, `build`, `explain`, `fix`, `refactor`, `pr`, `doc`, `deps`. Extensible with project-specific skills in `.theo/skills/`.
+
+### Session Persistence
+
+Conversations persist across terminal restarts. Theo remembers what you were working on:
+
+```
+[theo] Restored session (12 messages)
+```
+
+### Context Compaction
+
+Long sessions don't degrade. Theo automatically compresses old messages while preserving critical information — system messages, recent context, and tool call pairs stay intact.
 
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│                    Product Surfaces                       │
-│           theo-cli  ·  theo-desktop (Tauri v2)           │
-├──────────────────────────────────────────────────────────┤
-│                   Application Layer                       │
-│          theo-application  ·  theo-api-contracts          │
-├───────────────────┬────────────────┬─────────────────────┤
-│   Code Intel      │  Agent Runtime │    Governance       │
-│   engine-graph    │  agent-runtime │    governance       │
-│   engine-parser   │                │                     │
-│   engine-retrieval│                │                     │
-├───────────────────┴────────────────┴─────────────────────┤
-│                    Infrastructure                         │
-│         theo-infra-llm  ·  theo-infra-auth               │
-│                    theo-tooling                           │
-├──────────────────────────────────────────────────────────┤
-│                    theo-domain                            │
-│            Core types, traits, errors (zero deps)         │
-└──────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────┐
+│                   theo (CLI)                     │
+│              theo-desktop (Tauri v2)             │
+├─────────────────────────────────────────────────┤
+│              theo-application                    │
+│         (use cases, GRAPHCTX service)            │
+├──────────────┬───────────────┬──────────────────┤
+│ Code Intel   │ Agent Runtime │   Governance     │
+│ engine-graph │ agent-runtime │   governance     │
+│ engine-parser│ (loop, pilot, │   (policies,     │
+│ engine-retr. │  reflector)   │    impact)       │
+├──────────────┴───────────────┴──────────────────┤
+│                Infrastructure                    │
+│    theo-infra-llm (25 providers, streaming)      │
+│    theo-infra-auth (OAuth PKCE, Device Flow)     │
+│    theo-tooling (21 tools, sandbox, plugins)     │
+├─────────────────────────────────────────────────┤
+│              theo-domain                         │
+│       Pure types, traits, errors (zero deps)     │
+└─────────────────────────────────────────────────┘
 ```
 
-### Crates
+### Bounded Contexts
 
-<details>
-<summary><strong>Code Intelligence Engine</strong> — understands your codebase</summary>
+- **Code Intelligence** — `engine-graph`, `engine-parser`, `engine-retrieval`: read-only analysis of source code
+- **Agent Runtime** — `agent-runtime`: orchestrates LLM + tools + governance in an async loop
+- **Governance** — `governance`: policy engine, impact analysis, risk assessment
+- **Infrastructure** — `infra-llm`, `infra-auth`, `tooling`: external connections behind traits
+- **Domain** — `theo-domain`: pure types shared across all contexts (zero dependencies)
 
-| Crate | Purpose |
-|---|---|
-| `theo-engine-parser` | Multi-language AST parser (16 languages via Tree-Sitter), symbol extraction, import resolution, type hierarchy analysis, framework-specific extractors for 7 backend families |
-| `theo-engine-graph` | Code graph construction, community detection, co-change analysis, clustering, persistence |
-| `theo-engine-retrieval` | Semantic search with neural embeddings + TF-IDF fallback, BM25 inverted index, PageRank centrality, graph attention propagation, TurboQuant compression (384-dim → 96 bytes) |
+### Key Invariants
 
-</details>
+- `theo-domain` **never** depends on other crates
+- Apps talk to `theo-application`, **never** to engines directly
+- Every tool call passes through the Decision Control Plane
+- `done()` is blocked until `git diff` shows real changes
+- Sandbox is mandatory for `bash` — bwrap > landlock > noop cascade
 
-<details>
-<summary><strong>Governance & Safety</strong> — enforces policies before execution</summary>
+## LLM Providers
 
-| Crate | Purpose |
-|---|---|
-| `theo-governance` | Policy engine with impact analysis (BFS-based), session metrics tracking, risk alerting (Info/Warning/Critical), community-aware change detection, test coverage linking |
+Theo supports **25 providers** out of the box. Internally everything is OpenAI-compatible — providers convert at the boundary.
 
-</details>
-
-<details>
-<summary><strong>Agent Runtime</strong> — orchestrates the agent loop</summary>
-
-| Crate | Purpose |
-|---|---|
-| `theo-agent-runtime` | Async agent loop orchestration, state machine transitions, context loop emission, decision control plane |
-
-</details>
-
-<details>
-<summary><strong>Infrastructure</strong> — connects to the outside world</summary>
-
-| Crate | Purpose |
-|---|---|
-| `theo-infra-llm` | LLM client abstraction — OpenAI-compatible, Anthropic, vLLM providers with streaming support |
-| `theo-infra-auth` | OAuth PKCE, device flow, secure token storage and refresh |
-| `theo-tooling` | Tool registry with 20+ tools: apply_patch, bash, edit, glob, grep, LSP, webfetch, codesearch, and more |
-
-</details>
-
-<details>
-<summary><strong>Application & Domain</strong> — glues everything together</summary>
-
-| Crate | Purpose |
-|---|---|
-| `theo-domain` | Core types, traits, errors, permissions, sessions — zero external dependencies |
-| `theo-application` | Use case orchestration (run_agent_session, build_project_graph, etc.) |
-| `theo-api-contracts` | Shared DTOs and serializable events for all surfaces |
-
-</details>
-
-### Apps
-
-| App | Description |
-|---|---|
-| `theo-cli` | Command-line interface for headless agent sessions |
-| `theo-desktop` | Tauri v2 desktop app — React 18, TypeScript, Tailwind CSS, Radix UI, Framer Motion |
+| Provider | Auth | Auto-detect |
+|---|---|---|
+| OpenAI (GPT-4o, o1, o3) | API key | `OPENAI_API_KEY` |
+| OpenAI Codex (gpt-5.3-codex) | OAuth PKCE | Automatic |
+| Anthropic (Claude 4) | API key | `ANTHROPIC_API_KEY` |
+| Ollama (local) | None | `localhost:11434` |
+| Groq, Mistral, Together, DeepSeek, Fireworks... | API key | Env var |
+| GitHub Copilot | Device Flow | Automatic |
+| Any OA-compatible endpoint | Configurable | `--provider` flag |
 
 ## Supported Languages
 
-Theo Code parses and understands code in **16 languages** via Tree-Sitter:
+Theo parses **16 languages** via Tree-Sitter with framework-specific extractors:
 
-| Language Family | Languages |
+| Language | Frameworks |
 |---|---|
-| **JavaScript** | TypeScript, TSX, JavaScript, JSX |
-| **JVM** | Java, Kotlin, Scala |
-| **Systems** | Rust, C, C++, Go |
-| **Scripting** | Python, Ruby, PHP |
-| **Mobile** | Swift, C# |
+| TypeScript/JavaScript | Express, Koa, Hapi |
+| Python | FastAPI, Flask, Django |
+| Java/Kotlin/Scala | Spring Boot |
+| Rust, Go, C, C++ | Generic extraction |
+| C# | ASP.NET Core |
+| PHP | Laravel |
+| Ruby | Rails |
+| Swift | Generic extraction |
 
-Framework-specific extractors cover **~78% of backend market share**: Express/Koa/Hapi, FastAPI/Flask/Django, Spring Boot, ASP.NET Core, Gin/Echo, Laravel, and Rails. All other frameworks fall through to a generic extractor.
+## Project Configuration
 
-## Getting Started
+```
+your-project/
+└── .theo/
+    ├── theo.md              # Project context (auto-generated by `theo init`)
+    ├── system-prompt.md     # Custom system prompt (optional)
+    ├── config.toml          # Pilot and agent configuration
+    ├── skills/              # Project-specific skills
+    ├── hooks/               # Pre/post tool execution hooks
+    ├── plans/               # Roadmaps for pilot execution
+    └── .gitignore           # Excludes generated files (graph, learnings, snapshots)
+```
 
-### Prerequisites
-
-- **Rust** nightly (edition 2024) — install via [rustup](https://rustup.rs)
-- **Node.js** 18+ — for the desktop frontend
-- **System libraries** for Tauri v2 — see [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/)
+## Development
 
 ### Build
 
 ```bash
-# Clone the repository
-git clone https://github.com/usetheodev/theo-code.git
-cd theo-code
-
-# Build all crates
-cargo build
-
-# Run the full test suite (2,647 tests)
-cargo test
-
-# Launch the desktop app in dev mode
-cd apps/theo-desktop
-cargo tauri dev
+cargo build                    # Build workspace
+cargo test                     # Run all 1630+ tests
+cargo test -p theo-agent-runtime  # Test a specific crate
 ```
 
-### Run the CLI
+### Run
 
 ```bash
-cargo run -p theo-cli
+cargo run --bin theo           # Run from source
+cargo install --path apps/theo-cli  # Install globally
 ```
-
-## Claude Code Integration
-
-Theo Code integrates with [Claude Code](https://docs.anthropic.com/en/docs/claude-code) as a governance overlay:
-
-| Integration | Purpose |
-|---|---|
-| **Hooks** | 25+ events (PreToolUse, PostToolUse, SessionStart, Stop) for real-time monitoring and blocking |
-| **StatusLine** | Persistent display updated every 300ms showing governance status |
-| **MCP Server** | Bidirectional tools — Claude Code can call `theo_explain` and `theo_review` |
-| **Skills** | Distributable commands: `/theo:explain`, `/theo:review` |
-
-The recommended deployment is a **Claude Code plugin** bundling all four integration points into a single distributable package.
-
-## Project Structure
-
-```
-theo-code/
-├── crates/
-│   ├── theo-domain/              # Core types (zero deps)
-│   ├── theo-engine-graph/        # Code graph + clustering
-│   ├── theo-engine-parser/       # 16-language AST parser
-│   ├── theo-engine-retrieval/    # Semantic search + embeddings
-│   ├── theo-governance/          # Policy engine + impact analysis
-│   ├── theo-agent-runtime/       # Async agent loop
-│   ├── theo-infra-llm/           # LLM providers
-│   ├── theo-infra-auth/          # OAuth + token management
-│   ├── theo-tooling/             # Tool registry (20+ tools)
-│   ├── theo-api-contracts/       # Shared DTOs
-│   └── theo-application/         # Use case layer
-├── apps/
-│   ├── theo-cli/                 # CLI binary
-│   ├── theo-desktop/             # Tauri v2 backend
-│   ├── theo-ui/                  # React frontend
-│   └── theo-benchmark/           # Benchmark runner
-├── docs/
-│   ├── current/                  # What IS implemented
-│   ├── target/                   # What is planned
-│   ├── adr/                      # Architecture Decision Records
-│   └── roadmap/                  # Product roadmap
-└── research/                     # Papers + experiments (isolated)
-```
-
-## Design Principles
-
-- **Governance is not optional.** Every tool call passes through the Decision Control Plane before execution. No exceptions.
-- **Prove it with a diff.** The state machine blocks `done()` until `git diff` shows real changes. No empty completions.
-- **Context over tokens.** GRAPHCTX gives the agent the right 5 files instead of dumping 500 files into context.
-- **Fail fast, fail loud.** Typed errors with `thiserror`, structured alerting, no silent failures.
-- **Boundaries matter.** `theo-domain` has zero dependencies. Apps never import engines directly. No circular dependencies.
 
 ## Contributing
 
-We welcome contributions! Here's how to get started:
+We welcome contributions! Architecture rules:
 
-1. **Fork** the repository
-2. **Create a branch** from `main` for your feature or fix
-3. **Write tests** — every logic change needs test coverage
-4. **Run the suite** — `cargo test` must pass with zero failures
-5. **Submit a PR** with a clear description of what and why
+1. `theo-domain` has **zero dependencies** on other crates
+2. Apps talk to `theo-application`, never to engines directly
+3. Every logic change needs test coverage (Arrange-Act-Assert)
+4. `cargo test` must pass with zero failures and zero warnings
+5. Code in English, communication in English or Portuguese
 
-### Architecture Rules
+## Harness Engineering Philosophy
 
-- `theo-domain` **never** depends on other crates
-- Apps talk to `theo-application`, **never** to engines directly
-- Governance is mandatory in the critical path, not post-process
-- All errors are typed — no `unwrap()` in production code
-- Tests follow Arrange-Act-Assert pattern
+Theo is built on the principle that **the harness matters more than the model**. We follow the industry consensus from OpenAI, Anthropic, and Martin Fowler:
 
-### Code Style
+- **Generic tools over specialized tools** — the model already knows bash, read, write
+- **Context engineering over context stuffing** — better tokens, not more tokens
+- **Computational sensors over inferential sensors** — tests and linters before AI review
+- **Environment legibility** — the agent should understand its surroundings instantly
+- **Self-improvement** — the harness learns from every failure
 
-- **Code**: English (variables, functions, types, technical comments)
-- **Communication**: Portuguese or English
-- Rust edition 2024 with `resolver = "3"`
-
-## Roadmap
-
-Theo Code is under active development. Key upcoming milestones:
-
-- [ ] Claude Code plugin (hooks + MCP + StatusLine + skills)
-- [ ] Real-time session monitoring dashboard
-- [ ] Multi-provider governance (Claude Code, Codex, Cursor)
-- [ ] Policy DSL for custom governance rules
-- [ ] Sub-agent orchestration with governance gates
-
-See [`docs/roadmap/`](docs/roadmap/) for the full plan.
+Read the full technical document: [`docs/current/harness-engineering.md`](docs/current/harness-engineering.md)
 
 ## License
 
@@ -265,5 +296,5 @@ Licensed under the [Apache License 2.0](LICENSE).
 ---
 
 <p align="center">
-  <sub>Built with Rust, governed by design.</sub>
+  <sub>The model is commodity. The harness is the product.</sub>
 </p>
