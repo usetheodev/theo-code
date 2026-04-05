@@ -440,7 +440,7 @@ fn convert_extraction(
             SymbolData {
                 qualified_name: qualified,
                 name: s.name.clone(),
-                kind: convert_symbol_kind(s.kind),
+                kind: convert_symbol_kind(&s.kind),
                 line_start: s.anchor.line,
                 line_end: s.anchor.end_line,
                 signature: s.signature.clone(),
@@ -469,7 +469,7 @@ fn convert_extraction(
             source_file: r.source_file.to_string_lossy().to_string(),
             target_symbol: r.target_symbol.clone(),
             target_file: r.target_file.as_ref().map(|p| p.to_string_lossy().to_string()),
-            kind: convert_reference_kind(r.reference_kind),
+            kind: convert_reference_kind(&r.reference_kind),
         })
         .collect();
 
@@ -498,28 +498,7 @@ fn convert_extraction(
     }
 }
 
-fn convert_symbol_kind(kind: SymbolKind) -> SymbolKindDto {
-    match kind {
-        SymbolKind::Function => SymbolKindDto::Function,
-        SymbolKind::Method => SymbolKindDto::Method,
-        SymbolKind::Class => SymbolKindDto::Class,
-        SymbolKind::Struct => SymbolKindDto::Struct,
-        SymbolKind::Enum => SymbolKindDto::Enum,
-        SymbolKind::Trait => SymbolKindDto::Trait,
-        SymbolKind::Interface => SymbolKindDto::Interface,
-        SymbolKind::Module => SymbolKindDto::Module,
-    }
-}
-
-fn convert_reference_kind(kind: ReferenceKind) -> ReferenceKindDto {
-    match kind {
-        ReferenceKind::Call => ReferenceKindDto::Call,
-        ReferenceKind::Extends => ReferenceKindDto::Extends,
-        ReferenceKind::Implements => ReferenceKindDto::Implements,
-        ReferenceKind::TypeUsage => ReferenceKindDto::TypeUsage,
-        ReferenceKind::Import => ReferenceKindDto::Import,
-    }
-}
+use crate::use_cases::conversion::{convert_symbol_kind, convert_reference_kind};
 
 // ---------------------------------------------------------------------------
 // Cache
@@ -584,7 +563,7 @@ mod tests {
             (SymbolKind::Module, SymbolKindDto::Module),
         ];
         for (from, expected) in variants {
-            assert_eq!(convert_symbol_kind(from), expected);
+            assert_eq!(convert_symbol_kind(&from), expected);
         }
     }
 
@@ -598,7 +577,7 @@ mod tests {
             (ReferenceKind::Import, ReferenceKindDto::Import),
         ];
         for (from, expected) in variants {
-            assert_eq!(convert_reference_kind(from), expected);
+            assert_eq!(convert_reference_kind(&from), expected);
         }
     }
 

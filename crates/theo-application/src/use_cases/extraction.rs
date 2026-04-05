@@ -214,25 +214,4 @@ fn extract_single_file(rel_path: &str, abs_path: &str) -> Option<(FileData, usiz
 // Type conversions
 // ---------------------------------------------------------------------------
 
-fn convert_symbol_kind(kind: &SymbolKind) -> SymbolKindDto {
-    match kind {
-        SymbolKind::Class => SymbolKindDto::Class,
-        SymbolKind::Function => SymbolKindDto::Function,
-        SymbolKind::Method => SymbolKindDto::Method,
-        SymbolKind::Module => SymbolKindDto::Module,
-        SymbolKind::Interface => SymbolKindDto::Interface,
-        SymbolKind::Trait => SymbolKindDto::Trait,
-        SymbolKind::Enum => SymbolKindDto::Enum,
-        SymbolKind::Struct => SymbolKindDto::Struct,
-    }
-}
-
-fn convert_reference_kind(kind: &ReferenceKind) -> ReferenceKindDto {
-    match kind {
-        ReferenceKind::Call => ReferenceKindDto::Call,
-        ReferenceKind::Extends => ReferenceKindDto::Extends,
-        ReferenceKind::Implements => ReferenceKindDto::Implements,
-        ReferenceKind::TypeUsage => ReferenceKindDto::TypeUsage,
-        ReferenceKind::Import => ReferenceKindDto::Import,
-    }
-}
+use crate::use_cases::conversion::{convert_symbol_kind, convert_reference_kind};

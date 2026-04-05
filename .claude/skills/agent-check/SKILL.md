@@ -29,4 +29,31 @@ Reporte como checklist com status:
 
 Diretório: `/home/paulo/Projetos/usetheo/theo-code`
 
+### 8. Quality Grades
+
+After completing the checklist, generate a quality grade per crate and save to `.theo/quality.json`:
+
+```bash
+# For each crate, compute a simple quality score:
+# - Has tests? (+1)
+# - cargo check clean? (+1)
+# - No #[allow(dead_code)]? (+1)
+# - No unwrap() in non-test code? (+1)
+# - Test count > 10? (+1)
+# Score: 0-5 mapped to grade: 0-1=D, 2=C, 3=B, 4=A, 5=A+
+```
+
+Write the result to `.theo/quality.json`:
+```json
+{
+  "generated_at": "2026-04-05",
+  "crates": {
+    "theo-agent-runtime": {"grade": "A", "score": 4, "tests": 308, "warnings": 0, "dead_code": 2},
+    "theo-domain": {"grade": "A+", "score": 5, "tests": 172, "warnings": 0, "dead_code": 0}
+  }
+}
+```
+
+This file is tracked by git — temporal evolution is visible via `git log -p .theo/quality.json`.
+
 Argumento: $ARGUMENTS

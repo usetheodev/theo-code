@@ -49,6 +49,7 @@ pub struct AgentRunEngine {
     metrics: Arc<MetricsCollector>,
     convergence: ConvergenceEvaluator,
     done_attempts: u32,
+    failure_tracker: crate::failure_tracker::FailurePatternTracker,
     snapshot_store: Option<Arc<dyn SnapshotStore>>,
     graph_context: Option<Arc<dyn theo_domain::graph_context::GraphContextProvider>>,
     #[allow(deprecated)]
@@ -105,6 +106,8 @@ impl AgentRunEngine {
             ConvergenceMode::AllOf,
         );
 
+        let failure_tracker = crate::failure_tracker::FailurePatternTracker::new(&project_dir);
+
         Self {
             run,
             task_id,
@@ -119,6 +122,7 @@ impl AgentRunEngine {
             metrics,
             convergence,
             done_attempts: 0,
+            failure_tracker,
             snapshot_store: None,
             graph_context: None,
             agent_state,
@@ -165,7 +169,41 @@ impl AgentRunEngine {
     /// Flow: Initialized → Planning → Executing → Evaluating → Converged/Replanning/Aborted
     /// Execute with fresh messages (no session history).
     pub async fn execute(&mut self) -> AgentResult {
-        self.execute_with_history(Vec::new()).await
+        let result = self.execute_with_history(Vec::new()).await;
+        self.record_session_exit(&result);
+        result
+    }
+
+    /// Record session exit: save failure patterns + session progress.
+    /// Best-effort — never fails, never blocks.
+    fn record_session_exit(&mut self, result: &AgentResult) {
+        // Save failure pattern tracker
+        self.failure_tracker.save();
+
+        // Record session end for cross-session progress tracking
+        if !self.config.is_subagent {
+            let tasks = if result.success {
+                vec![crate::session_bootstrap::CompletedTask {
+                    name: result.summary.chars().take(100).collect(),
+                    status: "completed".to_string(),
+                    files_changed: result.files_edited.clone(),
+                }]
+            } else {
+                vec![crate::session_bootstrap::CompletedTask {
+                    name: result.summary.chars().take(100).collect(),
+                    status: "failed".to_string(),
+                    files_changed: result.files_edited.clone(),
+                }]
+            };
+            let last_error = if result.success { None } else { Some(result.summary.clone()) };
+            crate::session_bootstrap::record_session_end(
+                &self.project_dir,
+                self.run.run_id.as_str(),
+                tasks,
+                vec![], // next_steps are determined by the LLM, not the engine
+                last_error,
+            );
+        }
     }
 
     /// Execute with session history from previous REPL prompts.
@@ -377,10 +415,21 @@ impl AgentRunEngine {
             #[allow(deprecated)]
             self.agent_state.maybe_transition(iteration, self.config.max_iterations);
 
-            // Context compaction: compress history if approaching context window limit.
-            crate::compaction::compact_if_needed(
+            // Context compaction: compress history with semantic progress context.
+            let compaction_ctx = crate::compaction::CompactionContext {
+                task_objective: messages.iter()
+                    .find(|m| m.role == theo_infra_llm::types::Role::User)
+                    .and_then(|m| m.content.clone())
+                    .unwrap_or_default()
+                    .chars().take(100).collect(),
+                current_phase: format!("{:?}", self.run.state),
+                target_files: self.agent_state.edits_files.clone(),
+                recent_errors: self.agent_state.edit_failures.iter().rev().take(2).cloned().collect(),
+            };
+            crate::compaction::compact_if_needed_with_context(
                 &mut messages,
                 self.config.context_window_tokens,
+                Some(&compaction_ctx),
             );
 
             // LLM call
@@ -1127,6 +1176,14 @@ impl AgentRunEngine {
                 // Record tool call in budget and metrics
                 self.budget_enforcer.record_tool_call();
                 self.metrics.record_tool_call(name, 0, success);
+
+                // Track failure patterns for steering loop suggestions
+                if !success {
+                    let pattern = format!("{}_failure", name);
+                    if let Some(suggestion) = self.failure_tracker.record_and_check(&pattern) {
+                        messages.push(Message::user(&suggestion));
+                    }
+                }
 
                 // Doom loop detection: check if this call repeats identically
                 if let Some(ref mut tracker) = doom_tracker {

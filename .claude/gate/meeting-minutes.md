@@ -1,32 +1,29 @@
-# Meeting — 2026-04-05 (Fase 3 Harness Engineering — MEDIUM Gaps)
+# Meeting — 2026-04-05 (Fase 4 — Conclusão Harness Engineering)
 
 ## Proposta
-6 tasks MEDIUM: GC skill, agent review on done, mutation testing, drift detection, self-correction, token estimation.
+6 tasks finais: feature list JSON, quality grades, wire CompactionContext/FailureTracker/SessionBootstrap, consolidar DRY.
 
 ## Participantes
-- **governance** — APPROVE (88%)
-- **qa** — APPROVE (2 tasks exigem testes: 3.2 e 3.6)
+- **governance** — APPROVE
+- **runtime** — APPROVE, risk MEDIUM (5 pontos de saída no engine)
 
 ## Conflitos
-1. 3.4 pre-commit pode ser ignorado com --no-verify — camada extra, não único sensor
-2. 3.6 deve atualizar callers atomicamente
+1. 5 pontos de saída no engine: extrair helper record_exit() para não omitir nenhum
+2. 4.6 DRY: graph_context_service testes devem continuar passando
 
 ## Veredito
 **APPROVED**
 
 ## Escopo Aprovado
-- `.claude/skills/gc/SKILL.md` (novo)
-- `.claude/skills/mutants/SKILL.md` (novo)
-- `crates/theo-agent-runtime/src/run_engine.rs` (3.2)
-- `.githooks/pre-commit` (novo)
-- `.claude/hooks/post-edit-lint.sh` (3.5)
-- `crates/theo-domain/src/lib.rs` (3.6)
-- `crates/theo-engine-retrieval/src/assembly.rs` (3.6)
-- `crates/theo-agent-runtime/src/compaction.rs` (3.6)
-- `mutants.toml` (novo)
+- `crates/theo-agent-runtime/src/run_engine.rs` (4.3, 4.4, 4.5)
+- `crates/theo-agent-runtime/src/session_bootstrap.rs` (4.1)
+- `apps/theo-cli/src/init.rs` (4.1)
+- `.claude/skills/agent-check/SKILL.md` (4.2)
+- `crates/theo-application/src/use_cases/extraction.rs` (4.6)
+- `crates/theo-application/src/use_cases/graph_context_service.rs` (4.6)
 
 ## Condições
-1. Task 3.2: testes para diff > 100, diff <= 100, diff vazio
-2. Task 3.6: atualizar todos callers num commit atômico, testes em theo-domain
-3. Task 3.4: detectar crate afetado, não rodar workspace inteiro
+1. Helper record_exit() para 4.4/4.5 — todos os 5 pontos de saída cobertos
+2. Sem unwrap() em produção. I/O best-effort.
+3. Testes existentes devem continuar passando
 4. cargo check + cargo test verde após cada task
