@@ -506,6 +506,46 @@ impl AgentRunEngine {
                         .and_then(|args| args.get("summary").and_then(|s| s.as_str()).map(String::from))
                         .unwrap_or_else(|| "Task completed.".to_string());
 
+                    // Clean state sensor: verify project compiles before accepting done.
+                    // Best-effort: skip if not Rust, timeout 30s, never hard-abort.
+                    if self.project_dir.join("Cargo.toml").exists() {
+                        let check_result = tokio::time::timeout(
+                            std::time::Duration::from_secs(30),
+                            tokio::process::Command::new("cargo")
+                                .args(["check", "--message-format=short"])
+                                .current_dir(&self.project_dir)
+                                .output(),
+                        )
+                        .await;
+
+                        let check_failed = match check_result {
+                            Ok(Ok(output)) if !output.status.success() => {
+                                let stderr = String::from_utf8_lossy(&output.stderr);
+                                Some(stderr.to_string())
+                            }
+                            _ => None, // Success, timeout, or command not found — pass through.
+                        };
+
+                        if let Some(errors) = check_failed {
+                            // Block done: inject errors as tool result, continue loop.
+                            let error_preview = if errors.len() > 2000 {
+                                format!("{}...\n[truncated]", &errors[..errors.char_indices().nth(2000).map(|(i,_)| i).unwrap_or(errors.len())])
+                            } else {
+                                errors
+                            };
+                            messages.push(Message::tool_result(
+                                &call.id,
+                                "done",
+                                &format!(
+                                    "BLOCKED: cargo check failed. Fix the compilation errors before calling done.\n\n{}",
+                                    error_preview
+                                ),
+                            ));
+                            self.transition_run(RunState::Replanning);
+                            continue; // Back to loop — agent sees the errors and can fix.
+                        }
+                    }
+
                     self.transition_run(RunState::Converged);
                     let _ = self.task_manager.transition(&self.task_id, TaskState::Completed);
                     self.metrics.record_run_complete(true);

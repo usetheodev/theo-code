@@ -143,9 +143,9 @@ fn detect_project_name(project_dir: &Path, project_type: ProjectType) -> String 
 // Template rendering
 // ---------------------------------------------------------------------------
 
-/// Render the theo.md template with project info.
-pub fn render_theo_md(project_name: &str, project_type: ProjectType) -> String {
-    format!(
+/// Render the theo.md template with project info and progressive disclosure pointers.
+pub fn render_theo_md(project_name: &str, project_type: ProjectType, project_dir: &std::path::Path) -> String {
+    let mut sections = format!(
         r#"# {project_name}
 
 ## Language
@@ -164,21 +164,45 @@ pub fn render_theo_md(project_name: &str, project_type: ProjectType) -> String {
 ## Conventions
 
 - Code language: English (variables, functions, types)
-- Communication: English
 - Tests: Required for business logic
-
-## Architecture
-
-<!-- Describe your project's architecture here -->
-
-## Important Directories
-
-- `src/` — Source code
 "#,
         lang = project_type.label(),
         build_cmd = project_type.build_cmd(),
         test_cmd = project_type.test_cmd(),
-    )
+    );
+
+    // Progressive disclosure: add pointers to existing docs
+    let mut pointers = Vec::new();
+    if project_dir.join("docs").is_dir() {
+        pointers.push("- `docs/` — Project documentation");
+    }
+    if project_dir.join("docs/adr").is_dir() {
+        pointers.push("- `docs/adr/` — Architecture Decision Records");
+    }
+    if project_dir.join("README.md").exists() {
+        pointers.push("- `README.md` — Project overview");
+    }
+    if project_dir.join("ARCHITECTURE.md").exists() {
+        pointers.push("- `ARCHITECTURE.md` — System architecture");
+    }
+    if project_dir.join("CONTRIBUTING.md").exists() {
+        pointers.push("- `CONTRIBUTING.md` — Contribution guidelines");
+    }
+    if project_dir.join("CHANGELOG.md").exists() {
+        pointers.push("- `CHANGELOG.md` — Change history");
+    }
+
+    if !pointers.is_empty() {
+        sections.push_str("\n## Documentation Pointers\n\n");
+        for p in &pointers {
+            sections.push_str(p);
+            sections.push('\n');
+        }
+    }
+
+    sections.push_str("\n## Architecture\n\n<!-- Run `theo init` with API key to generate detailed architecture -->\n");
+
+    sections
 }
 
 /// Content for .theo/.gitignore — exclude generated files, keep theo.md.
@@ -232,7 +256,7 @@ pub fn run_init(project_dir: &Path) -> Result<bool, String> {
         .map_err(|e| format!("Failed to create .theo/: {e}"))?;
 
     // Write theo.md
-    let content = render_theo_md(&project_name, project_type);
+    let content = render_theo_md(&project_name, project_type, project_dir);
     std::fs::write(&theo_md_path, &content)
         .map_err(|e| format!("Failed to write .theo/theo.md: {e}"))?;
     eprintln!("  Created .theo/theo.md");
@@ -312,7 +336,7 @@ pub async fn run_init_with_agent(
         eprintln!("  No API key — using static template");
         let project_type = detect_project_type(project_dir);
         let project_name = detect_project_name(project_dir, project_type);
-        let content = render_theo_md(&project_name, project_type);
+        let content = render_theo_md(&project_name, project_type, project_dir);
         std::fs::write(&theo_md_path, &content)
             .map_err(|e| format!("Failed to write theo.md: {e}"))?;
         eprintln!("  Created .theo/theo.md (template)");
@@ -358,7 +382,7 @@ pub async fn run_init_with_agent(
             eprintln!("  AI analysis incomplete — using static template as fallback");
             let project_type = detect_project_type(project_dir);
             let project_name = detect_project_name(project_dir, project_type);
-            let content = render_theo_md(&project_name, project_type);
+            let content = render_theo_md(&project_name, project_type, project_dir);
             std::fs::write(&theo_md_path, &content)
                 .map_err(|e| format!("Failed to write theo.md: {e}"))?;
             eprintln!("  Created .theo/theo.md (template fallback)");
@@ -502,9 +526,29 @@ mod tests {
 
     #[test]
     fn render_template_contains_project_info() {
-        let content = render_theo_md("my-app", ProjectType::Node);
+        let tmp = tempfile::tempdir().unwrap();
+        let content = render_theo_md("my-app", ProjectType::Node, tmp.path());
         assert!(content.contains("# my-app"));
         assert!(content.contains("Node.js"));
         assert!(content.contains("npm test"));
+    }
+
+    #[test]
+    fn render_template_includes_doc_pointers_when_present() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("README.md"), "# My Project").unwrap();
+        std::fs::create_dir_all(tmp.path().join("docs/adr")).unwrap();
+
+        let content = render_theo_md("test-proj", ProjectType::Rust, tmp.path());
+        assert!(content.contains("## Documentation Pointers"));
+        assert!(content.contains("README.md"));
+        assert!(content.contains("docs/adr/"));
+    }
+
+    #[test]
+    fn render_template_omits_pointers_when_no_docs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let content = render_theo_md("bare", ProjectType::Unknown, tmp.path());
+        assert!(!content.contains("## Documentation Pointers"));
     }
 }

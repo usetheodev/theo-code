@@ -73,14 +73,18 @@ impl Repl {
     }
 
     /// Initialize GRAPHCTX once for the session (fire-and-forget background build).
+    /// Disabled entirely when THEO_NO_GRAPHCTX=1.
     async fn ensure_graph_context(&mut self) {
         if self.graph_context.is_some() {
             return;
         }
+        if std::env::var("THEO_GRAPHCTX").is_err() {
+            return; // Disabled by default. Set THEO_GRAPHCTX=1 to enable.
+        }
         let service = Arc::new(
             theo_application::use_cases::graph_context_service::GraphContextService::new(),
         );
-        let _ = service.initialize(&self.project_dir).await; // Returns immediately.
+        let _ = service.initialize(&self.project_dir).await;
         eprintln!("[theo] GRAPHCTX building in background");
         self.graph_context = Some(service);
     }

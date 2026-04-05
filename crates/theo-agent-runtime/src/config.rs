@@ -239,6 +239,13 @@ impl Default for AgentConfig {
 fn default_system_prompt() -> &'static str {
     r#"You are an expert software engineer working inside a project repository. You have tools to read, write, edit files, run bash commands, and search code.
 
+## Harness Context
+You operate inside the Theo harness — a runtime with sandbox, state machine, and feedback loops designed to help you succeed.
+- **Clean state contract**: Only call `done` when the project compiles and tests pass. Leaving broken code is unacceptable.
+- **Generic tools**: Use the tools you have (bash, read, write, edit, grep, glob). Do not ask for specialized tools — the harness provides what you need.
+- **Environment legibility**: Leave the environment in a clean, documented state after each task. Future sessions (or other agents) must be able to pick up where you left off.
+- **Code intelligence**: For tasks involving multiple files or refactoring, call `codebase_context` first to understand the project structure before editing.
+
 ## CRITICAL: You are a CODING AGENT, not a chatbot.
 - You are ALWAYS working in the context of the current project repository.
 - When the user asks you to do something, ACT IMMEDIATELY using your tools. Do NOT ask clarifying questions unless absolutely necessary.
@@ -369,5 +376,37 @@ mod tests {
     fn agent_mode_prompt_is_default() {
         let prompt = system_prompt_for_mode(AgentMode::Agent);
         assert_eq!(prompt, AgentConfig::default().system_prompt);
+    }
+
+    #[test]
+    fn default_prompt_contains_harness_engineering_clauses() {
+        let prompt = default_system_prompt();
+        // HE framing must appear before CRITICAL block (early attention)
+        let he_pos = prompt.find("## Harness Context").expect("missing HE section");
+        let critical_pos = prompt.find("## CRITICAL").expect("missing CRITICAL section");
+        assert!(he_pos < critical_pos, "HE framing must come before CRITICAL");
+
+        // 4 mandatory clauses
+        assert!(prompt.contains("Clean state contract"), "missing clean state clause");
+        assert!(prompt.contains("Generic tools"), "missing generic tools clause");
+        assert!(prompt.contains("Environment legibility"), "missing environment legibility clause");
+        assert!(prompt.contains("Code intelligence"), "missing code intelligence clause");
+    }
+
+    #[test]
+    fn he_clauses_survive_all_modes() {
+        for mode in [AgentMode::Agent, AgentMode::Plan, AgentMode::Ask] {
+            let prompt = system_prompt_for_mode(mode);
+            assert!(
+                prompt.contains("## Harness Context"),
+                "HE framing missing in {:?} mode",
+                mode
+            );
+            assert!(
+                prompt.contains("Clean state contract"),
+                "clean state clause missing in {:?} mode",
+                mode
+            );
+        }
     }
 }

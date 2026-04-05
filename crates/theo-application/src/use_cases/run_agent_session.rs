@@ -43,13 +43,16 @@ pub async fn run_agent_session(
     }
 
     // Initialize GRAPHCTX — fire-and-forget background build.
-    // Agent starts immediately; graph context becomes available when build completes.
-    let graph_context: Option<Arc<dyn GraphContextProvider>> = {
-        let service = Arc::new(GraphContextService::new());
-        let _ = service.initialize(project_dir).await; // Returns immediately.
-        eprintln!("[theo] GRAPHCTX building in background");
-        Some(service)
-    };
+    // Disabled entirely when THEO_NO_GRAPHCTX=1.
+    let graph_context: Option<Arc<dyn GraphContextProvider>> =
+        if std::env::var("THEO_GRAPHCTX").is_err() {
+            None // Disabled by default. Set THEO_GRAPHCTX=1 to enable.
+        } else {
+            let service = Arc::new(GraphContextService::new());
+            let _ = service.initialize(project_dir).await;
+            eprintln!("[theo] GRAPHCTX building in background");
+            Some(service)
+        };
 
     let registry = create_default_registry();
     let mut agent = AgentLoop::new(config, registry, event_sink);

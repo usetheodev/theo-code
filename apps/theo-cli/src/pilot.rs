@@ -39,14 +39,18 @@ pub async fn run_pilot(
     let roadmap_path = theo_agent_runtime::roadmap::find_latest_roadmap(&project_dir);
 
     // Initialize GRAPHCTX — fire-and-forget background build.
-    let graph_context: Option<Arc<dyn theo_domain::graph_context::GraphContextProvider>> = {
-        let service = Arc::new(
-            theo_application::use_cases::graph_context_service::GraphContextService::new(),
-        );
-        let _ = service.initialize(&project_dir).await; // Returns immediately.
-        eprintln!("[theo] GRAPHCTX building in background");
-        Some(service)
-    };
+    // Disabled entirely when THEO_NO_GRAPHCTX=1.
+    let graph_context: Option<Arc<dyn theo_domain::graph_context::GraphContextProvider>> =
+        if std::env::var("THEO_GRAPHCTX").is_err() {
+            None // Disabled by default. Set THEO_GRAPHCTX=1 to enable.
+        } else {
+            let service = Arc::new(
+                theo_application::use_cases::graph_context_service::GraphContextService::new(),
+            );
+            let _ = service.initialize(&project_dir).await;
+            eprintln!("[theo] GRAPHCTX building in background");
+            Some(service)
+        };
 
     // Create pilot loop
     let mut pilot = PilotLoop::new(config, pilot_config, project_dir, promise, complete, event_bus);
