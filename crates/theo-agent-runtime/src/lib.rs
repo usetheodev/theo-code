@@ -7,6 +7,7 @@ pub mod convergence;
 pub mod correction;
 pub mod dlq;
 pub mod event_bus;
+pub mod failure_tracker;
 pub mod hooks;
 pub mod events;
 pub mod metrics;

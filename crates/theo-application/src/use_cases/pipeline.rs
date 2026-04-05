@@ -12,14 +12,18 @@ use theo_engine_retrieval::budget::BudgetConfig;
 use theo_engine_retrieval::escape::ContextMembership;
 use theo_engine_retrieval::search::MultiSignalScorer;
 use theo_engine_retrieval::summary::{self, CommunitySummary, FileGitInfo};
-use theo_governance::impact::{self, ImpactReport};
-use theo_engine_graph::bridge::{self, BridgeStats, FileData};
-use theo_engine_graph::cluster::{self, ClusterAlgorithm, Community};
+pub use theo_governance::impact::ImpactReport;
+pub use theo_engine_graph::bridge::{BridgeStats, FileData};
+pub use theo_engine_graph::cluster::Community;
+
+use theo_governance::impact;
+use theo_engine_graph::bridge;
+use theo_engine_graph::cluster::{self, ClusterAlgorithm};
 use theo_engine_graph::git;
 use theo_engine_graph::model::{CodeGraph, EdgeType};
 use theo_engine_graph::persist;
 
-use crate::extract;
+use crate::use_cases::extraction as extract;
 
 // ---------------------------------------------------------------------------
 // Configuration

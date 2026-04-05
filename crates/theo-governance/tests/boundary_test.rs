@@ -123,8 +123,16 @@ fn collect_cargo_tomls() -> HashMap<String, (String, Vec<String>)> {
     result
 }
 
+/// Engine violations: MUST be zero. Hard assert.
+const ENGINE_CRATES: &[&str] = &[
+    "theo-engine-graph",
+    "theo-engine-parser",
+    "theo-engine-retrieval",
+    "theo-governance",
+];
+
 #[test]
-fn apps_must_not_import_engine_or_infra_directly() {
+fn apps_must_not_import_engines_directly() {
     let crates = collect_cargo_tomls();
     let mut violations = Vec::new();
 
@@ -133,20 +141,42 @@ fn apps_must_not_import_engine_or_infra_directly() {
             continue;
         }
         for dep in deps {
-            if FORBIDDEN_FOR_APPS.contains(&dep.as_str()) {
+            if ENGINE_CRATES.contains(&dep.as_str()) {
                 violations.push(format!("apps/{name} imports {dep} directly"));
             }
         }
     }
 
-    // NOTE: This test currently documents KNOWN violations.
-    // Once the boundary refactor (Fase 1) is complete, change this to:
-    //   assert!(violations.is_empty(), "Boundary violations:\n{}", violations.join("\n"));
-    if !violations.is_empty() {
+    assert!(
+        violations.is_empty(),
+        "Engine boundary violations (apps must use theo-application):\n  {}",
+        violations.join("\n  ")
+    );
+}
+
+/// Infra violations: tracked as warnings (future refactor).
+#[test]
+fn apps_infra_imports_tracked_as_warnings() {
+    let crates = collect_cargo_tomls();
+    let infra_crates = ["theo-infra-llm", "theo-infra-auth", "theo-tooling"];
+    let mut warnings = Vec::new();
+
+    for (name, (category, deps)) in &crates {
+        if category != "apps" {
+            continue;
+        }
+        for dep in deps {
+            if infra_crates.contains(&dep.as_str()) {
+                warnings.push(format!("apps/{name} imports {dep} directly"));
+            }
+        }
+    }
+
+    if !warnings.is_empty() {
         eprintln!(
-            "WARNING: {} boundary violation(s) detected (tracked for Fase 1 fix):\n  {}",
-            violations.len(),
-            violations.join("\n  ")
+            "INFO: {} infra import(s) in apps (tracked for future refactor):\n  {}",
+            warnings.len(),
+            warnings.join("\n  ")
         );
     }
 }

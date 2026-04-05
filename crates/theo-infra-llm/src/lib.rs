@@ -3,6 +3,7 @@ pub mod client;
 pub mod stream;
 pub mod error;
 pub mod codex;
+pub mod mock;
 pub mod provider;
 pub mod providers;
 mod hermes;

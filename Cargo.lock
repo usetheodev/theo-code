@@ -5436,10 +5436,7 @@ dependencies = [
 name = "theo"
 version = "0.1.0"
 dependencies = [
- "bincode",
  "clap",
- "ignore",
- "rayon",
  "rustyline",
  "serde",
  "serde_json",
@@ -5447,15 +5444,10 @@ dependencies = [
  "theo-agent-runtime",
  "theo-application",
  "theo-domain",
- "theo-engine-graph",
- "theo-engine-parser",
- "theo-engine-retrieval",
- "theo-governance",
  "theo-infra-auth",
  "theo-infra-llm",
  "theo-tooling",
  "tokio",
- "walkdir",
 ]
 
 [[package]]
@@ -5489,7 +5481,9 @@ name = "theo-application"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "bincode",
  "ignore",
+ "rayon",
  "serde",
  "serde_json",
  "tempfile",
@@ -5499,6 +5493,7 @@ dependencies = [
  "theo-engine-graph",
  "theo-engine-parser",
  "theo-engine-retrieval",
+ "theo-governance",
  "theo-tooling",
  "thiserror 2.0.18",
  "tokio",

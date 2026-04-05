@@ -26,15 +26,60 @@ pub struct SandboxAuditRecord {
     pub executor_entries: Vec<AuditEntry>,
 }
 
-/// In-memory audit trail (thread-safe).
-#[derive(Debug, Default)]
+/// In-memory audit trail (thread-safe) with optional persistent JSONL storage.
+#[derive(Debug)]
 pub struct AuditTrail {
     records: std::sync::Mutex<Vec<SandboxAuditRecord>>,
+    /// Path to persistent JSONL file (e.g., ~/.config/theo/audit/2026-04-05.jsonl).
+    persist_path: Option<std::path::PathBuf>,
+}
+
+impl Default for AuditTrail {
+    fn default() -> Self {
+        Self {
+            records: std::sync::Mutex::new(Vec::new()),
+            persist_path: None,
+        }
+    }
 }
 
 impl AuditTrail {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Create an audit trail with persistent JSONL storage.
+    ///
+    /// Each record is appended as one JSON line to the file.
+    /// Directory is created if it doesn't exist.
+    pub fn with_persistence(path: std::path::PathBuf) -> Self {
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        Self {
+            records: std::sync::Mutex::new(Vec::new()),
+            persist_path: Some(path),
+        }
+    }
+
+    /// Create an audit trail persisting to the default location (~/.config/theo/audit/).
+    pub fn with_default_persistence() -> Self {
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+        let today = {
+            let d = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            // Simple date: days since epoch
+            let days = d / 86400;
+            format!("{days}")
+        };
+        let path = std::path::PathBuf::from(home)
+            .join(".config")
+            .join("theo")
+            .join("audit")
+            .join(format!("{today}.jsonl"));
+        Self::with_persistence(path)
     }
 
     /// Record a sandboxed execution.
@@ -55,6 +100,20 @@ impl AuditTrail {
             violations: result.violations.clone(),
             executor_entries: result.audit_entries.clone(),
         };
+
+        // Persist to JSONL (best-effort, never blocks)
+        if let Some(ref path) = self.persist_path {
+            if let Ok(json) = serde_json::to_string(&record) {
+                use std::io::Write;
+                if let Ok(mut file) = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(path)
+                {
+                    let _ = writeln!(file, "{json}");
+                }
+            }
+        }
 
         if let Ok(mut records) = self.records.lock() {
             records.push(record);
@@ -203,6 +262,56 @@ mod tests {
         let json = serde_json::to_string(&records[0]).unwrap();
         assert!(json.contains("echo test"));
         assert!(json.contains("low"));
+    }
+
+    // ── Persistence tests ───────────────
+
+    #[test]
+    fn persistent_trail_writes_jsonl() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("audit.jsonl");
+        let trail = AuditTrail::with_persistence(path.clone());
+
+        trail.record("echo hi", &sample_config(), "low", &successful_result());
+        trail.record("rm -rf /", &sample_config(), "critical", &failed_result_with_violation());
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(lines.len(), 2, "Should have 2 JSONL lines");
+
+        // Each line should be valid JSON
+        for line in &lines {
+            let _: SandboxAuditRecord = serde_json::from_str(line)
+                .expect("Each JSONL line should be a valid SandboxAuditRecord");
+        }
+    }
+
+    #[test]
+    fn persistent_trail_append_does_not_overwrite() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("audit.jsonl");
+
+        // First trail
+        let trail1 = AuditTrail::with_persistence(path.clone());
+        trail1.record("echo 1", &sample_config(), "low", &successful_result());
+        drop(trail1);
+
+        // Second trail (simulates new session)
+        let trail2 = AuditTrail::with_persistence(path.clone());
+        trail2.record("echo 2", &sample_config(), "low", &successful_result());
+
+        let content = std::fs::read_to_string(&path).unwrap();
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(lines.len(), 2, "Should have 2 lines from 2 separate sessions");
+    }
+
+    #[test]
+    fn persistent_trail_creates_parent_dirs() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("nested").join("deep").join("audit.jsonl");
+        let trail = AuditTrail::with_persistence(path.clone());
+        trail.record("echo test", &sample_config(), "low", &successful_result());
+        assert!(path.exists(), "JSONL file should exist in nested directory");
     }
 
     // ── Integration test: policy → config → audit ───────────────

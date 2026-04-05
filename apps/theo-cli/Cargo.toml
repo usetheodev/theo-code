@@ -5,13 +5,9 @@ edition.workspace = true
 
 [dependencies]
 theo-domain.workspace = true
-theo-engine-graph.workspace = true
-theo-engine-retrieval.workspace = true
-theo-governance.workspace = true
-theo-engine-parser.workspace = true
-theo-tooling.workspace = true
 theo-application.workspace = true
 theo-agent-runtime.workspace = true
+theo-tooling.workspace = true
 theo-infra-auth = { path = "../../crates/theo-infra-auth" }
 theo-infra-llm = { path = "../../crates/theo-infra-llm" }
 tokio.workspace = true
@@ -19,10 +15,6 @@ clap.workspace = true
 rustyline.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-walkdir.workspace = true
-ignore.workspace = true
-rayon = "1"
-bincode = "1"
 
 [dev-dependencies]
 tempfile.workspace = true

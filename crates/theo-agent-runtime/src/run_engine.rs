@@ -236,6 +236,39 @@ impl AgentRunEngine {
             }
         }
 
+        // Boot sequence: inject progress from previous sessions + recent git activity.
+        // Inserted after memories, before skills — so the agent knows where it left off.
+        if !self.config.is_subagent {
+            let mut boot_parts: Vec<String> = Vec::new();
+
+            // Previous session progress
+            if let Some(progress_msg) = crate::session_bootstrap::boot_message(&self.project_dir) {
+                boot_parts.push(progress_msg);
+            }
+
+            // Recent git activity (max 20 commits, best-effort)
+            if let Ok(output) = std::process::Command::new("git")
+                .args(["log", "--oneline", "-20"])
+                .current_dir(&self.project_dir)
+                .output()
+            {
+                if output.status.success() {
+                    let log = String::from_utf8_lossy(&output.stdout);
+                    let log = log.trim();
+                    if !log.is_empty() {
+                        boot_parts.push(format!("Recent git commits:\n{log}"));
+                    }
+                }
+            }
+
+            if !boot_parts.is_empty() {
+                messages.push(Message::system(&format!(
+                    "## Session Boot Context\n{}",
+                    boot_parts.join("\n\n")
+                )));
+            }
+        }
+
         // Inject available skills into system context (main agent only).
         // Sub-agents do NOT receive skills — they execute their direct objective.
         // This is Layer 2 of recursive spawning prevention (prompt isolation).
@@ -1114,6 +1147,17 @@ impl AgentRunEngine {
                     }
                     "grep" | "glob" => self.agent_state.record_search(),
                     "edit" | "write" | "apply_patch" => {
+                        // RPI sensor: warn if editing without prior research.
+                        // Research = codebase_context, grep, glob, or read calls.
+                        if self.agent_state.searches_done == 0
+                            && self.agent_state.files_read.is_empty()
+                            && self.agent_state.edit_attempts == 0
+                        {
+                            messages.push(Message::user(
+                                "⚠️ You are editing files without prior research (no grep, glob, read, or codebase_context calls). \
+                                 Consider researching the codebase first to understand the affected area and avoid misdiagnosis."
+                            ));
+                        }
                         let file = call
                             .parse_arguments()
                             .ok()
@@ -1268,9 +1312,48 @@ fn auto_init_project_context(project_dir: &std::path::Path) {
             .to_string()
     });
 
-    let content = format!(
-        "# {name}\n\n## Language\n{lang}\n\n## Architecture\n\n<!-- Run `theo init` to generate detailed project context -->\n"
-    );
+    // Progressive disclosure template: table of contents with pointers.
+    // ~60 lines — agent navigates deeper on demand.
+    let mut sections = Vec::new();
+    sections.push(format!("# {name}\n"));
+    sections.push(format!("## Language\n{lang}\n"));
+
+    // Detect and point to existing docs
+    let docs_dir = project_dir.join("docs");
+    let has_docs = docs_dir.exists();
+    let has_readme = project_dir.join("README.md").exists();
+    let has_adr = project_dir.join("docs").join("adr").exists();
+
+    sections.push("## Architecture\n".to_string());
+    if has_readme {
+        sections.push("See `README.md` for project overview.\n".to_string());
+    }
+    if has_docs {
+        sections.push("See `docs/` for detailed documentation.\n".to_string());
+    }
+    if has_adr {
+        sections.push("See `docs/adr/` for Architecture Decision Records.\n".to_string());
+    }
+    if !has_readme && !has_docs {
+        sections.push("<!-- Run `theo init` to generate detailed project context -->\n".to_string());
+    }
+
+    // Point to key config files
+    sections.push("## Key Files\n".to_string());
+    let key_files = [
+        ("Cargo.toml", "Rust workspace manifest"),
+        ("package.json", "Node.js package config"),
+        ("pyproject.toml", "Python project config"),
+        ("go.mod", "Go module config"),
+        (".github/workflows", "CI/CD pipelines"),
+    ];
+    for (file, desc) in &key_files {
+        if project_dir.join(file).exists() {
+            sections.push(format!("- `{file}` — {desc}\n"));
+        }
+    }
+
+    let content = sections.join("");
 
     let theo_dir = project_dir.join(".theo");
     if std::fs::create_dir_all(&theo_dir).is_err() {

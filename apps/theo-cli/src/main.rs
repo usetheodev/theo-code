@@ -1,8 +1,4 @@
-#[allow(dead_code)]
-mod extract;
 mod init;
-#[allow(dead_code)]
-mod pipeline;
 mod commands;
 mod pilot;
 mod renderer;
@@ -12,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use clap::{Parser, Subcommand};
-use pipeline::{Pipeline, PipelineConfig};
+use theo_application::use_cases::pipeline::{Pipeline, PipelineConfig};
 
 // ---------------------------------------------------------------------------
 // CLI definition (Clap derive)
@@ -354,7 +350,7 @@ fn cmd_context(repo_path: &Path, query: &str) {
 
 fn cmd_impact(repo_path: &Path, file_path: &str) {
     let mut pipeline = Pipeline::with_defaults();
-    let (files, _) = extract::extract_repo(repo_path);
+    let (files, _) = theo_application::use_cases::extraction::extract_repo(repo_path);
     pipeline.build_graph(&files);
     let _ = pipeline.add_git_cochanges(repo_path);
     pipeline.cluster();
@@ -382,7 +378,7 @@ fn cmd_impact(repo_path: &Path, file_path: &str) {
 fn cmd_stats(repo_path: &Path) {
     let t = Instant::now();
     let mut pipeline = Pipeline::with_defaults();
-    let (files, ext_stats) = extract::extract_repo(repo_path);
+    let (files, ext_stats) = theo_application::use_cases::extraction::extract_repo(repo_path);
     let stats = pipeline.build_graph(&files);
     let _ = pipeline.add_git_cochanges(repo_path);
     pipeline.cluster();
@@ -418,9 +414,9 @@ fn build_fresh(
     repo_path: &Path,
     cache_dir: &Path,
     cache_path: &Path,
-) -> (u128, u128, u128, Vec<theo_engine_graph::cluster::Community>) {
+) -> (u128, u128, u128, Vec<theo_application::use_cases::pipeline::Community>) {
     let t = Instant::now();
-    let (files, _) = extract::extract_repo(repo_path);
+    let (files, _) = theo_application::use_cases::extraction::extract_repo(repo_path);
     pipeline.build_graph(&files);
     let graph_ms = t.elapsed().as_millis();
 
