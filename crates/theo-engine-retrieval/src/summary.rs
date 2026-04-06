@@ -14,6 +14,21 @@ use theo_engine_graph::model::{CodeGraph, EdgeType, NodeType};
 // Public types
 // ---------------------------------------------------------------------------
 
+/// Structured data derived from the graph — machine-readable, no LLM needed.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CommunityStructuredData {
+    /// Top symbols by in-degree (most called/referenced)
+    pub top_functions: Vec<String>,
+    /// Edge types present within this community
+    pub edge_types_present: Vec<String>,
+    /// Files outside this community that members import/call (max 5)
+    pub cross_community_deps: Vec<String>,
+    /// Number of unique files
+    pub file_count: usize,
+    /// Dominant language by file extension
+    pub primary_language: String,
+}
+
 /// A generated summary for a community.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CommunitySummary {
@@ -21,10 +36,12 @@ pub struct CommunitySummary {
     pub community_id: String,
     /// Human-readable name (e.g., "auth/jwt")
     pub name: String,
-    /// The full summary text
+    /// The full summary text (for LLM consumption)
     pub text: String,
-    /// Estimated token count
+    /// Estimated token count (of text only — structured not counted)
     pub token_count: usize,
+    /// Machine-readable structured data (for runtime/tracing, not in budget)
+    pub structured: CommunityStructuredData,
 }
 
 /// Git commit info per file (passed in from the git module).
@@ -219,11 +236,65 @@ fn generate_one(
     let text = lines.join("\n");
     let token_count = estimate_tokens(&text);
 
+    // Build structured data (machine-readable, no LLM needed).
+    let member_set: HashSet<&str> = community.node_ids.iter().map(String::as_str).collect();
+
+    // Top functions: symbols with highest in-degree (most called)
+    let mut top_functions: Vec<(String, usize)> = symbols.iter()
+        .map(|s| {
+            let in_degree = graph.reverse_neighbors(&s.id).len();
+            (s.name.clone(), in_degree)
+        })
+        .collect();
+    top_functions.sort_by(|a, b| b.1.cmp(&a.1));
+    let top_functions: Vec<String> = top_functions.into_iter().take(5).map(|(name, _)| name).collect();
+
+    // Edge types present within this community
+    let mut edge_types: HashSet<String> = HashSet::new();
+    for edge in graph.all_edges() {
+        if member_set.contains(edge.source.as_str()) && member_set.contains(edge.target.as_str()) {
+            edge_types.insert(format!("{:?}", edge.edge_type));
+        }
+    }
+    let edge_types_present: Vec<String> = edge_types.into_iter().collect();
+
+    // Cross-community deps: external files that members import/call (max 5)
+    let mut external_deps: HashSet<String> = HashSet::new();
+    for edge in graph.all_edges() {
+        if member_set.contains(edge.source.as_str()) && !member_set.contains(edge.target.as_str()) {
+            if let Some(node) = graph.get_node(&edge.target) {
+                if let Some(fp) = &node.file_path {
+                    external_deps.insert(fp.clone());
+                }
+            }
+        }
+    }
+    let cross_community_deps: Vec<String> = external_deps.into_iter().take(5).collect();
+
+    // Primary language by extension
+    let mut ext_counts: HashMap<String, usize> = HashMap::new();
+    for f in &files {
+        if let Some(ext) = std::path::Path::new(f).extension().and_then(|e| e.to_str()) {
+            *ext_counts.entry(ext.to_string()).or_default() += 1;
+        }
+    }
+    let primary_language = ext_counts.into_iter()
+        .max_by_key(|(_, count)| *count)
+        .map(|(ext, _)| ext)
+        .unwrap_or_default();
+
     CommunitySummary {
         community_id: community.id.clone(),
         name: community.name.clone(),
         text,
         token_count,
+        structured: CommunityStructuredData {
+            top_functions,
+            edge_types_present,
+            cross_community_deps,
+            file_count: files.len(),
+            primary_language,
+        },
     }
 }
 

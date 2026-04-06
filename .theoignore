@@ -1,0 +1,3 @@
+# Exclude external projects from GRAPHCTX indexing
+opencode/
+pi-mono/

@@ -56,6 +56,18 @@ impl Tool for CodebaseContextTool {
                     description: "Maximum tokens of context to return (default: 4000).".into(),
                     required: false,
                 },
+                ToolParam {
+                    name: "mode".into(),
+                    param_type: "string".into(),
+                    description: "Navigation mode: 'search' (default — rank modules by relevance), 'callers' (who calls this symbol?), 'callees' (what does it call?), 'imports' (what does it import?), 'dependents' (what depends on it?).".into(),
+                    required: false,
+                },
+                ToolParam {
+                    name: "symbol".into(),
+                    param_type: "string".into(),
+                    description: "Symbol name for callers/callees/imports/dependents modes (e.g., 'verify_token', 'AgentRunEngine').".into(),
+                    required: false,
+                },
             ],
         }
     }
@@ -76,6 +88,16 @@ impl Tool for CodebaseContextTool {
             .and_then(|v| v.as_u64())
             .map(|v| v as usize)
             .unwrap_or(DEFAULT_BUDGET);
+
+        let mode = args
+            .get("mode")
+            .and_then(|v| v.as_str())
+            .unwrap_or("search");
+
+        let symbol = args
+            .get("symbol")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
 
         // Check if graph context provider is available.
         let provider = match &ctx.graph_context {
@@ -100,22 +122,53 @@ impl Tool for CodebaseContextTool {
             });
         }
 
-        // Query with timeout.
+        // Dispatch by navigation mode.
+        use theo_domain::graph_context::NavigationMode;
+        let nav_mode = match mode {
+            "callers" => Some(NavigationMode::Callers),
+            "callees" => Some(NavigationMode::Callees),
+            "imports" => Some(NavigationMode::Imports),
+            "dependents" => Some(NavigationMode::Dependents),
+            _ => None, // "search" or default
+        };
+
         let result = tokio::time::timeout(
             std::time::Duration::from_secs(QUERY_TIMEOUT_SECS),
-            provider.query_context(query, budget),
+            async {
+                if let Some(nav) = nav_mode {
+                    // Navigation mode: traverse graph from symbol
+                    let sym = if symbol.is_empty() { query } else { symbol };
+                    provider.navigate_symbol(sym, nav, budget).await
+                } else {
+                    // Search mode: BM25 + multi-signal ranking (default)
+                    provider.query_context(query, budget).await
+                }
+            },
         )
         .await;
 
         match result {
             Ok(Ok(ctx_result)) => {
+                let (ctx_result, retrieval_method) = if ctx_result.blocks.is_empty() {
+                    // Veto Protocol: BM25 returned nothing → fallback to symbol lookup.
+                    // Paper "Navigation Paradox" shows graph resolves 99.4% of cases
+                    // where retrieval fails.
+                    match provider.query_by_symbol(query, budget).await {
+                        Ok(fallback) if !fallback.blocks.is_empty() => (fallback, "symbol_fallback"),
+                        _ => (ctx_result, "empty"),
+                    }
+                } else {
+                    (ctx_result, "search")
+                };
+
                 let text = ctx_result.to_prompt_text();
                 if text.is_empty() {
                     return Ok(ToolOutput {
                         title: "Codebase Context".into(),
-                        output: "No relevant code structures found for this query. Try a different search term or use grep/glob.".into(),
+                        output: "No relevant code structures found for this query. Try a different search term, or use mode='callers'/'callees' with a specific symbol name.".into(),
                         metadata: serde_json::json!({
                             "status": "empty",
+                            "retrieval_method": retrieval_method,
                             "query": query,
                             "budget_tokens": budget,
                         }),
@@ -149,6 +202,8 @@ impl Tool for CodebaseContextTool {
                     output: text,
                     metadata: serde_json::json!({
                         "status": "ok",
+                        "retrieval_method": retrieval_method,
+                        "mode": mode,
                         "total_tokens": ctx_result.total_tokens,
                         "budget_tokens": ctx_result.budget_tokens,
                         "budget_used_pct": budget_used_pct,

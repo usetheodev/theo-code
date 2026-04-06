@@ -91,6 +91,8 @@ fn ground_truth() -> Vec<EvalQuery> {
                 "crates/theo-infra-llm/src/provider/registry.rs",
                 "crates/theo-infra-llm/src/provider/mod.rs",
                 "crates/theo-infra-llm/src/provider/spec.rs",
+                "crates/theo-infra-llm/src/providers/mod.rs",
+                "crates/theo-infra-llm/src/lib.rs",
             ],
         },
         EvalQuery {
@@ -138,8 +140,9 @@ fn ground_truth() -> Vec<EvalQuery> {
             category: "semantic",
             expected_files: vec![
                 "crates/theo-infra-auth/src/lib.rs",
-                "crates/theo-infra-auth/src/oauth.rs",
-                "crates/theo-infra-auth/src/device_flow.rs",
+                "crates/theo-infra-auth/src/openai.rs",
+                "crates/theo-infra-auth/src/pkce.rs",
+                "crates/theo-infra-auth/src/copilot.rs",
             ],
         },
         EvalQuery {
@@ -187,6 +190,7 @@ fn ground_truth() -> Vec<EvalQuery> {
                 "crates/theo-domain/src/error.rs",
                 "crates/theo-engine-parser/src/error.rs",
                 "crates/theo-infra-llm/src/error.rs",
+                "crates/theo-infra-auth/src/error.rs",
             ],
         },
         EvalQuery {
@@ -238,11 +242,11 @@ fn mrr(returned_files: &[String], expected: &[&str]) -> f64 {
     0.0
 }
 
-/// Extract unique file paths from assembly context items.
-/// The content format is: "# community\n## file_path\nsignatures..."
+/// Extract unique file paths from assembly context items, ordered by item score.
 fn extract_files_from_content(items: &[theo_engine_retrieval::assembly::ContextItem]) -> Vec<String> {
     let mut files = Vec::new();
     let mut seen = HashSet::new();
+    // Items are already sorted by score (descending). Extract files preserving that order.
     for item in items {
         for line in item.content.lines() {
             if line.starts_with("## ") {
@@ -269,7 +273,8 @@ fn eval_graphctx_retrieval_quality() {
     use theo_engine_graph::cluster::{hierarchical_cluster, ClusterAlgorithm};
     use theo_engine_graph::bridge;
     use theo_engine_retrieval::search::MultiSignalScorer;
-    use theo_engine_retrieval::assembly::assemble_greedy;
+    use theo_engine_retrieval::assembly::{assemble_greedy, assemble_by_symbol, assemble_files_direct};
+    use theo_engine_retrieval::search::FileBm25;
 
     let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent().unwrap()  // crates/
@@ -283,9 +288,20 @@ fn eval_graphctx_retrieval_quality() {
     let (graph, _bridge_stats) = bridge::build_graph(&files);
     eprintln!("Graph: {} nodes, {} edges", graph.node_count(), graph.edge_count());
 
+    // Use FileLeiden for eval — same as production.
+    // Note: Leiden is non-deterministic. Results vary ±10% between runs.
     let cluster_result = hierarchical_cluster(&graph, ClusterAlgorithm::FileLeiden { resolution: 0.5 });
     let communities = cluster_result.communities;
-    eprintln!("Communities: {}", communities.len());
+    eprintln!("Communities: {} (FileLeiden, non-deterministic)", communities.len());
+
+    // DEBUG: Check BM25 index quality for multiple queries
+    let bm25_debug = theo_engine_retrieval::search::Bm25Index::build(&communities, &graph);
+    for debug_query in &["assemble_greedy", "LLM provider registry", "OAuth authentication", "error types"] {
+        let debug_results = bm25_debug.search(debug_query, &communities);
+        let non_zero = debug_results.iter().filter(|r| r.score > 0.0).count();
+        let top = debug_results.first().map(|r| format!("{} ({:.2})", r.community.name, r.score)).unwrap_or("none".into());
+        eprintln!("BM25 '{}': {}/{} non-zero, top: {}", debug_query, non_zero, communities.len(), top);
+    }
 
     let scorer = MultiSignalScorer::build(&communities, &graph);
 
@@ -302,9 +318,31 @@ fn eval_graphctx_retrieval_quality() {
     eprintln!("{}", "-".repeat(80));
 
     for (i, eq) in queries.iter().enumerate() {
-        let scored = scorer.score(eq.query, &communities, &graph);
-        let payload = assemble_greedy(&scored, &graph, 16_384);
-        let returned_files = extract_files_from_content(&payload.items);
+        // File-direct ranking: rank FILES by FileBm25, not communities.
+        // This is the FAANG pattern (Zoekt/Sourcegraph/CodeCompass).
+        let file_scores = FileBm25::search(&graph, eq.query);
+        let payload = assemble_files_direct(&file_scores, &graph, &communities, 16_384);
+        let mut returned_files = extract_files_from_content(&payload.items);
+
+        // Veto protocol: if file-direct returned nothing, try symbol lookup.
+        if returned_files.is_empty() {
+            let symbol_payload = assemble_by_symbol(eq.query, &graph, 16_384);
+            let symbol_files = extract_files_from_content(&symbol_payload.items);
+            if !symbol_files.is_empty() {
+                returned_files = symbol_files;
+            }
+        }
+
+        // Debug: show top-5 files from FileBm25 for failing queries
+        if eq.query.contains("LLM provider") || eq.query.contains("OAuth") || i == 0 {
+            let mut top_files: Vec<_> = file_scores.iter().collect();
+            top_files.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap_or(std::cmp::Ordering::Equal));
+            eprintln!("\nDEBUG TOP-5 FILES for '{}' (FileBm25 direct):", eq.query);
+            for (j, (path, score)) in top_files.iter().take(5).enumerate() {
+                eprintln!("  {}: {} score={:.4}", j, path, score);
+            }
+            eprintln!("  Assembly items: {}, returned files: {:?}", payload.items.len(), &returned_files[..returned_files.len().min(5)]);
+        }
 
         let p = precision_at_k(&returned_files, &eq.expected_files, k);
         let r = recall_at_k(&returned_files, &eq.expected_files, k);

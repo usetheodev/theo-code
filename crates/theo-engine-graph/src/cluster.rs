@@ -1395,6 +1395,7 @@ fn merge_small_communities(
 }
 
 /// Subdivide a large file-level community by re-running Leiden with higher resolution.
+#[allow(dead_code)] // Kept as alternative to LPA-based subdivision
 fn subdivide_file_community(graph: &CodeGraph, community: &Community) -> Vec<Community> {
     use crate::model::EdgeType;
 

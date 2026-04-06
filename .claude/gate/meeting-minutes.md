@@ -1,37 +1,24 @@
-# Meeting — 2026-04-06 (P1 FAANG — 7.5 → 8.5)
+# Meeting — 2026-04-06 (Reverse Dependency Boost — P@5 breakthrough)
 
 ## Proposta
-5 items P1. 3 aprovados, 2 adiados (YAGNI sem dados).
+Reverse Dependency Boost: após BM25 encontrar file #1, boost files que CHAMAM símbolos definidos no file #1. Filtros: só funções (não types), hub filter (lib.rs/mod.rs), cap 0.6.
 
 ## Participantes
-- **governance** — P1.1/P1.2/P1.4 APPROVE. P1.3/P1.5 NEEDS_REVISION.
+- **graphctx** — Design concreto: reverse_neighbors de Function symbols, hub filter, cap
 
-## Decisão ajustada
-
-| Item | Decisão | Razão |
-|---|---|---|
-| P1.1 Stale cache | **APPROVE** | Zero risco, dados stale > vazio |
-| P1.2 Impact invalidation | **APPROVE** | Threshold conservador como fallback |
-| P1.3 Intent classifier | **ADIADO P2** | Cruza 3 bounded contexts, sem benchmark. YAGNI |
-| P1.4 Planning injection | **APPROVE** | Com flag + skip if Building |
-| P1.5 Snapshot semantics | **ADIADO P2** | RwLock já suficiente, sem evidência de contention |
+## Evidência
+- LocAgent (ACL 2025): graph traversal from BM25 seed via call/import edges
+- Aider: Personalized PageRank seeded from context files
+- CodeCompass: BM25 + Graph combination = 99%
 
 ## Veredito
-**APPROVED** (3 de 5 items)
+**APPROVED**
 
 ## Escopo Aprovado
-
-### P1.1 — Stale cache during build
-- `crates/theo-application/src/use_cases/graph_context_service.rs`
-
-### P1.2 — Impact-based invalidation
-- `crates/theo-application/src/use_cases/pipeline.rs`
-
-### P1.4 — Planning injection
-- `crates/theo-agent-runtime/src/run_engine.rs`
+- `crates/theo-engine-retrieval/src/assembly.rs` (assemble_files_direct — reverse dep boost)
 
 ## Condições
-1. P1.1: Building(Option<GraphState>) — stale_cache field
-2. P1.2: usar edge count (fan-in+fan-out) como proxy de centralidade. >20 edges = central
-3. P1.4: entre Session Boot Context e Skills. Max 200 tokens. Flag config.inject_graph_planning. Skip if Building.
-4. cargo test verde após cada item
+1. Boost apenas para Function/Method symbols (não types/traits)
+2. Hub filter: skip lib.rs, mod.rs, main.rs
+3. Cap MAX_BOOST=0.6 por file
+4. Eval P@5 deve subir de 0.360

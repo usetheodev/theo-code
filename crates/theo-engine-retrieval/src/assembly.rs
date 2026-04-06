@@ -61,10 +61,9 @@ fn community_content(community: &Community, graph: &CodeGraph) -> String {
                 NodeType::File => {
                     // Emit child signatures (symbols contained in this file).
                     let children = graph.contains_children(node_id);
-                    if children.is_empty() {
-                        lines.push(node.name.clone());
-                    } else {
-                        lines.push(format!("## {}", node.name));
+                    // Always emit ## prefix so file paths are detectable by consumers.
+                    lines.push(format!("## {}", node.name));
+                    if !children.is_empty() {
                         for child_id in children {
                             if let Some(child) = graph.get_node(child_id) {
                                 let text = child.signature.as_deref().unwrap_or(&child.name);
@@ -115,7 +114,6 @@ pub fn assemble_greedy(
         content: String,
         token_count: usize,
         score: f64,
-        density: f64,
     }
 
     // Minimum community size to include in output (filter noise from singletons).
@@ -127,20 +125,20 @@ pub fn assemble_greedy(
         .map(|s| {
             let content = community_content(&s.community, graph);
             let token_count = estimate_tokens(&content).max(1); // floor at 1 to avoid div/0
-            let density = s.score / token_count as f64;
             Candidate {
                 community_id: s.community.id.clone(),
                 community_name: s.community.name.clone(),
                 content,
                 token_count,
                 score: s.score,
-                density,
             }
         })
         .collect();
 
-    // Sort descending by density (value density = score / cost).
-    candidates.sort_by(|a, b| b.density.partial_cmp(&a.density).unwrap_or(std::cmp::Ordering::Equal));
+    // Sort descending by SCORE (relevance first, not token-efficiency).
+    // Previous: sorted by density (score/tokens) which caused small irrelevant
+    // communities to beat large relevant ones. Now: most relevant first.
+    candidates.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
 
     let mut items: Vec<ContextItem> = Vec::new();
     let mut total_tokens = 0usize;
@@ -194,7 +192,6 @@ pub fn assemble_with_summaries(
         content: String,
         token_count: usize,
         score: f64,
-        density: f64,
     }
 
     let mut candidates: Vec<Candidate> = scored
@@ -207,19 +204,17 @@ pub fn assemble_with_summaries(
                 let tc = estimate_tokens(&fallback).max(1);
                 (fallback, tc)
             };
-            let density = s.score / token_count as f64;
             Candidate {
                 community_id: s.community.id.clone(),
                 community_name: s.community.name.clone(),
                 content,
                 token_count,
                 score: s.score,
-                density,
             }
         })
         .collect();
 
-    candidates.sort_by(|a, b| b.density.partial_cmp(&a.density).unwrap_or(std::cmp::Ordering::Equal));
+    candidates.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
 
     let mut items: Vec<ContextItem> = Vec::new();
     let mut total_tokens = 0usize;
@@ -954,13 +949,208 @@ pub fn assemble_by_symbol(
 }
 
 // ---------------------------------------------------------------------------
+// File-direct assembly (FAANG pattern: rank files, annotate with community)
+// ---------------------------------------------------------------------------
+
+/// Assemble context by ranking FILES directly, not communities.
+///
+/// Every production code search system (Zoekt, Sourcegraph, CodeCompass)
+/// ranks at file level. This function:
+/// 1. Takes pre-computed file_path → score from FileBm25
+/// 2. Ranks files by score (best file = slot #1)
+/// 3. For each file, emits its signatures with community annotation
+/// 4. Fills budget greedily by file rank
+///
+/// This gives dramatically better P@5 than community-first assembly because
+/// each of the K slots is a specific high-scoring file, not a random member
+/// of a high-scoring community.
+pub fn assemble_files_direct(
+    file_scores: &std::collections::HashMap<String, f64>,
+    graph: &CodeGraph,
+    communities: &[Community],
+    budget_tokens: usize,
+) -> ContextPayload {
+    if file_scores.is_empty() || budget_tokens == 0 {
+        return ContextPayload {
+            items: vec![],
+            total_tokens: 0,
+            budget_tokens,
+            exploration_hints: String::new(),
+        };
+    }
+
+    // Build file → community lookup
+    let mut file_to_community: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
+    for comm in communities {
+        for nid in &comm.node_ids {
+            if let Some(node) = graph.get_node(nid) {
+                if let Some(fp) = node.file_path.as_deref() {
+                    file_to_community.entry(fp).or_insert(&comm.name);
+                }
+            }
+        }
+    }
+
+    // Apply penalties and boosts before ranking.
+    let mut adjusted_scores: std::collections::HashMap<&str, f64> = file_scores
+        .iter()
+        .map(|(path, &score)| {
+            let p = path.as_str();
+            let mut s = score;
+
+            // Penalty: test/benchmark/example files get 1/10 score (Zoekt pattern).
+            // These files mention symbols (because they test them) but aren't source.
+            let is_test = p.contains("/tests/") || p.contains("/test_") || p.contains("_test.")
+                || p.contains(".test.") || p.contains("_spec.") || p.contains(".spec.");
+            let is_benchmark = p.contains("/examples/") || p.contains("/benchmark")
+                || p.contains("benchmark.") || p.contains("theo-benchmark");
+            let is_eval = p.contains("eval_suite");
+
+            if is_test || is_benchmark || is_eval {
+                s *= 0.1; // 1/10 penalty
+            }
+
+            (p, s)
+        })
+        .collect();
+
+    // Reverse Dependency Boost (LocAgent ACL 2025 pattern):
+    // After BM25 finds file #1 (the definer), find files that CALL symbols
+    // defined in file #1. This answers "who USES this?" — the exact gap
+    // in slots 2-5.
+    //
+    // Key difference from failed forward expansion: we follow REVERSE edges
+    // from the seed's symbols to their callers. Forward expansion (file→imports)
+    // hits lib.rs (imported by everything). Reverse expansion (symbol→callers)
+    // is targeted and sparse.
+    //
+    // Filters: only Function/Method symbols (types/traits have too many implementers),
+    // skip hub files (lib.rs, mod.rs, main.rs), cap boost at 0.6.
+    use theo_engine_graph::model::SymbolKind;
+
+    const REVERSE_BOOST_PER_CALLER: f64 = 0.20;
+    const MAX_REVERSE_BOOST: f64 = 0.6;
+    const HUB_SUFFIXES: &[&str] = &["/lib.rs", "/mod.rs", "/main.rs"];
+
+    let is_hub_file = |p: &str| HUB_SUFFIXES.iter().any(|s| p.ends_with(s));
+
+    // Only expand from top-3 BM25 seeds
+    let mut seeds_for_reverse: Vec<(&str, f64)> = adjusted_scores.iter()
+        .map(|(&p, &s)| (p, s))
+        .collect();
+    seeds_for_reverse.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    let mut reverse_boost: std::collections::HashMap<&str, f64> = std::collections::HashMap::new();
+
+    for (seed_path, _seed_score) in seeds_for_reverse.iter().take(3) {
+        let file_id = format!("file:{}", seed_path);
+
+        // For each symbol DEFINED in this seed file
+        for sym_id in graph.contains_children(&file_id) {
+            let Some(sym) = graph.get_node(sym_id) else { continue };
+
+            // Only functions/methods — types and traits have too many implementers
+            let is_fn = matches!(sym.kind, Some(SymbolKind::Function) | Some(SymbolKind::Method));
+            if !is_fn { continue; }
+
+            // Find CALLERS of this symbol (reverse edge traversal)
+            for caller_id in graph.reverse_neighbors(sym_id) {
+                let Some(caller) = graph.get_node(caller_id) else { continue };
+                let Some(caller_file) = caller.file_path.as_deref() else { continue };
+
+                // Skip self-references and hub files
+                if caller_file == *seed_path { continue; }
+                if is_hub_file(caller_file) { continue; }
+
+                *reverse_boost.entry(caller_file).or_insert(0.0) += REVERSE_BOOST_PER_CALLER;
+            }
+        }
+    }
+
+    // Apply capped boost
+    for (&path, &boost) in &reverse_boost {
+        let capped = boost.min(MAX_REVERSE_BOOST);
+        adjusted_scores.entry(path)
+            .and_modify(|s| *s += capped)
+            .or_insert(capped);
+    }
+
+    // Rank files by adjusted score descending
+    let mut ranked_files: Vec<(&str, f64)> = adjusted_scores.into_iter().collect();
+    ranked_files.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    // Build items: one per file, with signatures
+    let mut items: Vec<ContextItem> = Vec::new();
+    let mut total_tokens = 0;
+    let mut seen_files: HashSet<&str> = HashSet::new();
+
+    for (file_path, score) in &ranked_files {
+        if !seen_files.insert(file_path) {
+            continue;
+        }
+
+        // Find file node ID
+        let file_id = format!("file:{}", file_path);
+        let mut lines: Vec<String> = Vec::new();
+
+        // Community annotation (1 line)
+        if let Some(comm_name) = file_to_community.get(file_path) {
+            lines.push(format!("# {} [{}]", file_path, comm_name));
+        } else {
+            lines.push(format!("# {}", file_path));
+        }
+
+        // File header with ## for eval detection
+        lines.push(format!("## {}", file_path));
+
+        // Symbol signatures from children
+        let children = graph.contains_children(&file_id);
+        let mut seen_sigs: HashSet<String> = HashSet::new();
+        for child_id in children {
+            if let Some(child) = graph.get_node(child_id) {
+                let text = child.signature.as_deref().unwrap_or(&child.name);
+                if seen_sigs.insert(text.to_string()) {
+                    lines.push(text.to_string());
+                }
+            }
+        }
+
+        let content = lines.join("\n");
+        let token_count = estimate_tokens(&content).max(1);
+
+        if total_tokens + token_count > budget_tokens {
+            break; // Budget exhausted
+        }
+
+        total_tokens += token_count;
+        items.push(ContextItem {
+            community_id: format!("file:{}", file_path),
+            content,
+            token_count,
+            score: *score,
+        });
+
+        if items.len() >= 20 {
+            break; // Cap at 20 files
+        }
+    }
+
+    ContextPayload {
+        items,
+        total_tokens,
+        budget_tokens,
+        exploration_hints: String::new(),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::summary::CommunitySummary;
+    use crate::summary::{CommunitySummary, CommunityStructuredData};
     use std::collections::HashMap;
     use std::io::Write;
     use theo_engine_graph::cluster::Community;
@@ -1108,6 +1298,7 @@ mod tests {
                 name: "auth/jwt".into(),
                 text: "## auth/jwt (3 funções, 10 linhas, src/auth.rs, src/handler.rs)\n\nFluxo: verify_token → decode".into(),
                 token_count: 20,
+                structured: CommunityStructuredData { top_functions: vec![], edge_types_present: vec![], cross_community_deps: vec![], file_count: 0, primary_language: String::new() },
             },
         );
 
@@ -1263,6 +1454,7 @@ mod tests {
                 name: "big/module".into(),
                 text: "## big/module".into(),
                 token_count: 5,
+                structured: CommunityStructuredData { top_functions: vec![], edge_types_present: vec![], cross_community_deps: vec![], file_count: 0, primary_language: String::new() },
             },
         );
 

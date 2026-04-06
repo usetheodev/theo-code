@@ -56,6 +56,7 @@ pub struct Bm25Index {
 /// (384-dim float → 96 bytes, 32x compression) with ~5% quality loss.
 /// Query vectors stay full-precision for maximum accuracy.
 pub struct MultiSignalScorer {
+    #[allow(dead_code)] // Superseded by FileBm25 (file-level indexing)
     bm25_index: Bm25Index,
     /// community_id -> normalized PageRank score
     centrality_scores: HashMap<String, f64>,
@@ -134,6 +135,13 @@ pub(crate) fn tokenise(text: &str) -> Vec<String> {
         if word.is_empty() {
             continue;
         }
+        // Also index the unsplit form (lowercased) for substring-like matching.
+        // "OpenAIAuth" → tokens: ["open", "ai", "auth", "openaiauth"]
+        // This helps "oauth" match files containing "oauth_client" etc.
+        let lower = word.to_lowercase();
+        if lower.len() >= 3 {
+            tokens.push(lower);
+        }
         // Then split camelCase/PascalCase
         split_identifier(word, &mut tokens);
     }
@@ -187,44 +195,40 @@ fn split_identifier(word: &str, out: &mut Vec<String>) {
 /// Build the text document for a community.
 ///
 /// For large communities (>5 files), generates a COMPACT document with
-/// file names + top symbol names only (avoids dilution in BM25).
-/// For small communities, includes full signatures and docstrings.
+/// Build a text document for BM25 indexing from a community's nodes.
+///
+/// ALWAYS includes signatures and symbol names — these are the terms that
+/// queries match against. Without them, BM25 returns 0 and query-independent
+/// signals (centrality, recency) dominate, producing a fixed ranking.
 fn community_document(community: &Community, graph: &CodeGraph) -> String {
     use theo_engine_graph::model::NodeType;
 
-    let is_large = community.node_ids.len() > 5;
     let mut parts = vec![community.name.clone()];
 
     for node_id in &community.node_ids {
         if let Some(node) = graph.get_node(node_id) {
-            // Always include the node name (file path for File nodes)
             parts.push(node.name.clone());
 
-            if !is_large {
-                if let Some(sig) = &node.signature {
-                    parts.push(sig.clone());
-                }
-                if let Some(doc) = &node.doc {
-                    if let Some(first_line) = doc.lines().next() {
-                        parts.push(first_line.to_string());
-                    }
+            if let Some(sig) = &node.signature {
+                parts.push(sig.clone());
+            }
+            if let Some(doc) = &node.doc {
+                if let Some(first_line) = doc.lines().next() {
+                    parts.push(first_line.to_string());
                 }
             }
 
-            // Follow CONTAINS edges to get child symbols — O(degree) via index
+            // Follow CONTAINS edges to get child symbols
             if matches!(node.node_type, NodeType::File) {
                 for child_id in graph.contains_children(node_id) {
                     if let Some(child) = graph.get_node(child_id) {
-                        // Always include symbol names (critical for BM25 matching)
                         parts.push(child.name.clone());
-                        if !is_large {
-                            if let Some(sig) = &child.signature {
-                                parts.push(sig.clone());
-                            }
-                            if let Some(doc) = &child.doc {
-                                if let Some(first_line) = doc.lines().next() {
-                                    parts.push(first_line.to_string());
-                                }
+                        if let Some(sig) = &child.signature {
+                            parts.push(sig.clone());
+                        }
+                        if let Some(doc) = &child.doc {
+                            if let Some(first_line) = doc.lines().next() {
+                                parts.push(first_line.to_string());
                             }
                         }
                     }
@@ -474,6 +478,208 @@ fn community_recency(communities: &[Community], graph: &CodeGraph) -> HashMap<St
 }
 
 // ---------------------------------------------------------------------------
+// Rust stop words — filter high-frequency code tokens from BM25
+// ---------------------------------------------------------------------------
+
+const RUST_STOP_WORDS: &[&str] = &[
+    "fn", "pub", "let", "mut", "use", "mod", "impl", "struct", "enum", "trait",
+    "type", "const", "static", "self", "super", "crate", "where", "for", "in",
+    "if", "else", "match", "return", "async", "await", "move", "ref", "as",
+    "str", "string", "bool", "i32", "i64", "u8", "u32", "u64", "usize", "f64",
+    "option", "result", "ok", "err", "some", "none", "vec", "box", "arc",
+    "true", "false", "new", "default",
+];
+
+fn is_stop_word(token: &str) -> bool {
+    RUST_STOP_WORDS.contains(&token)
+}
+
+// ---------------------------------------------------------------------------
+// File-level BM25 with BM25F boosts (CodeCompass/Zoekt pattern)
+// ---------------------------------------------------------------------------
+
+/// File-level BM25 search with BM25F field boosts.
+///
+/// Indexes each file as a separate document (not community).
+/// Boosts: filename 5x, symbol name 3x, signature 1x, doc 1x.
+pub struct FileBm25;
+
+impl FileBm25 {
+    /// Search with Pseudo-Relevance Feedback (PRF).
+    ///
+    /// Stage 1: Initial BM25 search.
+    /// Stage 2: If top result is confident, extract its symbol names as expansion
+    ///          terms and merge with original scores.
+    ///
+    /// PRF is a classic IR technique (Rocchio, 1971) that uses the top result's
+    /// vocabulary to find related documents. Unlike graph expansion, PRF is purely
+    /// lexical and doesn't suffer from dense import noise.
+    pub fn search(graph: &CodeGraph, query: &str) -> HashMap<String, f64> {
+        let initial = Self::search_inner(graph, query);
+
+        // Only expand if we have a confident top result
+        let mut sorted: Vec<_> = initial.iter().collect();
+        sorted.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+        if sorted.len() >= 2 && *sorted[0].1 > sorted[1].1 * 2.0 {
+            let top_file = sorted[0].0.as_str();
+            let file_id = format!("file:{}", top_file);
+
+            // Extract top-5 most unique symbol names from the top file
+            let mut expansion: Vec<String> = Vec::new();
+            for child_id in graph.contains_children(&file_id) {
+                if let Some(child) = graph.get_node(child_id) {
+                    // Only expand with meaningful symbol names (not common ones)
+                    if child.name.len() >= 5 && !is_stop_word(&child.name.to_lowercase()) {
+                        expansion.push(child.name.clone());
+                    }
+                }
+            }
+            expansion.truncate(5);
+
+            if !expansion.is_empty() {
+                // Run second BM25 with expansion terms only (not original query)
+                let expansion_query = expansion.join(" ");
+                let expanded = Self::search_inner(graph, &expansion_query);
+
+                // Merge: original scores + 0.3x expanded scores
+                let mut merged = initial;
+                for (path, exp_score) in expanded {
+                    merged.entry(path)
+                        .and_modify(|s| *s += exp_score * 0.3)
+                        .or_insert(exp_score * 0.3);
+                }
+                return merged;
+            }
+        }
+
+        initial
+    }
+
+    /// Inner BM25 search (single pass).
+    fn search_inner(graph: &CodeGraph, query: &str) -> HashMap<String, f64> {
+        let query_tokens: Vec<String> = tokenise(query)
+            .into_iter()
+            .filter(|t| !is_stop_word(t))
+            .collect();
+
+        if query_tokens.is_empty() {
+            return HashMap::new();
+        }
+
+        let file_nodes: Vec<(&str, &str)> = graph.node_ids()
+            .filter_map(|id| {
+                let n = graph.get_node(id)?;
+                if n.node_type == NodeType::File {
+                    Some((id, n.file_path.as_deref().unwrap_or(&n.name)))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let doc_count = file_nodes.len();
+        if doc_count == 0 {
+            return HashMap::new();
+        }
+
+        let mut postings: HashMap<String, Vec<(usize, f64)>> = HashMap::new();
+        let mut doc_lengths: Vec<f64> = Vec::with_capacity(doc_count);
+
+        for (idx, (file_id, _)) in file_nodes.iter().enumerate() {
+            let Some(file_node) = graph.get_node(file_id) else { continue };
+            let mut weighted_tf: HashMap<String, f64> = HashMap::new();
+
+            // Filename: 5x boost (BM25F — Zoekt pattern)
+            for token in tokenise(&file_node.name) {
+                if !is_stop_word(&token) {
+                    *weighted_tf.entry(token).or_default() += 5.0;
+                }
+            }
+
+            // Children via Contains edges
+            for child_id in graph.contains_children(file_id) {
+                if let Some(child) = graph.get_node(child_id) {
+                    // Symbol name: 3x boost
+                    for token in tokenise(&child.name) {
+                        if !is_stop_word(&token) {
+                            *weighted_tf.entry(token).or_default() += 3.0;
+                        }
+                    }
+                    // Signature: 1x
+                    if let Some(sig) = &child.signature {
+                        for token in tokenise(sig) {
+                            if !is_stop_word(&token) {
+                                *weighted_tf.entry(token).or_default() += 1.0;
+                            }
+                        }
+                    }
+                    // Doc first line: 1x
+                    if let Some(doc) = &child.doc {
+                        if let Some(fl) = doc.lines().next() {
+                            for token in tokenise(fl) {
+                                if !is_stop_word(&token) {
+                                    *weighted_tf.entry(token).or_default() += 1.0;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            let len: f64 = weighted_tf.values().sum();
+            doc_lengths.push(len);
+            for (term, freq) in weighted_tf {
+                postings.entry(term).or_default().push((idx, freq));
+            }
+        }
+
+        let avg_dl = if doc_count > 0 { doc_lengths.iter().sum::<f64>() / doc_count as f64 } else { 1.0 };
+        let (k1, b) = (1.2f64, 0.75f64);
+        let n = doc_count as f64;
+
+        let mut scores = vec![0.0f64; doc_count];
+        for term in &query_tokens {
+            let Some(posts) = postings.get(term.as_str()) else { continue };
+            let n_t = posts.len() as f64;
+            let idf = ((n - n_t + 0.5) / (n_t + 0.5) + 1.0).ln();
+            for &(doc_idx, tf) in posts {
+                let dl = doc_lengths[doc_idx];
+                let norm = tf * (k1 + 1.0) / (tf + k1 * (1.0 - b + b * dl / avg_dl));
+                scores[doc_idx] += idf * norm;
+            }
+        }
+
+        let mut result = HashMap::new();
+        for (idx, (_, file_path)) in file_nodes.iter().enumerate() {
+            if scores[idx] > 0.0 {
+                result.insert(file_path.to_string(), scores[idx]);
+            }
+        }
+        result
+    }
+
+    /// Aggregate file scores to community level via max.
+    pub fn community_scores(
+        file_scores: &HashMap<String, f64>,
+        communities: &[Community],
+        graph: &CodeGraph,
+    ) -> HashMap<String, f64> {
+        communities.iter().map(|comm| {
+            let max_score = comm.node_ids.iter()
+                .filter_map(|nid| {
+                    graph.get_node(nid)
+                        .and_then(|n| n.file_path.as_deref())
+                        .and_then(|fp| file_scores.get(fp))
+                })
+                .copied()
+                .fold(0.0f64, f64::max);
+            (comm.id.clone(), max_score)
+        }).collect()
+    }
+}
+
+// ---------------------------------------------------------------------------
 // MultiSignalScorer implementation
 // ---------------------------------------------------------------------------
 
@@ -593,11 +799,14 @@ impl MultiSignalScorer {
             eprintln!("[tiered] fast path: {} communities > 500, skipping neural + graph attention", communities.len());
         }
 
-        // 1. BM25 scores (always — fast for any size)
-        let bm25_results = self.bm25_index.search(query, communities);
-        let bm25_map: HashMap<&str, f64> = bm25_results
+        // 1. BM25 scores — FILE-LEVEL with max-aggregation to community.
+        // This follows the CodeCompass/Zoekt pattern: every production code search
+        // system indexes at file level. Community-level BM25 dilutes TF/IDF.
+        let file_scores = FileBm25::search(graph, query);
+        let community_file_scores = FileBm25::community_scores(&file_scores, communities, graph);
+        let bm25_map: HashMap<&str, f64> = community_file_scores
             .iter()
-            .map(|r| (r.community.id.as_str(), r.score))
+            .map(|(id, score)| (id.as_str(), *score))
             .collect();
         let bm25_max = bm25_map.values().cloned().fold(f64::NEG_INFINITY, f64::max);
         let bm25_min = bm25_map.values().cloned().fold(f64::INFINITY, f64::min);
@@ -663,36 +872,27 @@ impl MultiSignalScorer {
         // With neural OFF: BM25 30%, File boost 25%, Graph attention 25%, Centrality 10%, Recency 10%
         //
         // THEO_NO_GRAPH_ATTENTION=1 disables graph attention signal (for A/B benchmarking).
-        let graph_attention_disabled = std::env::var("THEO_NO_GRAPH_ATTENTION").is_ok();
-        let (w_bm25, w_sem, w_file, w_graph, w_cent, w_rec) = if self.using_neural {
-            if graph_attention_disabled {
-                (0.30, 0.25, 0.25, 0.00, 0.10, 0.10)
-            } else {
-                (0.25, 0.20, 0.20, 0.15, 0.10, 0.10)
-            }
-        } else if graph_attention_disabled {
-            (0.35, 0.00, 0.35, 0.00, 0.15, 0.15) // graph attention disabled
-        } else {
-            (0.30, 0.00, 0.25, 0.25, 0.10, 0.10)
-        };
+        // Signal weights. Graph attention REMOVED — benchmark proved 0% impact
+        // on top-3 rankings across 20 queries (eval_graph_attention_ab test).
+        // Weights sum to 1.0. BM25 is the primary query-dependent signal.
+        // Weighted linear combination — calibrated via eval suite.
+        // BM25 (file-level) is the dominant query-dependent signal (55%).
+        // File boost provides precision on symbol name matches (30%).
+        // Centrality/recency are minimal (15% total) to avoid query-independent noise.
+        let (w_bm25, w_file, w_cent, w_rec) = (0.55, 0.30, 0.05, 0.10);
 
         let mut result: Vec<ScoredCommunity> = communities
             .iter()
             .map(|comm| {
-                // Normalize BM25
+                // Normalize BM25 to [0,1]
                 let raw_bm25 = *bm25_map.get(comm.id.as_str()).unwrap_or(&0.0);
                 let norm_bm25 = if bm25_range > 0.0 { (raw_bm25 - bm25_min) / bm25_range } else { 0.0 };
 
-                // Normalize semantic
-                let raw_sem = *semantic_raw.get(comm.id.as_str()).unwrap_or(&0.0);
-                let norm_sem = if sem_range > 0.0 { (raw_sem - sem_min) / sem_range } else { 0.0 };
-
-                // Centrality and recency (already normalized)
+                // Centrality and recency (already [0,1])
                 let centrality = *self.centrality_scores.get(&comm.id).unwrap_or(&0.0);
                 let recency = *self.recency_scores.get(&comm.id).unwrap_or(&0.0);
 
-                // Per-file symbol match boost (best single symbol match ratio)
-                // Uses pre-tokenized symbol sets — no tokenization at query time.
+                // Per-file symbol match boost
                 let file_boost = if let Some(token_sets) = self.community_symbol_tokens.get(&comm.id) {
                     let mut best = 0.0f64;
                     for toks in token_sets {
@@ -702,22 +902,9 @@ impl MultiSignalScorer {
                         }
                     }
                     best
-                } else {
-                    0.0
-                };
+                } else { 0.0 };
 
-                // Graph attention (already normalized to [0, 1])
-                let graph_att = graph_attention_scores
-                    .get(&comm.id)
-                    .copied()
-                    .unwrap_or(0.0);
-
-                let score = w_bm25 * norm_bm25
-                    + w_sem * norm_sem
-                    + w_file * file_boost
-                    + w_graph * graph_att
-                    + w_cent * centrality
-                    + w_rec * recency;
+                let score = w_bm25 * norm_bm25 + w_file * file_boost + w_cent * centrality + w_rec * recency;
 
                 ScoredCommunity {
                     community: comm.clone(),
@@ -791,5 +978,83 @@ mod tests {
     #[test]
     fn test_all_lowercase() {
         assert_eq!(tokenise("already lowercase"), vec!["already", "lowercase"]);
+    }
+
+    /// Debug test: verify BM25 actually works with a simple community.
+    #[test]
+    fn debug_bm25_community_document() {
+        use theo_engine_graph::model::*;
+        use theo_engine_graph::cluster::Community;
+
+        let mut graph = CodeGraph::new();
+
+        // Create a File node with Symbol children
+        graph.add_node(Node {
+            id: "file:crates/auth/src/lib.rs".to_string(),
+            node_type: NodeType::File,
+            name: "crates/auth/src/lib.rs".to_string(),
+            file_path: Some("crates/auth/src/lib.rs".to_string()),
+            signature: None,
+            kind: None,
+            line_start: None,
+            line_end: None,
+            last_modified: 0.0,
+            doc: None,
+        });
+        graph.add_node(Node {
+            id: "sym:verify_token".to_string(),
+            node_type: NodeType::Symbol,
+            name: "verify_token".to_string(),
+            file_path: Some("crates/auth/src/lib.rs".to_string()),
+            signature: Some("pub fn verify_token(token: &str) -> Result<Claims>".to_string()),
+            kind: Some(SymbolKind::Function),
+            line_start: Some(10),
+            line_end: Some(25),
+            last_modified: 0.0,
+            doc: Some("Verify a JWT token and extract claims.".to_string()),
+        });
+        graph.add_edge(Edge {
+            source: "file:crates/auth/src/lib.rs".to_string(),
+            target: "sym:verify_token".to_string(),
+            edge_type: EdgeType::Contains,
+            weight: 1.0,
+        });
+
+        let community = Community {
+            id: "comm-auth".to_string(),
+            name: "authentication".to_string(),
+            level: 0,
+            node_ids: vec![
+                "file:crates/auth/src/lib.rs".to_string(),
+                "sym:verify_token".to_string(),
+            ],
+            parent_id: None,
+            version: 1,
+        };
+
+        // Check community_document output
+        let doc = community_document(&community, &graph);
+        eprintln!("COMMUNITY DOCUMENT:\n{}\n", doc);
+        assert!(doc.contains("verify_token"), "Document should contain symbol name");
+        assert!(doc.contains("verify"), "Document should contain 'verify' after tokenization");
+
+        // Check tokenization
+        let tokens = tokenise(&doc);
+        eprintln!("TOKENS: {:?}\n", tokens);
+        assert!(tokens.contains(&"verify".to_string()), "Tokens should contain 'verify'");
+        assert!(tokens.contains(&"token".to_string()), "Tokens should contain 'token'");
+
+        // Build BM25 index and search
+        let communities = vec![community];
+        let bm25 = Bm25Index::build(&communities, &graph);
+        let results = bm25.search("verify_token", &communities);
+
+        eprintln!("BM25 RESULTS for 'verify_token':");
+        for r in &results {
+            eprintln!("  {} score={:.4}", r.community.name, r.score);
+        }
+
+        assert!(!results.is_empty(), "BM25 should return results");
+        assert!(results[0].score > 0.0, "Top result should have positive score, got {}", results[0].score);
     }
 }

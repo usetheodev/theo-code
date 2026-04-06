@@ -148,6 +148,51 @@ pub trait GraphContextProvider: Send + Sync {
 
     /// Whether the provider has been successfully initialized.
     fn is_ready(&self) -> bool;
+
+    /// Fallback: search by symbol name when query_context returns 0 blocks.
+    /// Default returns empty — implementations override with symbol lookup.
+    async fn query_by_symbol(
+        &self,
+        _symbol_query: &str,
+        budget_tokens: usize,
+    ) -> Result<GraphContextResult, GraphContextError> {
+        Ok(GraphContextResult {
+            blocks: vec![],
+            total_tokens: 0,
+            budget_tokens,
+            exploration_hints: String::new(),
+        })
+    }
+
+    /// Navigate the code graph from a specific symbol.
+    /// Returns callers, callees, imports, or dependents of the given symbol.
+    /// Default returns empty — implementations override with graph traversal.
+    async fn navigate_symbol(
+        &self,
+        _symbol: &str,
+        _mode: NavigationMode,
+        budget_tokens: usize,
+    ) -> Result<GraphContextResult, GraphContextError> {
+        Ok(GraphContextResult {
+            blocks: vec![],
+            total_tokens: 0,
+            budget_tokens,
+            exploration_hints: String::new(),
+        })
+    }
+}
+
+/// Navigation mode for graph traversal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NavigationMode {
+    /// Who calls this symbol?
+    Callers,
+    /// What does this symbol call?
+    Callees,
+    /// What does this file/symbol import?
+    Imports,
+    /// What depends on this file/symbol?
+    Dependents,
 }
 
 #[cfg(test)]
