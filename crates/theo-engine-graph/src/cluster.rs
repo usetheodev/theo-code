@@ -148,7 +148,7 @@ fn compute_modularity(
     q / m2
 }
 
-/// Louvain Phase 1: local moves.
+/// Louvain Phase 1: local moves — O(E) per pass using adjacency list.
 ///
 /// Returns `true` if any node was moved (improvement found).
 fn louvain_phase1(
@@ -161,53 +161,73 @@ fn louvain_phase1(
         return false;
     }
     let m2 = 2.0 * total_weight;
+    let n = node_ids.len();
     let mut improved = false;
 
-    // Iterate over nodes. In practice Louvain iterates until convergence.
-    // We do a fixed number of passes to keep things deterministic.
-    for _ in 0..node_ids.len() {
+    // Pre-compute index: node_id -> idx for O(1) lookup.
+    let id_to_idx: HashMap<&str, usize> = node_ids
+        .iter()
+        .enumerate()
+        .map(|(i, id)| (id.as_str(), i))
+        .collect();
+
+    // Pre-compute adjacency list: for each node, list of (neighbor_idx, weight).
+    // This converts O(N²) neighbor scan to O(degree) per node.
+    let mut adj: Vec<Vec<(usize, f64)>> = vec![Vec::new(); n];
+    for ((a, b), &w) in weight_map.iter() {
+        if let (Some(&ai), Some(&bi)) = (id_to_idx.get(a.as_str()), id_to_idx.get(b.as_str())) {
+            adj[ai].push((bi, w));
+            adj[bi].push((ai, w));
+        }
+    }
+
+    // Pre-compute degrees: sum of weights per node.
+    let degrees: Vec<f64> = adj.iter().map(|neighbors| neighbors.iter().map(|(_, w)| w).sum()).collect();
+
+    // Community total degree: sum of degrees of all nodes in each community.
+    // Maintained incrementally when a node moves.
+    let max_comm = n;
+    let mut comm_total_degree: Vec<f64> = vec![0.0; max_comm];
+    for i in 0..n {
+        comm_total_degree[assignment[i]] += degrees[i];
+    }
+
+    // Iterate until convergence (max N passes as safety bound).
+    for _ in 0..n {
         let mut any_move = false;
-        for idx in 0..node_ids.len() {
-            let node_id = &node_ids[idx];
-            let ki = degree(node_id, weight_map);
+        for idx in 0..n {
+            let ki = degrees[idx];
             let current_comm = assignment[idx];
 
-            // Collect neighboring communities.
-            let neighbor_comms: std::collections::HashSet<usize> = node_ids
-                .iter()
-                .enumerate()
-                .filter(|(j, nb_id)| {
-                    if *j == idx {
-                        return false;
-                    }
-                    let (lo, hi) = if node_id < *nb_id {
-                        (node_id.clone(), (*nb_id).clone())
-                    } else {
-                        ((*nb_id).clone(), node_id.clone())
-                    };
-                    weight_map.contains_key(&(lo, hi))
-                })
-                .map(|(j, _)| assignment[j])
-                .collect();
+            // Collect neighboring communities — O(degree), not O(N).
+            let mut neighbor_comms = std::collections::HashSet::new();
+            for &(nb_idx, _) in &adj[idx] {
+                if nb_idx != idx {
+                    neighbor_comms.insert(assignment[nb_idx]);
+                }
+            }
 
             if neighbor_comms.is_empty() {
                 continue;
             }
 
-            // Temporarily remove node from its community (sentinel value).
+            // Temporarily remove node from its community.
+            comm_total_degree[current_comm] -= ki;
             assignment[idx] = usize::MAX;
 
             // Best community to move to.
             let mut best_comm = current_comm;
             let mut best_gain = 0.0;
 
-            // Evaluate gain for moving to each neighboring community.
-            let candidates: Vec<usize> = neighbor_comms.into_iter().collect();
-            for &candidate_comm in &candidates {
-                let k_i_in =
-                    weight_to_community(node_id, candidate_comm, assignment, node_ids, weight_map);
-                let sigma_tot =
-                    total_degree_of_community(candidate_comm, assignment, node_ids, weight_map);
+            // Evaluate gain for each neighboring community — O(degree) per candidate.
+            for &candidate_comm in &neighbor_comms {
+                // Weight from node to candidate community: sum weights to neighbors in that community.
+                let k_i_in: f64 = adj[idx]
+                    .iter()
+                    .filter(|(nb, _)| assignment[*nb] == candidate_comm)
+                    .map(|(_, w)| w)
+                    .sum();
+                let sigma_tot = comm_total_degree[candidate_comm];
                 let delta_q = k_i_in - sigma_tot * ki / m2;
 
                 if delta_q > best_gain {
@@ -217,6 +237,7 @@ fn louvain_phase1(
             }
 
             assignment[idx] = best_comm;
+            comm_total_degree[best_comm] += ki;
             if best_comm != current_comm {
                 any_move = true;
                 improved = true;
@@ -332,26 +353,53 @@ fn compute_modularity_resolution(
         return 0.0;
     }
     let m2 = 2.0 * total_weight;
+    let n = node_ids.len();
 
-    let mut q = 0.0;
-    for i in 0..node_ids.len() {
-        for j in 0..node_ids.len() {
-            if assignment[i] != assignment[j] {
-                continue;
-            }
-            let a = &node_ids[i];
-            let b = &node_ids[j];
-            let (lo, hi) = if a < b {
-                (a.clone(), b.clone())
-            } else {
-                (b.clone(), a.clone())
-            };
-            let a_ij = *weight_map.get(&(lo, hi)).unwrap_or(&0.0);
-            let ki = degree(a, weight_map);
-            let kj = degree(b, weight_map);
-            q += a_ij - resolution * ki * kj / m2;
+    // Pre-compute: node index, adjacency, degrees — O(E) total.
+    let id_to_idx: HashMap<&str, usize> = node_ids
+        .iter()
+        .enumerate()
+        .map(|(i, id)| (id.as_str(), i))
+        .collect();
+
+    let mut adj: Vec<Vec<(usize, f64)>> = vec![Vec::new(); n];
+    for ((a, b), &w) in weight_map.iter() {
+        if let (Some(&ai), Some(&bi)) = (id_to_idx.get(a.as_str()), id_to_idx.get(b.as_str())) {
+            adj[ai].push((bi, w));
+            adj[bi].push((ai, w));
         }
     }
+
+    let degrees: Vec<f64> = adj.iter().map(|nb| nb.iter().map(|(_, w)| w).sum()).collect();
+
+    // Compute modularity Q — O(E) by iterating edges, not node pairs.
+    let mut q = 0.0;
+
+    // Edge contribution: sum a_ij for same-community pairs (via adjacency)
+    for i in 0..n {
+        for &(j, w) in &adj[i] {
+            if assignment[i] == assignment[j] {
+                q += w; // Each edge counted twice (i→j and j→i), but we sum all
+            }
+        }
+    }
+
+    // Degree penalty: sum ki*kj/m2 for all same-community pairs
+    // Group nodes by community, then sum products of degrees within each community.
+    let max_comm = assignment.iter().copied().max().unwrap_or(0) + 1;
+    let mut comm_degree_sum: Vec<f64> = vec![0.0; max_comm];
+    let mut comm_degree_sq_sum: Vec<f64> = vec![0.0; max_comm];
+    for i in 0..n {
+        let c = assignment[i];
+        comm_degree_sum[c] += degrees[i];
+    }
+    // Sum of ki*kj for all pairs in community c = (sum_ki)^2 (includes i==j terms, but those cancel)
+    for c in 0..max_comm {
+        comm_degree_sq_sum[c] = comm_degree_sum[c] * comm_degree_sum[c];
+    }
+
+    let degree_penalty: f64 = comm_degree_sq_sum.iter().sum();
+    q = q - resolution * degree_penalty / m2;
     q / m2
 }
 
@@ -631,6 +679,126 @@ pub fn leiden_communities(
 ///
 /// Returns a list of sub-communities. If the community has 0 or 1 nodes,
 /// returns a single level-1 community wrapping those nodes.
+/// Seeded Label Propagation Algorithm — O(E) per pass.
+///
+/// Each node starts with a label derived from `initial_labels` (e.g. directory hash).
+/// Nodes without a seed get a unique label. On each pass, every node adopts the
+/// heaviest-weighted label among its neighbors. Converges in 3-5 passes for
+/// directory-seeded code graphs.
+///
+/// Returns: node_id → final label (usize).
+pub fn lpa_seeded(
+    node_ids: &[String],
+    weight_map: &HashMap<(String, String), f64>,
+    initial_labels: &HashMap<String, usize>,
+) -> HashMap<String, usize> {
+    let n = node_ids.len();
+    if n == 0 {
+        return HashMap::new();
+    }
+
+    // Index: node_id → idx
+    let id_to_idx: HashMap<&str, usize> = node_ids
+        .iter()
+        .enumerate()
+        .map(|(i, id)| (id.as_str(), i))
+        .collect();
+
+    // Pre-compute adjacency list O(E)
+    let mut adj: Vec<Vec<(usize, f64)>> = vec![Vec::new(); n];
+    for ((a, b), &w) in weight_map.iter() {
+        if let (Some(&ai), Some(&bi)) = (id_to_idx.get(a.as_str()), id_to_idx.get(b.as_str())) {
+            adj[ai].push((bi, w));
+            adj[bi].push((ai, w));
+        }
+    }
+
+    // Initialize labels from seeds (fallback: unique per node)
+    let mut next_unique = initial_labels.values().copied().max().unwrap_or(0) + 1;
+    let mut labels: Vec<usize> = node_ids
+        .iter()
+        .map(|id| {
+            if let Some(&lbl) = initial_labels.get(id) {
+                lbl
+            } else {
+                let lbl = next_unique;
+                next_unique += 1;
+                lbl
+            }
+        })
+        .collect();
+
+    // Iterate until convergence (max 10 passes)
+    for _ in 0..10 {
+        let mut changed = false;
+        for idx in 0..n {
+            if adj[idx].is_empty() {
+                continue;
+            }
+
+            // Weighted label counts among neighbors — O(degree)
+            let mut label_weight: HashMap<usize, f64> = HashMap::new();
+            for &(nb_idx, w) in &adj[idx] {
+                *label_weight.entry(labels[nb_idx]).or_insert(0.0) += w;
+            }
+
+            // Adopt heaviest label
+            let best = label_weight
+                .iter()
+                .max_by(|(_, wa), (_, wb)| wa.partial_cmp(wb).unwrap())
+                .map(|(&lbl, _)| lbl)
+                .unwrap();
+
+            if best != labels[idx] {
+                labels[idx] = best;
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+
+    // Convert to HashMap output
+    node_ids
+        .iter()
+        .enumerate()
+        .map(|(i, id)| (id.clone(), labels[i]))
+        .collect()
+}
+
+/// Generate directory-based seed labels from node IDs.
+///
+/// Nodes with the same directory prefix get the same label.
+/// E.g. "src/auth/login.rs::handle" and "src/auth/token.rs::validate" → same label.
+pub fn dir_seed_labels(node_ids: &[String]) -> HashMap<String, usize> {
+    let mut dir_to_label: HashMap<String, usize> = HashMap::new();
+    let mut next_label = 0usize;
+    let mut result = HashMap::new();
+
+    for id in node_ids {
+        // Extract directory prefix: everything before the last component.
+        // For "src/auth/login.rs::handle_login" → "src/auth"
+        // For "src/main.rs::main" → "src"
+        let dir = id
+            .split("::")
+            .next()
+            .unwrap_or(id)
+            .rsplit_once('/')
+            .map(|(dir, _)| dir.to_string())
+            .unwrap_or_else(|| "root".to_string());
+
+        let label = *dir_to_label.entry(dir).or_insert_with(|| {
+            let l = next_label;
+            next_label += 1;
+            l
+        });
+        result.insert(id.clone(), label);
+    }
+
+    result
+}
+
 pub fn subdivide_community(
     graph: &CodeGraph,
     community: &Community,
@@ -872,6 +1040,21 @@ fn leiden_on_nodes(
         return (vec![], 0.0);
     }
 
+    // Pre-compute adjacency list: O(E) instead of O(N²) per iteration.
+    let id_to_idx: HashMap<&str, usize> = owned_ids
+        .iter()
+        .enumerate()
+        .map(|(i, id)| (id.as_str(), i))
+        .collect();
+
+    let mut adj: Vec<Vec<(usize, f64)>> = vec![Vec::new(); n];
+    for ((a, b), &w) in weight_map.iter() {
+        if let (Some(&ai), Some(&bi)) = (id_to_idx.get(a.as_str()), id_to_idx.get(b.as_str())) {
+            adj[ai].push((bi, w));
+            adj[bi].push((ai, w));
+        }
+    }
+
     // Initialize: each node in its own community
     let mut assignment: Vec<usize> = (0..n).collect();
     let mut next_comm;
@@ -879,32 +1062,21 @@ fn leiden_on_nodes(
     for _ in 0..max_iterations {
         let mut improved = false;
 
-        // Phase 1: Local moves (same as Louvain)
+        // Phase 1: Local moves — O(E) per iteration using adjacency list.
         for i in 0..n {
-            let node = &owned_ids[i];
             let current_comm = assignment[i];
 
-            // Find neighbor communities and their total edge weight
+            // Neighbor communities via adjacency list — O(degree), not O(N).
             let mut comm_weights: HashMap<usize, f64> = HashMap::new();
-            for j in 0..n {
-                if i == j {
-                    continue;
-                }
-                let (lo, hi) = if *node < owned_ids[j] {
-                    (node.clone(), owned_ids[j].clone())
-                } else {
-                    (owned_ids[j].clone(), node.clone())
-                };
-                if let Some(&w) = weight_map.get(&(lo, hi)) {
-                    *comm_weights.entry(assignment[j]).or_insert(0.0) += w;
-                }
+            for &(nb_idx, w) in &adj[i] {
+                *comm_weights.entry(assignment[nb_idx]).or_insert(0.0) += w;
             }
 
             // Find best community
             let mut best_comm = current_comm;
             let mut best_gain = 0.0;
             for (&comm, &w) in &comm_weights {
-                let gain = w - resolution; // simplified modularity gain
+                let gain = w - resolution;
                 if gain > best_gain {
                     best_gain = gain;
                     best_comm = comm;

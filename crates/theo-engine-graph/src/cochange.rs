@@ -64,29 +64,40 @@ pub fn update_cochanges(graph: &mut CodeGraph, changed_files: &[String], days_si
         }
     }
 
-    for (src, tgt) in pairs {
-        // If an existing CoChanges edge between this pair has a lower weight
-        // (older event), update it in-place. Otherwise add a new edge.
-        let existing = graph
-            .edges_mut()
-            .iter_mut()
-            .find(|e| e.edge_type == EdgeType::CoChanges && e.source == src && e.target == tgt);
+    // Build index of existing CoChanges edges: (src, tgt) → edge index.
+    // This converts the O(E) linear scan per pair to O(1) HashMap lookup.
+    let mut cochange_index: std::collections::HashMap<(String, String), usize> =
+        std::collections::HashMap::new();
+    for (idx, edge) in graph.edges_mut().iter().enumerate() {
+        if edge.edge_type == EdgeType::CoChanges {
+            cochange_index.insert((edge.source.clone(), edge.target.clone()), idx);
+        }
+    }
 
-        match existing {
-            Some(edge) if new_weight > edge.weight => {
+    // New edges to add (collected separately to avoid borrow conflict).
+    let mut new_edges: Vec<Edge> = Vec::new();
+
+    for (src, tgt) in pairs {
+        if let Some(&idx) = cochange_index.get(&(src.clone(), tgt.clone())) {
+            // Existing edge: update weight if newer.
+            let edge = &mut graph.edges_mut()[idx];
+            if new_weight > edge.weight {
                 edge.weight = new_weight;
             }
-            Some(_) => {
-                // Existing edge is already at least as recent; keep it.
-            }
-            None => {
-                graph.add_edge(Edge {
-                    source: src,
-                    target: tgt,
-                    edge_type: EdgeType::CoChanges,
-                    weight: new_weight,
-                });
-            }
+        } else {
+            // New edge: collect for batch addition.
+            cochange_index.insert((src.clone(), tgt.clone()), usize::MAX); // mark as seen
+            new_edges.push(Edge {
+                source: src,
+                target: tgt,
+                edge_type: EdgeType::CoChanges,
+                weight: new_weight,
+            });
         }
+    }
+
+    // Add all new edges at once.
+    for edge in new_edges {
+        graph.add_edge(edge);
     }
 }

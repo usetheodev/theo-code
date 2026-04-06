@@ -4,7 +4,8 @@
 //! Lives in `theo-application` (not `theo-agent-runtime`) to respect bounded
 //! context boundaries — the runtime only sees the trait from `theo-domain`.
 
-use std::path::Path;
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -35,8 +36,6 @@ use theo_engine_retrieval::search::MultiSignalScorer;
 const BUILD_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Cache validity period.
-const CACHE_MAX_AGE: Duration = Duration::from_secs(3600); // 1 hour
-
 /// Leiden resolution parameter (1.0 = standard modularity).
 const LEIDEN_RESOLUTION: f64 = 1.0;
 
@@ -112,7 +111,7 @@ impl GraphContextProvider for GraphContextService {
         let dir = project_dir.to_path_buf();
         let cache_path = dir.join(".theo").join("graph.bin");
 
-        if let Some(graph) = try_load_cache(&cache_path) {
+        if let Some(graph) = try_load_cache(&cache_path, &dir) {
             let (communities, scorer) = build_index(&graph);
             let mut state = self.state.write().await;
             *state = GraphBuildState::Ready(GraphState {
@@ -138,6 +137,7 @@ impl GraphContextProvider for GraphContextService {
         let state_ref = self.state.clone();
         let build_flag = self.build_in_progress.clone();
         let dir_clone = dir.clone();
+        let dir_for_cache = dir.clone();
 
         tokio::spawn(async move {
             let result = tokio::time::timeout(
@@ -153,7 +153,7 @@ impl GraphContextProvider for GraphContextService {
             let mut state = state_ref.write().await;
             match result {
                 Ok(Ok(Ok((graph, communities, scorer)))) => {
-                    save_cache_atomic(&cache_path, &graph);
+                    save_cache_atomic(&cache_path, &graph, &dir_for_cache);
                     *state = GraphBuildState::Ready(GraphState {
                         graph,
                         communities,
@@ -504,31 +504,120 @@ use crate::use_cases::conversion::{convert_symbol_kind, convert_reference_kind};
 // Cache
 // ---------------------------------------------------------------------------
 
-/// Try loading a cached graph if it exists and is fresh enough.
-fn try_load_cache(cache_path: &Path) -> Option<CodeGraph> {
+/// Graph cache manifest — stored alongside graph.bin.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct GraphManifest {
+    /// Hash of project file state (sorted path:mtime pairs).
+    content_hash: String,
+    /// When the graph was built (Unix seconds).
+    built_at_secs: u64,
+    /// Number of files in the snapshot.
+    file_count: usize,
+}
+
+/// Compute a deterministic hash of the project's source file state.
+///
+/// Walks the project directory (respecting EXCLUDED_DIRS), collects
+/// sorted (path, mtime_secs) pairs, and hashes the concatenation.
+/// Cost: ~5ms for 500 files (stat only, no reads).
+fn compute_project_hash(project_dir: &Path) -> String {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let mut entries: BTreeMap<String, u64> = BTreeMap::new();
+
+    let walker = ignore::WalkBuilder::new(project_dir)
+        .hidden(true)
+        .git_ignore(true)
+        .max_depth(Some(10))
+        .build();
+
+    for entry in walker.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        // Only source files
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        if !matches!(ext, "rs" | "py" | "ts" | "tsx" | "js" | "jsx" | "go" | "java" | "rb" | "php" | "c" | "cpp" | "cs" | "sh" | "yaml" | "toml") {
+            continue;
+        }
+        if let Ok(meta) = std::fs::metadata(path) {
+            let mtime = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            if let Ok(rel) = path.strip_prefix(project_dir) {
+                entries.insert(rel.to_string_lossy().to_string(), mtime);
+            }
+        }
+    }
+
+    let mut hasher = DefaultHasher::new();
+    for (path, mtime) in &entries {
+        path.hash(&mut hasher);
+        mtime.hash(&mut hasher);
+    }
+    format!("{:016x}", hasher.finish())
+}
+
+/// Try loading a cached graph if the project state matches.
+///
+/// Uses content-hash comparison instead of TTL — eliminates both
+/// false cache-hits (code changed within TTL) and false cache-misses
+/// (1h passed with no changes).
+fn try_load_cache(cache_path: &Path, project_dir: &Path) -> Option<CodeGraph> {
     if !cache_path.exists() {
         return None;
     }
 
-    let metadata = std::fs::metadata(cache_path).ok()?;
-    let modified = metadata.modified().ok()?;
-    let age = SystemTime::now().duration_since(modified).ok()?;
+    let manifest_path = cache_path.with_extension("manifest.json");
+    let manifest_content = std::fs::read_to_string(&manifest_path).ok()?;
+    let manifest: GraphManifest = serde_json::from_str(&manifest_content).ok()?;
 
-    if age > CACHE_MAX_AGE {
+    let current_hash = compute_project_hash(project_dir);
+    if manifest.content_hash != current_hash {
+        return None; // Project changed since last build
+    }
+
+    // Safety: also reject very old caches (>24h) as a fallback
+    let now_secs = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    if now_secs - manifest.built_at_secs > 86400 {
         return None;
     }
 
     theo_engine_graph::persist::load(cache_path).ok()
 }
 
-/// Atomic cache write: write to .tmp, then rename.
-fn save_cache_atomic(cache_path: &Path, graph: &CodeGraph) {
+/// Atomic cache write with manifest.
+fn save_cache_atomic(cache_path: &Path, graph: &CodeGraph, project_dir: &Path) {
     let tmp_path = cache_path.with_extension("bin.tmp");
     if let Some(parent) = cache_path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
     if theo_engine_graph::persist::save(graph, &tmp_path).is_ok() {
         let _ = std::fs::rename(&tmp_path, cache_path);
+
+        // Write manifest
+        let manifest = GraphManifest {
+            content_hash: compute_project_hash(project_dir),
+            built_at_secs: SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+            file_count: graph.node_count(),
+        };
+        if let Ok(json) = serde_json::to_string_pretty(&manifest) {
+            let manifest_tmp = cache_path.with_extension("manifest.json.tmp");
+            if std::fs::write(&manifest_tmp, &json).is_ok() {
+                let _ = std::fs::rename(&manifest_tmp, cache_path.with_extension("manifest.json"));
+            }
+        }
     }
 }
 
@@ -656,7 +745,7 @@ mod tests {
 
     #[test]
     fn cache_miss_on_nonexistent_path() {
-        assert!(try_load_cache(Path::new("/tmp/nonexistent_graph.bin")).is_none());
+        assert!(try_load_cache(Path::new("/tmp/nonexistent_graph.bin"), Path::new("/tmp")).is_none());
     }
 
     #[tokio::test]

@@ -1,7 +1,8 @@
 /// Tests for Louvain community detection and label propagation.
+use std::collections::HashMap;
 use theo_engine_graph::cluster::{
-    detect_communities, hierarchical_cluster, leiden_communities, subdivide_community,
-    ClusterAlgorithm,
+    detect_communities, dir_seed_labels, hierarchical_cluster, leiden_communities,
+    lpa_seeded, subdivide_community, ClusterAlgorithm,
 };
 use theo_engine_graph::model::{CodeGraph, Edge, EdgeType, Node, NodeType, SymbolKind};
 
@@ -368,4 +369,88 @@ fn leiden_has_reasonable_modularity_on_clustered_graph() {
     );
 
     assert_communities_connected(&result, &g);
+}
+
+// ---------------------------------------------------------------------------
+// Seeded LPA tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn lpa_seeded_empty_returns_empty() {
+    let result = lpa_seeded(&[], &HashMap::new(), &HashMap::new());
+    assert!(result.is_empty());
+}
+
+#[test]
+fn lpa_seeded_clusters_by_directory() {
+    // Two groups of nodes: src/auth/* and src/api/*
+    let nodes: Vec<String> = vec![
+        "src/auth/login.rs::handle".to_string(),
+        "src/auth/token.rs::validate".to_string(),
+        "src/auth/session.rs::create".to_string(),
+        "src/api/routes.rs::get".to_string(),
+        "src/api/handler.rs::process".to_string(),
+        "src/api/middleware.rs::check".to_string(),
+    ];
+
+    // Edges: strong intra-group, weak inter-group
+    let mut weights: HashMap<(String, String), f64> = HashMap::new();
+    // Auth group (strong)
+    weights.insert((nodes[0].clone(), nodes[1].clone()), 5.0);
+    weights.insert((nodes[0].clone(), nodes[2].clone()), 5.0);
+    weights.insert((nodes[1].clone(), nodes[2].clone()), 5.0);
+    // Api group (strong)
+    weights.insert((nodes[3].clone(), nodes[4].clone()), 5.0);
+    weights.insert((nodes[3].clone(), nodes[5].clone()), 5.0);
+    weights.insert((nodes[4].clone(), nodes[5].clone()), 5.0);
+    // Weak cross-group
+    weights.insert((nodes[2].clone(), nodes[3].clone()), 0.5);
+
+    let seeds = dir_seed_labels(&nodes);
+    let labels = lpa_seeded(&nodes, &weights, &seeds);
+
+    // All auth nodes should have the same label
+    let auth_label = labels[&nodes[0]];
+    assert_eq!(labels[&nodes[1]], auth_label);
+    assert_eq!(labels[&nodes[2]], auth_label);
+
+    // All api nodes should have the same label
+    let api_label = labels[&nodes[3]];
+    assert_eq!(labels[&nodes[4]], api_label);
+    assert_eq!(labels[&nodes[5]], api_label);
+
+    // The two groups should have different labels
+    assert_ne!(auth_label, api_label);
+}
+
+#[test]
+fn lpa_seeded_converges_on_fully_connected() {
+    // All nodes connected equally — should converge to 1 label
+    let nodes: Vec<String> = (0..5).map(|i| format!("n{i}")).collect();
+    let mut weights = HashMap::new();
+    for i in 0..5 {
+        for j in (i + 1)..5 {
+            weights.insert((nodes[i].clone(), nodes[j].clone()), 1.0);
+        }
+    }
+
+    let seeds = HashMap::new(); // no seeds = unique per node
+    let labels = lpa_seeded(&nodes, &weights, &seeds);
+
+    // All nodes should converge to the same label
+    let unique: std::collections::HashSet<usize> = labels.values().copied().collect();
+    assert_eq!(unique.len(), 1, "Fully connected graph should converge to 1 community");
+}
+
+#[test]
+fn dir_seed_labels_groups_by_directory() {
+    let nodes = vec![
+        "src/auth/login.rs::foo".to_string(),
+        "src/auth/token.rs::bar".to_string(),
+        "src/api/routes.rs::baz".to_string(),
+    ];
+    let seeds = dir_seed_labels(&nodes);
+
+    assert_eq!(seeds[&nodes[0]], seeds[&nodes[1]], "Same dir should have same label");
+    assert_ne!(seeds[&nodes[0]], seeds[&nodes[2]], "Different dirs should have different labels");
 }

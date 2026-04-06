@@ -272,6 +272,9 @@ impl Pipeline {
                     summaries_regenerated += 1;
                 }
             }
+
+            // Invalidate cached scorer — communities changed, scorer must be rebuilt on next query.
+            self.cached_scorer = None;
         }
 
         let elapsed_ms = start.elapsed().as_millis() as u64;
@@ -331,16 +334,24 @@ impl Pipeline {
             .map(|s| (s.community_id.clone(), s))
             .collect();
 
-        // Build and cache the multi-signal scorer
-        self.cached_scorer = Some(MultiSignalScorer::build(&self.communities, &self.graph));
+        // Scorer is built lazily on first assemble_context() call — not here.
+        // This avoids ~20s of fastembed/ONNX initialization when only stats/clustering is needed.
+        self.cached_scorer = None;
 
         &self.communities
+    }
+
+    /// Ensure the scorer is built (lazy initialization).
+    fn ensure_scorer(&mut self) {
+        if self.cached_scorer.is_none() && !self.communities.is_empty() {
+            self.cached_scorer = Some(MultiSignalScorer::build(&self.communities, &self.graph));
+        }
     }
 
     /// Search and assemble context for a given task query.
     ///
     /// Uses pre-generated human-readable summaries instead of raw symbol dumps.
-    pub fn assemble_context(&self, query: &str) -> ContextPayload {
+    pub fn assemble_context(&mut self, query: &str) -> ContextPayload {
         if self.communities.is_empty() {
             return ContextPayload {
                 items: vec![],
@@ -350,15 +361,9 @@ impl Pipeline {
             };
         }
 
-        // Use cached scorer or build on-demand
-        let fallback_scorer;
-        let scorer = match &self.cached_scorer {
-            Some(s) => s,
-            None => {
-                fallback_scorer = MultiSignalScorer::build(&self.communities, &self.graph);
-                &fallback_scorer
-            }
-        };
+        // Build scorer on first context assembly (lazy — avoids 20s fastembed in stats/cluster-only paths)
+        self.ensure_scorer();
+        let scorer = self.cached_scorer.as_ref().unwrap();
 
         // Score communities
         let scored = scorer.score(query, &self.communities, &self.graph);
@@ -380,7 +385,7 @@ impl Pipeline {
     /// 3. Read actual source files from disk (`repo_root`)
     /// 4. Build context items with: summary header + actual code
     /// 5. Pack into token budget using greedy knapsack
-    pub fn assemble_context_with_code(&self, query: &str, repo_root: &Path) -> ContextPayload {
+    pub fn assemble_context_with_code(&mut self, query: &str, repo_root: &Path) -> ContextPayload {
         if self.communities.is_empty() {
             return ContextPayload {
                 items: vec![],
@@ -390,14 +395,8 @@ impl Pipeline {
             };
         }
 
-        let fallback_scorer;
-        let scorer = match &self.cached_scorer {
-            Some(s) => s,
-            None => {
-                fallback_scorer = MultiSignalScorer::build(&self.communities, &self.graph);
-                &fallback_scorer
-            }
-        };
+        self.ensure_scorer();
+        let scorer = self.cached_scorer.as_ref().unwrap();
         let scored = scorer.score(query, &self.communities, &self.graph);
 
         let budget = BudgetConfig::default_16k();
@@ -543,8 +542,9 @@ impl Pipeline {
             self.regenerate_summaries();
         }
 
-        // Build and cache the scorer
-        self.cached_scorer = Some(MultiSignalScorer::build(&self.communities, &self.graph));
+        // Scorer is built lazily on first assemble_context() call — not here.
+        // This avoids ~28s of fastembed initialization when only stats/clustering is needed.
+        self.cached_scorer = None;
         Ok(())
     }
 
@@ -711,7 +711,7 @@ mod tests {
 
     #[test]
     fn test_pipeline_no_communities_returns_empty_context() {
-        let pipeline = Pipeline::with_defaults();
+        let mut pipeline = Pipeline::with_defaults();
         let context = pipeline.assemble_context("anything");
         assert!(context.items.is_empty());
     }

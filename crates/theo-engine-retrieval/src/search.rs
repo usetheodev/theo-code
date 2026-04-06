@@ -516,7 +516,17 @@ impl MultiSignalScorer {
         let tfidf_config = TfidfConfig::default();
         let tfidf_model = TfidfModel::build(&community_docs, &tfidf_config);
 
-        let (embedder, quantizer, quantized_docs, using_neural) = match NeuralEmbedder::new() {
+        // Neural embeddings are opt-in via THEO_NEURAL=1 env var.
+        // Default = BM25/TF-IDF only (80% of signals). Neural adds 20% semantic quality
+        // but costs ~28s for model load + embedding. Disabled by default for responsiveness.
+        let neural_enabled = std::env::var("THEO_NEURAL").is_ok();
+        let embedder_result: Result<crate::embedding::neural::NeuralEmbedder, Box<dyn std::error::Error>> = if neural_enabled {
+            NeuralEmbedder::new()
+        } else {
+            Err("Neural embeddings disabled (set THEO_NEURAL=1 to enable)".into())
+        };
+
+        let (embedder, quantizer, quantized_docs, using_neural) = match embedder_result {
             Ok(emb) => {
                 // Neural path: embed → TurboQuant compress (384-dim → 96 bytes)
                 let doc_refs: Vec<&str> = community_docs.iter().map(|s| s.as_str()).collect();
