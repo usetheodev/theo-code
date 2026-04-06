@@ -115,14 +115,17 @@ fn test_budget_zero_produces_empty_payload() {
 }
 
 #[test]
-fn test_huge_budget_includes_all_communities() {
+fn test_huge_budget_includes_all_non_singleton_communities() {
     let (graph, scored) = fixture_scored_communities();
     let payload = assemble_greedy(&scored, &graph, 1_000_000);
 
+    // Singletons (communities with <2 members) are filtered from output.
+    // Fixture has: auth (2 members), db (2 members), api (1 member — filtered).
+    let non_singleton_count = scored.iter().filter(|s| s.community.node_ids.len() >= 2).count();
     assert_eq!(
         payload.items.len(),
-        scored.len(),
-        "huge budget should include all communities"
+        non_singleton_count,
+        "huge budget should include all non-singleton communities"
     );
 }
 

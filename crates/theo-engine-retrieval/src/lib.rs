@@ -14,4 +14,4 @@ pub mod experimental;
 pub use embedding::neural;
 pub use embedding::tfidf;
 pub use embedding::turboquant;
-pub use experimental::{bandit, cascade, compress, contrastive, ensemble, feedback, memory, predictive};
+pub use experimental::compress;

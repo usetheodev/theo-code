@@ -658,10 +658,15 @@ impl MultiSignalScorer {
             propagate_attention(&initial_node_scores, graph, communities, 2, 0.5)
         };
 
-        // Weights: BM25 25%, Semantic 20%, File boost 20%, Graph attention 15%,
-        //          Centrality 10%, Recency 10%
-        let (w_bm25, w_sem, w_file, w_graph, w_cent, w_rec) =
-            (0.25, 0.20, 0.20, 0.15, 0.10, 0.10);
+        // Signal weights depend on whether neural embeddings are active.
+        // With neural ON:  BM25 25%, Semantic 20%, File boost 20%, Graph 15%, Centrality 10%, Recency 10%
+        // With neural OFF: BM25 30%, File boost 25%, Graph attention 25%, Centrality 10%, Recency 10%
+        //                  (semantic/TF-IDF dropped — correlates with BM25 on code)
+        let (w_bm25, w_sem, w_file, w_graph, w_cent, w_rec) = if self.using_neural {
+            (0.25, 0.20, 0.20, 0.15, 0.10, 0.10)
+        } else {
+            (0.30, 0.00, 0.25, 0.25, 0.10, 0.10) // semantic dropped
+        };
 
         let mut result: Vec<ScoredCommunity> = communities
             .iter()
