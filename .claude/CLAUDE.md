@@ -9,7 +9,7 @@ Monorepo com 4 bounded contexts:
 ```
 crates/
   theo-domain          # Tipos puros, traits, erros (zero infra)
-  theo-engine-graph    # Code graph via Tree-Sitter (14 linguagens)
+  theo-engine-graph    # Code graph via Tree-Sitter (9 full + 5 basic linguagens)
   theo-engine-parser   # AST parser multi-linguagem, extração de símbolos
   theo-engine-retrieval # Semantic search, embeddings, TF-IDF, graph attention
   theo-governance      # Policy engine, impact analysis, métricas

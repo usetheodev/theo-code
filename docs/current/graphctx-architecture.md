@@ -447,40 +447,150 @@ BM25: 0.30, File boost: 0.25, Graph attention: 0.25,
 Centrality: 0.10, Recency: 0.10
 
 // Environment variables
-THEO_NO_GRAPHCTX=1    // Disable GRAPHCTX entirely
-THEO_NEURAL=1         // Enable neural embeddings (adds ~28s)
+THEO_NO_GRAPHCTX=1           // Disable GRAPHCTX entirely
+THEO_NEURAL=1                // Enable neural embeddings (adds ~28s)
+THEO_NO_GRAPH_ATTENTION=1    // Disable graph attention signal (A/B benchmarking)
 ```
 
 ---
 
-## 7. Failure Modes
+## 7. Recent Improvements (P0+P1 FAANG roadmap)
+
+### Symbol-First Assembly (P0.7)
+
+For queries like "where is verify_token", bypasses community scoring entirely:
+
+```rust
+// crates/theo-engine-retrieval/src/assembly.rs
+pub fn assemble_by_symbol(symbol_query, graph, budget_tokens) -> ContextPayload
+```
+
+- Direct symbol name lookup via `CodeGraph::nodes_by_name()` (O(1) HashMap)
+- Ranked by: exact match (2.0) > substring (1.0) + in-degree disambiguation
+- Deduplicates by file — one entry per file, highest scored symbol wins
+- Capped at 10 files
+
+### Smart File Sampling (P0.6)
+
+Replaces blind `MAX_FILES_TO_PARSE=500` truncation:
+
+1. **Directory breadth**: at least 1 file per top-level directory (most recently modified)
+2. **Recency fill**: remaining slots filled by mtime descending (across all dirs)
+
+This ensures representation of all modules instead of over-indexing the first 500 walked.
+
+### Stale Cache During Build (P1.1)
+
+When the graph is rebuilding, serves the previous graph state (stale) instead of returning empty:
+
+```
+Building { stale: Option<GraphState> }
+```
+
+- Previous `Ready` state is preserved when transitioning to `Building`
+- Queries during build return stale results (better than nothing)
+- Fresh state replaces stale when build completes
+
+### Planning Injection (P1.4)
+
+Before the first agent iteration, GRAPHCTX injects top-5 relevant files as a system message:
+
+```
+## Suggested Starting Files
+Based on code graph analysis, these areas are most relevant to your task:
+- theo-agent-runtime::run_engine (relevance: 84%)
+- theo-agent-runtime::agent_loop (relevance: 72%)
+...
+Start here, but verify with read/grep.
+```
+
+- Query derived from task objective (last user message)
+- Budget: 1000 tokens (light overhead)
+- Skipped if Building, if subagent, or if no objective
+
+### Impact-Based Invalidation (P1.2)
+
+Replaces volume-based heuristic (`>10% edges changed`) with impact analysis:
+
+- **Central file** (>= 20 edges — fan-in + fan-out): triggers full recluster
+- **Peripheral file**: incremental patch only
+- Fallback: volume-based `>10%` still triggers recluster for safety
+
+### Eval Framework (P0.1)
+
+20 ground-truth queries in 4 categories for measuring retrieval quality:
+
+```bash
+cargo test -p theo-engine-retrieval --test eval_suite -- --ignored --nocapture
+```
+
+- **Symbol exact** (5 queries): "assemble_greedy", "propagate_attention", etc.
+- **Module** (5): "sandbox bwrap", "clustering algorithm", etc.
+- **Semantic** (5): "error handling recovery", "OAuth authentication", etc.
+- **Cross-cutting** (5): "sandbox tests", "error types across crates", etc.
+
+Metrics: precision@5, recall@5, MRR. Thresholds: acceptable >= 0.475, good >= 0.675.
+
+Graph attention A/B benchmark also available:
+```bash
+cargo test -p theo-engine-retrieval --test eval_suite -- --ignored --nocapture eval_graph_attention_ab
+```
+
+### Typed Tool Contract (P0.2)
+
+`CodebaseContextTool` metadata now includes structured block data:
+
+```json
+{
+  "status": "ok",
+  "total_tokens": 8130,
+  "budget_used_pct": 76,
+  "blocks_count": 5,
+  "blocks": [
+    {
+      "source_id": "theo-tooling::sandbox",
+      "score": 0.742,
+      "token_count": 3203,
+      "file_paths": ["crates/theo-tooling/src/sandbox/bwrap.rs", "..."]
+    }
+  ]
+}
+```
+
+The runtime can consume `metadata.blocks` programmatically; the LLM reads `output` (markdown).
+
+---
+
+## 8. Failure Modes
 
 | Scenario | Behavior | Recovery |
 |---|---|---|
 | Parse error in file X | File skipped, rest of graph builds | Automatic |
 | Build timeout (>60s) | State → Failed | Agent uses grep/glob |
 | Cache hash mismatch | Full rebuild triggered | Automatic |
-| Query during Building | Empty context returned | LLM falls back to grep |
-| No .gitignore + no .git | EXCLUDED_DIRS hardcoded protects | Automatic |
-| Huge repo (>500 files) | MAX_FILES_TO_PARSE cap, primary language priority | Automatic |
+| Query during Building | **Stale cache served** (if available) | Automatic |
+| No .gitignore + no .git | EXCLUDED_DIRS + .add_ignore fallback | Automatic |
+| Huge repo (>500 files) | Smart sampling: dir breadth + mtime | Automatic |
+| Central file changed | Full recluster triggered (impact-based) | Automatic |
 
 ---
 
-## 8. Key Files Reference
+## 9. Key Files Reference
 
 | Component | File | Key Functions |
 |---|---|---|
 | Domain trait | `theo-domain/src/graph_context.rs` | `GraphContextProvider`, `EXCLUDED_DIRS` |
 | Token estimation | `theo-domain/src/tokens.rs` | `estimate_tokens()` |
 | Service | `theo-application/.../graph_context_service.rs` | `initialize()`, `query_context()` |
-| Pipeline | `theo-application/.../pipeline.rs` | `build_graph()`, `cluster()`, `assemble_context()` |
+| Pipeline | `theo-application/.../pipeline.rs` | `build_graph()`, `cluster()`, `assemble_context()`, `update_file()` |
 | Extraction | `theo-application/.../extraction.rs` | `extract_repo()` |
-| Graph model | `theo-engine-graph/src/model.rs` | `CodeGraph`, `Node`, `Edge` |
+| Graph model | `theo-engine-graph/src/model.rs` | `CodeGraph`, `Node`, `Edge`, `nodes_by_name()` |
 | Bridge | `theo-engine-graph/src/bridge.rs` | `build_graph()`, `file_node_id()` |
-| Clustering | `theo-engine-graph/src/cluster.rs` | `hierarchical_cluster()`, `lpa_seeded()` |
+| Clustering | `theo-engine-graph/src/cluster.rs` | `hierarchical_cluster()`, `lpa_seeded()`, `subdivide_with_lpa_seeded()` |
 | Co-changes | `theo-engine-graph/src/cochange.rs` | `update_cochanges()` |
 | Persistence | `theo-engine-graph/src/persist.rs` | `save()`, `load()` |
 | Search | `theo-engine-retrieval/src/search.rs` | `MultiSignalScorer::build()`, `score()` |
-| Assembly | `theo-engine-retrieval/src/assembly.rs` | `assemble_greedy()` |
+| Assembly | `theo-engine-retrieval/src/assembly.rs` | `assemble_greedy()`, `assemble_by_symbol()` |
 | Graph attention | `theo-engine-retrieval/src/graph_attention.rs` | `propagate_attention()` |
+| Eval suite | `theo-engine-retrieval/tests/eval_suite.rs` | 20 queries + A/B benchmark |
 | Tool | `theo-tooling/src/codebase_context/mod.rs` | `CodebaseContextTool` |
