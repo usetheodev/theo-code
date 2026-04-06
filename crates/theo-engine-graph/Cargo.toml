@@ -20,10 +20,10 @@ ignore.workspace = true
 
 # SCIP integration (optional — requires rust-analyzer)
 scip = { workspace = true, optional = true }
-prost = { workspace = true, optional = true }
+protobuf = { workspace = true, optional = true }
 
 [features]
-scip = ["dep:scip", "dep:prost"]
+scip = ["dep:scip", "dep:protobuf"]
 
 [dev-dependencies]
 tempfile.workspace = true

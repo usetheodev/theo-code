@@ -38,7 +38,7 @@ impl ScipIndex {
         use scip::types::Index;
 
         let bytes = std::fs::read(path).ok()?;
-        let index = <Index as prost::Message>::decode(bytes.as_slice()).ok()?;
+        let index = <Index as protobuf::Message>::parse_from_bytes(&bytes).ok()?;
         Some(Self::from_proto(index))
     }
 

@@ -285,8 +285,32 @@ fn eval_graphctx_retrieval_quality() {
     let (files, stats) = theo_application::use_cases::extraction::extract_repo(workspace_root);
     eprintln!("Parsed {}/{} files, {} symbols", stats.files_parsed, stats.files_found, stats.symbols_extracted);
 
-    let (graph, _bridge_stats) = bridge::build_graph(&files);
+    let (mut graph, _bridge_stats) = bridge::build_graph(&files);
     eprintln!("Graph: {} nodes, {} edges", graph.node_count(), graph.edge_count());
+
+    // SCIP enrichment: if index.scip exists, merge exact cross-file edges.
+    // This adds compiler-verified Calls/Imports edges that Tree-Sitter misses.
+    #[cfg(feature = "scip")]
+    {
+        let scip_path = workspace_root.join(".theo/index.scip");
+        if scip_path.exists() {
+            if let Some(scip_index) = theo_engine_graph::scip::reader::ScipIndex::load(&scip_path) {
+                let edges_before = graph.edge_count();
+                theo_engine_graph::scip::merge::merge_scip_edges(&mut graph, &scip_index);
+                let edges_after = graph.edge_count();
+                eprintln!(
+                    "SCIP: loaded {} docs, {} occurrences, +{} edges merged",
+                    scip_index.document_count,
+                    scip_index.occurrence_count,
+                    edges_after - edges_before
+                );
+            } else {
+                eprintln!("SCIP: index.scip exists but failed to parse");
+            }
+        } else {
+            eprintln!("SCIP: no index.scip found (run `rust-analyzer scip . --output .theo/index.scip` to enable)");
+        }
+    }
 
     // Use FileLeiden for eval — same as production.
     // Note: Leiden is non-deterministic. Results vary ±10% between runs.

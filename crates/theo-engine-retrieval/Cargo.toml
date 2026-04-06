@@ -11,6 +11,9 @@ serde_json.workspace = true
 thiserror.workspace = true
 fastembed = "4"
 
+[features]
+scip = ["theo-engine-graph/scip"]
+
 [dev-dependencies]
 tempfile.workspace = true
 theo-application.workspace = true
