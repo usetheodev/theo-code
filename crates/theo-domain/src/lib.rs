@@ -1,6 +1,7 @@
 pub mod agent_run;
 pub mod budget;
 pub mod capability;
+pub mod code_intel;
 pub mod error;
 pub mod event;
 pub mod graph_context;

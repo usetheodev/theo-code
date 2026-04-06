@@ -5,3 +5,4 @@ pub mod git;
 pub mod model;
 pub mod parse;
 pub mod persist;
+pub mod scip;

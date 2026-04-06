@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+theo-domain.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -16,6 +17,13 @@ tree-sitter-typescript = "0.23.2"
 tree-sitter-javascript = "0.25"
 rayon = "1"
 ignore.workspace = true
+
+# SCIP integration (optional — requires rust-analyzer)
+scip = { workspace = true, optional = true }
+prost = { workspace = true, optional = true }
+
+[features]
+scip = ["dep:scip", "dep:prost"]
 
 [dev-dependencies]
 tempfile.workspace = true
