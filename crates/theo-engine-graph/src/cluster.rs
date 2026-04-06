@@ -1394,15 +1394,57 @@ fn name_community(community: &Community, graph: &CodeGraph) -> String {
             .unwrap_or_else(|| paths[0].to_string())
     };
 
-    // Clean up: remove "src/", "crates/", common noise.
-    let clean = prefix
-        .trim_start_matches("crates/")
-        .trim_start_matches("src/")
-        .trim_end_matches('/');
+    // Extract meaningful name: try crate/package name, then deepest directory.
+    let clean = extract_meaningful_name(&prefix, &paths, community.node_ids.len());
+    clean
+}
 
-    if clean.is_empty() || clean == "." {
-        format!("root ({})", community.node_ids.len())
+/// Extract a meaningful community name from file paths.
+///
+/// Priority: crate name > package directory > deepest non-trivial directory > fallback.
+fn extract_meaningful_name(prefix: &str, paths: &[&str], member_count: usize) -> String {
+    let parts: Vec<&str> = prefix.split('/').filter(|s| !s.is_empty()).collect();
+
+    // Try to find a crate name pattern: "crates/<name>/..." or "apps/<name>/..."
+    for (i, part) in parts.iter().enumerate() {
+        if (*part == "crates" || *part == "apps") && i + 1 < parts.len() {
+            let crate_name = parts[i + 1];
+            // Include subdirectory if available (e.g., "theo-agent-runtime/src/config")
+            if i + 3 < parts.len() && parts[i + 2] == "src" {
+                return format!("{}::{} ({})", crate_name, parts[i + 3], member_count);
+            }
+            return format!("{} ({})", crate_name, member_count);
+        }
+    }
+
+    // Try "src/<meaningful_dir>/..." pattern
+    for (i, part) in parts.iter().enumerate() {
+        if *part == "src" && i + 1 < parts.len() {
+            let module = parts[i + 1];
+            if module != "lib.rs" && module != "main.rs" {
+                return format!("{} ({})", module, member_count);
+            }
+        }
+    }
+
+    // Fallback: use the deepest non-trivial directory
+    let trivial = ["src", "lib", "crates", "apps", ".", ""];
+    for part in parts.iter().rev() {
+        if !trivial.contains(part) {
+            return format!("{} ({})", part, member_count);
+        }
+    }
+
+    // Last resort: count distinct top-level dirs
+    let mut top_dirs: Vec<&str> = paths
+        .iter()
+        .filter_map(|p| p.split('/').next())
+        .collect();
+    top_dirs.sort();
+    top_dirs.dedup();
+    if top_dirs.len() <= 3 {
+        format!("{} ({})", top_dirs.join("+"), member_count)
     } else {
-        format!("{} ({})", clean, community.node_ids.len())
+        format!("mixed ({})", member_count)
     }
 }

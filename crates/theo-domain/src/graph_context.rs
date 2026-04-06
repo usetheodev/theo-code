@@ -7,6 +7,44 @@
 use std::path::Path;
 
 // ---------------------------------------------------------------------------
+// Excluded directories — source of truth for graph indexing
+// ---------------------------------------------------------------------------
+
+/// Directories that should ALWAYS be excluded from code graph indexing.
+///
+/// These are build artifacts, dependency caches, and generated code that
+/// pollute the graph with irrelevant nodes. Used by both `extraction.rs`
+/// and `graph_context_service.rs` — import from here, don't duplicate.
+///
+/// Note: the `ignore` crate's WalkBuilder also respects `.gitignore` via
+/// `.git_ignore(true)`. This list is a safety net for repos without `.gitignore`
+/// or when `.git/` is absent (e.g., tarballs, rsync without .git).
+pub const EXCLUDED_DIRS: &[&str] = &[
+    // Rust
+    "target",
+    // Node.js / JavaScript / TypeScript
+    "node_modules", ".next", ".nuxt", "bower_components",
+    // Python
+    "__pycache__", ".venv", "venv", ".tox", ".eggs", ".mypy_cache",
+    // Go
+    "vendor",
+    // Java / Kotlin / Gradle
+    ".gradle", ".mvn",
+    // Generic build output
+    "dist", "build", "out", ".output",
+    // Coverage / testing
+    "coverage", ".nyc_output", "htmlcov",
+    // Caches
+    ".cache", ".parcel-cache", ".turbo",
+    // Rust toolchain (if somehow in tree)
+    ".cargo", ".rustup",
+    // Generated code
+    "__generated__", "generated",
+    // IDE / editor
+    ".idea", ".vscode",
+];
+
+// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 

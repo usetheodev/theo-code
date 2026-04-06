@@ -53,6 +53,8 @@ fn estimate_tokens(text: &str) -> usize {
 /// For Symbol nodes: emits signature or name directly.
 fn community_content(community: &Community, graph: &CodeGraph) -> String {
     let mut lines: Vec<String> = vec![format!("# {}", community.name)];
+    let mut seen_signatures: std::collections::HashSet<String> = std::collections::HashSet::new(); // Q1.3: dedup
+
     for node_id in &community.node_ids {
         if let Some(node) = graph.get_node(node_id) {
             match node.node_type {
@@ -60,27 +62,23 @@ fn community_content(community: &Community, graph: &CodeGraph) -> String {
                     // Emit child signatures (symbols contained in this file).
                     let children = graph.contains_children(node_id);
                     if children.is_empty() {
-                        // No symbols extracted — fall back to file path.
                         lines.push(node.name.clone());
                     } else {
                         lines.push(format!("## {}", node.name));
                         for child_id in children {
                             if let Some(child) = graph.get_node(child_id) {
-                                if let Some(sig) = &child.signature {
-                                    lines.push(sig.clone());
-                                } else {
-                                    lines.push(child.name.clone());
+                                let text = child.signature.as_deref().unwrap_or(&child.name);
+                                if seen_signatures.insert(text.to_string()) {
+                                    lines.push(text.to_string());
                                 }
                             }
                         }
                     }
                 }
                 _ => {
-                    // Symbol, Test, Import, Type — emit signature or name.
-                    if let Some(sig) = &node.signature {
-                        lines.push(sig.clone());
-                    } else {
-                        lines.push(node.name.clone());
+                    let text = node.signature.as_deref().unwrap_or(&node.name);
+                    if seen_signatures.insert(text.to_string()) {
+                        lines.push(text.to_string());
                     }
                 }
             }
@@ -120,8 +118,12 @@ pub fn assemble_greedy(
         density: f64,
     }
 
+    // Minimum community size to include in output (filter noise from singletons).
+    const MIN_COMMUNITY_SIZE: usize = 2;
+
     let mut candidates: Vec<Candidate> = scored
         .iter()
+        .filter(|s| s.community.node_ids.len() >= MIN_COMMUNITY_SIZE) // Q1.2: skip singletons
         .map(|s| {
             let content = community_content(&s.community, graph);
             let token_count = estimate_tokens(&content).max(1); // floor at 1 to avoid div/0

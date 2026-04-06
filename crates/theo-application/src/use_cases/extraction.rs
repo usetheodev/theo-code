@@ -36,11 +36,24 @@ pub struct ExtractionStats {
 pub fn extract_repo(repo_root: &Path) -> (Vec<FileData>, ExtractionStats) {
     let start = Instant::now();
 
-    // Discover source files
-    let walker = ignore::WalkBuilder::new(repo_root)
-        .hidden(true)
-        .git_ignore(true)
-        .build();
+    // Discover source files.
+    // Uses theo-domain EXCLUDED_DIRS as source of truth + .gitignore + .theoignore.
+    let mut walker_builder = ignore::WalkBuilder::new(repo_root);
+    walker_builder.hidden(true).git_ignore(true);
+    // Fallback: read .gitignore even when .git/ is absent (rsync, tarballs)
+    let _ = walker_builder.add_ignore(repo_root.join(".gitignore"));
+    // Custom ignore: projects can add .theoignore for graph-specific exclusions
+    walker_builder.add_custom_ignore_filename(".theoignore");
+    walker_builder.filter_entry(|entry| {
+            // Skip excluded directories (but not files with those names, e.g. build.rs)
+            if entry.file_type().is_some_and(|ft| ft.is_dir()) {
+                if let Some(name) = entry.file_name().to_str() {
+                    return !theo_domain::graph_context::EXCLUDED_DIRS.contains(&name);
+                }
+            }
+            true
+        });
+    let walker = walker_builder.build();
 
     let mut source_files: Vec<(String, String)> = Vec::new(); // (rel_path, abs_path)
 

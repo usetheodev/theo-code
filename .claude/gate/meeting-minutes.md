@@ -1,27 +1,22 @@
-# Meeting — 2026-04-06 (fastembed Decision — BM25-only default)
+# Meeting — 2026-04-06 (Unificar EXCLUDED_DIRS + gitignore fallback)
 
 ## Proposta
-Eliminar fastembed como bottleneck (28s). Duas ações: fix warm path bug + fastembed como feature flag.
+Unificar EXCLUDED_DIRS em theo-domain, usar .add_ignore() para .gitignore fallback, suportar .theoignore.
 
 ## Participantes
-- **governance** — Opção C (feature flag, default BM25-only). Neural = 20% do score. Fallback já existe.
-- **graphctx** — Confirmou: NeuralEmbedder em build() não score(). quantized_docs cacheáveis. BM25+graph+centrality cobrem 80%.
-
-## Decisão
-**D + C combinados:**
-1. Fix D: cmd_stats warm path não deve triggerar scorer
-2. Opção C: fastembed off by default. Neural habilitado via THEO_NEURAL=1
+- **governance** — APPROVE com ajuste: usar .add_ignore() do crate ignore, não reimplementar parser
 
 ## Veredito
 **APPROVED**
 
 ## Escopo Aprovado
-- `crates/theo-engine-retrieval/src/search.rs` (skip NeuralEmbedder quando THEO_NEURAL não set)
-- `apps/theo-cli/src/main.rs` (fix cmd_stats warm triggering scorer)
-- `crates/theo-application/src/use_cases/pipeline.rs` (ensure lazy scorer path correct)
+- `crates/theo-domain/src/graph_context.rs` (constante EXCLUDED_DIRS)
+- `crates/theo-application/src/use_cases/extraction.rs` (importar constante + .add_ignore + .theoignore)
+- `crates/theo-application/src/use_cases/graph_context_service.rs` (importar constante + .add_ignore + .theoignore)
 
 ## Condições
-1. NeuralEmbedder::new() só chamado se THEO_NEURAL=1 env var set
-2. Fallback TF-IDF já existe — deve ser o default path
-3. Testes devem passar tanto com neural ON quanto OFF
-4. Benchmark: stats WARM < 1s, context COLD < 5s, context WARM < 2s
+1. Constante em theo-domain/src/graph_context.rs (conhecimento de domínio)
+2. .add_ignore(project_dir.join(".gitignore")) — fallback quando .git/ ausente
+3. .add_custom_ignore_filename(".theoignore") — extensibilidade
+4. NÃO reimplementar parser de .gitignore
+5. Remover EXCLUDED_DIRS duplicado dos dois arquivos de application

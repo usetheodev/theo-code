@@ -267,11 +267,7 @@ fn build_graph_from_project(
     (graph, communities, scorer)
 }
 
-/// Directories to always exclude from graph indexing.
-const EXCLUDED_DIRS: &[&str] = &[
-    "target", "node_modules", "vendor", "dist", "build",
-    "__pycache__", ".venv", "venv", ".next", ".nuxt",
-];
+// EXCLUDED_DIRS imported from theo-domain::graph_context (source of truth).
 
 /// Maximum files to parse. Prevents timeout on huge monorepos.
 const MAX_FILES_TO_PARSE: usize = 500;
@@ -299,17 +295,18 @@ fn parse_project_files(project_dir: &Path) -> Vec<FileData> {
     let primary_ext = detect_project_language(project_dir);
 
     let collect_paths = || {
-        let walker = ignore::WalkBuilder::new(project_dir)
-            .hidden(true)
-            .git_ignore(true)
-            .filter_entry(|entry| {
+        let mut wb = ignore::WalkBuilder::new(project_dir);
+        wb.hidden(true).git_ignore(true);
+        let _ = wb.add_ignore(project_dir.join(".gitignore"));
+        wb.add_custom_ignore_filename(".theoignore");
+        wb.filter_entry(|entry| {
                 if entry.file_type().map_or(false, |ft| ft.is_dir()) {
                     let name = entry.file_name().to_str().unwrap_or("");
-                    return !EXCLUDED_DIRS.contains(&name);
+                    return !theo_domain::graph_context::EXCLUDED_DIRS.contains(&name);
                 }
                 true
-            })
-            .build();
+            });
+        let walker = wb.build();
 
         let mut primary = Vec::new();
         let mut secondary = Vec::new();
@@ -526,11 +523,18 @@ fn compute_project_hash(project_dir: &Path) -> String {
 
     let mut entries: BTreeMap<String, u64> = BTreeMap::new();
 
-    let walker = ignore::WalkBuilder::new(project_dir)
-        .hidden(true)
-        .git_ignore(true)
-        .max_depth(Some(10))
-        .build();
+    let mut hash_wb = ignore::WalkBuilder::new(project_dir);
+    hash_wb.hidden(true).git_ignore(true).max_depth(Some(10));
+    let _ = hash_wb.add_ignore(project_dir.join(".gitignore"));
+    hash_wb.add_custom_ignore_filename(".theoignore");
+    hash_wb.filter_entry(|entry| {
+            if entry.file_type().map_or(false, |ft| ft.is_dir()) {
+                let name = entry.file_name().to_str().unwrap_or("");
+                return !theo_domain::graph_context::EXCLUDED_DIRS.contains(&name);
+            }
+            true
+        });
+    let walker = hash_wb.build();
 
     for entry in walker.flatten() {
         let path = entry.path();
