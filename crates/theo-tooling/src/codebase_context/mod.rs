@@ -123,6 +123,27 @@ impl Tool for CodebaseContextTool {
                     });
                 }
 
+                // Build typed attachments: structured data for runtime/tracing.
+                // The LLM reads `output` (markdown). The runtime reads `attachments` (JSON).
+                let typed_blocks: Vec<serde_json::Value> = ctx_result.blocks.iter().map(|b| {
+                    // Extract file paths from content (lines starting with "## ")
+                    let file_paths: Vec<&str> = b.content.lines()
+                        .filter(|l| l.starts_with("## "))
+                        .map(|l| l.trim_start_matches("## ").trim())
+                        .collect();
+
+                    serde_json::json!({
+                        "source_id": b.source_id,
+                        "score": b.score,
+                        "token_count": b.token_count,
+                        "file_paths": file_paths,
+                    })
+                }).collect();
+
+                let budget_used_pct = if ctx_result.budget_tokens > 0 {
+                    (ctx_result.total_tokens as f64 / ctx_result.budget_tokens as f64 * 100.0) as u32
+                } else { 0 };
+
                 Ok(ToolOutput {
                     title: format!("Codebase Context ({} tokens)", ctx_result.total_tokens),
                     output: text,
@@ -130,7 +151,9 @@ impl Tool for CodebaseContextTool {
                         "status": "ok",
                         "total_tokens": ctx_result.total_tokens,
                         "budget_tokens": ctx_result.budget_tokens,
-                        "blocks": ctx_result.blocks.len(),
+                        "budget_used_pct": budget_used_pct,
+                        "blocks_count": ctx_result.blocks.len(),
+                        "blocks": typed_blocks,
                         "query": query,
                     }),
                     attachments: None,

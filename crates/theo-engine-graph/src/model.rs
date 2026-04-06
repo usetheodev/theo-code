@@ -117,6 +117,10 @@ pub struct CodeGraph {
     /// Enables O(1) lookup of file children instead of O(total_edges) scan.
     #[serde(default)]
     contains_children_index: HashMap<String, Vec<String>>,
+    /// Name index: symbol name → Vec<node_id>.
+    /// Enables O(1) symbol lookup by name for symbol-first retrieval.
+    #[serde(default)]
+    name_index: HashMap<String, Vec<String>>,
 }
 
 impl CodeGraph {
@@ -130,10 +134,18 @@ impl CodeGraph {
     /// Insert or overwrite a node. Overwrites if `id` already exists.
     pub fn add_node(&mut self, node: Node) {
         let id = node.id.clone();
+        let name = node.name.clone();
         self.nodes.insert(id.clone(), node);
         // Ensure adjacency entries exist even for isolated nodes.
         self.adjacency.entry(id.clone()).or_default();
-        self.reverse_adjacency.entry(id).or_default();
+        self.reverse_adjacency.entry(id.clone()).or_default();
+        // Update name index for symbol-first lookup.
+        self.name_index.entry(name).or_default().push(id);
+    }
+
+    /// Lookup node IDs by symbol name. Returns empty if not found.
+    pub fn nodes_by_name(&self, name: &str) -> &[String] {
+        self.name_index.get(name).map(|v| v.as_slice()).unwrap_or(&[])
     }
 
     /// Append an edge. Both endpoints need not exist in the node map (the

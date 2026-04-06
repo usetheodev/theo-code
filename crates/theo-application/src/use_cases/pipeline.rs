@@ -216,15 +216,24 @@ impl Pipeline {
 
         let edges_changed = edges_removed + edges_added;
 
-        // Step 4: Decide whether to re-cluster or just regenerate summaries
+        // Step 4: Impact-based invalidation.
+        // Central files (high fan-in + fan-out) trigger full recluster.
+        // Peripheral files get incremental patch only.
+        const CENTRAL_EDGE_THRESHOLD: usize = 20;
+
+        let file_edge_count = self.graph.all_edges().iter()
+            .filter(|e| e.source == file_id || e.target == file_id)
+            .count();
+        let is_central = file_edge_count >= CENTRAL_EDGE_THRESHOLD;
+
         let change_ratio = if self.total_edges_at_last_cluster > 0 {
             edges_changed as f64 / self.total_edges_at_last_cluster as f64
         } else {
-            // No prior clustering — any change triggers a full cluster
             1.0
         };
 
-        let recluster_triggered = change_ratio > 0.10;
+        // Recluster if: central file changed OR >10% edges changed OR no prior clustering
+        let recluster_triggered = is_central || change_ratio > 0.10;
         let mut summaries_regenerated = 0;
 
         if recluster_triggered {

@@ -307,6 +307,40 @@ impl AgentRunEngine {
             }
         }
 
+        // Planning injection: if GRAPHCTX is Ready, inject top-5 relevant files
+        // as system message so the LLM starts with structural orientation.
+        // Skip if Building (don't use stale for planning), only use fresh Ready state.
+        if !self.config.is_subagent {
+            if let Some(ref provider) = self.graph_context {
+                if provider.is_ready() {
+                    // Use the task objective (first user message) as query
+                    let planning_query = messages.iter()
+                        .rev()
+                        .find(|m| m.role == theo_infra_llm::types::Role::User)
+                        .and_then(|m| m.content.as_deref())
+                        .unwrap_or("")
+                        .chars()
+                        .take(200)
+                        .collect::<String>();
+
+                    if !planning_query.is_empty() {
+                        if let Ok(ctx) = provider.query_context(&planning_query, 1000).await {
+                            if !ctx.blocks.is_empty() {
+                                let file_hints: Vec<String> = ctx.blocks.iter()
+                                    .take(5)
+                                    .map(|b| format!("- {} (relevance: {:.0}%)", b.source_id, b.score * 100.0))
+                                    .collect();
+                                messages.push(Message::system(&format!(
+                                    "## Suggested Starting Files\nBased on code graph analysis, these areas are most relevant to your task:\n{}\n\nStart here, but verify with read/grep.",
+                                    file_hints.join("\n")
+                                )));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // Inject available skills into system context (main agent only).
         // Sub-agents do NOT receive skills — they execute their direct objective.
         // This is Layer 2 of recursive spawning prevention (prompt isolation).

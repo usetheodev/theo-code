@@ -227,8 +227,11 @@ fn get_symbol_query(language: SupportedLanguage) -> Option<&'static str> {
         SupportedLanguage::Rust => Some(RS_SYMBOLS_QUERY),
         SupportedLanguage::Php => Some(PHP_SYMBOLS_QUERY),
         SupportedLanguage::Ruby => Some(RB_SYMBOLS_QUERY),
-        // Kotlin, Scala, Swift, C, C++ — no dedicated query yet
-        _ => None,
+        // Kotlin, Scala, Swift, C, C++ — BASIC extraction only.
+        // These languages use the generic extractor (file-level nodes, no symbol detail).
+        // Graph quality for these is significantly lower than Tier 1 (TS/Py/Go/Java/Rust).
+        // Honest coverage: these are "basic" not "full".
+        _ => None, // Returns None → generic extractor used → file nodes only
     }
 }
 

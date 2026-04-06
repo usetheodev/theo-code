@@ -53,8 +53,8 @@ struct GraphState {
 enum GraphBuildState {
     /// No initialization started yet.
     Uninitialized,
-    /// Build running in background. Agent operates without context.
-    Building,
+    /// Build running in background. Stale cache served if available.
+    Building { stale: Option<GraphState> },
     /// Graph built and ready for queries.
     Ready(GraphState),
     /// Build failed. Agent operates without context.
@@ -102,7 +102,7 @@ impl GraphContextProvider for GraphContextService {
         // Fast path: already ready or building.
         {
             let current = self.state.read().await;
-            if matches!(*current, GraphBuildState::Ready(_) | GraphBuildState::Building) {
+            if matches!(*current, GraphBuildState::Ready(_) | GraphBuildState::Building { .. }) {
                 return Ok(());
             }
         }
@@ -127,10 +127,15 @@ impl GraphContextProvider for GraphContextService {
             return Ok(()); // Another build already running.
         }
 
-        // Transition to Building.
+        // Transition to Building — preserve previous state as stale cache.
         {
             let mut state = self.state.write().await;
-            *state = GraphBuildState::Building;
+            let stale = match std::mem::replace(&mut *state, GraphBuildState::Uninitialized) {
+                GraphBuildState::Ready(gs) => Some(gs),
+                GraphBuildState::Building { stale } => stale,
+                _ => None,
+            };
+            *state = GraphBuildState::Building { stale };
         }
 
         // Spawn background build — fire and forget.
@@ -195,7 +200,8 @@ impl GraphContextProvider for GraphContextService {
 
         match &*state {
             GraphBuildState::Uninitialized => return Err(GraphContextError::NotInitialized),
-            GraphBuildState::Building => return empty, // Agent runs without context.
+            GraphBuildState::Building { stale: None } => return empty,
+            GraphBuildState::Building { stale: Some(_) } => {} // Serve stale — fall through
             GraphBuildState::Failed(e) => return Err(GraphContextError::BuildFailed(e.clone())),
             GraphBuildState::Ready(_) => {} // Fall through to query.
         }
@@ -204,9 +210,10 @@ impl GraphContextProvider for GraphContextService {
             return empty;
         }
 
-        // Safe: we checked Ready above.
+        // Safe: we checked Ready or Building(stale) above.
         let graph_state = match &*state {
             GraphBuildState::Ready(gs) => gs,
+            GraphBuildState::Building { stale: Some(gs) } => gs,
             _ => unreachable!(),
         };
 
@@ -327,12 +334,61 @@ fn parse_project_files(project_dir: &Path) -> Vec<FileData> {
             }
         }
 
-        // Primary language first, then secondary, capped.
-        primary.truncate(MAX_FILES_TO_PARSE);
-        let remaining = MAX_FILES_TO_PARSE.saturating_sub(primary.len());
-        secondary.truncate(remaining);
-        primary.extend(secondary);
-        primary
+        // Smart sampling: instead of blind truncation by walk order,
+        // ensure directory breadth + prioritize recently modified files.
+        let mut all_files = primary;
+        all_files.extend(secondary);
+
+        if all_files.len() <= MAX_FILES_TO_PARSE {
+            return all_files;
+        }
+
+        // Step 1: Guarantee breadth — at least 1 file per top-level directory.
+        let mut by_dir: std::collections::HashMap<String, Vec<std::path::PathBuf>> = std::collections::HashMap::new();
+        for path in &all_files {
+            let dir = path.strip_prefix(project_dir)
+                .unwrap_or(path)
+                .components()
+                .next()
+                .map(|c| c.as_os_str().to_string_lossy().to_string())
+                .unwrap_or_else(|| "root".to_string());
+            by_dir.entry(dir).or_default().push(path.clone());
+        }
+
+        let mut selected: Vec<std::path::PathBuf> = Vec::with_capacity(MAX_FILES_TO_PARSE);
+        let mut selected_set: std::collections::HashSet<std::path::PathBuf> = std::collections::HashSet::new();
+
+        // Pick 1 file per dir (most recently modified)
+        for (_dir, mut files) in by_dir {
+            files.sort_by(|a, b| {
+                let ma = std::fs::metadata(a).and_then(|m| m.modified()).unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                let mb = std::fs::metadata(b).and_then(|m| m.modified()).unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                mb.cmp(&ma) // newest first
+            });
+            if let Some(f) = files.first() {
+                if selected_set.insert(f.clone()) {
+                    selected.push(f.clone());
+                }
+            }
+        }
+
+        // Step 2: Fill remaining slots by mtime (newest first, across all dirs).
+        all_files.sort_by(|a, b| {
+            let ma = std::fs::metadata(a).and_then(|m| m.modified()).unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+            let mb = std::fs::metadata(b).and_then(|m| m.modified()).unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+            mb.cmp(&ma)
+        });
+
+        for f in all_files {
+            if selected.len() >= MAX_FILES_TO_PARSE {
+                break;
+            }
+            if selected_set.insert(f.clone()) {
+                selected.push(f);
+            }
+        }
+
+        selected
     };
 
     let paths = collect_paths();

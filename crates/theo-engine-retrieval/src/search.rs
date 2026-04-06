@@ -661,11 +661,19 @@ impl MultiSignalScorer {
         // Signal weights depend on whether neural embeddings are active.
         // With neural ON:  BM25 25%, Semantic 20%, File boost 20%, Graph 15%, Centrality 10%, Recency 10%
         // With neural OFF: BM25 30%, File boost 25%, Graph attention 25%, Centrality 10%, Recency 10%
-        //                  (semantic/TF-IDF dropped — correlates with BM25 on code)
+        //
+        // THEO_NO_GRAPH_ATTENTION=1 disables graph attention signal (for A/B benchmarking).
+        let graph_attention_disabled = std::env::var("THEO_NO_GRAPH_ATTENTION").is_ok();
         let (w_bm25, w_sem, w_file, w_graph, w_cent, w_rec) = if self.using_neural {
-            (0.25, 0.20, 0.20, 0.15, 0.10, 0.10)
+            if graph_attention_disabled {
+                (0.30, 0.25, 0.25, 0.00, 0.10, 0.10)
+            } else {
+                (0.25, 0.20, 0.20, 0.15, 0.10, 0.10)
+            }
+        } else if graph_attention_disabled {
+            (0.35, 0.00, 0.35, 0.00, 0.15, 0.15) // graph attention disabled
         } else {
-            (0.30, 0.00, 0.25, 0.25, 0.10, 0.10) // semantic dropped
+            (0.30, 0.00, 0.25, 0.25, 0.10, 0.10)
         };
 
         let mut result: Vec<ScoredCommunity> = communities

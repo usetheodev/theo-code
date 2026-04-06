@@ -769,24 +769,49 @@ pub fn lpa_seeded(
 
 /// Generate directory-based seed labels from node IDs.
 ///
-/// Nodes with the same directory prefix get the same label.
-/// E.g. "src/auth/login.rs::handle" and "src/auth/token.rs::validate" → same label.
+/// Extracts the most meaningful directory component from node IDs:
+/// - `file:crates/theo-agent-runtime/src/run_engine.rs` → "theo-agent-runtime"
+/// - `file:apps/theo-cli/src/main.rs` → "theo-cli"
+/// - `sym:crates/theo-domain/src/lib.rs::StateMachine` → "theo-domain"
+/// - `src/auth/login.rs::handle` → "auth"
+///
+/// The goal is to group by **crate/package**, not by generic "src/" directory.
 pub fn dir_seed_labels(node_ids: &[String]) -> HashMap<String, usize> {
     let mut dir_to_label: HashMap<String, usize> = HashMap::new();
     let mut next_label = 0usize;
     let mut result = HashMap::new();
 
     for id in node_ids {
-        // Extract directory prefix: everything before the last component.
-        // For "src/auth/login.rs::handle_login" → "src/auth"
-        // For "src/main.rs::main" → "src"
-        let dir = id
+        // Strip prefix (file:, sym:, test:, etc.) and symbol suffix (::name)
+        let path_part = id
             .split("::")
             .next()
             .unwrap_or(id)
-            .rsplit_once('/')
-            .map(|(dir, _)| dir.to_string())
-            .unwrap_or_else(|| "root".to_string());
+            .trim_start_matches("file:")
+            .trim_start_matches("sym:")
+            .trim_start_matches("test:")
+            .trim_start_matches("import:")
+            .trim_start_matches("type:");
+
+        let parts: Vec<&str> = path_part.split('/').collect();
+
+        // Extract meaningful directory:
+        // "crates/<name>/..." or "apps/<name>/..." → use <name>
+        // "src/<dir>/..." → use <dir>
+        // Otherwise → use parent directory
+        let dir = if parts.len() >= 2 && (parts[0] == "crates" || parts[0] == "apps") {
+            parts[1].to_string()
+        } else if parts.len() >= 2 && parts[0] == "src" {
+            parts[1].to_string()
+        } else if parts.len() >= 2 {
+            // Use the first non-trivial directory
+            parts.iter()
+                .find(|p| !["src", "lib", ".", ""].contains(p) && !p.contains('.'))
+                .unwrap_or(&parts[0])
+                .to_string()
+        } else {
+            "root".to_string()
+        };
 
         let label = *dir_to_label.entry(dir).or_insert_with(|| {
             let l = next_label;
@@ -1153,18 +1178,23 @@ pub fn hierarchical_cluster(graph: &CodeGraph, algorithm: ClusterAlgorithm) -> C
         })
         .collect();
 
-    let mut all_communities: Vec<Community> = named.clone();
+    // Level-1: Subdivide mega-communities using seeded LPA.
+    // Communities with >30 members are REPLACED by subcommunities based on directory labels.
+    const MEGA_THRESHOLD: usize = 30;
 
-    // Level-1: For file-level communities that are too large (>15 files),
-    // re-cluster the sub-graph with higher resolution to split into smaller groups.
-    let is_file_level = matches!(algorithm, ClusterAlgorithm::FileLeiden { .. });
-    for l0_comm in &named {
-        if is_file_level && l0_comm.node_ids.len() > 8 {
-            let sub = subdivide_file_community(graph, l0_comm);
-            all_communities.extend(sub);
-        } else if !is_file_level && l0_comm.node_ids.len() > 30 {
-            let sub = subdivide_community(graph, l0_comm, usize::MAX);
-            all_communities.extend(sub);
+    let mut all_communities: Vec<Community> = Vec::new();
+    for l0_comm in named {
+        if l0_comm.node_ids.len() > MEGA_THRESHOLD {
+            let sub = subdivide_with_lpa_seeded(graph, &l0_comm);
+            if sub.is_empty() {
+                // LPA couldn't subdivide — keep original
+                all_communities.push(l0_comm);
+            } else {
+                // Replace mega-community with subcommunities
+                all_communities.extend(sub);
+            }
+        } else {
+            all_communities.push(l0_comm);
         }
     }
 
@@ -1172,6 +1202,105 @@ pub fn hierarchical_cluster(graph: &CodeGraph, algorithm: ClusterAlgorithm) -> C
         communities: all_communities,
         modularity: level0_result.modularity,
     }
+}
+
+/// Subdivide a mega-community using seeded LPA with directory labels.
+///
+/// Produces subcommunities aligned with directory structure (e.g., "auth", "api").
+/// If LPA converges to a single group, the original community is kept as-is.
+fn subdivide_with_lpa_seeded(graph: &CodeGraph, parent: &Community) -> Vec<Community> {
+    let members = &parent.node_ids;
+    if members.len() <= 1 {
+        return vec![];
+    }
+
+    // Build local weight map restricted to this community's members.
+    let member_set: HashSet<&str> = members.iter().map(String::as_str).collect();
+    let mut local_weights: HashMap<(String, String), f64> = HashMap::new();
+    for edge in graph.all_edges() {
+        if member_set.contains(edge.source.as_str()) && member_set.contains(edge.target.as_str()) {
+            let (lo, hi) = if edge.source < edge.target {
+                (edge.source.clone(), edge.target.clone())
+            } else {
+                (edge.target.clone(), edge.source.clone())
+            };
+            *local_weights.entry((lo, hi)).or_insert(0.0) += edge.weight;
+        }
+    }
+
+    // Seed labels from directory structure.
+    let seeds = dir_seed_labels(members);
+
+    // If local edges exist, use LPA to refine seeds with structural info.
+    // If no edges (isolated nodes merged together), use directory labels directly.
+    let labels = if local_weights.is_empty() {
+        seeds.clone()
+    } else {
+        lpa_seeded(members, &local_weights, &seeds)
+    };
+
+    // Group by label.
+    let mut buckets: HashMap<usize, Vec<String>> = HashMap::new();
+    for (node_id, label) in &labels {
+        buckets.entry(*label).or_default().push(node_id.clone());
+    }
+
+    // If LPA produced only 1 group, fall back to pure directory split.
+    // This handles the case where edges are too strong/uniform for LPA to separate.
+    if buckets.len() <= 1 {
+        buckets.clear();
+        for (node_id, label) in &seeds {
+            buckets.entry(*label).or_default().push(node_id.clone());
+        }
+    }
+
+    // Still 1 bucket after dir split? Give up.
+    if buckets.len() <= 1 {
+        return vec![];
+    }
+
+    // Merge tiny subcommunities (<3 members) into the largest bucket.
+    let largest_label = buckets
+        .iter()
+        .max_by_key(|(_, v)| v.len())
+        .map(|(k, _)| *k)
+        .unwrap_or(0);
+
+    let mut tiny_nodes: Vec<String> = Vec::new();
+    buckets.retain(|label, nodes| {
+        if nodes.len() < 3 && *label != largest_label {
+            tiny_nodes.extend(nodes.drain(..));
+            false
+        } else {
+            true
+        }
+    });
+    if !tiny_nodes.is_empty() {
+        buckets.entry(largest_label).or_default().extend(tiny_nodes);
+    }
+
+    // If merging reduced to 1 bucket, skip.
+    if buckets.len() <= 1 {
+        return vec![];
+    }
+
+    // Emit subcommunities.
+    buckets
+        .into_values()
+        .enumerate()
+        .map(|(i, node_ids)| {
+            let mut sub = Community {
+                id: format!("{}-sub-{}", parent.id, i),
+                name: String::new(), // will be named below
+                level: 1,
+                node_ids,
+                parent_id: Some(parent.id.clone()),
+                version: parent.version,
+            };
+            sub.name = name_community(&sub, graph);
+            sub
+        })
+        .collect()
 }
 
 /// Merge communities with fewer than `min_size` members into their best neighbor.

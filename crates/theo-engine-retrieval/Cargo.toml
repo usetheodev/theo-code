@@ -13,3 +13,4 @@ fastembed = "4"
 
 [dev-dependencies]
 tempfile.workspace = true
+theo-application.workspace = true
