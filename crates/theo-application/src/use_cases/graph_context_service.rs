@@ -141,6 +141,10 @@ impl GraphContextProvider for GraphContextService {
             let tantivy_index = FileTantivyIndex::build(&graph).ok();
             #[cfg(feature = "dense-retrieval")]
             let (embedder, embedding_cache) = build_dense_components(&graph, &dir);
+
+            // Generate Code Wiki (deterministic, ~50ms, cached by graph_hash)
+            generate_wiki_if_stale(&graph, &communities, &dir);
+
             let mut state = self.state.write().await;
             *state = GraphBuildState::Ready(GraphState {
                 graph,
@@ -200,6 +204,10 @@ impl GraphContextProvider for GraphContextService {
                     let tantivy_index = FileTantivyIndex::build(&graph).ok();
                     #[cfg(feature = "dense-retrieval")]
                     let (embedder, embedding_cache) = build_dense_components(&graph, &dir_for_cache);
+
+                    // Generate Code Wiki (deterministic, cached)
+                    generate_wiki_if_stale(&graph, &communities, &dir_for_cache);
+
                     *state = GraphBuildState::Ready(GraphState {
                         graph,
                         communities,
@@ -549,6 +557,33 @@ fn build_index(graph: &CodeGraph) -> Vec<Community> {
 
 /// Build dense retrieval components: NeuralEmbedder + EmbeddingCache.
 ///
+/// Generate Code Wiki if stale (graph changed since last generation).
+/// Deterministic, zero LLM cost, ~50-100ms for medium repos.
+fn generate_wiki_if_stale(graph: &CodeGraph, communities: &[Community], project_dir: &Path) {
+    use theo_engine_retrieval::wiki;
+
+    let hash = wiki::generator::compute_graph_hash(graph);
+    if wiki::persistence::is_fresh(project_dir, hash) {
+        return; // Wiki is up-to-date
+    }
+
+    let project_name = project_dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("project");
+
+    let wiki_data = wiki::generator::generate_wiki(communities, graph, project_name);
+
+    if let Err(e) = wiki::persistence::write_to_disk(&wiki_data, project_dir) {
+        eprintln!("[wiki] Warning: failed to write wiki: {e}");
+    } else {
+        eprintln!(
+            "[wiki] Generated {} pages in .theo/wiki/",
+            wiki_data.docs.len()
+        );
+    }
+}
+
 /// Tries to load cached embeddings from .theo/embeddings.bin first.
 /// If cache miss, initializes embedder and builds embeddings from graph.
 /// Returns (None, None) on any failure — fallback to Tier 1/0.
