@@ -526,3 +526,66 @@ fn benchmark_external_bm25() {
         emit_report(&gt.repo, &results, "FileBm25 (external repo)");
     }
 }
+
+/// E2E: Generate Code Wiki from real theo-code repo.
+///
+/// Run: cargo test -p theo-engine-retrieval --test benchmark_suite -- --ignored --nocapture wiki_e2e
+#[test]
+#[ignore]
+fn wiki_e2e() {
+    use theo_engine_graph::bridge;
+    use theo_engine_graph::cluster::{hierarchical_cluster, ClusterAlgorithm};
+    use theo_engine_retrieval::wiki;
+
+    let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent().unwrap()
+        .parent().unwrap();
+
+    eprintln!("=== CODE WIKI E2E TEST ===\n");
+
+    let (files, stats) = theo_application::use_cases::extraction::extract_repo(workspace_root);
+    eprintln!("Parsed: {}/{} files, {} symbols", stats.files_parsed, stats.files_found, stats.symbols_extracted);
+
+    let (graph, _) = bridge::build_graph(&files);
+    eprintln!("Graph: {} nodes, {} edges", graph.node_count(), graph.edge_count());
+
+    let cluster = hierarchical_cluster(&graph, ClusterAlgorithm::FileLeiden { resolution: 1.0 });
+    eprintln!("Communities: {}", cluster.communities.len());
+
+    let start = std::time::Instant::now();
+    let wiki_data = wiki::generator::generate_wiki(&cluster.communities, &graph, "theo-code");
+    let gen_time = start.elapsed();
+    eprintln!("Wiki: {} pages in {:.0}ms\n", wiki_data.docs.len(), gen_time.as_millis());
+
+    wiki::persistence::write_to_disk(&wiki_data, workspace_root).unwrap();
+
+    // Verify
+    let index_path = workspace_root.join(".theo/wiki/index.md");
+    assert!(index_path.exists(), "index.md must exist");
+
+    let modules_dir = workspace_root.join(".theo/wiki/modules");
+    let page_count = std::fs::read_dir(&modules_dir).unwrap().count();
+    assert!(page_count > 0, "must have module pages");
+
+    // Stats
+    eprintln!("{:30} {:>5} {:>6} {:>4} {:>4} {:>8}", "MODULE", "FILES", "SYMS", "ENTR", "DEPS", "COVER");
+    eprintln!("{}", "-".repeat(65));
+    for doc in &wiki_data.docs {
+        eprintln!("{:30} {:>5} {:>6} {:>4} {:>4} {:>7.1}%",
+            &doc.title[..doc.title.len().min(30)],
+            doc.file_count, doc.symbol_count,
+            doc.entry_points.len(), doc.dependencies.len(),
+            doc.test_coverage.percentage);
+    }
+
+    // Provenance check
+    for doc in &wiki_data.docs {
+        assert!(!doc.source_refs.is_empty(), "{} has no provenance", doc.slug);
+    }
+
+    // Cache check
+    let hash = wiki::generator::compute_graph_hash(&graph);
+    assert!(wiki::persistence::is_fresh(workspace_root, hash));
+
+    eprintln!("\n=== WIKI E2E: {} pages, {:.0}ms, PASSED ===", wiki_data.docs.len(), gen_time.as_millis());
+}
