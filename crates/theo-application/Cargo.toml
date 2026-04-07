@@ -18,6 +18,7 @@ thiserror.workspace = true
 async-trait.workspace = true
 ignore.workspace = true
 theo-governance.workspace = true
+theo-infra-llm.workspace = true
 rayon.workspace = true
 bincode.workspace = true
 
