@@ -1,21 +1,19 @@
-# Meeting — 2026-04-07 (Cleanup + Commit Mudanças Pendentes)
+# Meeting — 2026-04-07 (Integração RRF no GraphContextService)
 
 ## Proposta
-Remover código morto (expand_query), commitar mudanças testadas: new_fast(), PRF 1.3x, top_k 500, path_segments 3x, benchmark suite + ground truth JSON.
+Integrar RRF 3-ranker no GraphContextService com 3 tiers, lazy enhancement, fallback cascade.
 
 ## Participantes
 - Governance, QA
 
 ## Veredito
-**APPROVED**
+**REJECTED**
 
-## Escopo Aprovado
-- Mod: `crates/theo-engine-retrieval/src/code_tokenizer.rs` (remover expand_query)
-- Mod: `crates/theo-engine-retrieval/src/dense_search.rs` (PRF 1.3x, já correto)
-- Mod: `crates/theo-engine-retrieval/src/embedding/neural.rs` (new_fast + THEO_FAST_EMBED)
-- Mod: `crates/theo-engine-retrieval/src/tantivy_search.rs` (top_k 500, path 3x, comments)
-- Novo: `crates/theo-engine-retrieval/tests/benchmarks/` (ground truth + benchmark runner)
+## Motivo
+Working tree suja com mudanças de symbol_first pipeline (meeting anterior). Zero diff para os 3 files propostos. CLI theo-cli importa infra diretamente (bounded context violation) — feature deve ser forwarded via theo-application, não direto no CLI.
 
-## Condições
-1. Remover expand_query() antes do commit
-2. 91+ testes passando após cleanup
+## Ação
+1. Commitar mudanças atuais (symbol_first + benchmark A/B)
+2. Criar branch dedicada para integração RRF
+3. Feature forwarding exclusivamente via theo-application
+4. Resubmeter meeting com tree limpo

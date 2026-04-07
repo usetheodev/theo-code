@@ -291,6 +291,103 @@ fn benchmark_rrf_dense() {
     emit_report(&gt.repo, &results, "RRF 3-ranker (BM25+Tantivy+Dense, Jina Code)");
 }
 
+/// A/B benchmark: Symbol-First vs RRF baseline.
+///
+/// Run: cargo test -p theo-engine-retrieval --features dense-retrieval --test benchmark_suite -- --ignored --nocapture benchmark_symbol_first_ab
+#[test]
+#[ignore]
+#[cfg(feature = "dense-retrieval")]
+fn benchmark_symbol_first_ab() {
+    use theo_engine_graph::bridge;
+    use theo_engine_retrieval::tantivy_search::{FileTantivyIndex, hybrid_rrf_search, symbol_first_search};
+    use theo_engine_retrieval::embedding::neural::NeuralEmbedder;
+    use theo_engine_retrieval::embedding::cache::EmbeddingCache;
+
+    let gt = load_ground_truth("theo-code");
+
+    let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent().unwrap()
+        .parent().unwrap();
+
+    eprintln!("Building graph...");
+    let (files, stats) = theo_application::use_cases::extraction::extract_repo(workspace_root);
+    eprintln!("Parsed {}/{} files", stats.files_parsed, stats.files_found);
+
+    let (graph, _) = bridge::build_graph(&files);
+    let tantivy_index = FileTantivyIndex::build(&graph).expect("Tantivy build failed");
+    let embedder = NeuralEmbedder::new().expect("NeuralEmbedder init failed");
+    let cache = EmbeddingCache::build(&graph, &embedder);
+    eprintln!("Ready: {} nodes, Tantivy {} docs, Embeddings {} files",
+        graph.node_count(), tantivy_index.num_docs(), cache.len());
+
+    let k = 5;
+
+    // --- Baseline: RRF 3-ranker ---
+    let mut rrf_results: Vec<QueryResult> = Vec::new();
+    for bq in &gt.queries {
+        let scores = hybrid_rrf_search(&graph, &tantivy_index, &embedder, &cache, &bq.query, 20.0);
+        let returned = extract_files_from_scores(&scores);
+        let expected: Vec<&str> = bq.expected_files.iter().map(|s| s.as_str()).collect();
+        let deps: Vec<DepEdge> = bq.dependencies.iter().map(|d| d.to_dep_edge()).collect();
+        let m = RetrievalMetrics::compute(&returned, &expected, &deps);
+        rrf_results.push(QueryResult {
+            id: bq.id.clone(), query: bq.query.clone(),
+            category: bq.category.clone(), difficulty: bq.difficulty.clone(),
+            metrics: m, returned_top_10: returned.into_iter().take(10).collect(),
+            expected_files: bq.expected_files.clone(),
+        });
+    }
+
+    // --- Variant: Symbol-First ---
+    let mut sym_results: Vec<QueryResult> = Vec::new();
+    for bq in &gt.queries {
+        let scores = symbol_first_search(&graph, &tantivy_index, &embedder, &cache, &bq.query, 20.0);
+        let returned = extract_files_from_scores(&scores);
+        let expected: Vec<&str> = bq.expected_files.iter().map(|s| s.as_str()).collect();
+        let deps: Vec<DepEdge> = bq.dependencies.iter().map(|d| d.to_dep_edge()).collect();
+        let m = RetrievalMetrics::compute(&returned, &expected, &deps);
+        sym_results.push(QueryResult {
+            id: bq.id.clone(), query: bq.query.clone(),
+            category: bq.category.clone(), difficulty: bq.difficulty.clone(),
+            metrics: m, returned_top_10: returned.into_iter().take(10).collect(),
+            expected_files: bq.expected_files.clone(),
+        });
+    }
+
+    // --- A/B Comparison ---
+    let rrf_avg = RetrievalMetrics::average(&rrf_results.iter().map(|r| r.metrics.clone()).collect::<Vec<_>>());
+    let sym_avg = RetrievalMetrics::average(&sym_results.iter().map(|r| r.metrics.clone()).collect::<Vec<_>>());
+
+    eprintln!("\n{}", "=".repeat(90));
+    eprintln!("A/B: SYMBOL-FIRST vs RRF BASELINE");
+    eprintln!("{}", "=".repeat(90));
+    eprintln!("{:<20} {:>10} {:>10} {:>10}", "", "RRF", "Symbol-1st", "Delta");
+    eprintln!("{}", "-".repeat(60));
+    eprintln!("{:<20} {:>10.3} {:>10.3} {:>+10.3}", "Recall@5", rrf_avg.recall_at_5, sym_avg.recall_at_5, sym_avg.recall_at_5 - rrf_avg.recall_at_5);
+    eprintln!("{:<20} {:>10.3} {:>10.3} {:>+10.3}", "Recall@10", rrf_avg.recall_at_10, sym_avg.recall_at_10, sym_avg.recall_at_10 - rrf_avg.recall_at_10);
+    eprintln!("{:<20} {:>10.3} {:>10.3} {:>+10.3}", "MRR", rrf_avg.mrr, sym_avg.mrr, sym_avg.mrr - rrf_avg.mrr);
+    eprintln!("{:<20} {:>10.3} {:>10.3} {:>+10.3}", "Hit@5", rrf_avg.hit_rate_at_5, sym_avg.hit_rate_at_5, sym_avg.hit_rate_at_5 - rrf_avg.hit_rate_at_5);
+    eprintln!("{:<20} {:>10.3} {:>10.3} {:>+10.3}", "nDCG@5", rrf_avg.ndcg_at_5, sym_avg.ndcg_at_5, sym_avg.ndcg_at_5 - rrf_avg.ndcg_at_5);
+    eprintln!("{:<20} {:>10.3} {:>10.3} {:>+10.3}", "MAP", rrf_avg.average_precision, sym_avg.average_precision, sym_avg.average_precision - rrf_avg.average_precision);
+    eprintln!("{:<20} {:>10.3} {:>10.3} {:>+10.3}", "DepCov", rrf_avg.dep_coverage, sym_avg.dep_coverage, sym_avg.dep_coverage - rrf_avg.dep_coverage);
+
+    // Per-query delta for queries that improved
+    eprintln!("\nPER-QUERY DELTA (R@5 changed):");
+    for (rrf_r, sym_r) in rrf_results.iter().zip(sym_results.iter()) {
+        let delta = sym_r.metrics.recall_at_5 - rrf_r.metrics.recall_at_5;
+        if delta.abs() > 0.01 {
+            eprintln!("  {} '{}': R@5 {:.2} → {:.2} ({:+.2})",
+                rrf_r.id, rrf_r.query, rrf_r.metrics.recall_at_5, sym_r.metrics.recall_at_5, delta);
+        }
+    }
+
+    eprintln!("\n{}", "=".repeat(90));
+
+    // Also emit full reports
+    emit_report(&gt.repo, &rrf_results, "RRF BASELINE");
+    emit_report(&gt.repo, &sym_results, "SYMBOL-FIRST");
+}
+
 /// Multi-repo benchmark: RRF+Dense on external repos.
 ///
 /// Run: cargo test -p theo-engine-retrieval --features dense-retrieval --test benchmark_suite -- --ignored --nocapture benchmark_external_rrf
