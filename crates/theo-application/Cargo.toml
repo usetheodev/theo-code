@@ -24,7 +24,7 @@ bincode.workspace = true
 [features]
 default = []
 tantivy-backend = ["theo-engine-retrieval/tantivy-backend"]
-dense-retrieval = ["theo-engine-retrieval/dense-retrieval"]
+dense-retrieval = ["tantivy-backend", "theo-engine-retrieval/dense-retrieval"]
 
 [dev-dependencies]
 tempfile.workspace = true

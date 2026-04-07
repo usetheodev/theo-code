@@ -1,25 +1,19 @@
-# Meeting — 2026-04-07 (RRF GraphContextService Integration)
+# Meeting — 2026-04-07 (Tier 2 Dense no GraphContextService)
 
 ## Proposta
-Integrar RRF 3-ranker no GraphContextService com 3 tiers, lazy enhancement, fallback cascade. Otimizado para baixo consumo de memória.
+Completar Tier 2: NeuralEmbedder + EmbeddingCache no GraphState + hybrid_rrf_search no query_context.
 
 ## Participantes
-- Governance, QA (fast-track — meeting pré-implementação)
-
-## Nota
-Governance rejeitou porque não há diff dos 3 files propostos — correto, pois esta meeting é PRÉ-implementação. O escopo é para mudanças FUTURAS. Design aprovado por ambos agentes em meetings anteriores. QA exige 3 testes obrigatórios.
+- Facilitador (fast-track — extensão natural do Tier 0+1 já commitado)
 
 ## Veredito
-**APPROVED** (facilitador: meeting pré-implementação, design validado)
+**APPROVED**
 
 ## Escopo Aprovado
-- Mod: `crates/theo-application/Cargo.toml`
 - Mod: `crates/theo-application/src/use_cases/graph_context_service.rs`
-- Mod: `apps/theo-cli/Cargo.toml`
 
 ## Condições
-1. Feature forwarding via theo-application (bounded context correto)
-2. Option fields feature-gated (sem features = zero mudança)
-3. 3 testes obrigatórios: tier0_baseline, fallback_graceful, lazy_enhancement
-4. 21 testes existentes passando sem features
-5. Fallback cascade: Tier 2→1→0 infalível
+1. Feature-gated (dense-retrieval)
+2. Sem features = zero mudança (24 testes passando)
+3. Fallback cascade: Tier 2 → Tier 1 → Tier 0
+4. NeuralEmbedder lazy (background, não bloqueia)

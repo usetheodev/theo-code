@@ -30,6 +30,11 @@ use theo_engine_retrieval::search::{FileBm25, MultiSignalScorer};
 #[cfg(feature = "tantivy-backend")]
 use theo_engine_retrieval::tantivy_search::FileTantivyIndex;
 
+#[cfg(feature = "dense-retrieval")]
+use theo_engine_retrieval::embedding::neural::NeuralEmbedder;
+#[cfg(feature = "dense-retrieval")]
+use theo_engine_retrieval::embedding::cache::EmbeddingCache;
+
 // ---------------------------------------------------------------------------
 // Configuration
 // ---------------------------------------------------------------------------
@@ -50,9 +55,15 @@ struct GraphState {
     graph: CodeGraph,
     communities: Vec<Community>,
     scorer: MultiSignalScorer,
-    /// Tantivy BM25F index (Tier 1). Built lazily on first query.
+    /// Tantivy BM25F index (Tier 1).
     #[cfg(feature = "tantivy-backend")]
     tantivy_index: Option<FileTantivyIndex>,
+    /// Neural embedder for dense search (Tier 2). AllMiniLM default, Jina Code opt-in.
+    #[cfg(feature = "dense-retrieval")]
+    embedder: Option<NeuralEmbedder>,
+    /// Pre-computed file embeddings (Tier 2). Cached to .theo/embeddings.bin.
+    #[cfg(feature = "dense-retrieval")]
+    embedding_cache: Option<EmbeddingCache>,
 }
 
 /// Explicit state machine for background graph build lifecycle.
@@ -119,9 +130,11 @@ impl GraphContextProvider for GraphContextService {
 
         if let Some(graph) = try_load_cache(&cache_path, &dir) {
             let (communities, scorer) = build_index(&graph);
-            // Eagerly build Tantivy index on cache hit (fast, ~100ms)
             #[cfg(feature = "tantivy-backend")]
             let tantivy_index = FileTantivyIndex::build(&graph).ok();
+            // Dense: try loading cached embeddings, build if missing
+            #[cfg(feature = "dense-retrieval")]
+            let (embedder, embedding_cache) = build_dense_components(&graph, &dir);
             let mut state = self.state.write().await;
             *state = GraphBuildState::Ready(GraphState {
                 graph,
@@ -129,6 +142,10 @@ impl GraphContextProvider for GraphContextService {
                 scorer,
                 #[cfg(feature = "tantivy-backend")]
                 tantivy_index,
+                #[cfg(feature = "dense-retrieval")]
+                embedder,
+                #[cfg(feature = "dense-retrieval")]
+                embedding_cache,
             });
             return Ok(());
         }
@@ -172,12 +189,18 @@ impl GraphContextProvider for GraphContextService {
                     save_cache_atomic(&cache_path, &graph, &dir_for_cache);
                     #[cfg(feature = "tantivy-backend")]
                     let tantivy_index = FileTantivyIndex::build(&graph).ok();
+                    #[cfg(feature = "dense-retrieval")]
+                    let (embedder, embedding_cache) = build_dense_components(&graph, &dir_for_cache);
                     *state = GraphBuildState::Ready(GraphState {
                         graph,
                         communities,
                         scorer,
                         #[cfg(feature = "tantivy-backend")]
                         tantivy_index,
+                        #[cfg(feature = "dense-retrieval")]
+                        embedder,
+                        #[cfg(feature = "dense-retrieval")]
+                        embedding_cache,
                     });
                 }
                 Ok(Ok(Err(_panic))) => {
@@ -233,30 +256,54 @@ impl GraphContextProvider for GraphContextService {
         };
 
         // Tiered scoring: use best available pipeline.
-        // Tier 1 (tantivy-backend): BM25 Custom + Tantivy BM25F via hybrid_search
-        // Tier 0 (always): BM25 Custom only via FileBm25::search
+        // Tier 2 (dense-retrieval): BM25 + Tantivy + Dense → RRF 3-ranker (MRR=0.914)
+        // Tier 1 (tantivy-backend): BM25 + Tantivy → hybrid_search (2-ranker)
+        // Tier 0 (always): BM25 only → FileBm25::search
         //
-        // File-level scoring + assemble_files_direct is more precise than
-        // community-level scoring + assemble_greedy (validated in benchmark:
-        // MRR 0.914 vs 0.815, 4/6 SOTA gates pass).
+        // Fallback cascade: Tier 2 → 1 → 0 (infalível).
         let file_scores: std::collections::HashMap<String, f64> = {
-            #[cfg(feature = "tantivy-backend")]
+            // Try Tier 2 first: full RRF 3-ranker (BM25 + Tantivy + Dense)
+            #[cfg(feature = "dense-retrieval")]
             {
-                if let Some(ref tantivy_index) = graph_state.tantivy_index {
-                    // Tier 1: hybrid_search (BM25 + Tantivy, no dense)
+                let has_tier2 = graph_state.tantivy_index.is_some()
+                    && graph_state.embedder.is_some()
+                    && graph_state.embedding_cache.is_some();
+
+                if has_tier2 {
+                    theo_engine_retrieval::tantivy_search::hybrid_rrf_search(
+                        &graph_state.graph,
+                        graph_state.tantivy_index.as_ref().unwrap(),
+                        graph_state.embedder.as_ref().unwrap(),
+                        graph_state.embedding_cache.as_ref().unwrap(),
+                        query,
+                        20.0, // RRF k parameter (empirically optimal)
+                    )
+                } else if graph_state.tantivy_index.is_some() {
                     theo_engine_retrieval::tantivy_search::hybrid_search(
                         &graph_state.graph,
-                        tantivy_index,
+                        graph_state.tantivy_index.as_ref().unwrap(),
                         query,
                     )
                 } else {
-                    // Fallback: BM25 only
                     FileBm25::search(&graph_state.graph, query)
                 }
             }
-            #[cfg(not(feature = "tantivy-backend"))]
+            // Without dense-retrieval: try Tier 1, then Tier 0
+            #[cfg(all(feature = "tantivy-backend", not(feature = "dense-retrieval")))]
             {
-                // Tier 0: BM25 only
+                if graph_state.tantivy_index.is_some() {
+                    theo_engine_retrieval::tantivy_search::hybrid_search(
+                        &graph_state.graph,
+                        graph_state.tantivy_index.as_ref().unwrap(),
+                        query,
+                    )
+                } else {
+                    FileBm25::search(&graph_state.graph, query)
+                }
+            }
+            // Without any features: Tier 0 only
+            #[cfg(not(any(feature = "tantivy-backend", feature = "dense-retrieval")))]
+            {
                 FileBm25::search(&graph_state.graph, query)
             }
         };
@@ -479,6 +526,60 @@ fn build_index(graph: &CodeGraph) -> (Vec<Community>, MultiSignalScorer) {
     let cluster_result = tokio_safe_cluster(graph);
     let scorer = MultiSignalScorer::build(&cluster_result.communities, graph);
     (cluster_result.communities, scorer)
+}
+
+/// Build dense retrieval components: NeuralEmbedder + EmbeddingCache.
+///
+/// Tries to load cached embeddings from .theo/embeddings.bin first.
+/// If cache miss, initializes embedder and builds embeddings from graph.
+/// Returns (None, None) on any failure — fallback to Tier 1/0.
+#[cfg(feature = "dense-retrieval")]
+fn build_dense_components(
+    graph: &CodeGraph,
+    project_dir: &Path,
+) -> (Option<NeuralEmbedder>, Option<EmbeddingCache>) {
+    // Try loading embedder (AllMiniLM default, ~200MB; Jina Code opt-in ~1.2GB)
+    let embedder = match NeuralEmbedder::new() {
+        Ok(e) => e,
+        Err(err) => {
+            eprintln!("[graphctx] Dense retrieval disabled: embedder init failed: {err}");
+            return (None, None);
+        }
+    };
+
+    // Try loading cached embeddings
+    let cache_path = project_dir.join(".theo").join("embeddings.bin");
+    let graph_hash = {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::hash::DefaultHasher::new();
+        for node_id in graph.node_ids() {
+            if let Some(node) = graph.get_node(node_id) {
+                if node.node_type == theo_engine_graph::model::NodeType::File {
+                    let path = node.file_path.as_deref().unwrap_or(&node.name);
+                    path.hash(&mut hasher);
+                    node.last_modified.to_bits().hash(&mut hasher);
+                }
+            }
+        }
+        hasher.finish()
+    };
+
+    if let Some(cache) = EmbeddingCache::load(&cache_path, graph_hash) {
+        eprintln!("[graphctx] Loaded embedding cache ({} files)", cache.len());
+        return (Some(embedder), Some(cache));
+    }
+
+    // Build embeddings (slow: ~5-30s depending on repo size and model)
+    eprintln!("[graphctx] Building embedding cache...");
+    let cache = EmbeddingCache::build(graph, &embedder);
+    eprintln!("[graphctx] Embedding cache built ({} files)", cache.len());
+
+    // Save to disk for next startup
+    if let Err(e) = cache.save(&cache_path) {
+        eprintln!("[graphctx] Warning: failed to save embedding cache: {e}");
+    }
+
+    (Some(embedder), Some(cache))
 }
 
 /// Run clustering with a fallback: try FileLeiden first, if it panics or
