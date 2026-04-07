@@ -7,6 +7,7 @@ pub mod graph_attention;
 pub mod metrics;
 pub mod search;
 pub mod summary;
+pub mod wiki;
 #[cfg(feature = "tantivy-backend")]
 pub mod tantivy_search;
 #[cfg(feature = "dense-retrieval")]
