@@ -597,13 +597,14 @@ impl FileBm25 {
                 }
             }
 
-            // Path segments: 2x boost. Directory names like "provider", "auth", "sandbox"
-            // are strong signals that BM25 should leverage.
+            // Path segments: 3x boost. Directory names like "routing", "extract", "middleware"
+            // disambiguate files with generic names (mod.rs, lib.rs).
+            // Increased from 2x to 3x after multi-repo benchmark showed axum mod.rs confusion.
             if let Some(fp) = &file_node.file_path {
                 for segment in fp.split('/') {
                     for token in tokenise(segment) {
                         if !is_stop_word(&token) {
-                            *weighted_tf.entry(token).or_default() += 2.0;
+                            *weighted_tf.entry(token).or_default() += 3.0;
                         }
                     }
                 }
@@ -637,15 +638,14 @@ impl FileBm25 {
                         }
                     }
                     // 2-hop import enrichment: symbols this child CALLS/IMPORTS.
-                    // Bridges "definer vs user" gap: if MultiSignalScorer calls
-                    // propagate_attention, "propagate" and "attention" go into
-                    // search.rs's BM25 document at 0.5x boost.
+                    // Low boost (0.15x) to minimize IDF dilution in BM25.
+                    // Higher values tested (0.3x, 0.5x) hurt BM25 baseline.
                     for target_id in graph.neighbors(child_id) {
                         if let Some(target) = graph.get_node(target_id) {
                             if target.node_type == NodeType::Symbol {
                                 for token in tokenise(&target.name) {
                                     if !is_stop_word(&token) {
-                                        *weighted_tf.entry(token).or_default() += 0.5;
+                                        *weighted_tf.entry(token).or_default() += 0.15;
                                     }
                                 }
                             }

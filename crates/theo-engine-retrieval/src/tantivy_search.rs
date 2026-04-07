@@ -211,13 +211,13 @@ mod inner {
                         )),
                         5.0,
                     ))),
-                    // path segments: 2x boost (directory components like "provider", "auth")
+                    // path segments: 3x boost (disambiguates mod.rs files by directory)
                     (Occur::Should, Box::new(BoostQuery::new(
                         Box::new(TermQuery::new(
                             tantivy::Term::from_field_text(self.f_path_segments, token),
                             IndexRecordOption::WithFreqs,
                         )),
-                        2.0,
+                        3.0,
                     ))),
                     // symbol: 3x boost
                     (Occur::Should, Box::new(BoostQuery::new(
@@ -237,7 +237,7 @@ mod inner {
                         tantivy::Term::from_field_text(self.f_doc, token),
                         IndexRecordOption::WithFreqs,
                     ))),
-                    // imports: 0.5x (lower weight — captures "who uses this")
+                    // imports: 0.5x (captures "who uses this")
                     (Occur::Should, Box::new(BoostQuery::new(
                         Box::new(TermQuery::new(
                             tantivy::Term::from_field_text(self.f_imports, token),
@@ -438,12 +438,14 @@ pub fn hybrid_rrf_search(
 
     // Get scores from all 3 rankers
     let bm25_scores = FileBm25::search(graph, query);
+    // Use large top_k to avoid missing files in large repos (e.g., FastAPI 1125 files).
+    // Cost is negligible: Tantivy is index-based, Dense scans all cached embeddings anyway.
     let tantivy_scores = tantivy_index
-        .search_with_prf(graph, query, 100)
+        .search_with_prf(graph, query, 500)
         .unwrap_or_default();
-    let dense_scores = FileDenseSearch::search(embedder, cache, query, 100);
+    let dense_scores = FileDenseSearch::search(embedder, cache, query, 500);
 
-    // Convert to ranked lists, EXCLUDING test/benchmark/example files before ranking
+    // Convert to ranked lists, EXCLUDING test/benchmark/example files
     let is_noise = |path: &str| -> bool {
         let lp = path.to_lowercase();
         lp.contains("test") || lp.contains("benchmark") || lp.contains("example")
@@ -461,7 +463,6 @@ pub fn hybrid_rrf_search(
     let tantivy_ranked = to_ranked(&tantivy_scores);
     let dense_ranked = to_ranked(&dense_scores);
 
-    // Build rank maps (String keys to avoid lifetime issues)
     let rank_map = |ranked: &[String]| -> HashMap<String, usize> {
         ranked.iter().enumerate().map(|(i, p)| (p.clone(), i)).collect()
     };
@@ -470,7 +471,6 @@ pub fn hybrid_rrf_search(
     let tantivy_rank = rank_map(&tantivy_ranked);
     let dense_rank = rank_map(&dense_ranked);
 
-    // Collect all non-noise file paths
     let mut all_paths: std::collections::HashSet<String> = std::collections::HashSet::new();
     for k in bm25_scores.keys() { if !is_noise(k) { all_paths.insert(k.clone()); } }
     for k in tantivy_scores.keys() { if !is_noise(k) { all_paths.insert(k.clone()); } }
@@ -480,11 +480,10 @@ pub fn hybrid_rrf_search(
         return HashMap::new();
     }
 
-    // Uniform RRF: equal weight for all 3 rankers (k=20 optimal).
+    // RRF 3-ranker: BM25 + Tantivy + Dense (uniform weights, k=40 optimal).
     let mut merged = HashMap::new();
     for path in &all_paths {
         let mut rrf_score = 0.0;
-
         if let Some(&rank) = bm25_rank.get(path.as_str()) {
             rrf_score += 1.0 / (k_param + rank as f64);
         }
@@ -494,7 +493,6 @@ pub fn hybrid_rrf_search(
         if let Some(&rank) = dense_rank.get(path.as_str()) {
             rrf_score += 1.0 / (k_param + rank as f64);
         }
-
         if rrf_score > 0.0 {
             merged.insert(path.clone(), rrf_score);
         }

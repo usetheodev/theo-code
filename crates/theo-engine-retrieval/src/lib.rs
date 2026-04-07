@@ -4,6 +4,7 @@ pub mod budget;
 pub mod code_tokenizer;
 pub mod escape;
 pub mod graph_attention;
+pub mod metrics;
 pub mod search;
 pub mod summary;
 #[cfg(feature = "tantivy-backend")]

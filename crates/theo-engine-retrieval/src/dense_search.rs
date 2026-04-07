@@ -16,12 +16,46 @@ mod inner {
     /// File-level dense search via embedding cosine similarity.
     pub struct FileDenseSearch;
 
+    /// Cosine scan helper: embed query, scan cache, return sorted scores.
+    fn cosine_scan(
+        query_vec: &[f64],
+        cache: &EmbeddingCache,
+    ) -> Vec<(String, f64)> {
+        let query_norm: f64 = query_vec.iter().map(|x| x * x).sum::<f64>().sqrt();
+        if query_norm < 1e-10 {
+            return Vec::new();
+        }
+
+        let mut scores: Vec<(String, f64)> = Vec::new();
+        for (file_path, embedding) in cache.iter() {
+            let emb_norm: f64 = embedding.iter().map(|x| x * x).sum::<f64>().sqrt();
+            if emb_norm < 1e-10 { continue; }
+
+            let mut sim = NeuralEmbedder::cosine_similarity(query_vec, embedding);
+
+            // Test/benchmark/example penalty
+            let lp = file_path.to_lowercase();
+            if lp.contains("test") || lp.contains("benchmark") || lp.contains("example") {
+                sim *= 0.1;
+            }
+
+            if sim > 0.0 {
+                scores.push((file_path.to_string(), sim));
+            }
+        }
+
+        scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        scores
+    }
+
     impl FileDenseSearch {
-        /// Search files by semantic similarity to query.
+        /// Search with PRF: embed query → find top-1 → expand query with top-1's
+        /// document text → re-embed → merge scores.
         ///
-        /// Returns file_path -> cosine_similarity mapping (same interface as FileBm25).
-        /// Zero-vector embeddings are skipped (guard against NeuralEmbedder failures).
-        /// Test/benchmark/example files receive a 0.1x penalty.
+        /// This bridges the "definer vs user" gap in dense search:
+        /// Stage 1: "TurboQuantizer quantize" → finds turboquant.rs (#1)
+        /// Stage 2: expanded with turboquant.rs symbols → search.rs rises
+        ///          because it mentions the same symbols
         pub fn search(
             embedder: &NeuralEmbedder,
             cache: &EmbeddingCache,
@@ -32,43 +66,44 @@ mod inner {
                 return HashMap::new();
             }
 
-            // Embed query
+            // Stage 1: initial dense search
             let query_vec = embedder.embed(query);
+            let initial = cosine_scan(&query_vec, cache);
 
-            // Zero-vector guard for query
-            let query_norm: f64 = query_vec.iter().map(|x| x * x).sum::<f64>().sqrt();
-            if query_norm < 1e-10 {
+            if initial.is_empty() {
                 return HashMap::new();
             }
 
-            // Cosine scan over all cached embeddings
-            let mut scores: Vec<(String, f64)> = Vec::new();
+            // PRF: if top-1 is confident (2x over #2), expand query
+            if initial.len() >= 2 && initial[0].1 > initial[1].1 * 1.3 {
+                let top_path = &initial[0].0;
 
-            for (file_path, embedding) in cache.iter() {
-                // Zero-vector guard: skip files with zero embeddings
-                let emb_norm: f64 = embedding.iter().map(|x| x * x).sum::<f64>().sqrt();
-                if emb_norm < 1e-10 {
-                    continue;
-                }
+                // Get top-1's embedding (which encodes its document text)
+                if let Some(top_emb) = cache.get(top_path) {
+                    // Create expanded query vector: 0.7 * original + 0.3 * top-1 doc
+                    let expanded: Vec<f64> = query_vec.iter()
+                        .zip(top_emb.iter())
+                        .map(|(q, d)| 0.7 * q + 0.3 * d)
+                        .collect();
 
-                let mut sim = NeuralEmbedder::cosine_similarity(&query_vec, embedding);
+                    let expanded_scores = cosine_scan(&expanded, cache);
 
-                // Test/benchmark/example penalty (Zoekt pattern)
-                let lp = file_path.to_lowercase();
-                if lp.contains("test") || lp.contains("benchmark") || lp.contains("example") {
-                    sim *= 0.1;
-                }
+                    // Merge: max of initial and expanded scores
+                    let mut merged: HashMap<String, f64> = HashMap::new();
+                    for (path, score) in initial.iter().chain(expanded_scores.iter()) {
+                        let entry = merged.entry(path.clone()).or_insert(0.0);
+                        *entry = entry.max(*score);
+                    }
 
-                if sim > 0.0 {
-                    scores.push((file_path.to_string(), sim));
+                    let mut result: Vec<_> = merged.into_iter().collect();
+                    result.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+                    result.truncate(top_k);
+                    return result.into_iter().collect();
                 }
             }
 
-            // Sort by similarity descending, take top_k
-            scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-            scores.truncate(top_k);
-
-            scores.into_iter().collect()
+            // No PRF: return initial results
+            initial.into_iter().take(top_k).collect::<Vec<_>>().into_iter().collect()
         }
     }
 }

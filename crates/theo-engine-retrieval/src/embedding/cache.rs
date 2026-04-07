@@ -19,9 +19,9 @@ use theo_engine_graph::model::{CodeGraph, NodeType};
 
 /// Version header: model name hash + embedding dimension.
 /// If the model changes, the cache auto-invalidates.
-const CACHE_VERSION: u32 = 1;
-const MODEL_NAME: &str = "AllMiniLM-L6-v2";
-const EMBEDDING_DIM: usize = 384;
+const CACHE_VERSION: u32 = 2; // Bumped: Jina Code 768-dim + 2-hop imports
+const MODEL_NAME: &str = "JinaEmbeddingsV2BaseCode";
+const EMBEDDING_DIM: usize = 768;
 
 #[derive(Serialize, Deserialize)]
 struct CacheHeader {
@@ -59,9 +59,9 @@ impl EmbeddingCache {
     /// Build cache from CodeGraph by embedding each file's document.
     ///
     /// For each File node, constructs a document from:
-    /// - File name and path
-    /// - Child symbol names and signatures
-    /// - First-line docstrings
+    /// - File name and path segments
+    /// - Child symbol names, signatures, first-line docs
+    /// - 2-hop import targets (symbols called by children)
     ///
     /// Then batch-embeds all documents via NeuralEmbedder.
     pub fn build(graph: &CodeGraph, embedder: &NeuralEmbedder) -> Self {
@@ -112,10 +112,8 @@ impl EmbeddingCache {
         let bytes = std::fs::read(path).ok()?;
         let data: CacheData = bincode::deserialize(&bytes).ok()?;
 
-        // Validate header
+        // Validate header (version + graph hash, model-flexible for fallback)
         if data.header.version != CACHE_VERSION
-            || data.header.model_name != MODEL_NAME
-            || data.header.embedding_dim != EMBEDDING_DIM
             || data.header.graph_hash != expected_graph_hash
         {
             return None; // Stale or incompatible cache
@@ -228,6 +226,17 @@ fn build_file_document(
             if let Some(doc) = &child.doc {
                 if let Some(first_line) = doc.lines().next() {
                     parts.push(first_line.to_string());
+                }
+            }
+
+            // 2-hop: symbols this child CALLS/IMPORTS (bridging definer-vs-user gap)
+            // If search.rs calls propagate_attention, "propagate_attention" goes
+            // into search.rs's embedding doc, so dense search also finds "users".
+            for target_id in graph.neighbors(child_id) {
+                if let Some(target) = graph.get_node(target_id) {
+                    if target.node_type == NodeType::Symbol {
+                        parts.push(target.name.clone());
+                    }
                 }
             }
         }

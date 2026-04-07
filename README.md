@@ -1,5 +1,11 @@
 <p align="center">
-  <h1 align="center">Theo</h1>
+  <a href="https://usetheo.dev">
+    <img src="https://usetheo.dev/logo.png" alt="Theo" height="80" />
+  </a>
+</p>
+
+<p align="center">
+  <h1 align="center">Theo Code</h1>
   <p align="center">
     <strong>The harness-first autonomous coding agent</strong>
   </p>

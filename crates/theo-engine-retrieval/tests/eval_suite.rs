@@ -480,23 +480,40 @@ fn eval_rrf_dense() {
         eprintln!("\nBASELINE (BM25 only): P@5={:.3}  MRR={:.3}", total_p / n, total_m / n);
     }
 
-    // --- Dense only (for analysis) ---
+    // --- Dense only (with diagnostic for weak queries) ---
     {
         let mut total_p = 0.0;
         let mut total_m = 0.0;
-        for eq in queries.iter() {
-            let scores = FileDenseSearch::search(&embedder, &cache, eq.query, 100);
+        eprintln!("\n--- DENSE RANKER DIAGNOSTIC (expected file positions) ---");
+        for (i, eq) in queries.iter().enumerate() {
+            let scores = FileDenseSearch::search(&embedder, &cache, eq.query, 200);
             let files = extract_files_from_scores(&scores);
-            total_p += precision_at_k(&files, &eq.expected_files, k);
+            let p = precision_at_k(&files, &eq.expected_files, k);
+            total_p += p;
             total_m += mrr(&files, &eq.expected_files);
+
+            // For weak queries: show where expected files rank in dense
+            if p < 0.40 {
+                let expected_ranks: Vec<String> = eq.expected_files.iter().map(|ef| {
+                    match files.iter().position(|f| f == *ef) {
+                        Some(pos) => format!("{}@{}", ef.split('/').last().unwrap_or(ef), pos + 1),
+                        None => format!("{}@MISS", ef.split('/').last().unwrap_or(ef)),
+                    }
+                }).collect();
+                eprintln!("  Q{} '{}': P@5={:.2} dense_ranks=[{}]",
+                    i + 1,
+                    if eq.query.len() > 30 { &eq.query[..30] } else { eq.query },
+                    p,
+                    expected_ranks.join(", "));
+            }
         }
         let n = queries.len() as f64;
-        eprintln!("DENSE ONLY: P@5={:.3}  MRR={:.3}", total_p / n, total_m / n);
+        eprintln!("DENSE ONLY: P@5={:.3}  MRR={:.3}\n", total_p / n, total_m / n);
     }
 
     // --- RRF 3-ranker with different k values ---
     // Use extract_files_from_scores instead of assembly to avoid community dilution
-    for rrf_k in [20.0, 40.0, 60.0] {
+    for rrf_k in [10.0, 20.0, 40.0] {
         let mut total_p = 0.0;
         let mut total_r = 0.0;
         let mut total_m = 0.0;
