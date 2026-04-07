@@ -1,19 +1,19 @@
-# Meeting — 2026-04-07 (Tier 2 Dense no GraphContextService)
+# Meeting — 2026-04-07 (Otimização Memória Tier 2)
 
 ## Proposta
-Completar Tier 2: NeuralEmbedder + EmbeddingCache no GraphState + hybrid_rrf_search no query_context.
+3 otimizações: quantized model, eliminar scorer, Tantivy mmap.
 
 ## Participantes
-- Facilitador (fast-track — extensão natural do Tier 0+1 já commitado)
+- Facilitador, Infra
 
 ## Veredito
-**APPROVED**
+**APPROVED** (parcial: otimizações 1+2. Mmap deferido.)
 
 ## Escopo Aprovado
-- Mod: `crates/theo-application/src/use_cases/graph_context_service.rs`
+- Mod: `crates/theo-engine-retrieval/src/embedding/neural.rs` (AllMiniLML6V2Q)
+- Mod: `crates/theo-application/src/use_cases/graph_context_service.rs` (scorer → Option)
 
 ## Condições
-1. Feature-gated (dense-retrieval)
-2. Sem features = zero mudança (24 testes passando)
-3. Fallback cascade: Tier 2 → Tier 1 → Tier 0
-4. NeuralEmbedder lazy (background, não bloqueia)
+1. MRR >= 0.85 após modelo quantizado (validar no benchmark)
+2. Tier 0 fallback preservado (FileBm25 não depende de scorer)
+3. Mmap deferido até ter baseline de latência

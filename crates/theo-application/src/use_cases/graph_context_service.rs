@@ -54,6 +54,10 @@ const LEIDEN_RESOLUTION: f64 = 1.0;
 struct GraphState {
     graph: CodeGraph,
     communities: Vec<Community>,
+    /// MultiSignalScorer: only built when no RRF pipeline available (Tier 0 only).
+    /// When tantivy-backend is active, query_context uses FileBm25 directly,
+    /// saving ~200MB RAM from scorer's BM25 index + TF-IDF model.
+    #[cfg(not(feature = "tantivy-backend"))]
     scorer: MultiSignalScorer,
     /// Tantivy BM25F index (Tier 1).
     #[cfg(feature = "tantivy-backend")]
@@ -129,16 +133,19 @@ impl GraphContextProvider for GraphContextService {
         let cache_path = dir.join(".theo").join("graph.bin");
 
         if let Some(graph) = try_load_cache(&cache_path, &dir) {
+            #[cfg(not(feature = "tantivy-backend"))]
             let (communities, scorer) = build_index(&graph);
             #[cfg(feature = "tantivy-backend")]
+            let communities = build_index(&graph);
+            #[cfg(feature = "tantivy-backend")]
             let tantivy_index = FileTantivyIndex::build(&graph).ok();
-            // Dense: try loading cached embeddings, build if missing
             #[cfg(feature = "dense-retrieval")]
             let (embedder, embedding_cache) = build_dense_components(&graph, &dir);
             let mut state = self.state.write().await;
             *state = GraphBuildState::Ready(GraphState {
                 graph,
                 communities,
+                #[cfg(not(feature = "tantivy-backend"))]
                 scorer,
                 #[cfg(feature = "tantivy-backend")]
                 tantivy_index,
@@ -185,8 +192,10 @@ impl GraphContextProvider for GraphContextService {
 
             let mut state = state_ref.write().await;
             match result {
-                Ok(Ok(Ok((graph, communities, scorer)))) => {
+                Ok(Ok(Ok((graph, communities)))) => {
                     save_cache_atomic(&cache_path, &graph, &dir_for_cache);
+                    #[cfg(not(feature = "tantivy-backend"))]
+                    let scorer = MultiSignalScorer::build(&communities, &graph);
                     #[cfg(feature = "tantivy-backend")]
                     let tantivy_index = FileTantivyIndex::build(&graph).ok();
                     #[cfg(feature = "dense-retrieval")]
@@ -194,6 +203,7 @@ impl GraphContextProvider for GraphContextService {
                     *state = GraphBuildState::Ready(GraphState {
                         graph,
                         communities,
+                        #[cfg(not(feature = "tantivy-backend"))]
                         scorer,
                         #[cfg(feature = "tantivy-backend")]
                         tantivy_index,
@@ -350,7 +360,7 @@ impl GraphContextProvider for GraphContextService {
 /// Full pipeline: walk → parse → convert → build_graph → cluster → scorer.
 fn build_graph_from_project(
     project_dir: &Path,
-) -> (CodeGraph, Vec<Community>, MultiSignalScorer) {
+) -> (CodeGraph, Vec<Community>) {
     // Step 1: Walk files and parse with tree-sitter.
     let file_data = parse_project_files(project_dir);
 
@@ -360,10 +370,10 @@ fn build_graph_from_project(
     // Step 3: Apply git co-change history (best-effort, max 500 commits, 50 files/commit).
     let _ = theo_engine_graph::git::populate_cochanges_from_git(project_dir, &mut graph, 500, 50);
 
-    // Step 4: Build index (cluster + scorer).
-    let (communities, scorer) = build_index(&graph);
+    // Step 4: Cluster only (scorer built conditionally by caller).
+    let communities = tokio_safe_cluster(&graph).communities;
 
-    (graph, communities, scorer)
+    (graph, communities)
 }
 
 // EXCLUDED_DIRS imported from theo-domain::graph_context (source of truth).
@@ -522,10 +532,19 @@ fn parse_project_files(project_dir: &Path) -> Vec<FileData> {
 }
 
 /// Build clustering + scorer from a ready graph.
+/// Build clustering index. Scorer only built when no RRF pipeline (saves ~200MB).
+#[cfg(not(feature = "tantivy-backend"))]
 fn build_index(graph: &CodeGraph) -> (Vec<Community>, MultiSignalScorer) {
     let cluster_result = tokio_safe_cluster(graph);
     let scorer = MultiSignalScorer::build(&cluster_result.communities, graph);
     (cluster_result.communities, scorer)
+}
+
+/// Build clustering only (Tier 1+: scorer not needed, RRF uses FileBm25 directly).
+#[cfg(feature = "tantivy-backend")]
+fn build_index(graph: &CodeGraph) -> Vec<Community> {
+    let cluster_result = tokio_safe_cluster(graph);
+    cluster_result.communities
 }
 
 /// Build dense retrieval components: NeuralEmbedder + EmbeddingCache.

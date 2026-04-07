@@ -28,10 +28,13 @@ impl NeuralEmbedder {
         Self::new_fast()
     }
 
-    /// Initialize with AllMiniLM-L6-v2 (384-dim, ~200MB RAM).
+    /// Initialize with AllMiniLM-L6-v2 Quantized (384-dim, ~22MB RAM).
+    ///
+    /// Quantized ONNX: 22MB vs 200MB full-precision. ~2-3% quality loss.
+    /// Production default for lean memory footprint.
     pub fn new_fast() -> Result<Self, Box<dyn std::error::Error>> {
         let mut options = InitOptions::default();
-        options.model_name = EmbeddingModel::AllMiniLML6V2;
+        options.model_name = EmbeddingModel::AllMiniLML6V2Q;
         options.show_download_progress = false;
         let model = TextEmbedding::try_new(options)?;
         Ok(NeuralEmbedder { model, dim: 384 })
