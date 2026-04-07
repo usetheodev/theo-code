@@ -242,6 +242,14 @@ fn mrr(returned_files: &[String], expected: &[&str]) -> f64 {
     0.0
 }
 
+/// Extract ranked file paths directly from a score map (no assembly expansion).
+/// Used by RRF eval to avoid community dilution.
+fn extract_files_from_scores(scores: &std::collections::HashMap<String, f64>) -> Vec<String> {
+    let mut sorted: Vec<_> = scores.iter().collect();
+    sorted.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap_or(std::cmp::Ordering::Equal));
+    sorted.into_iter().map(|(k, _)| k.clone()).collect()
+}
+
 /// Extract unique file paths from assembly context items, ordered by item score.
 fn extract_files_from_content(items: &[theo_engine_retrieval::assembly::ContextItem]) -> Vec<String> {
     let mut files = Vec::new();
@@ -416,6 +424,481 @@ fn eval_graphctx_retrieval_quality() {
         eprintln!("\nWARNING: Average precision@5 ({:.3}) is below minimum threshold (0.30)", avg_p);
         eprintln!("This suggests fundamental retrieval problems.");
     }
+}
+
+/// RRF 3-ranker fusion: BM25 + Tantivy + Dense embeddings.
+///
+/// Run: cargo test -p theo-engine-retrieval --features dense-retrieval --test eval_suite -- --ignored --nocapture eval_rrf_dense
+#[test]
+#[ignore]
+#[cfg(feature = "dense-retrieval")]
+fn eval_rrf_dense() {
+    use theo_engine_graph::bridge;
+    use theo_engine_retrieval::tantivy_search::{FileTantivyIndex, hybrid_rrf_search};
+    use theo_engine_retrieval::embedding::neural::NeuralEmbedder;
+    use theo_engine_retrieval::embedding::cache::EmbeddingCache;
+    use theo_engine_retrieval::search::FileBm25;
+    use theo_engine_retrieval::dense_search::FileDenseSearch;
+
+    let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent().unwrap()
+        .parent().unwrap();
+
+    eprintln!("Building graph...");
+    let (files, stats) = theo_application::use_cases::extraction::extract_repo(workspace_root);
+    eprintln!("Parsed {}/{} files, {} symbols", stats.files_parsed, stats.files_found, stats.symbols_extracted);
+
+    let (graph, _) = bridge::build_graph(&files);
+    eprintln!("Graph: {} nodes, {} edges", graph.node_count(), graph.edge_count());
+
+    // Build Tantivy index
+    let tantivy_index = FileTantivyIndex::build(&graph).expect("Tantivy index build failed");
+    eprintln!("Tantivy: {} docs indexed", tantivy_index.num_docs());
+
+    // Build dense embeddings
+    let embedder = NeuralEmbedder::new().expect("NeuralEmbedder init failed");
+    eprintln!("Building embedding cache...");
+    let start = std::time::Instant::now();
+    let cache = EmbeddingCache::build(&graph, &embedder);
+    let build_time = start.elapsed();
+    eprintln!("Embedding cache: {} files, built in {:.1}s", cache.len(), build_time.as_secs_f64());
+
+    let queries = ground_truth();
+    let k = 5;
+
+    // --- Baseline: Custom BM25 only (for A/B comparison) ---
+    {
+        let mut total_p = 0.0;
+        let mut total_m = 0.0;
+        for eq in queries.iter() {
+            let scores = FileBm25::search(&graph, eq.query);
+            let files = extract_files_from_scores(&scores);
+            total_p += precision_at_k(&files, &eq.expected_files, k);
+            total_m += mrr(&files, &eq.expected_files);
+        }
+        let n = queries.len() as f64;
+        eprintln!("\nBASELINE (BM25 only): P@5={:.3}  MRR={:.3}", total_p / n, total_m / n);
+    }
+
+    // --- Dense only (for analysis) ---
+    {
+        let mut total_p = 0.0;
+        let mut total_m = 0.0;
+        for eq in queries.iter() {
+            let scores = FileDenseSearch::search(&embedder, &cache, eq.query, 100);
+            let files = extract_files_from_scores(&scores);
+            total_p += precision_at_k(&files, &eq.expected_files, k);
+            total_m += mrr(&files, &eq.expected_files);
+        }
+        let n = queries.len() as f64;
+        eprintln!("DENSE ONLY: P@5={:.3}  MRR={:.3}", total_p / n, total_m / n);
+    }
+
+    // --- RRF 3-ranker with different k values ---
+    // Use extract_files_from_scores instead of assembly to avoid community dilution
+    for rrf_k in [20.0, 40.0, 60.0] {
+        let mut total_p = 0.0;
+        let mut total_r = 0.0;
+        let mut total_m = 0.0;
+
+        eprintln!("\n=== RRF 3-RANKER k={} ===", rrf_k);
+        eprintln!("{:<5} {:<45} {:>8} {:>8} {:>6}", "#", "Query", "P@5", "R@5", "MRR");
+        eprintln!("{}", "-".repeat(80));
+
+        for (i, eq) in queries.iter().enumerate() {
+            let rrf_scores = hybrid_rrf_search(&graph, &tantivy_index, &embedder, &cache, eq.query, rrf_k);
+            // Extract files directly from scores — no assembly expansion
+            let returned_files = extract_files_from_scores(&rrf_scores);
+
+            let p = precision_at_k(&returned_files, &eq.expected_files, k);
+            let r = recall_at_k(&returned_files, &eq.expected_files, k);
+            let m = mrr(&returned_files, &eq.expected_files);
+
+            total_p += p;
+            total_r += r;
+            total_m += m;
+
+            eprintln!(
+                "{:<5} {:<45} {:>8.2} {:>8.2} {:>6.2}",
+                format!("{}.", i + 1),
+                if eq.query.len() > 44 { &eq.query[..44] } else { eq.query },
+                p, r, m
+            );
+
+            if p < 0.2 {
+                eprintln!("  MISS! Expected: {:?}", eq.expected_files);
+                eprintln!("  Got: {:?}", &returned_files[..returned_files.len().min(5)]);
+            }
+        }
+
+        let n = queries.len() as f64;
+        let avg_p = total_p / n;
+        let avg_r = total_r / n;
+        let avg_m = total_m / n;
+
+        eprintln!("\nRRF k={}: P@5={:.3}  R@5={:.3}  MRR={:.3}", rrf_k, avg_p, avg_r, avg_m);
+    }
+
+    // --- RRF + Assembly (reverse dep boost + test penalty) ---
+    {
+        use theo_engine_graph::cluster::{hierarchical_cluster, ClusterAlgorithm};
+        use theo_engine_retrieval::assembly::assemble_files_direct;
+
+        let cluster_result = hierarchical_cluster(&graph, ClusterAlgorithm::FileLeiden { resolution: 0.5 });
+        let communities = cluster_result.communities;
+
+        eprintln!("\n=== RRF k=20 + ASSEMBLY (reverse dep boost) ===");
+        let mut total_p = 0.0;
+        let mut total_r = 0.0;
+        let mut total_m = 0.0;
+
+        for (i, eq) in queries.iter().enumerate() {
+            let rrf_scores = hybrid_rrf_search(&graph, &tantivy_index, &embedder, &cache, eq.query, 20.0);
+            let payload = assemble_files_direct(&rrf_scores, &graph, &communities, 16_384);
+            let returned_files = extract_files_from_content(&payload.items);
+
+            let p = precision_at_k(&returned_files, &eq.expected_files, k);
+            let r = recall_at_k(&returned_files, &eq.expected_files, k);
+            let m = mrr(&returned_files, &eq.expected_files);
+
+            total_p += p;
+            total_r += r;
+            total_m += m;
+
+            if p < 0.2 {
+                eprintln!("  Q{} MISS: {:?}", i + 1, &returned_files[..returned_files.len().min(5)]);
+            }
+        }
+
+        let n = queries.len() as f64;
+        eprintln!("RRF+ASSEMBLY: P@5={:.3}  R@5={:.3}  MRR={:.3}", total_p / n, total_r / n, total_m / n);
+    }
+
+    // --- 2-RANKER RRF (BM25 + Dense, no Tantivy) ---
+    {
+        eprintln!("\n=== 2-RANKER RRF (BM25 + Dense) k=60 ===");
+        let mut total_p = 0.0;
+        let mut total_m = 0.0;
+
+        for eq in queries.iter() {
+            let bm25_scores = FileBm25::search(&graph, eq.query);
+            let dense_scores = FileDenseSearch::search(&embedder, &cache, eq.query, 100);
+
+            let is_noise = |p: &str| {
+                let lp = p.to_lowercase();
+                lp.contains("test") || lp.contains("benchmark") || lp.contains("example")
+            };
+            let to_ranked = |scores: &std::collections::HashMap<String, f64>| -> Vec<String> {
+                let mut s: Vec<_> = scores.iter().filter(|(k, _)| !is_noise(k)).collect();
+                s.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap());
+                s.into_iter().map(|(k, _)| k.clone()).collect()
+            };
+
+            let bm25_ranked = to_ranked(&bm25_scores);
+            let dense_ranked = to_ranked(&dense_scores);
+
+            let bm25_rank: std::collections::HashMap<String, usize> = bm25_ranked.iter().enumerate().map(|(i, p)| (p.clone(), i)).collect();
+            let dense_rank: std::collections::HashMap<String, usize> = dense_ranked.iter().enumerate().map(|(i, p)| (p.clone(), i)).collect();
+
+            let mut all: std::collections::HashSet<String> = std::collections::HashSet::new();
+            for k in bm25_scores.keys() { if !is_noise(k) { all.insert(k.clone()); } }
+            for k in dense_scores.keys() { if !is_noise(k) { all.insert(k.clone()); } }
+
+            let mut merged: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
+            for path in all {
+                let mut s = 0.0;
+                if let Some(&r) = bm25_rank.get(&path) { s += 1.0 / (60.0 + r as f64); }
+                if let Some(&r) = dense_rank.get(&path) { s += 1.0 / (60.0 + r as f64); }
+                if s > 0.0 { merged.insert(path, s); }
+            }
+
+            let returned_files = extract_files_from_scores(&merged);
+            total_p += precision_at_k(&returned_files, &eq.expected_files, k);
+            total_m += mrr(&returned_files, &eq.expected_files);
+        }
+
+        let n = queries.len() as f64;
+        eprintln!("2-RANKER: P@5={:.3}  MRR={:.3}", total_p / n, total_m / n);
+    }
+}
+
+/// Full pipeline eval: RRF + Cross-Encoder Reranker (Jina multilingual).
+///
+/// Run: cargo test -p theo-engine-retrieval --features reranker --test eval_suite -- --ignored --nocapture eval_full_pipeline
+#[test]
+#[ignore]
+#[cfg(feature = "reranker")]
+fn eval_full_pipeline() {
+    use theo_engine_graph::bridge;
+    use theo_engine_retrieval::tantivy_search::FileTantivyIndex;
+    use theo_engine_retrieval::embedding::neural::NeuralEmbedder;
+    use theo_engine_retrieval::embedding::cache::EmbeddingCache;
+    use theo_engine_retrieval::reranker::CrossEncoderReranker;
+    use theo_engine_retrieval::pipeline::retrieve_and_rerank;
+    use theo_engine_retrieval::tantivy_search::hybrid_rrf_search;
+
+    let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent().unwrap()
+        .parent().unwrap();
+
+    eprintln!("Building graph...");
+    let (files, stats) = theo_application::use_cases::extraction::extract_repo(workspace_root);
+    eprintln!("Parsed {}/{} files, {} symbols", stats.files_parsed, stats.files_found, stats.symbols_extracted);
+
+    let (graph, _) = bridge::build_graph(&files);
+    eprintln!("Graph: {} nodes, {} edges", graph.node_count(), graph.edge_count());
+
+    let tantivy_index = FileTantivyIndex::build(&graph).expect("Tantivy index build failed");
+    eprintln!("Tantivy: {} docs indexed", tantivy_index.num_docs());
+
+    let embedder = NeuralEmbedder::new().expect("NeuralEmbedder init failed");
+    let cache = EmbeddingCache::build(&graph, &embedder);
+    eprintln!("Embedding cache: {} files", cache.len());
+
+    let reranker = CrossEncoderReranker::new().expect("CrossEncoderReranker init failed");
+    eprintln!("Reranker: Jina v2 multilingual loaded");
+
+    let queries = ground_truth();
+    let k = 5;
+
+    // --- A/B: RRF-only (baseline for comparison) ---
+    let mut rrf_total_p = 0.0;
+    let mut rrf_total_m = 0.0;
+    for eq in queries.iter() {
+        let scores = hybrid_rrf_search(&graph, &tantivy_index, &embedder, &cache, eq.query, 20.0);
+        let files = extract_files_from_scores(&scores);
+        rrf_total_p += precision_at_k(&files, &eq.expected_files, k);
+        rrf_total_m += mrr(&files, &eq.expected_files);
+    }
+    let n = queries.len() as f64;
+    eprintln!("\nRRF-ONLY: P@5={:.3}  MRR={:.3}", rrf_total_p / n, rrf_total_m / n);
+
+    // --- Full pipeline: RRF + Reranker ---
+    let mut total_p = 0.0;
+    let mut total_r = 0.0;
+    let mut total_m = 0.0;
+    let mut total_rerank_ms = 0.0;
+
+    eprintln!("\n=== FULL PIPELINE (RRF k=20 + Reranker top-20) ===");
+    eprintln!("{:<5} {:<45} {:>8} {:>8} {:>6} {:>8}", "#", "Query", "P@5", "R@5", "MRR", "ms");
+    eprintln!("{}", "-".repeat(90));
+
+    for (i, eq) in queries.iter().enumerate() {
+        let start = std::time::Instant::now();
+        let reranked = retrieve_and_rerank(
+            &graph, &tantivy_index, &embedder, &cache, &reranker,
+            eq.query, 20.0, 20,
+        );
+        let elapsed = start.elapsed();
+        total_rerank_ms += elapsed.as_millis() as f64;
+
+        let returned_files = extract_files_from_scores(&reranked);
+
+        let p = precision_at_k(&returned_files, &eq.expected_files, k);
+        let r = recall_at_k(&returned_files, &eq.expected_files, k);
+        let m = mrr(&returned_files, &eq.expected_files);
+
+        total_p += p;
+        total_r += r;
+        total_m += m;
+
+        eprintln!(
+            "{:<5} {:<45} {:>8.2} {:>8.2} {:>6.2} {:>8.0}",
+            format!("{}.", i + 1),
+            if eq.query.len() > 44 { &eq.query[..44] } else { eq.query },
+            p, r, m, elapsed.as_millis()
+        );
+
+        if p < 0.2 {
+            eprintln!("  MISS! Expected: {:?}", eq.expected_files);
+            eprintln!("  Got: {:?}", &returned_files[..returned_files.len().min(5)]);
+        }
+    }
+
+    let avg_p = total_p / n;
+    let avg_r = total_r / n;
+    let avg_m = total_m / n;
+    let avg_ms = total_rerank_ms / n;
+
+    eprintln!("\n{}", "=".repeat(90));
+    eprintln!("FULL PIPELINE: P@5={:.3}  R@5={:.3}  MRR={:.3}  avg_ms={:.0}", avg_p, avg_r, avg_m, avg_ms);
+    eprintln!("vs RRF-ONLY:   P@5={:.3}  MRR={:.3}", rrf_total_p / n, rrf_total_m / n);
+    eprintln!("Delta:         P@5={:+.3}  MRR={:+.3}", avg_p - rrf_total_p / n, avg_m - rrf_total_m / n);
+}
+
+/// A/B benchmark: Custom FileBm25 vs Tantivy backend.
+///
+/// Both use BM25F with same field boosts (filename 5x, symbol 3x, sig 1x, doc 1x).
+/// Measures P@5, R@5, MRR for both backends and compares.
+///
+/// Run: cargo test -p theo-engine-retrieval --features tantivy-backend --test eval_suite -- --ignored --nocapture eval_tantivy_vs_custom
+#[test]
+#[ignore]
+#[cfg(feature = "tantivy-backend")]
+fn eval_tantivy_vs_custom() {
+    use theo_engine_graph::cluster::{hierarchical_cluster, ClusterAlgorithm};
+    use theo_engine_graph::bridge;
+    use theo_engine_retrieval::search::FileBm25;
+    use theo_engine_retrieval::tantivy_search::FileTantivyIndex;
+    use theo_engine_retrieval::assembly::assemble_files_direct;
+
+    let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent().unwrap()
+        .parent().unwrap();
+
+    eprintln!("Building graph...");
+    let (files, stats) = theo_application::use_cases::extraction::extract_repo(workspace_root);
+    eprintln!("Parsed {}/{} files, {} symbols", stats.files_parsed, stats.files_found, stats.symbols_extracted);
+
+    let (graph, _) = bridge::build_graph(&files);
+    eprintln!("Graph: {} nodes, {} edges", graph.node_count(), graph.edge_count());
+
+    let cluster_result = hierarchical_cluster(&graph, ClusterAlgorithm::FileLeiden { resolution: 0.5 });
+    let communities = cluster_result.communities;
+    eprintln!("Communities: {}", communities.len());
+
+    // Build Tantivy index
+    let tantivy_index = FileTantivyIndex::build(&graph).expect("Tantivy index build failed");
+    eprintln!("Tantivy: {} docs indexed", tantivy_index.num_docs());
+
+    let queries = ground_truth();
+    let k = 5;
+
+    let mut custom_total_p = 0.0;
+    let mut custom_total_m = 0.0;
+    let mut tantivy_total_p = 0.0;
+    let mut tantivy_total_m = 0.0;
+
+    eprintln!("\n{:<5} {:<40} {:>10} {:>10} {:>10} {:>10}", "#", "Query", "Custom P@5", "Tantivy P@5", "Custom MRR", "Tantivy MRR");
+    eprintln!("{}", "-".repeat(95));
+
+    for (i, eq) in queries.iter().enumerate() {
+        // Custom FileBm25
+        let custom_scores = FileBm25::search(&graph, eq.query);
+        let custom_payload = assemble_files_direct(&custom_scores, &graph, &communities, 16_384);
+        let custom_files = extract_files_from_content(&custom_payload.items);
+
+        // Tantivy
+        let tantivy_scores = tantivy_index.search_with_prf(&graph, eq.query, 50).unwrap_or_default();
+        let tantivy_payload = assemble_files_direct(&tantivy_scores, &graph, &communities, 16_384);
+        let tantivy_files = extract_files_from_content(&tantivy_payload.items);
+
+        let cp = precision_at_k(&custom_files, &eq.expected_files, k);
+        let cm = mrr(&custom_files, &eq.expected_files);
+        let tp = precision_at_k(&tantivy_files, &eq.expected_files, k);
+        let tm = mrr(&tantivy_files, &eq.expected_files);
+
+        custom_total_p += cp;
+        custom_total_m += cm;
+        tantivy_total_p += tp;
+        tantivy_total_m += tm;
+
+        let winner = if tp > cp { "TANTIVY" } else if cp > tp { "CUSTOM" } else { "TIE" };
+
+        eprintln!(
+            "{:<5} {:<40} {:>10.2} {:>10.2} {:>10.2} {:>10.2}  {}",
+            format!("{}.", i + 1),
+            if eq.query.len() > 39 { &eq.query[..39] } else { eq.query },
+            cp, tp, cm, tm, winner
+        );
+    }
+
+    let n = queries.len() as f64;
+    eprintln!("\n{}", "=".repeat(95));
+    eprintln!("CUSTOM:  P@5={:.3}  MRR={:.3}", custom_total_p / n, custom_total_m / n);
+    eprintln!("TANTIVY: P@5={:.3}  MRR={:.3}", tantivy_total_p / n, tantivy_total_m / n);
+
+    let p5_gate = 0.40;
+    let mrr_gate = 0.85;
+    let tantivy_p5 = tantivy_total_p / n;
+    let tantivy_mrr = tantivy_total_m / n;
+
+    eprintln!("\nGate: P@5 >= {:.2}, MRR >= {:.2}", p5_gate, mrr_gate);
+    eprintln!("Tantivy: P@5={:.3} {}, MRR={:.3} {}",
+        tantivy_p5, if tantivy_p5 >= p5_gate { "PASS" } else { "FAIL" },
+        tantivy_mrr, if tantivy_mrr >= mrr_gate { "PASS" } else { "FAIL" },
+    );
+}
+
+/// Hybrid search: combine Custom + Tantivy for best of both.
+///
+/// Run: cargo test -p theo-engine-retrieval --features tantivy-backend --test eval_suite -- --ignored --nocapture eval_hybrid_search
+#[test]
+#[ignore]
+#[cfg(feature = "tantivy-backend")]
+fn eval_hybrid_search() {
+    use theo_engine_graph::cluster::{hierarchical_cluster, ClusterAlgorithm};
+    use theo_engine_graph::bridge;
+    use theo_engine_retrieval::tantivy_search::{FileTantivyIndex, hybrid_search};
+    use theo_engine_retrieval::assembly::assemble_files_direct;
+
+    let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent().unwrap()
+        .parent().unwrap();
+
+    eprintln!("Building graph...");
+    let (files, stats) = theo_application::use_cases::extraction::extract_repo(workspace_root);
+    eprintln!("Parsed {}/{} files, {} symbols", stats.files_parsed, stats.files_found, stats.symbols_extracted);
+
+    let (graph, _) = bridge::build_graph(&files);
+    eprintln!("Graph: {} nodes, {} edges", graph.node_count(), graph.edge_count());
+
+    let cluster_result = hierarchical_cluster(&graph, ClusterAlgorithm::FileLeiden { resolution: 0.5 });
+    let communities = cluster_result.communities;
+
+    let tantivy_index = FileTantivyIndex::build(&graph).expect("Tantivy index build failed");
+    eprintln!("Tantivy: {} docs indexed", tantivy_index.num_docs());
+
+    let queries = ground_truth();
+    let k = 5;
+
+    let mut total_p = 0.0;
+    let mut total_r = 0.0;
+    let mut total_m = 0.0;
+
+    eprintln!("\n{:<5} {:<45} {:>8} {:>8} {:>6}", "#", "Query", "P@5", "R@5", "MRR");
+    eprintln!("{}", "-".repeat(80));
+
+    for (i, eq) in queries.iter().enumerate() {
+        let hybrid_scores = hybrid_search(&graph, &tantivy_index, eq.query);
+        let payload = assemble_files_direct(&hybrid_scores, &graph, &communities, 16_384);
+        let returned_files = extract_files_from_content(&payload.items);
+
+        let p = precision_at_k(&returned_files, &eq.expected_files, k);
+        let r = recall_at_k(&returned_files, &eq.expected_files, k);
+        let m = mrr(&returned_files, &eq.expected_files);
+
+        total_p += p;
+        total_r += r;
+        total_m += m;
+
+        eprintln!(
+            "{:<5} {:<45} {:>8.2} {:>8.2} {:>6.2}",
+            format!("{}.", i + 1),
+            if eq.query.len() > 44 { &eq.query[..44] } else { eq.query },
+            p, r, m
+        );
+
+        if p < 0.2 {
+            eprintln!("  MISS! Expected: {:?}", eq.expected_files);
+            eprintln!("  Got: {:?}", &returned_files[..returned_files.len().min(5)]);
+        }
+    }
+
+    let n = queries.len() as f64;
+    let avg_p = total_p / n;
+    let avg_r = total_r / n;
+    let avg_m = total_m / n;
+
+    eprintln!("\n{}", "=".repeat(80));
+    eprintln!("HYBRID: P@5={:.3}  R@5={:.3}  MRR={:.3}", avg_p, avg_r, avg_m);
+
+    let p5_gate = 0.40;
+    let mrr_gate = 0.85;
+    eprintln!("\nGate: P@5 >= {:.2} {}, MRR >= {:.2} {}",
+        p5_gate, if avg_p >= p5_gate { "PASS" } else { "FAIL" },
+        mrr_gate, if avg_m >= mrr_gate { "PASS" } else { "FAIL" },
+    );
 }
 
 /// A/B benchmark: graph attention ON vs OFF.

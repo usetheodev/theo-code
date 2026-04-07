@@ -10,9 +10,14 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 fastembed = "4"
+tantivy = { workspace = true, optional = true }
+bincode = { workspace = true, optional = true }
 
 [features]
 scip = ["theo-engine-graph/scip"]
+tantivy-backend = ["tantivy"]
+dense-retrieval = ["tantivy-backend", "bincode"]
+reranker = ["dense-retrieval"]
 
 [dev-dependencies]
 tempfile.workspace = true

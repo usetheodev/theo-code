@@ -1000,11 +1000,14 @@ pub fn assemble_files_direct(
 
             // Penalty: test/benchmark/example files get 1/10 score (Zoekt pattern).
             // These files mention symbols (because they test them) but aren't source.
-            let is_test = p.contains("/tests/") || p.contains("/test_") || p.contains("_test.")
-                || p.contains(".test.") || p.contains("_spec.") || p.contains(".spec.");
-            let is_benchmark = p.contains("/examples/") || p.contains("/benchmark")
-                || p.contains("benchmark.") || p.contains("theo-benchmark");
-            let is_eval = p.contains("eval_suite");
+            let lp = p.to_lowercase();
+            let is_test = lp.contains("/tests/") || lp.contains("/test_") || lp.contains("_test.")
+                || lp.contains(".test.") || lp.contains("_spec.") || lp.contains(".spec.")
+                || lp.starts_with("tests/");
+            let is_benchmark = lp.contains("/examples/") || lp.contains("/benchmark")
+                || lp.contains("benchmark.") || lp.contains("theo-benchmark")
+                || lp.contains("/benches/");
+            let is_eval = lp.contains("eval_suite") || lp.contains("eval_");
 
             if is_test || is_benchmark || is_eval {
                 s *= 0.1; // 1/10 penalty
@@ -1063,6 +1066,20 @@ pub fn assemble_files_direct(
                 if is_hub_file(caller_file) { continue; }
 
                 *reverse_boost.entry(caller_file).or_insert(0.0) += REVERSE_BOOST_PER_CALLER;
+            }
+        }
+
+        // Also check FILE-level reverse edges (added by SCIP merge).
+        // SCIP adds precise file:A → file:B edges for cross-file references.
+        for rev_id in graph.reverse_neighbors(&file_id) {
+            if let Some(rev_node) = graph.get_node(rev_id) {
+                if rev_node.node_type == NodeType::File {
+                    if let Some(fp) = rev_node.file_path.as_deref() {
+                        if fp != *seed_path && !is_hub_file(fp) {
+                            *reverse_boost.entry(fp).or_insert(0.0) += REVERSE_BOOST_PER_CALLER;
+                        }
+                    }
+                }
             }
         }
     }
