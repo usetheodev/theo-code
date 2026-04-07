@@ -25,7 +25,10 @@ use theo_engine_parser::tree_sitter::{self as ts, SupportedLanguage};
 use theo_engine_parser::types::{FileExtraction, ReferenceKind, SymbolKind};
 
 use theo_engine_retrieval::assembly;
-use theo_engine_retrieval::search::MultiSignalScorer;
+use theo_engine_retrieval::search::{FileBm25, MultiSignalScorer};
+
+#[cfg(feature = "tantivy-backend")]
+use theo_engine_retrieval::tantivy_search::FileTantivyIndex;
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -47,6 +50,9 @@ struct GraphState {
     graph: CodeGraph,
     communities: Vec<Community>,
     scorer: MultiSignalScorer,
+    /// Tantivy BM25F index (Tier 1). Built lazily on first query.
+    #[cfg(feature = "tantivy-backend")]
+    tantivy_index: Option<FileTantivyIndex>,
 }
 
 /// Explicit state machine for background graph build lifecycle.
@@ -113,11 +119,16 @@ impl GraphContextProvider for GraphContextService {
 
         if let Some(graph) = try_load_cache(&cache_path, &dir) {
             let (communities, scorer) = build_index(&graph);
+            // Eagerly build Tantivy index on cache hit (fast, ~100ms)
+            #[cfg(feature = "tantivy-backend")]
+            let tantivy_index = FileTantivyIndex::build(&graph).ok();
             let mut state = self.state.write().await;
             *state = GraphBuildState::Ready(GraphState {
                 graph,
                 communities,
                 scorer,
+                #[cfg(feature = "tantivy-backend")]
+                tantivy_index,
             });
             return Ok(());
         }
@@ -159,10 +170,14 @@ impl GraphContextProvider for GraphContextService {
             match result {
                 Ok(Ok(Ok((graph, communities, scorer)))) => {
                     save_cache_atomic(&cache_path, &graph, &dir_for_cache);
+                    #[cfg(feature = "tantivy-backend")]
+                    let tantivy_index = FileTantivyIndex::build(&graph).ok();
                     *state = GraphBuildState::Ready(GraphState {
                         graph,
                         communities,
                         scorer,
+                        #[cfg(feature = "tantivy-backend")]
+                        tantivy_index,
                     });
                 }
                 Ok(Ok(Err(_panic))) => {
@@ -217,11 +232,41 @@ impl GraphContextProvider for GraphContextService {
             _ => unreachable!(),
         };
 
-        // Score + assemble (fast, ~20-30ms).
-        let scored = graph_state
-            .scorer
-            .score(query, &graph_state.communities, &graph_state.graph);
-        let payload = assembly::assemble_greedy(&scored, &graph_state.graph, budget_tokens);
+        // Tiered scoring: use best available pipeline.
+        // Tier 1 (tantivy-backend): BM25 Custom + Tantivy BM25F via hybrid_search
+        // Tier 0 (always): BM25 Custom only via FileBm25::search
+        //
+        // File-level scoring + assemble_files_direct is more precise than
+        // community-level scoring + assemble_greedy (validated in benchmark:
+        // MRR 0.914 vs 0.815, 4/6 SOTA gates pass).
+        let file_scores: std::collections::HashMap<String, f64> = {
+            #[cfg(feature = "tantivy-backend")]
+            {
+                if let Some(ref tantivy_index) = graph_state.tantivy_index {
+                    // Tier 1: hybrid_search (BM25 + Tantivy, no dense)
+                    theo_engine_retrieval::tantivy_search::hybrid_search(
+                        &graph_state.graph,
+                        tantivy_index,
+                        query,
+                    )
+                } else {
+                    // Fallback: BM25 only
+                    FileBm25::search(&graph_state.graph, query)
+                }
+            }
+            #[cfg(not(feature = "tantivy-backend"))]
+            {
+                // Tier 0: BM25 only
+                FileBm25::search(&graph_state.graph, query)
+            }
+        };
+
+        let payload = assembly::assemble_files_direct(
+            &file_scores,
+            &graph_state.graph,
+            &graph_state.communities,
+            budget_tokens,
+        );
 
         let blocks: Vec<ContextBlock> = payload
             .items
