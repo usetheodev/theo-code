@@ -19,9 +19,9 @@ use theo_engine_graph::model::{CodeGraph, NodeType};
 
 /// Version header: model name hash + embedding dimension.
 /// If the model changes, the cache auto-invalidates.
-const CACHE_VERSION: u32 = 2; // Bumped: Jina Code 768-dim + 2-hop imports
-const MODEL_NAME: &str = "JinaEmbeddingsV2BaseCode";
-const EMBEDDING_DIM: usize = 768;
+const CACHE_VERSION: u32 = 3; // Bumped: AllMiniLM default (384-dim), Jina opt-in
+const MODEL_NAME: &str = "AllMiniLML6V2"; // Default model
+const EMBEDDING_DIM: usize = 384; // Default dim (768 if Jina Code)
 
 #[derive(Serialize, Deserialize)]
 struct CacheHeader {
