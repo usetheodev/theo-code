@@ -1,0 +1,146 @@
+{
+  "schema": "graphctx-benchmark-v1",
+  "repo": {
+    "name": "fastapi",
+    "language": "python",
+    "category": "web-framework"
+  },
+  "queries": [
+    {
+      "id": "fastapi-sym-001",
+      "query": "FastAPI application class init",
+      "category": "symbol",
+      "difficulty": "easy",
+      "expected_files": [
+        "fastapi/applications.py"
+      ],
+      "dependencies": []
+    },
+    {
+      "id": "fastapi-sym-002",
+      "query": "APIRouter add_api_route",
+      "category": "symbol",
+      "difficulty": "easy",
+      "expected_files": [
+        "fastapi/routing.py"
+      ],
+      "dependencies": []
+    },
+    {
+      "id": "fastapi-sym-003",
+      "query": "Depends dependency injection",
+      "category": "symbol",
+      "difficulty": "easy",
+      "expected_files": [
+        "fastapi/param_functions.py",
+        "fastapi/dependencies/utils.py",
+        "fastapi/dependencies/models.py"
+      ],
+      "dependencies": []
+    },
+    {
+      "id": "fastapi-mod-001",
+      "query": "OpenAPI schema generation swagger",
+      "category": "module",
+      "difficulty": "medium",
+      "expected_files": [
+        "fastapi/openapi/utils.py",
+        "fastapi/openapi/docs.py",
+        "fastapi/openapi/models.py"
+      ],
+      "dependencies": []
+    },
+    {
+      "id": "fastapi-mod-002",
+      "query": "CORS middleware allowed origins headers",
+      "category": "module",
+      "difficulty": "easy",
+      "expected_files": [
+        "fastapi/middleware/cors.py",
+        "fastapi/middleware/__init__.py"
+      ],
+      "dependencies": []
+    },
+    {
+      "id": "fastapi-mod-003",
+      "query": "request body JSON model validation pydantic",
+      "category": "module",
+      "difficulty": "medium",
+      "expected_files": [
+        "fastapi/encoders.py",
+        "fastapi/datastructures.py",
+        "fastapi/_compat/v2.py"
+      ],
+      "dependencies": []
+    },
+    {
+      "id": "fastapi-sem-001",
+      "query": "exception handler error response HTTP status",
+      "category": "semantic",
+      "difficulty": "medium",
+      "expected_files": [
+        "fastapi/exception_handlers.py",
+        "fastapi/exceptions.py",
+        "fastapi/responses.py"
+      ],
+      "dependencies": []
+    },
+    {
+      "id": "fastapi-sem-002",
+      "query": "background task async worker",
+      "category": "semantic",
+      "difficulty": "easy",
+      "expected_files": [
+        "fastapi/background.py",
+        "fastapi/concurrency.py"
+      ],
+      "dependencies": []
+    },
+    {
+      "id": "fastapi-sem-003",
+      "query": "security OAuth2 bearer token authentication",
+      "category": "semantic",
+      "difficulty": "medium",
+      "expected_files": [
+        "fastapi/security/oauth2.py",
+        "fastapi/security/http.py",
+        "fastapi/security/__init__.py"
+      ],
+      "dependencies": []
+    },
+    {
+      "id": "fastapi-xcut-001",
+      "query": "query parameters path parameters Header Cookie",
+      "category": "cross-cutting",
+      "difficulty": "medium",
+      "expected_files": [
+        "fastapi/param_functions.py",
+        "fastapi/params.py"
+      ],
+      "dependencies": []
+    },
+    {
+      "id": "fastapi-xcut-002",
+      "query": "WebSocket endpoint connection handler",
+      "category": "cross-cutting",
+      "difficulty": "medium",
+      "expected_files": [
+        "fastapi/routing.py",
+        "fastapi/websockets.py"
+      ],
+      "dependencies": []
+    },
+    {
+      "id": "fastapi-xcut-003",
+      "query": "response model JSON serialization encoder",
+      "category": "cross-cutting",
+      "difficulty": "medium",
+      "expected_files": [
+        "fastapi/encoders.py",
+        "fastapi/responses.py",
+        "fastapi/routing.py"
+      ],
+      "dependencies": []
+    }
+  ]
+}

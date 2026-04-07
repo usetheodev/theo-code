@@ -437,9 +437,9 @@ pub fn hybrid_rrf_search(
     use crate::dense_search::FileDenseSearch;
 
     // Get scores from all 3 rankers
+    // NOTE: Query expansion with synonyms TESTED but REVERTED — hurt MRR (0.914→0.886)
+    // because BM25 IDF is sensitive to added terms. Dense handles synonyms natively.
     let bm25_scores = FileBm25::search(graph, query);
-    // Use large top_k to avoid missing files in large repos (e.g., FastAPI 1125 files).
-    // Cost is negligible: Tantivy is index-based, Dense scans all cached embeddings anyway.
     let tantivy_scores = tantivy_index
         .search_with_prf(graph, query, 500)
         .unwrap_or_default();

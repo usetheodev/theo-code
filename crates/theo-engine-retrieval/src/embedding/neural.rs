@@ -18,8 +18,14 @@ impl NeuralEmbedder {
     /// Initialize with Jina Code embeddings (768-dim, code-trained).
     ///
     /// Falls back to AllMiniLM-L6-v2 (384-dim) if Jina fails to load.
+    /// Use `new_fast()` for large repos where Jina is too slow on CPU.
     /// On first run, downloads the model to `~/.cache/fastembed/`.
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
+        // THEO_FAST_EMBED=1 forces AllMiniLM (4x faster, for large repos)
+        if std::env::var("THEO_FAST_EMBED").is_ok() {
+            return Self::new_fast();
+        }
+
         // Try Jina Code first (code-specific, 768-dim)
         {
             let mut jina_opts = InitOptions::default();
@@ -32,11 +38,17 @@ impl NeuralEmbedder {
 
         // Fallback to AllMiniLM (generic NLP, 384-dim)
         eprintln!("[neural] Jina Code model failed, falling back to AllMiniLM-L6-v2");
+        Self::new_fast()
+    }
+
+    /// Initialize with AllMiniLM-L6-v2 (384-dim, fast).
+    ///
+    /// 4x faster than Jina Code. Use for repos > 500 files.
+    pub fn new_fast() -> Result<Self, Box<dyn std::error::Error>> {
         let mut options = InitOptions::default();
         options.model_name = EmbeddingModel::AllMiniLML6V2;
         options.show_download_progress = false;
         let model = TextEmbedding::try_new(options)?;
-
         Ok(NeuralEmbedder { model, dim: 384 })
     }
 

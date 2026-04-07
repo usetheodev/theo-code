@@ -1,34 +1,21 @@
-# Meeting — 2026-04-07 (Benchmark Profissional GRAPHCTX)
+# Meeting — 2026-04-07 (Cleanup + Commit Mudanças Pendentes)
 
 ## Proposta
-Sistema de benchmark profissional: metrics.rs (11 métricas IR), ground truth JSON com dependency annotations, benchmark runner com report agregado.
+Remover código morto (expand_query), commitar mudanças testadas: new_fast(), PRF 1.3x, top_k 500, path_segments 3x, benchmark suite + ground truth JSON.
 
 ## Participantes
-- Governance (Principal Engineer)
-- QA (Staff QA Engineer)
-
-## Análises
-- Governance: APPROVE (95%). Zero impacto em produção, bounded context correto.
-- QA: validated=false (condicional). Exige 15+ unit tests com hand-computed values para nDCG e MAP.
-
-## Conflitos
-1. QA quer ground truth schema validation com file existence check
-2. Risco: deps anotadas incorretamente → falsos positivos. Mitigação: validar deps contra graph real.
+- Governance, QA
 
 ## Veredito
 **APPROVED**
 
 ## Escopo Aprovado
-- Novo: `crates/theo-engine-retrieval/src/metrics.rs`
-- Novo: `crates/theo-engine-retrieval/tests/benchmarks/ground_truth/theo-code.json`
-- Novo: `crates/theo-engine-retrieval/tests/benchmark_suite.rs`
-- Novo: `crates/theo-engine-retrieval/tests/test_metrics.rs`
-- Mod: `crates/theo-engine-retrieval/src/lib.rs`
+- Mod: `crates/theo-engine-retrieval/src/code_tokenizer.rs` (remover expand_query)
+- Mod: `crates/theo-engine-retrieval/src/dense_search.rs` (PRF 1.3x, já correto)
+- Mod: `crates/theo-engine-retrieval/src/embedding/neural.rs` (new_fast + THEO_FAST_EMBED)
+- Mod: `crates/theo-engine-retrieval/src/tantivy_search.rs` (top_k 500, path 3x, comments)
+- Novo: `crates/theo-engine-retrieval/tests/benchmarks/` (ground truth + benchmark runner)
 
 ## Condições
-1. Mínimo 15 unit tests para metrics.rs com valores hand-computed
-2. nDCG e MAP validados contra cálculo manual (tolerância < 0.001)
-3. Ground truth JSON com schema validation
-4. Benchmark runner valida que files referenciados existem no repo
-5. Sem unwrap() em metrics.rs — guarda para divisão por zero
-6. Testes determinísticos
+1. Remover expand_query() antes do commit
+2. 91+ testes passando após cleanup
