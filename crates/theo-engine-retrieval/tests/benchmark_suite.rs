@@ -596,3 +596,85 @@ fn wiki_e2e() {
 
     eprintln!("\n=== WIKI E2E: {} pages, {:.0}ms, PASSED ===", wiki_data.docs.len(), gen_time.as_millis());
 }
+
+/// Generate Code Wiki for an external repo + render HTML.
+///
+/// Set WIKI_REPO env var to the repo path. Default: /tmp/fastapi
+///
+/// Run: WIKI_REPO=/tmp/fastapi cargo test -p theo-engine-retrieval --test benchmark_suite -- --ignored --nocapture wiki_external
+#[test]
+#[ignore]
+fn wiki_external() {
+    use theo_engine_graph::bridge;
+    use theo_engine_graph::cluster::{hierarchical_cluster, ClusterAlgorithm};
+    use theo_engine_retrieval::wiki;
+
+    let repo_path = std::env::var("WIKI_REPO").unwrap_or_else(|_| "/tmp/fastapi".to_string());
+    let repo_root = std::path::Path::new(&repo_path);
+
+    if !repo_root.exists() {
+        eprintln!("SKIP: {} not found. Clone it first.", repo_path);
+        return;
+    }
+
+    let repo_name = repo_root.file_name().and_then(|n| n.to_str()).unwrap_or("project");
+    eprintln!("=== WIKI EXTERNAL: {} ===\n", repo_name);
+
+    // Parse
+    let start = std::time::Instant::now();
+    let (files, stats) = theo_application::use_cases::extraction::extract_repo(repo_root);
+    eprintln!("Parsed: {}/{} files, {} symbols ({:.1}s)",
+        stats.files_parsed, stats.files_found, stats.symbols_extracted,
+        start.elapsed().as_secs_f64());
+
+    // Build graph
+    let (graph, _) = bridge::build_graph(&files);
+    eprintln!("Graph: {} nodes, {} edges", graph.node_count(), graph.edge_count());
+
+    // Count test nodes
+    let test_nodes = graph.node_ids().filter(|id| {
+        graph.get_node(id).map_or(false, |n| n.node_type == theo_engine_graph::model::NodeType::Test)
+    }).count();
+    eprintln!("Test nodes: {}", test_nodes);
+
+    // Cluster
+    let cluster = hierarchical_cluster(&graph, ClusterAlgorithm::FileLeiden { resolution: 1.0 });
+    eprintln!("Communities: {}", cluster.communities.len());
+
+    // Generate wiki
+    let start = std::time::Instant::now();
+    let wiki_data = wiki::generator::generate_wiki_with_root(
+        &cluster.communities, &graph, repo_name, Some(repo_root)
+    );
+    let gen_time = start.elapsed();
+    eprintln!("Wiki: {} pages in {:.0}ms", wiki_data.docs.len(), gen_time.as_millis());
+
+    // Write wiki markdown
+    wiki::persistence::write_to_disk(&wiki_data, repo_root).unwrap();
+    eprintln!("Written to {}/.theo/wiki/\n", repo_path);
+
+    // Stats
+    eprintln!("{:40} {:>5} {:>6} {:>8}", "MODULE", "FILES", "SYMS", "COVER");
+    eprintln!("{}", "-".repeat(65));
+    for doc in wiki_data.docs.iter().take(20) {
+        eprintln!("{:40} {:>5} {:>6} {:>7.1}%",
+            &doc.title[..doc.title.len().min(40)],
+            doc.file_count, doc.symbol_count, doc.test_coverage.percentage);
+    }
+    if wiki_data.docs.len() > 20 {
+        eprintln!("  ... and {} more", wiki_data.docs.len() - 20);
+    }
+
+    // Render HTML
+    let wiki_dir = repo_root.join(".theo/wiki");
+    let html = theo_marklive::render(&wiki_dir, theo_marklive::Config {
+        title: format!("{} — Code Wiki", repo_name),
+        search: true,
+    }).unwrap();
+
+    let output = format!("/tmp/{}-wiki.html", repo_name);
+    std::fs::write(&output, &html).unwrap();
+    eprintln!("\nHTML: {} ({:.0} KB)", output, std::fs::metadata(&output).unwrap().len() as f64 / 1024.0);
+
+    eprintln!("\n=== DONE: open {} in browser ===", output);
+}

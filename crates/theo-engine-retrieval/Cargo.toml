@@ -22,3 +22,4 @@ reranker = ["dense-retrieval"]
 [dev-dependencies]
 tempfile.workspace = true
 theo-application.workspace = true
+theo-marklive = { path = "../../apps/theo-marklive" }
