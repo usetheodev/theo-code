@@ -552,8 +552,15 @@ fn wiki_e2e() {
     let cluster = hierarchical_cluster(&graph, ClusterAlgorithm::FileLeiden { resolution: 1.0 });
     eprintln!("Communities: {}", cluster.communities.len());
 
+    // Debug: count node types
+    let test_nodes = graph.node_ids().filter(|id| {
+        graph.get_node(id).map_or(false, |n| n.node_type == theo_engine_graph::model::NodeType::Test)
+    }).count();
+    let test_edges = graph.all_edges().iter().filter(|e| e.edge_type == theo_engine_graph::model::EdgeType::Tests).count();
+    eprintln!("DEBUG: {} Test nodes, {} Tests edges in graph", test_nodes, test_edges);
+
     let start = std::time::Instant::now();
-    let wiki_data = wiki::generator::generate_wiki(&cluster.communities, &graph, "theo-code");
+    let wiki_data = wiki::generator::generate_wiki_with_root(&cluster.communities, &graph, "theo-code", Some(workspace_root));
     let gen_time = start.elapsed();
     eprintln!("Wiki: {} pages in {:.0}ms\n", wiki_data.docs.len(), gen_time.as_millis());
 
