@@ -2,13 +2,31 @@
 
 use super::model::*;
 
-/// Render a single wiki page to markdown.
+/// Render a single wiki page to markdown with canonical frontmatter.
 pub fn render_page(doc: &WikiDoc) -> String {
     let mut md = String::with_capacity(4096);
 
-    // Header
+    // Canonical frontmatter — source of truth for tier classification + LLM relevance
+    let fm = PageFrontmatter::module(doc.enriched, &doc.summary, &doc.tags);
+    md += &render_frontmatter(&fm);
+
+    // Header with Karpathy pattern: title + summary + tags
     md += &format!("# {}\n\n", doc.title);
+    if !doc.summary.is_empty() {
+        md += &format!("**Summary**: {}\n\n", doc.summary);
+    }
+    if !doc.tags.is_empty() {
+        let tag_str: String = doc.tags.iter().map(|t| format!("#{}", t)).collect::<Vec<_>>().join(" ");
+        md += &format!("**Tags**: {}\n\n", tag_str);
+    }
     md += &format!("> {} files | {} | {} symbols\n\n", doc.file_count, doc.primary_language, doc.symbol_count);
+
+    // Module documentation (from //! comments in lib.rs — author's own words)
+    if let Some(ref module_doc) = doc.module_doc {
+        md += "## Overview\n\n";
+        md += module_doc;
+        md += "\n\n";
+    }
 
     // Entry Points
     if !doc.entry_points.is_empty() {
@@ -22,14 +40,49 @@ pub fn render_page(doc: &WikiDoc) -> String {
         }
     }
 
-    // Public API
+    // Public API — grouped by kind for readability
     if !doc.public_api.is_empty() {
         md += "## Public API\n\n";
-        md += &format!("```{}\n", lang_hint(&doc.primary_language));
-        for api in &doc.public_api {
-            md += &format!("{}\n", api.signature);
+
+        let groups: &[(&str, &str)] = &[
+            ("Trait", "Traits"), ("Struct", "Types"), ("Enum", "Enums"),
+            ("Function", "Functions"), ("Method", "Methods"),
+        ];
+
+        let mut rendered_any_group = false;
+        for (kind, label) in groups {
+            let items: Vec<&ApiEntry> = doc.public_api.iter()
+                .filter(|a| a.kind == *kind)
+                .collect();
+            if items.is_empty() { continue; }
+
+            md += &format!("### {}\n\n", label);
+            md += &format!("```{}\n", lang_hint(&doc.primary_language));
+            for api in &items {
+                md += &format!("{}\n", api.signature);
+            }
+            md += "```\n";
+            // Add doc comments below the code block
+            for api in &items {
+                if let Some(ref doc_str) = api.doc {
+                    let first_line = doc_str.lines().next().unwrap_or("");
+                    if !first_line.is_empty() {
+                        md += &format!("> `{}` — {}\n", api.name, first_line);
+                    }
+                }
+            }
+            md += "\n";
+            rendered_any_group = true;
         }
-        md += "```\n\n";
+
+        // Catch-all for ungrouped kinds
+        if !rendered_any_group {
+            md += &format!("```{}\n", lang_hint(&doc.primary_language));
+            for api in &doc.public_api {
+                md += &format!("{}\n", api.signature);
+            }
+            md += "```\n\n";
+        }
     }
 
     // Files
@@ -81,20 +134,23 @@ pub fn render_page(doc: &WikiDoc) -> String {
     md
 }
 
-/// Render the index page (TOC) — flat list.
+/// Render the index page (TOC) — flat list using default groups.
 pub fn render_index(docs: &[WikiDoc], project_name: &str) -> String {
-    render_hierarchical_index(docs, &[], &[], project_name)
+    let default_schema = WikiSchema::default_for(project_name);
+    render_hierarchical_index(docs, &[], &[], project_name, &default_schema)
 }
 
 /// Render hierarchical index grouped by bounded context.
 ///
 /// high_level_pages: slugs of overview/architecture/getting-started
 /// concepts: detected concept candidates with related modules
+/// schema: user-configurable wiki schema with group definitions
 pub fn render_hierarchical_index(
     docs: &[WikiDoc],
     high_level_pages: &[(&str, &str)], // (slug, title)
     concepts: &[(&str, &str, &[String])], // (slug, name, related_module_slugs)
     project_name: &str,
+    schema: &WikiSchema,
 ) -> String {
     let mut md = String::with_capacity(4096);
 
@@ -119,30 +175,19 @@ pub fn render_hierarchical_index(
         md += "\n";
     }
 
-    // Modules grouped by bounded context
+    // Modules grouped by bounded context (from schema)
     md += "## Modules\n\n";
-
-    let groups: &[(&str, &[&str])] = &[
-        ("Code Intelligence", &["theo-engine"]),
-        ("Agent", &["theo-agent"]),
-        ("Infrastructure", &["theo-infra"]),
-        ("Tooling", &["theo-tooling"]),
-        ("Governance", &["theo-governance"]),
-        ("Domain", &["theo-domain"]),
-        ("Frontend", &["theo-ui", "theo-desktop"]),
-        ("Application", &["theo-application", "theo-cli", "theo-benchmark"]),
-    ];
 
     let mut grouped_slugs: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-    for (group_name, prefixes) in groups {
+    for group in &schema.groups {
         let group_docs: Vec<&WikiDoc> = docs.iter()
-            .filter(|d| prefixes.iter().any(|p| d.slug.starts_with(p) || d.title.starts_with(p)))
+            .filter(|d| group.prefixes.iter().any(|p| d.slug.starts_with(p) || d.title.starts_with(p)))
             .collect();
 
         if group_docs.is_empty() { continue; }
 
-        md += &format!("### {}\n\n", group_name);
+        md += &format!("### {}\n\n", group.name);
         md += "| Module | Files | Symbols | Coverage |\n";
         md += "|--------|-------|---------|----------|\n";
 
@@ -245,6 +290,10 @@ mod tests {
                 untested: vec!["untested_fn".into()],
             },
             source_refs: vec![SourceRef::file("src/auth.rs")],
+            summary: "rs traits across 3 files (10 symbols). Primary: verify_token.".into(),
+            tags: vec!["rs".into(), "auth".into(), "traits".into()],
+            crate_description: None,
+            module_doc: None,
             generated_at: "0".into(),
             enriched: false,
         }
@@ -295,5 +344,26 @@ mod tests {
     fn render_page_footer() {
         let md = render_page(&sample_doc());
         assert!(md.contains("Generated by GRAPHCTX"));
+    }
+
+    #[test]
+    fn renderer_uses_schema_groups() {
+        let mut doc = sample_doc();
+        doc.slug = "mylib-auth".into();
+        doc.title = "MyLib Auth".into();
+
+        let schema = WikiSchema {
+            project: ProjectConfig { name: "Test".into(), description: String::new() },
+            groups: vec![
+                GroupConfig { name: "Security".into(), prefixes: vec!["mylib-auth".into()] },
+                GroupConfig { name: "Core".into(), prefixes: vec!["mylib-core".into()] },
+            ],
+            pages: PageConfig::default(),
+        };
+
+        let md = render_hierarchical_index(&[doc], &[], &[], "Test", &schema);
+        assert!(md.contains("### Security"), "should use schema group name, got:\n{}", md);
+        assert!(!md.contains("### Other"), "should not fall to Other");
+        assert!(!md.contains("Code Intelligence"), "should not use default groups");
     }
 }

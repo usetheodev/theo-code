@@ -264,6 +264,202 @@ body {{
 }}
 .badge-ok {{ background: rgba(16,185,129,0.1); color: var(--ok); }}
 .badge-warn {{ background: rgba(245,158,11,0.1); color: var(--warn); }}
+
+/* ═══ Overview Visual Components ═══ */
+
+.overview-hero {{
+  background: linear-gradient(135deg, var(--surface-2) 0%, var(--surface-1) 100%);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  padding: 40px 36px;
+  margin-bottom: 32px;
+  position: relative;
+  overflow: hidden;
+}}
+
+.overview-hero::before {{
+  content: '';
+  position: absolute;
+  top: -50%;
+  right: -20%;
+  width: 400px;
+  height: 400px;
+  background: radial-gradient(circle, var(--brand-glow) 0%, transparent 70%);
+  pointer-events: none;
+}}
+
+.overview-hero h1 {{
+  font-size: 32px;
+  font-weight: 600;
+  color: var(--text-0);
+  margin: 0 0 8px;
+  border: none;
+  padding: 0;
+  position: relative;
+}}
+
+.overview-hero .hero-subtitle {{
+  font-size: 16px;
+  color: var(--text-2);
+  margin: 0 0 20px;
+  line-height: 1.5;
+  position: relative;
+}}
+
+.overview-hero .hero-stats {{
+  display: flex;
+  gap: 24px;
+  position: relative;
+}}
+
+.overview-hero .hero-stat {{
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-1);
+}}
+
+.overview-hero .hero-stat .stat-value {{
+  color: var(--brand);
+  font-weight: 600;
+}}
+
+/* Feature Cards */
+.feature-grid {{
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+  margin: 16px 0 32px;
+}}
+
+.feature-card {{
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px;
+  transition: border-color 0.15s, transform 0.15s;
+}}
+
+.feature-card:hover {{
+  border-color: var(--brand);
+  transform: translateY(-2px);
+}}
+
+.feature-card .card-icon {{
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: var(--brand-soft);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 12px;
+  color: var(--brand);
+  font-size: 18px;
+}}
+
+.feature-card .card-title {{
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-0);
+  margin-bottom: 6px;
+}}
+
+.feature-card .card-desc {{
+  font-size: 13px;
+  color: var(--text-2);
+  line-height: 1.5;
+}}
+
+/* Quick Links */
+.quick-links-section {{
+  margin: 32px 0;
+}}
+
+.quick-links-section h2 {{
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-0);
+  margin-bottom: 16px;
+}}
+
+.quick-links-grid {{
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}}
+
+.quick-link-card {{
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s;
+  text-decoration: none;
+}}
+
+.quick-link-card:hover {{
+  background: var(--brand-soft);
+  border-color: var(--brand);
+}}
+
+.quick-link-card .link-icon {{
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  background: var(--surface-3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--brand);
+  font-size: 14px;
+  flex-shrink: 0;
+}}
+
+.quick-link-card .link-title {{
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-0);
+}}
+
+/* Mermaid diagrams */
+.mermaid-container {{
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 24px;
+  margin: 16px 0 32px;
+  overflow-x: auto;
+}}
+
+.mermaid-container .mermaid {{
+  display: flex;
+  justify-content: center;
+}}
+
+.mermaid-container .mermaid svg {{
+  max-width: 100%;
+}}
+
+/* Section divider */
+.overview-section {{
+  margin: 32px 0;
+}}
+
+.overview-section h2 {{
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-0);
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}}
 </style>
 </head>
 <body>
@@ -288,7 +484,38 @@ body {{
     {pages_html}
   </main>
 </div>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 <script>
+mermaid.initialize({{
+  startOnLoad: false,
+  theme: 'dark',
+  themeVariables: {{
+    primaryColor: '#6c5ce7',
+    primaryTextColor: '#f0f2f5',
+    primaryBorderColor: '#2b3348',
+    lineColor: '#4e586e',
+    secondaryColor: '#1c2130',
+    tertiaryColor: '#151921',
+    background: '#0e1117',
+    mainBkg: '#1c2130',
+    nodeBorder: '#2b3348',
+    clusterBkg: '#151921',
+    clusterBorder: '#2b3348',
+    titleColor: '#f0f2f5',
+    edgeLabelBackground: '#0e1117',
+  }},
+  flowchart: {{ curve: 'basis', padding: 20 }},
+}});
+
+function renderMermaidDiagrams() {{
+  document.querySelectorAll('.mermaid').forEach(function(el) {{
+    if (!el.dataset.rendered) {{
+      el.dataset.rendered = 'true';
+      mermaid.run({{ nodes: [el] }});
+    }}
+  }});
+}}
+
 const searchIndex = {search_index};
 
 function showPage(slug) {{
@@ -307,6 +534,7 @@ function showPage(slug) {{
   document.getElementById('searchResults').classList.remove('visible');
   document.getElementById('sidebarNav').style.display = '';
   window.scrollTo(0, 0);
+  setTimeout(renderMermaidDiagrams, 50);
 }}
 
 function onSearch(query) {{
@@ -327,6 +555,11 @@ function onSearch(query) {{
   results.classList.add('visible');
   nav.style.display = 'none';
 }}
+
+// Render mermaid diagrams on initial load
+document.addEventListener('DOMContentLoaded', function() {{
+  setTimeout(renderMermaidDiagrams, 100);
+}});
 </script>
 </body>
 </html>"##, title=title, sidebar_html=sidebar_html, pages_html=pages_html, search_index=search_index)

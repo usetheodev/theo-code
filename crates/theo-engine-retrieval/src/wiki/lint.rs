@@ -16,6 +16,12 @@ pub struct LintReport {
     pub large_pages: Vec<(String, usize)>,
     /// (page, section_name) — ## headers followed immediately by another ## header.
     pub empty_sections: Vec<(String, String)>,
+    /// Cache pages with stale graph_hash (different from current manifest).
+    pub stale_cache_pages: Vec<String>,
+    /// Cache pages recommended for eviction (stale + in stale/ dir).
+    pub eviction_candidates: Vec<String>,
+    /// Pairs of cache pages with high content overlap (potential duplicates).
+    pub duplicate_candidates: Vec<(String, String)>,
     /// Total pages scanned.
     pub total_pages: usize,
     /// Total issues found.
@@ -41,14 +47,31 @@ impl std::fmt::Display for LintReport {
             writeln!(f, "  Empty sections: {}", self.empty_sections.len())?;
             for (p, s) in &self.empty_sections { writeln!(f, "    - {}::{}", p, s)?; }
         }
+        if !self.stale_cache_pages.is_empty() {
+            writeln!(f, "  Stale cache pages: {}", self.stale_cache_pages.len())?;
+            for p in &self.stale_cache_pages { writeln!(f, "    - {}", p)?; }
+        }
+        if !self.eviction_candidates.is_empty() {
+            writeln!(f, "  Eviction candidates: {}", self.eviction_candidates.len())?;
+            for p in &self.eviction_candidates { writeln!(f, "    - {}", p)?; }
+        }
+        if !self.duplicate_candidates.is_empty() {
+            writeln!(f, "  Duplicate candidates: {}", self.duplicate_candidates.len())?;
+            for (a, b) in &self.duplicate_candidates { writeln!(f, "    - {} ≈ {}", a, b)?; }
+        }
         Ok(())
     }
 }
 
-const LARGE_PAGE_THRESHOLD: usize = 5000; // tokens (estimated as chars/4)
+const DEFAULT_LARGE_PAGE_THRESHOLD: usize = 5000; // tokens (estimated as chars/4)
 
 /// Run lint on a wiki directory. Returns report with all detected issues.
 pub fn lint(wiki_dir: &Path) -> LintReport {
+    lint_with_threshold(wiki_dir, DEFAULT_LARGE_PAGE_THRESHOLD)
+}
+
+/// Run lint with configurable large-page token threshold.
+pub fn lint_with_threshold(wiki_dir: &Path, large_page_threshold: usize) -> LintReport {
     let mut report = LintReport::default();
 
     let modules_dir = wiki_dir.join("modules");
@@ -122,7 +145,7 @@ pub fn lint(wiki_dir: &Path) -> LintReport {
     // Detect large pages
     for (slug, content) in &pages {
         let token_estimate = content.len() / 4;
-        if token_estimate > LARGE_PAGE_THRESHOLD {
+        if token_estimate > large_page_threshold {
             report.large_pages.push((slug.clone(), token_estimate));
         }
     }
@@ -146,10 +169,41 @@ pub fn lint(wiki_dir: &Path) -> LintReport {
         }
     }
 
+    // Detect stale cache pages
+    // wiki_dir = .theo/wiki, project_dir = wiki_dir/../../
+    let project_dir = wiki_dir.parent().and_then(|p| p.parent());
+    let manifest_hash = project_dir
+        .and_then(|pd| super::persistence::load_manifest(pd))
+        .map(|m| m.graph_hash);
+
+    if let Some(current_hash) = manifest_hash {
+        let cache_dir = wiki_dir.join("cache");
+        if cache_dir.exists() {
+            if let Ok(entries) = std::fs::read_dir(&cache_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().and_then(|e| e.to_str()) != Some("md") { continue; }
+                    let slug = path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
+                    if let Ok(content) = std::fs::read_to_string(&path) {
+                        let fm = super::model::parse_frontmatter(&content);
+                        if let Some(page_hash) = fm.graph_hash {
+                            if page_hash != current_hash {
+                                report.stale_cache_pages.push(slug.clone());
+                                report.eviction_candidates.push(slug);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     report.total_issues = report.orphan_pages.len()
         + report.broken_links.len()
         + report.large_pages.len()
-        + report.empty_sections.len();
+        + report.empty_sections.len()
+        + report.stale_cache_pages.len()
+        + report.duplicate_candidates.len();
 
     report
 }
@@ -235,5 +289,19 @@ mod tests {
         let display = format!("{}", report);
         assert!(display.contains("issues found"));
         assert!(display.contains("Orphan"));
+    }
+
+    #[test]
+    fn lint_custom_threshold() {
+        let dir = tempfile::tempdir().unwrap();
+        create_test_wiki(dir.path());
+
+        // With default threshold (5000), big-page (25000 chars / 4 = 6250 tokens) is large
+        let report = lint(dir.path());
+        assert!(report.large_pages.iter().any(|(s, _)| s == "big-page"));
+
+        // With very high threshold, big-page is NOT large
+        let report2 = lint_with_threshold(dir.path(), 100_000);
+        assert!(!report2.large_pages.iter().any(|(s, _)| s == "big-page"));
     }
 }

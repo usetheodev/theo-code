@@ -266,34 +266,59 @@ impl GraphContextProvider for GraphContextService {
             return empty;
         }
 
-        // LAYER 0: Wiki cache lookup (<5ms).
-        // If wiki has a high-confidence match, return it directly — no RRF needed.
-        // This is the "knowledge compounding" layer: previous sessions' knowledge
-        // is served instantly, avoiding the full retrieval pipeline.
+        // LAYER 0: Wiki cache lookup (<5ms) with Absolute Confidence Calibration.
+        // Uses evaluate_direct_return() with 3 gates:
+        // Gate 1: BM25 absolute floor (below = never return)
+        // Gate 2: Decision confidence from raw signals (not normalized)
+        // Gate 3: Per-category threshold
         {
+            use theo_engine_retrieval::wiki::lookup::{evaluate_direct_return, DEFAULT_BM25_FLOOR};
+
             let wiki_dir = std::path::PathBuf::from(".theo/wiki");
             let wiki_results = theo_engine_retrieval::wiki::lookup::lookup(&wiki_dir, query, 3);
-            if let Some(top) = wiki_results.first() {
-                if top.confidence >= 0.6 && top.token_count <= budget_tokens {
-                    let blocks: Vec<ContextBlock> = wiki_results.iter()
-                        .take_while(|r| r.confidence >= 0.5)
-                        .filter(|r| r.token_count <= budget_tokens)
-                        .map(|r| ContextBlock {
-                            source_id: format!("wiki:{}", r.slug),
-                            content: r.content.clone(),
-                            token_count: r.token_count,
-                            score: r.confidence,
-                        })
-                        .collect();
 
-                    if !blocks.is_empty() {
-                        let total_tokens: usize = blocks.iter().map(|b| b.token_count).sum();
-                        return Ok(GraphContextResult {
-                            total_tokens,
-                            budget_tokens,
-                            exploration_hints: format!("Wiki cache hit: {} (confidence {:.0}%)", top.title, top.confidence * 100.0),
-                            blocks,
-                        });
+            // Ranking decision log
+            if !wiki_results.is_empty() {
+                let (allow, conf, reason) = evaluate_direct_return(&wiki_results, query, DEFAULT_BM25_FLOOR);
+                let query_class = theo_engine_retrieval::wiki::model::classify_query(query);
+                eprintln!("[wiki-decision] query=\"{}\" class={} allow={} conf={:.2} reason={} top=[{}]",
+                    query, query_class.as_str(), allow, conf, reason,
+                    wiki_results.iter().take(3).map(|r| format!("{}:T:{}:bm25={:.1}:conf={:.0}%",
+                        r.slug, r.authority_tier.as_str(), r.bm25_raw, r.confidence * 100.0
+                    )).collect::<Vec<_>>().join(", ")
+                );
+            }
+
+            let (allow, _conf, _reason) = evaluate_direct_return(&wiki_results, query, DEFAULT_BM25_FLOOR);
+
+            if allow {
+                if let Some(top) = wiki_results.first() {
+                    if top.token_count <= budget_tokens {
+                        let blocks: Vec<ContextBlock> = wiki_results.iter()
+                            .take(3)
+                            .filter(|r| r.bm25_raw >= DEFAULT_BM25_FLOOR && r.token_count <= budget_tokens)
+                            .map(|r| ContextBlock {
+                                source_id: format!("wiki:{}[T:{}]", r.slug, r.authority_tier.as_str()),
+                                content: r.content.clone(),
+                                token_count: r.token_count,
+                                score: r.confidence,
+                            })
+                            .collect();
+
+                        if !blocks.is_empty() {
+                            let total_tokens: usize = blocks.iter().map(|b| b.token_count).sum();
+                            let query_class = theo_engine_retrieval::wiki::model::classify_query(query);
+                            return Ok(GraphContextResult {
+                                total_tokens,
+                                budget_tokens,
+                                exploration_hints: format!(
+                                    "Wiki direct return: {} (T:{}, bm25={:.1}, class={}, {})",
+                                    top.title, top.authority_tier.as_str(),
+                                    top.bm25_raw, query_class.as_str(), top.page_kind
+                                ),
+                                blocks,
+                            });
+                        }
                     }
                 }
             }
@@ -630,13 +655,33 @@ fn write_back_to_wiki(
 
     let path = cache_dir.join(format!("{}.md", slug));
 
-    // Don't overwrite existing cache (first result wins)
+    // Load current graph_hash for staleness tracking
+    let graph_hash = cache_dir.parent()
+        .and_then(|wiki_dir| wiki_dir.parent().and_then(|p| p.parent()))
+        .and_then(|project_dir| theo_engine_retrieval::wiki::persistence::load_manifest(project_dir))
+        .map(|m| m.graph_hash)
+        .unwrap_or(0);
+
+    // Check staleness: overwrite if existing page has different graph_hash
     if path.exists() {
-        return Ok(());
+        if let Ok(existing) = std::fs::read_to_string(&path) {
+            let fm = theo_engine_retrieval::wiki::model::parse_frontmatter(&existing);
+            if let Some(existing_hash) = fm.graph_hash {
+                if existing_hash == graph_hash {
+                    return Ok(()); // Fresh — skip
+                }
+                // Stale — will overwrite below
+            } else {
+                return Ok(()); // Legacy page without frontmatter — don't overwrite
+            }
+        }
     }
 
-    // Build formatted markdown page (not raw blocks)
-    let mut md = format!("# Query: {}\n\n", query);
+    // Build formatted markdown page with canonical frontmatter
+    let fm = theo_engine_retrieval::wiki::model::PageFrontmatter::cache(query, graph_hash);
+    let mut md = theo_engine_retrieval::wiki::model::render_frontmatter(&fm);
+
+    md += &format!("# Query: {}\n\n", query);
     md += &format!("> Cached from GRAPHCTX pipeline | {} results\n\n", blocks.len());
 
     // Relevant files table
@@ -651,7 +696,6 @@ fn write_back_to_wiki(
     // Code context from each block
     md += "## Context\n\n";
     for block in blocks {
-        // Extract first few lines of content as preview
         let preview: String = block.content.lines().take(20).collect::<Vec<_>>().join("\n");
         md += &format!("### {}\n\n{}\n\n", block.source_id, preview);
     }
@@ -664,7 +708,6 @@ fn write_back_to_wiki(
     std::fs::write(&path, md)?;
 
     // Log the write-back
-    // Navigate from cache_dir (.theo/wiki/cache) to project_dir
     if let Some(wiki_dir) = cache_dir.parent() {
         if let Some(project_dir) = wiki_dir.parent().and_then(|p| p.parent()) {
             theo_engine_retrieval::wiki::persistence::append_log(
@@ -677,6 +720,8 @@ fn write_back_to_wiki(
 
     Ok(())
 }
+
+// parse_frontmatter_graph_hash removed — use theo_engine_retrieval::wiki::model::parse_frontmatter()
 
 fn generate_wiki_if_stale(graph: &CodeGraph, communities: &[Community], project_dir: &Path) {
     use theo_engine_retrieval::wiki;
@@ -691,22 +736,58 @@ fn generate_wiki_if_stale(graph: &CodeGraph, communities: &[Community], project_
         .and_then(|n| n.to_str())
         .unwrap_or("project");
 
-    let wiki_data = wiki::generator::generate_wiki(communities, graph, project_name);
+    // Load or create wiki schema
+    let schema = wiki::persistence::load_schema(project_dir, project_name);
+    let _ = wiki::persistence::write_schema_default(project_dir, &schema);
+
+    // Try incremental generation first
+    let existing_manifest = wiki::persistence::load_manifest(project_dir);
+    let (wiki_data, log_detail) = if let Some(manifest) = &existing_manifest {
+        if !manifest.page_hashes.is_empty() {
+            // Load existing docs from disk for incremental merge
+            let existing_docs = wiki::generator::generate_wiki(communities, graph, project_name);
+            let (wiki, stats) = wiki::generator::generate_wiki_incremental(
+                communities, graph, project_name, manifest, &existing_docs.docs,
+            );
+            let detail = format!("incremental | {}", stats);
+            (wiki, detail)
+        } else {
+            // Old manifest without page_hashes → full regen
+            let wiki = wiki::generator::generate_wiki(communities, graph, project_name);
+            let detail = format!("full | {} pages from graph", wiki.docs.len());
+            (wiki, detail)
+        }
+    } else {
+        let wiki = wiki::generator::generate_wiki(communities, graph, project_name);
+        let detail = format!("initial | {} pages from graph", wiki.docs.len());
+        (wiki, detail)
+    };
+
+    // Cleanup orphaned pages before writing
+    let wiki_dir = project_dir.join(".theo").join("wiki");
+    let current_slugs: std::collections::HashSet<String> = wiki_data.docs.iter()
+        .map(|d| d.slug.clone())
+        .collect();
+    let removed = wiki::persistence::cleanup_orphaned_pages(&wiki_dir, &current_slugs);
+    if removed > 0 {
+        eprintln!("[wiki] Cleaned up {} orphaned pages", removed);
+    }
 
     if let Err(e) = wiki::persistence::write_to_disk(&wiki_data, project_dir) {
         eprintln!("[wiki] Warning: failed to write wiki: {e}");
     } else {
         eprintln!(
-            "[wiki] Generated {} pages in .theo/wiki/",
-            wiki_data.docs.len()
+            "[wiki] Generated {} pages in .theo/wiki/ ({})",
+            wiki_data.docs.len(), log_detail
         );
-        // Log the ingest
-        wiki::persistence::append_log(
-            project_dir,
-            "ingest",
-            &format!("Generated {} pages from graph ({} nodes, {} edges)",
-                wiki_data.docs.len(), graph.node_count(), graph.edge_count()),
-        );
+        wiki::persistence::append_log(project_dir, "ingest", &log_detail);
+
+        // Cache lifecycle: mark stale, GC cold (7 days)
+        let stale_moved = wiki::persistence::mark_stale_cache(&wiki_dir, hash);
+        let gc_removed = wiki::persistence::gc_cold_cache(&wiki_dir, 604800); // 7 days
+        if stale_moved > 0 || gc_removed > 0 {
+            eprintln!("[wiki] Cache lifecycle: {} marked stale, {} GC'd", stale_moved, gc_removed);
+        }
     }
 }
 

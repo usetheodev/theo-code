@@ -1,0 +1,275 @@
+{
+  "validated": true,
+  "proposal": "Wiki Retrieval Scoring Enhancement — 3 changes",
+  "evaluation_date": "2026-04-08T14:30:00Z",
+  "evaluator": "QA Staff Engineer",
+  "tests_executed": 64,
+  "tests_passed": 64,
+  "tests_failed": 0,
+  "baseline_status": "HEALTHY",
+  "changes_proposed": [
+    {
+      "change_id": 1,
+      "title": "Expose bm25_raw in WikiLookupResult",
+      "testable": true,
+      "risk_level": "LOW",
+      "required_tests": [
+        {
+          "test_name": "lookup_includes_bm25_raw_score",
+          "description": "Verify WikiLookupResult.bm25_raw field contains raw BM25 score before final normalization",
+          "assertion": "assert!(result.bm25_raw >= 0.0 && result.bm25_raw <= 1.0, 'raw score should be in valid range')",
+          "setup": "Create wiki with auth.md, search.md; query 'JWT token'",
+          "expected": "First result has bm25_raw == unnormalized score from compute_final_score input"
+        },
+        {
+          "test_name": "bm25_raw_distinct_from_confidence",
+          "description": "Verify bm25_raw differs from final confidence (which includes tier/title/stale)",
+          "assertion": "assert_ne!(result.bm25_raw, result.confidence)",
+          "setup": "Query that matches both Deterministic and RawCache pages",
+          "expected": "Same query produces different raw vs final scores due to tier weighting"
+        },
+        {
+          "test_name": "bm25_raw_zero_score_still_excluded",
+          "description": "Pages with zero BM25 score should not appear in results even if exposed",
+          "assertion": "assert!(result.bm25_raw > 0.0 for all results)",
+          "setup": "Query 'zzzzzz' that has no matches",
+          "expected": "lookup() returns empty even though bm25_raw is exposed"
+        }
+      ]
+    },
+    {
+      "change_id": 2,
+      "title": "evaluate_direct_return() with 3-gate policy",
+      "testable": true,
+      "risk_level": "MEDIUM",
+      "complexity_note": "Weights (0.5, 0.3, 0.1, 0.1) are arbitrary initially — must be empirically calibrated",
+      "required_tests": [
+        {
+          "test_name": "evaluate_direct_return_floor_gate",
+          "description": "Verify floor threshold prevents weak matches (e.g., confidence < 0.45)",
+          "assertion": "assert!(!evaluate_direct_return(0.44, ...), 'should reject below floor')",
+          "setup": "Create wiki with low-relevance match",
+          "expected": "Result with confidence 0.44 returns false even if other gates pass"
+        },
+        {
+          "test_name": "evaluate_direct_return_composite_confidence",
+          "description": "Verify composite confidence = 0.5*bm25 + 0.3*tier_weight + 0.1*freshness + 0.1*title_boost",
+          "assertion": "assert_approx_eq!(composite, expected, 0.01)",
+          "setup": "Known bm25=0.8, Deterministic(weight=1.0), fresh, title_match",
+          "expected": "composite = 0.5*0.8 + 0.3*1.0 + 0.1*1.0 + 0.1*1.0 = 0.9"
+        },
+        {
+          "test_name": "evaluate_direct_return_category_thresholds",
+          "description": "Verify different thresholds per category (keyword=0.6, semantic=0.65, hybrid=0.7)",
+          "assertion": "assert!(evaluate_direct_return(0.62, KEYWORD_CLASS, ...), 'keyword lower bar')",
+          "setup": "Same content, different query classes",
+          "expected": "Keyword query passes at 0.62, semantic query fails at 0.62"
+        },
+        {
+          "test_name": "evaluate_direct_return_tier_aware",
+          "description": "Verify Deterministic pages bypass thresholds (always approved if composite > 0.5)",
+          "assertion": "assert!(evaluate_direct_return(0.52, _, Deterministic, ..), 'deterministic always trusted')",
+          "setup": "Deterministic page with composite just above floor",
+          "expected": "Returns true regardless of category threshold"
+        },
+        {
+          "test_name": "evaluate_direct_return_stale_override",
+          "description": "Verify stale RawCache pages never approved (hard block, not threshold)",
+          "assertion": "assert!(!evaluate_direct_return(0.95, _, RawCache, true), 'stale cache always blocked')",
+          "setup": "Stale cache page with composite = 0.95 (would pass all thresholds)",
+          "expected": "Returns false due to stale override"
+        },
+        {
+          "test_name": "evaluate_direct_return_boundary_cases",
+          "description": "Test exact boundary values (0.5, 0.6, 0.65, 0.7)",
+          "assertion": "assert!(!eva(.49, KEYWORD), assert!(eva(.50, KEYWORD))",
+          "setup": "Edge case values at thresholds",
+          "expected": "Exact boundaries inclusive/exclusive as specified"
+        }
+      ]
+    },
+    {
+      "change_id": 3,
+      "title": "QueryClass heuristic (keyword-based classification)",
+      "testable": true,
+      "risk_level": "MEDIUM",
+      "complexity_note": "Heuristic classification (keyword vs semantic vs hybrid) impacts direct_return gates",
+      "required_tests": [
+        {
+          "test_name": "classify_query_keyword_patterns",
+          "description": "Verify keyword detection for common patterns: 'function X', 'struct Y', 'trait Z', 'how to X'",
+          "assertion": "assert_eq!(classify('function hash_password'), QueryClass::Keyword)",
+          "setup": "Queries with structural code keywords",
+          "expected": "Correctly classified as Keyword (0.6 threshold)"
+        },
+        {
+          "test_name": "classify_query_semantic_patterns",
+          "description": "Verify semantic detection for abstract questions: 'how does X work', 'explain Y', 'what is Z'",
+          "assertion": "assert_eq!(classify('how does authentication flow work'), QueryClass::Semantic)",
+          "setup": "Queries with 'how', 'explain', 'describe', 'understand'",
+          "expected": "Correctly classified as Semantic (0.65 threshold)"
+        },
+        {
+          "test_name": "classify_query_hybrid_patterns",
+          "description": "Verify hybrid classification for mixed structural + conceptual: 'function X that does Y'",
+          "assertion": "assert_eq!(classify('function that validates JWT tokens'), QueryClass::Hybrid)",
+          "setup": "Queries with both code keywords + behavior description",
+          "expected": "Correctly classified as Hybrid (0.7 threshold)"
+        },
+        {
+          "test_name": "classify_query_edge_cases",
+          "description": "Verify fallback classification for ambiguous/empty queries",
+          "assertion": "assert_eq!(classify(''), QueryClass::Semantic) // default fallback",
+          "setup": "Empty query, single word, unicode, numbers only",
+          "expected": "Fallback to Semantic (most permissive)"
+        },
+        {
+          "test_name": "classify_query_case_insensitive",
+          "description": "Verify classification is case-insensitive",
+          "assertion": "assert_eq!(classify('FUNCTION X'), classify('function x'))",
+          "setup": "Same query in different cases",
+          "expected": "Both classified identically"
+        }
+      ]
+    }
+  ],
+  "missing_tests": [],
+  "weak_tests": [],
+  "integration_test_suite": {
+    "title": "End-to-end eval: 50-query benchmark",
+    "critical": true,
+    "description": "Before/after evaluation on real queries shows impact on latency and recall",
+    "scope": [
+      "lookup('how does auth work') → should hit Semantic threshold",
+      "lookup('function verify_token') → should hit Keyword threshold",
+      "lookup('JWT implementation') → should hit Hybrid threshold",
+      "Measure: latency, direct_return_rate, recall vs RRF baseline"
+    ],
+    "success_criteria": [
+      "direct_return_rate increases (fewer RRF fallbacks)",
+      "latency <= 5ms (wiki lookup SLO)",
+      "recall@1 >= 0.9 (no false positives)",
+      "Deterministic pages always approved if composite >= 0.5"
+    ]
+  },
+  "risks_identified": [
+    {
+      "risk_id": "R1",
+      "severity": "MEDIUM",
+      "title": "Arbitrary weight constants (0.5, 0.3, 0.1, 0.1)",
+      "description": "Composite confidence formula uses fixed weights that haven't been empirically validated. Changing one weight shifts all thresholds.",
+      "impact": "If weights are poorly calibrated, direct_return will either approve too many pages (hallucination) or too few (falls back to RRF, loses latency gain)",
+      "mitigation": [
+        "Eval benchmark MUST show before/after metrics on real 50+ query set",
+        "Run mutation tests on weight constants: each +/- 0.05 should show measurable recall impact",
+        "Weights should be constants in code with clear comment: 'Empirically calibrated from <eval_run_id>'",
+        "If eval shows weights are poor, reject change and re-calibrate"
+      ],
+      "test_evidence_required": "run_benchmark.sh output with MRR/Recall/DepCov before/after"
+    },
+    {
+      "risk_id": "R2",
+      "severity": "MEDIUM",
+      "title": "QueryClass heuristic is brittle",
+      "description": "Keyword-based classification (regex/keyword lists) may misclassify queries at boundaries. Example: 'function to validate JWT tokens' could be Keyword or Hybrid depending on heuristic implementation.",
+      "impact": "Misclassification → wrong threshold applied → wrong direct_return decision",
+      "mitigation": [
+        "QueryClass MUST have 100% test coverage of all branches in classify_query()",
+        "Test suite must include: all documented patterns + 5-10 edge cases per pattern",
+        "Heuristic rules MUST be documented inline (comment each if/else with example query)",
+        "If heuristic is >10 lines, consider moving to separate module with dedicated tests"
+      ],
+      "test_evidence_required": "classify_query_edge_cases test covers all branches"
+    },
+    {
+      "risk_id": "R3",
+      "severity": "LOW",
+      "title": "bm25_raw field is new API surface",
+      "description": "Adding bm25_raw to WikiLookupResult exposes internal scoring details. Consumers may depend on this field, making it part of public contract.",
+      "impact": "If field is added then later removed or changed, breaks consumer code",
+      "mitigation": [
+        "Document in CHANGELOG that bm25_raw is UNSTABLE and subject to change (not SemVer guarantee)",
+        "Add lint rule: no test should assert specific bm25_raw values (test behavior, not value)",
+        "Consider alternative: keep bm25_raw private, expose only final confidence"
+      ],
+      "test_evidence_required": "bm25_raw_distinct_from_confidence test"
+    }
+  ],
+  "test_coverage_validation": {
+    "unit_tests": {
+      "total_required": 17,
+      "breakdown": {
+        "bm25_raw_field": 3,
+        "evaluate_direct_return_policy": 6,
+        "query_class_heuristic": 5,
+        "scoring_composition": 3
+      },
+      "all_testable": true,
+      "estimated_implementation_time_minutes": 240
+    },
+    "integration_tests": {
+      "eval_benchmark_50_queries": {
+        "critical": true,
+        "duration_minutes": 15,
+        "success_criteria": "MRR >= 0.90, Recall >= 0.85, no regression vs baseline",
+        "required_before": "Merging to main"
+      }
+    }
+  },
+  "mutation_test_requirements": {
+    "critical": true,
+    "rationale": "Weights and thresholds are confidence-sensitive. Mutation testing proves test suite catches subtle bugs.",
+    "mutations_to_apply": [
+      "Weight constants: 0.5→0.45, 0.3→0.25, 0.1→0.05",
+      "Thresholds: 0.6→0.55, 0.65→0.60, 0.7→0.65",
+      "Boundary operators: >= → >, <= → <",
+      "Tier weights: flip order (RawCache highest, Deterministic lowest)",
+      "QueryClass fallback: Semantic → Keyword"
+    ],
+    "minimum_kill_rate": 0.95,
+    "pass_condition": "Each mutation causes at least one test to fail"
+  },
+  "veredicts": {
+    "change_1_bm25_raw": {
+      "status": "TESTABLE ✓",
+      "condition": "IF 3 unit tests pass with 100% assertion coverage",
+      "required_tests": ["lookup_includes_bm25_raw_score", "bm25_raw_distinct_from_confidence", "bm25_raw_zero_score_still_excluded"],
+      "can_proceed": true
+    },
+    "change_2_evaluate_direct_return": {
+      "status": "CONDITIONAL ✓",
+      "condition": "IF 6 unit tests + eval benchmark show no regression",
+      "required_tests": ["evaluate_direct_return_floor_gate", "evaluate_direct_return_composite_confidence", "evaluate_direct_return_category_thresholds", "evaluate_direct_return_tier_aware", "evaluate_direct_return_stale_override", "evaluate_direct_return_boundary_cases"],
+      "blockers": [
+        "R1: Weight constants must be empirically validated on 50+ query eval",
+        "Mutation tests must show >= 0.95 kill rate on weight/threshold mutations"
+      ],
+      "can_proceed": "CONDITIONAL — eval must show before/after metrics"
+    },
+    "change_3_query_class": {
+      "status": "CONDITIONAL ✓",
+      "condition": "IF 5 unit tests cover all classification branches + 100% line coverage",
+      "required_tests": ["classify_query_keyword_patterns", "classify_query_semantic_patterns", "classify_query_hybrid_patterns", "classify_query_edge_cases", "classify_query_case_insensitive"],
+      "blockers": [
+        "R2: Heuristic logic must be fully documented with examples",
+        "All branches in classify_query() must have test coverage"
+      ],
+      "can_proceed": true
+    }
+  },
+  "overall_assessment": {
+    "verdict": "TESTABLE BUT REQUIRES EMPIRICAL VALIDATION",
+    "rationale": "All 3 changes are individually testable with standard unit tests. However, Change #2 (evaluate_direct_return with weights) is high-confidence-risk: arbitrary weights without empirical calibration can break recall. Change #3 (QueryClass) is brittle if heuristic is not fully tested.",
+    "approval_conditions": [
+      "1. Implement all 17 unit tests listed above (3+6+5+3=17)",
+      "2. Run eval benchmark on 50+ real queries: before/after metrics",
+      "3. Mutation tests on weight/threshold constants: kill_rate >= 0.95",
+      "4. Zero test regressions vs current 64 passing wiki tests",
+      "5. CHANGELOG updated with 'Unstable API' caveat for bm25_raw"
+    ],
+    "confidence_level": 0.95,
+    "recommended_approach": "Implement unit tests first (2h). Then run eval benchmark (15m). If eval shows improvement or neutral impact, proceed. If eval shows recall drop, reject and recalibrate weights.",
+    "timeline": "2-3 days if eval is successful on first run; 1-2 weeks if weight re-tuning needed"
+  },
+  "final_answer": "CONDITIONAL APPROVAL: Testable, but deploy only after (1) all 17 unit tests pass, (2) eval benchmark shows no recall regression, (3) mutation tests verify weight/threshold constants are load-bearing"
+}

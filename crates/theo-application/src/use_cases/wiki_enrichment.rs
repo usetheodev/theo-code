@@ -206,6 +206,10 @@ fn load_wiki_from_disk(
                 untested: vec![],
             },
             source_refs: vec![],
+            summary: String::new(),
+            tags: vec![],
+            crate_description: None,
+            module_doc: None,
             generated_at: String::new(),
             enriched: false,
         });

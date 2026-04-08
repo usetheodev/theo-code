@@ -8,6 +8,7 @@ theo-domain.workspace = true
 theo-engine-graph = { path = "../theo-engine-graph" }
 serde.workspace = true
 serde_json.workspace = true
+toml.workspace = true
 thiserror.workspace = true
 fastembed = "4"
 tantivy = { workspace = true, optional = true }

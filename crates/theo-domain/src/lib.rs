@@ -16,6 +16,7 @@ pub mod tool;
 pub mod tokens;
 pub mod tool_call;
 pub mod truncate;
+pub mod wiki_backend;
 
 /// Trait for state machines with validated transitions.
 pub trait StateMachine: Copy + PartialEq + std::fmt::Debug {
