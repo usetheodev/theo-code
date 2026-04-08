@@ -1,17 +1,13 @@
-# Meeting — 2026-04-07 (LLM Wiki: 5 Features Karpathy)
+# Meeting — 2026-04-07 (Wiki Human-Friendly)
 
 ## Proposta
-Completar LLM Wiki pattern: Log, Query→Page, Lint, BM25 Search, Auto Enrich.
-
-## Participantes
-- Facilitador (fast-track — extensão natural do wiki existente)
+Transformar wiki de inventário para documentação viva: concept detection, index hierárquico, LLM high-level pages.
 
 ## Veredito
 **APPROVED**
 
-## Escopo Aprovado
-- Mod: `crates/theo-engine-retrieval/src/wiki/persistence.rs` (append_log)
-- Novo: `crates/theo-engine-retrieval/src/wiki/lint.rs`
-- Mod: `crates/theo-engine-retrieval/src/wiki/lookup.rs` (BM25)
-- Mod: `crates/theo-engine-retrieval/src/wiki/mod.rs` (pub mod lint)
-- Mod: `crates/theo-application/src/use_cases/graph_context_service.rs`
+## Escopo
+- Novo: `crates/theo-application/src/use_cases/wiki_highlevel.rs`
+- Mod: `crates/theo-application/src/use_cases/mod.rs`
+- Mod: `crates/theo-engine-retrieval/src/wiki/renderer.rs`
+- Mod: `crates/theo-engine-retrieval/src/wiki/generator.rs`

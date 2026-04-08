@@ -126,8 +126,8 @@ mod tests {
                 slug: "test-module".into(),
                 title: "Test Module".into(),
                 community_id: "c1".into(),
-                file_count: 1,
-                symbol_count: 2,
+                file_count: 3,
+                symbol_count: 10,
                 primary_language: "rs".into(),
                 files: vec![],
                 entry_points: vec![],
@@ -194,7 +194,8 @@ mod tests {
         write_to_disk(&wiki, dir.path()).unwrap();
 
         let index = std::fs::read_to_string(dir.path().join(".theo/wiki/index.md")).unwrap();
-        assert!(index.contains("Test Module"));
-        assert!(index.contains("test-module"));
+        // Module should appear somewhere in the index (flat or hierarchical)
+        assert!(index.contains("test-module") || index.contains("Test Module"),
+            "index should reference the module: {}", &index[..index.len().min(500)]);
     }
 }

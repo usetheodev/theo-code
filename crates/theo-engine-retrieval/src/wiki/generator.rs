@@ -466,6 +466,94 @@ fn chrono_now() -> String {
 }
 
 // ---------------------------------------------------------------------------
+// Concept detection
+// ---------------------------------------------------------------------------
+
+/// A detected concept that merits a dedicated concept page.
+#[derive(Debug, Clone)]
+pub struct ConceptCandidate {
+    /// Concept name (e.g., "retrieval", "authentication", "sandbox").
+    pub name: String,
+    /// Slugs of related module pages.
+    pub related_modules: Vec<String>,
+    /// Hint text from top symbols/docs.
+    pub description_hint: String,
+}
+
+/// Detect high-level concepts by grouping related communities.
+///
+/// Heuristic: communities whose names share a common prefix/keyword
+/// and have cross-dependencies form a concept.
+pub fn detect_concepts(docs: &[super::model::WikiDoc]) -> Vec<ConceptCandidate> {
+    // Group docs by crate prefix (first 2 hyphen-segments)
+    let mut groups: HashMap<String, Vec<&super::model::WikiDoc>> = HashMap::new();
+
+    for doc in docs {
+        if doc.file_count < 2 { continue; } // Skip tiny modules
+
+        // Extract group key: "theo-engine" from "theo-engine-retrieval (24)"
+        let key = doc.title
+            .split(|c: char| c == '(' || c == ' ')
+            .next()
+            .unwrap_or(&doc.title)
+            .trim()
+            .split('-')
+            .take(2)
+            .collect::<Vec<_>>()
+            .join("-");
+
+        if key.len() >= 4 {
+            groups.entry(key).or_default().push(doc);
+        }
+    }
+
+    let mut concepts = Vec::new();
+
+    for (key, group_docs) in &groups {
+        if group_docs.len() < 2 { continue; } // Need 2+ modules for a concept
+
+        // Concept name: human-readable from the key
+        let name = match key.as_str() {
+            "theo-engine" => "Code Intelligence Engine".to_string(),
+            "theo-agent" => "Agent Runtime".to_string(),
+            "theo-infra" => "Infrastructure".to_string(),
+            "theo-tooling" => "Developer Tools".to_string(),
+            "theo-governance" => "Governance & Safety".to_string(),
+            "theo-domain" => "Domain Model".to_string(),
+            "theo-ui" | "theo-desktop" => "Frontend & Desktop".to_string(),
+            "theo-application" => "Application Layer".to_string(),
+            _ => format!("{} Subsystem", key.replace('-', " ")),
+        };
+
+        let related_modules: Vec<String> = group_docs.iter().map(|d| d.slug.clone()).collect();
+
+        // Build description hint from top entry points
+        let mut hints = Vec::new();
+        for doc in group_docs.iter().take(3) {
+            for ep in doc.entry_points.iter().take(2) {
+                hints.push(format!("{}: {}", ep.name, ep.signature));
+            }
+        }
+        let description_hint = if hints.is_empty() {
+            format!("{} modules related to {}", group_docs.len(), key)
+        } else {
+            hints.join("; ")
+        };
+
+        concepts.push(ConceptCandidate {
+            name,
+            related_modules,
+            description_hint,
+        });
+    }
+
+    // Sort by number of related modules (largest concepts first)
+    concepts.sort_by(|a, b| b.related_modules.len().cmp(&a.related_modules.len()));
+    concepts.truncate(8); // Max 8 concepts
+    concepts
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
