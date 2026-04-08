@@ -1,12 +1,11 @@
 //! Wiki lookup: fast semantic cache for query_context.
 //!
-//! Searches wiki pages by token overlap with the query.
-//! Returns matching pages as ContextBlocks if confidence exceeds threshold.
+//! BM25 search over wiki pages — IDF-aware, code-tokenized.
 //! This is the first retrieval layer — before the RRF pipeline.
 //!
 //! Latency target: <5ms for any query.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use crate::code_tokenizer::tokenize_code;
@@ -30,10 +29,10 @@ pub struct WikiLookupResult {
 /// than to return wrong context.
 const MIN_CONFIDENCE: f64 = 0.5;
 
-/// Search wiki pages for a query. Returns top matches above confidence threshold.
+/// Search wiki pages using BM25 scoring. Returns top matches above threshold.
 ///
-/// Scoring: token overlap between query tokens and page title + symbol names.
-/// Fast: reads pre-generated markdown files from disk, tokenizes and matches.
+/// BM25 with code-aware tokenization — IDF-weighted, title boost 3x.
+/// Scans both modules/ (bootstrap) and cache/ (write-back).
 ///
 /// Returns empty vec if no match above threshold (triggers RRF fallback).
 pub fn lookup(wiki_dir: &Path, query: &str, max_results: usize) -> Vec<WikiLookupResult> {
@@ -41,112 +40,104 @@ pub fn lookup(wiki_dir: &Path, query: &str, max_results: usize) -> Vec<WikiLooku
         return Vec::new();
     }
 
-    let query_tokens: HashSet<String> = tokenize_code(query).into_iter().collect();
+    let query_tokens = tokenize_code(query);
     if query_tokens.is_empty() {
         return Vec::new();
     }
 
+    // Collect all wiki pages
     let modules_dir = wiki_dir.join("modules");
     let cache_dir = wiki_dir.join("cache");
 
-    let mut results: Vec<WikiLookupResult> = Vec::new();
+    let mut pages: Vec<(String, String, String)> = Vec::new(); // (slug, title, content)
 
-    // Scan both modules/ (bootstrap) and cache/ (write-back from previous queries)
-    let dirs_to_scan: Vec<std::path::PathBuf> = [modules_dir, cache_dir]
-        .into_iter()
-        .filter(|d| d.exists())
-        .collect();
+    for dir in [&modules_dir, &cache_dir] {
+        if !dir.exists() { continue; }
+        let entries = match std::fs::read_dir(dir) {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("md") { continue; }
+            if path.to_string_lossy().contains(".enriched.") { continue; }
+            let Ok(content) = std::fs::read_to_string(&path) else { continue };
+            let slug = path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
+            let title = content.lines()
+                .find(|l| l.starts_with("# "))
+                .map(|l| l.trim_start_matches("# ").trim().to_string())
+                .unwrap_or_else(|| slug.clone());
+            pages.push((slug, title, content));
+        }
+    }
 
-    if dirs_to_scan.is_empty() {
+    if pages.is_empty() {
         return Vec::new();
     }
 
-    for scan_dir in &dirs_to_scan {
-    let entries = match std::fs::read_dir(scan_dir) {
-        Ok(e) => e,
-        Err(_) => continue,
-    };
+    // Build BM25 index
+    let doc_count = pages.len();
+    let mut postings: HashMap<String, Vec<(usize, f64)>> = HashMap::new();
+    let mut doc_lengths: Vec<f64> = Vec::with_capacity(doc_count);
 
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("md") {
-            continue;
-        }
-        if path.to_string_lossy().contains(".enriched.") {
-            continue;
+    for (idx, (_, title, content)) in pages.iter().enumerate() {
+        let mut tf: HashMap<String, f64> = HashMap::new();
+
+        // Title tokens: 3x boost
+        for token in tokenize_code(title) {
+            *tf.entry(token).or_default() += 3.0;
         }
 
-        let Ok(content) = std::fs::read_to_string(&path) else { continue };
-
-        let slug = path.file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("")
-            .to_string();
-
-        // Extract title from first heading
-        let title = content.lines()
-            .find(|l| l.starts_with("# "))
-            .map(|l| l.trim_start_matches("# ").trim().to_string())
-            .unwrap_or_else(|| slug.clone());
-
-        // Score: token overlap between query and page content
-        // Weight: title tokens 3x, code block tokens 2x, body tokens 1x
-        let mut page_tokens: HashSet<String> = HashSet::new();
-        let mut title_tokens: HashSet<String> = HashSet::new();
-        let mut code_tokens: HashSet<String> = HashSet::new();
-
-        // Tokenize title
-        for token in tokenize_code(&title) {
-            title_tokens.insert(token.clone());
-            page_tokens.insert(token);
+        // Content tokens: 1x (first 3000 chars for speed)
+        let preview = &content[..content.len().min(3000)];
+        for token in tokenize_code(preview) {
+            *tf.entry(token).or_default() += 1.0;
         }
 
-        // Tokenize content (first 2000 chars for speed)
-        let content_preview = &content[..content.len().min(2000)];
-        let mut in_code_block = false;
-        for line in content_preview.lines() {
-            if line.starts_with("```") {
-                in_code_block = !in_code_block;
-                continue;
-            }
-            for token in tokenize_code(line) {
-                if in_code_block {
-                    code_tokens.insert(token.clone());
-                }
-                page_tokens.insert(token);
-            }
-        }
+        let len: f64 = tf.values().sum();
+        doc_lengths.push(len);
 
-        // Compute weighted overlap
-        let title_hits = query_tokens.iter().filter(|qt| title_tokens.contains(*qt)).count();
-        let code_hits = query_tokens.iter().filter(|qt| code_tokens.contains(*qt)).count();
-        let body_hits = query_tokens.iter().filter(|qt| page_tokens.contains(*qt)).count();
-
-        let weighted_score = (title_hits as f64 * 3.0)
-            + (code_hits as f64 * 2.0)
-            + (body_hits as f64 * 1.0);
-
-        let max_possible = query_tokens.len() as f64 * 3.0; // All tokens match title
-        let confidence = if max_possible > 0.0 {
-            (weighted_score / max_possible).min(1.0)
-        } else {
-            0.0
-        };
-
-        if confidence >= MIN_CONFIDENCE {
-            let token_count = content.len() / 4; // Rough estimate: 4 chars per token
-            results.push(WikiLookupResult {
-                content,
-                slug,
-                title,
-                confidence,
-                token_count,
-            });
+        for (term, freq) in tf {
+            postings.entry(term).or_default().push((idx, freq));
         }
     }
-    } // end for scan_dir
 
-    // Sort by confidence descending
+    let avg_dl = doc_lengths.iter().sum::<f64>() / doc_count as f64;
+    let (k1, b) = (1.2f64, 0.75f64);
+    let n = doc_count as f64;
+
+    // BM25 scoring
+    let mut scores = vec![0.0f64; doc_count];
+    for token in &query_tokens {
+        let Some(posts) = postings.get(token.as_str()) else { continue };
+        let n_t = posts.len() as f64;
+        let idf = ((n - n_t + 0.5) / (n_t + 0.5) + 1.0).ln();
+        for &(doc_idx, tf) in posts {
+            let dl = doc_lengths[doc_idx];
+            let norm = tf * (k1 + 1.0) / (tf + k1 * (1.0 - b + b * dl / avg_dl));
+            scores[doc_idx] += idf * norm;
+        }
+    }
+
+    // Normalize to 0-1 confidence
+    let max_score = scores.iter().cloned().fold(0.0f64, f64::max);
+
+    let mut results: Vec<WikiLookupResult> = Vec::new();
+    for (idx, &score) in scores.iter().enumerate() {
+        if score <= 0.0 { continue; }
+        let confidence = if max_score > 0.0 { score / max_score } else { 0.0 };
+        if confidence < MIN_CONFIDENCE { continue; }
+
+        let (slug, title, content) = &pages[idx];
+        results.push(WikiLookupResult {
+            content: content.clone(),
+            slug: slug.clone(),
+            title: title.clone(),
+            confidence,
+            token_count: content.len() / 4,
+        });
+    }
+
     results.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal));
     results.truncate(max_results);
 

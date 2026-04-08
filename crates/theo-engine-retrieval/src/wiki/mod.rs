@@ -14,3 +14,4 @@ pub mod generator;
 pub mod renderer;
 pub mod persistence;
 pub mod lookup;
+pub mod lint;
