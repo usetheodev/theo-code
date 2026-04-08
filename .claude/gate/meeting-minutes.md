@@ -1,19 +1,20 @@
-# Meeting — 2026-04-07 (theo-marklive: Markdown Wiki Viewer)
+# Meeting — 2026-04-07 (Wiki Cache Semântico)
 
 ## Proposta
-Novo crate open source theo-marklive em apps/. MIT license.
+Wiki como primeira camada de retrieval no query_context.
 
 ## Participantes
-- Facilitador (fast-track — novo crate isolado, zero impacto em existentes)
+- Governance (APPROVE 85%)
 
 ## Veredito
 **APPROVED**
 
 ## Escopo Aprovado
-- Novo: `apps/theo-marklive/` (inteiro)
-- Mod: `Cargo.toml` workspace (add member)
+- Novo: `crates/theo-engine-retrieval/src/wiki/lookup.rs`
+- Mod: `crates/theo-engine-retrieval/src/wiki/mod.rs`
+- Mod: `crates/theo-application/src/use_cases/graph_context_service.rs`
 
 ## Condições
-1. MIT license
-2. Zero impacto em crates existentes
-3. Deps: pulldown-cmark (MIT) + syntect (MIT)
+1. Threshold calibrado para evitar false positives
+2. Fallback transparente (zero regressão)
+3. Testes unitários para lookup (match/miss/threshold)

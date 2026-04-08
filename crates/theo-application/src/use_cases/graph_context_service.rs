@@ -266,6 +266,39 @@ impl GraphContextProvider for GraphContextService {
             return empty;
         }
 
+        // LAYER 0: Wiki cache lookup (<5ms).
+        // If wiki has a high-confidence match, return it directly — no RRF needed.
+        // This is the "knowledge compounding" layer: previous sessions' knowledge
+        // is served instantly, avoiding the full retrieval pipeline.
+        {
+            let wiki_dir = std::path::PathBuf::from(".theo/wiki");
+            let wiki_results = theo_engine_retrieval::wiki::lookup::lookup(&wiki_dir, query, 3);
+            if let Some(top) = wiki_results.first() {
+                if top.confidence >= 0.6 && top.token_count <= budget_tokens {
+                    let blocks: Vec<ContextBlock> = wiki_results.iter()
+                        .take_while(|r| r.confidence >= 0.5)
+                        .filter(|r| r.token_count <= budget_tokens)
+                        .map(|r| ContextBlock {
+                            source_id: format!("wiki:{}", r.slug),
+                            content: r.content.clone(),
+                            token_count: r.token_count,
+                            score: r.confidence,
+                        })
+                        .collect();
+
+                    if !blocks.is_empty() {
+                        let total_tokens: usize = blocks.iter().map(|b| b.token_count).sum();
+                        return Ok(GraphContextResult {
+                            total_tokens,
+                            budget_tokens,
+                            exploration_hints: format!("Wiki cache hit: {} (confidence {:.0}%)", top.title, top.confidence * 100.0),
+                            blocks,
+                        });
+                    }
+                }
+            }
+        }
+
         // Safe: we checked Ready or Building(stale) above.
         let graph_state = match &*state {
             GraphBuildState::Ready(gs) => gs,
