@@ -47,15 +47,24 @@ pub fn lookup(wiki_dir: &Path, query: &str, max_results: usize) -> Vec<WikiLooku
     }
 
     let modules_dir = wiki_dir.join("modules");
-    if !modules_dir.exists() {
-        return Vec::new();
-    }
+    let cache_dir = wiki_dir.join("cache");
 
     let mut results: Vec<WikiLookupResult> = Vec::new();
 
-    let entries = match std::fs::read_dir(&modules_dir) {
+    // Scan both modules/ (bootstrap) and cache/ (write-back from previous queries)
+    let dirs_to_scan: Vec<std::path::PathBuf> = [modules_dir, cache_dir]
+        .into_iter()
+        .filter(|d| d.exists())
+        .collect();
+
+    if dirs_to_scan.is_empty() {
+        return Vec::new();
+    }
+
+    for scan_dir in &dirs_to_scan {
+    let entries = match std::fs::read_dir(scan_dir) {
         Ok(e) => e,
-        Err(_) => return Vec::new(),
+        Err(_) => continue,
     };
 
     for entry in entries.flatten() {
@@ -135,6 +144,7 @@ pub fn lookup(wiki_dir: &Path, query: &str, max_results: usize) -> Vec<WikiLooku
             });
         }
     }
+    } // end for scan_dir
 
     // Sort by confidence descending
     results.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal));

@@ -377,6 +377,18 @@ impl GraphContextProvider for GraphContextService {
             })
             .collect();
 
+        // WRITE-BACK: Save RRF result to wiki cache for future queries.
+        // This is the "knowledge compounding" cycle: each query that goes through
+        // the full pipeline enriches the wiki, making future queries faster.
+        // Only writes if: (1) we have meaningful content, (2) wiki dir exists.
+        if !blocks.is_empty() && payload.total_tokens > 100 {
+            let wiki_dir = std::path::PathBuf::from(".theo/wiki/cache");
+            if let Err(e) = write_back_to_wiki(&wiki_dir, query, &blocks) {
+                // Best-effort: don't fail the query if write-back fails
+                eprintln!("[wiki-cache] Write-back failed: {e}");
+            }
+        }
+
         Ok(GraphContextResult {
             total_tokens: payload.total_tokens,
             budget_tokens: payload.budget_tokens,
@@ -592,6 +604,51 @@ fn build_index(graph: &CodeGraph) -> Vec<Community> {
 ///
 /// Generate Code Wiki if stale (graph changed since last generation).
 /// Deterministic, zero LLM cost, ~50-100ms for medium repos.
+/// Write-back: save RRF pipeline results as cached wiki page.
+///
+/// Creates `.theo/wiki/cache/{slug}.md` with the query and results.
+/// Future wiki lookups will find these cached pages.
+fn write_back_to_wiki(
+    cache_dir: &Path,
+    query: &str,
+    blocks: &[ContextBlock],
+) -> std::io::Result<()> {
+    std::fs::create_dir_all(cache_dir)?;
+
+    // Slug from query (deterministic)
+    let slug: String = query
+        .to_lowercase()
+        .split_whitespace()
+        .take(5)
+        .collect::<Vec<_>>()
+        .join("-")
+        .replace(|c: char| !c.is_alphanumeric() && c != '-', "");
+
+    if slug.is_empty() {
+        return Ok(());
+    }
+
+    let path = cache_dir.join(format!("{}.md", slug));
+
+    // Don't overwrite existing cache (first result wins)
+    if path.exists() {
+        return Ok(());
+    }
+
+    // Build markdown from blocks
+    let mut md = format!("# Query: {}\n\n", query);
+    md += &format!("> Cached from RRF pipeline | {} blocks\n\n", blocks.len());
+
+    for block in blocks {
+        md += &format!("## {}\n\n", block.source_id);
+        md += &block.content;
+        md += "\n\n---\n\n";
+    }
+
+    std::fs::write(&path, md)?;
+    Ok(())
+}
+
 fn generate_wiki_if_stale(graph: &CodeGraph, communities: &[Community], project_dir: &Path) {
     use theo_engine_retrieval::wiki;
 
