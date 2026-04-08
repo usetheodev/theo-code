@@ -597,6 +597,156 @@ fn wiki_e2e() {
     eprintln!("\n=== WIKI E2E: {} pages, {:.0}ms, PASSED ===", wiki_data.docs.len(), gen_time.as_millis());
 }
 
+/// A/B Benchmark: Wiki Cache vs RRF-only.
+///
+/// Measures the impact of wiki as semantic cache layer:
+/// Group A: Wiki lookup first, fallback to BM25
+/// Group B: BM25 only (no wiki)
+///
+/// Metrics: latency, tokens, hit rate, quality (MRR/P@5)
+///
+/// Run: cargo test -p theo-engine-retrieval --test benchmark_suite -- --ignored --nocapture wiki_ab_benchmark
+#[test]
+#[ignore]
+fn wiki_ab_benchmark() {
+    use theo_engine_graph::bridge;
+    use theo_engine_graph::cluster::{hierarchical_cluster, ClusterAlgorithm};
+    use theo_engine_retrieval::wiki;
+    use theo_engine_retrieval::search::FileBm25;
+
+    let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent().unwrap()
+        .parent().unwrap();
+
+    eprintln!("=== A/B BENCHMARK: Wiki Cache vs RRF-only ===\n");
+
+    // Step 1: Build graph + generate wiki (if not exists)
+    let (files, stats) = theo_application::use_cases::extraction::extract_repo(workspace_root);
+    let (graph, _) = bridge::build_graph(&files);
+    let cluster = hierarchical_cluster(&graph, ClusterAlgorithm::FileLeiden { resolution: 1.0 });
+
+    // Ensure wiki exists
+    let wiki_hash = wiki::generator::compute_graph_hash(&graph);
+    if !wiki::persistence::is_fresh(workspace_root, wiki_hash) {
+        let wiki_data = wiki::generator::generate_wiki_with_root(
+            &cluster.communities, &graph, "theo-code", Some(workspace_root)
+        );
+        wiki::persistence::write_to_disk(&wiki_data, workspace_root).unwrap();
+    }
+    let wiki_dir = workspace_root.join(".theo/wiki");
+
+    // Step 2: Load ground truth
+    let gt = load_ground_truth("theo-code");
+    let k = 5;
+
+    // Step 3: Run A/B for each query
+    eprintln!("{:<5} {:<40} {:>8} {:>8} {:>10} {:>10} {:>8}",
+        "#", "Query", "Wiki?", "P@5", "Lat(ms)A", "Lat(ms)B", "Delta");
+    eprintln!("{}", "-".repeat(95));
+
+    let mut wiki_hits = 0;
+    let mut wiki_total_lat = 0.0;
+    let mut rrf_total_lat = 0.0;
+    let mut wiki_total_p5 = 0.0;
+    let mut rrf_total_p5 = 0.0;
+    let mut wiki_total_tokens = 0usize;
+    let mut rrf_total_tokens = 0usize;
+
+    for (i, bq) in gt.queries.iter().enumerate() {
+        let expected: Vec<&str> = bq.expected_files.iter().map(|s| s.as_str()).collect();
+
+        // GROUP A: Wiki lookup first, then BM25 fallback
+        let start_a = std::time::Instant::now();
+        let wiki_results = wiki::lookup::lookup(&wiki_dir, &bq.query, 3);
+        let wiki_hit = !wiki_results.is_empty() && wiki_results[0].confidence >= 0.6;
+
+        let (a_files, a_tokens) = if wiki_hit {
+            wiki_hits += 1;
+            // Extract file paths from wiki content (best effort)
+            let mut files = Vec::new();
+            for r in &wiki_results {
+                // Wiki pages mention file paths in backticks
+                for line in r.content.lines() {
+                    if line.contains('`') && (line.contains(".rs") || line.contains(".py") || line.contains(".ts")) {
+                        // Extract path from backtick
+                        for part in line.split('`') {
+                            if part.contains('/') && (part.ends_with(".rs") || part.ends_with(".py") || part.ends_with(".ts")) {
+                                files.push(part.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+            files.dedup();
+            let tokens: usize = wiki_results.iter().map(|r| r.token_count).sum();
+            (files, tokens)
+        } else {
+            // Fallback to BM25
+            let scores = FileBm25::search(&graph, &bq.query);
+            let files = extract_files_from_scores(&scores);
+            let tokens: usize = files.len() * 500; // Estimate 500 tokens per file context
+            (files, tokens)
+        };
+        let lat_a = start_a.elapsed().as_secs_f64() * 1000.0;
+
+        // GROUP B: BM25 only (no wiki)
+        let start_b = std::time::Instant::now();
+        let scores = FileBm25::search(&graph, &bq.query);
+        let b_files = extract_files_from_scores(&scores);
+        let b_tokens: usize = b_files.len() * 500;
+        let lat_b = start_b.elapsed().as_secs_f64() * 1000.0;
+
+        let p5_a = metrics::precision_at_k(&a_files, &expected, k);
+        let p5_b = metrics::precision_at_k(&b_files, &expected, k);
+
+        wiki_total_lat += lat_a;
+        rrf_total_lat += lat_b;
+        wiki_total_p5 += p5_a;
+        rrf_total_p5 += p5_b;
+        wiki_total_tokens += a_tokens;
+        rrf_total_tokens += b_tokens;
+
+        let hit_str = if wiki_hit { "HIT" } else { "miss" };
+        let delta = if lat_a < lat_b { "faster" } else { "slower" };
+
+        eprintln!("{:<5} {:<40} {:>8} {:>8.2} {:>10.1} {:>10.1} {:>8}",
+            format!("{}.", i + 1),
+            if bq.query.len() > 39 { &bq.query[..39] } else { &bq.query },
+            hit_str, p5_a, lat_a, lat_b, delta);
+    }
+
+    let n = gt.queries.len() as f64;
+    let hit_rate = wiki_hits as f64 / n * 100.0;
+
+    eprintln!("\n{}", "=".repeat(95));
+    eprintln!("RESULTS ({} queries):\n", gt.queries.len());
+
+    eprintln!("{:<25} {:>15} {:>15} {:>15}", "", "Wiki+Fallback", "BM25-only", "Improvement");
+    eprintln!("{}", "-".repeat(70));
+    eprintln!("{:<25} {:>15.1} {:>15.1} {:>14.0}%",
+        "Avg latency (ms)", wiki_total_lat / n, rrf_total_lat / n,
+        (1.0 - wiki_total_lat / rrf_total_lat) * 100.0);
+    eprintln!("{:<25} {:>15.3} {:>15.3} {:>+14.3}",
+        "Avg P@5", wiki_total_p5 / n, rrf_total_p5 / n,
+        wiki_total_p5 / n - rrf_total_p5 / n);
+    eprintln!("{:<25} {:>15} {:>15} {:>14.0}%",
+        "Total tokens", wiki_total_tokens, rrf_total_tokens,
+        (1.0 - wiki_total_tokens as f64 / rrf_total_tokens as f64) * 100.0);
+    eprintln!("{:<25} {:>14.0}%", "Wiki hit rate", hit_rate);
+    eprintln!("{:<25} {:>15}", "Wiki hits", wiki_hits);
+
+    // Lint the wiki
+    let lint_report = wiki::lint::lint(&wiki_dir);
+    eprintln!("\nWIKI HEALTH:");
+    eprintln!("  Pages: {}", lint_report.total_pages);
+    eprintln!("  Issues: {}", lint_report.total_issues);
+    eprintln!("  Orphan pages: {}", lint_report.orphan_pages.len());
+    eprintln!("  Broken links: {}", lint_report.broken_links.len());
+    eprintln!("  Large pages: {}", lint_report.large_pages.len());
+
+    eprintln!("\n=== A/B BENCHMARK COMPLETE ===");
+}
+
 /// Generate Code Wiki for an external repo + render HTML.
 ///
 /// Set WIKI_REPO env var to the repo path. Default: /tmp/fastapi
