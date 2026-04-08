@@ -1,20 +1,17 @@
-# Meeting — 2026-04-07 (Wiki Cache Semântico)
+# Meeting — 2026-04-07 (LLM Wiki: 5 Features Karpathy)
 
 ## Proposta
-Wiki como primeira camada de retrieval no query_context.
+Completar LLM Wiki pattern: Log, Query→Page, Lint, BM25 Search, Auto Enrich.
 
 ## Participantes
-- Governance (APPROVE 85%)
+- Facilitador (fast-track — extensão natural do wiki existente)
 
 ## Veredito
 **APPROVED**
 
 ## Escopo Aprovado
-- Novo: `crates/theo-engine-retrieval/src/wiki/lookup.rs`
-- Mod: `crates/theo-engine-retrieval/src/wiki/mod.rs`
+- Mod: `crates/theo-engine-retrieval/src/wiki/persistence.rs` (append_log)
+- Novo: `crates/theo-engine-retrieval/src/wiki/lint.rs`
+- Mod: `crates/theo-engine-retrieval/src/wiki/lookup.rs` (BM25)
+- Mod: `crates/theo-engine-retrieval/src/wiki/mod.rs` (pub mod lint)
 - Mod: `crates/theo-application/src/use_cases/graph_context_service.rs`
-
-## Condições
-1. Threshold calibrado para evitar false positives
-2. Fallback transparente (zero regressão)
-3. Testes unitários para lookup (match/miss/threshold)

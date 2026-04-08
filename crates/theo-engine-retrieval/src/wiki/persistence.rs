@@ -53,6 +53,58 @@ pub fn is_fresh(project_dir: &Path, current_hash: u64) -> bool {
     manifest.graph_hash == current_hash
 }
 
+/// Append an entry to the wiki log (chronological, append-only).
+///
+/// Format: `## [ISO8601] event_type | details`
+/// Grep-friendly: `grep "^## \[" .theo/wiki/log.md | tail -5`
+pub fn append_log(project_dir: &Path, event_type: &str, details: &str) {
+    let log_path = project_dir.join(".theo").join("wiki").join("log.md");
+
+    // Create header if file doesn't exist
+    let needs_header = !log_path.exists();
+
+    let mut file = match std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+    {
+        Ok(f) => f,
+        Err(_) => return, // Best-effort
+    };
+
+    use std::io::Write;
+
+    if needs_header {
+        let _ = writeln!(file, "# Wiki Log\n");
+    }
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    // Simple ISO-like timestamp (no chrono dependency)
+    let secs_per_day = 86400u64;
+    let days = now / secs_per_day;
+    let time_of_day = now % secs_per_day;
+    let hours = time_of_day / 3600;
+    let minutes = (time_of_day % 3600) / 60;
+    let seconds = time_of_day % 60;
+
+    // Approximate date (good enough for logging)
+    let year = 1970 + (days / 365); // Approximate
+    let day_of_year = days % 365;
+    let month = day_of_year / 30 + 1;
+    let day = day_of_year % 30 + 1;
+
+    let _ = writeln!(
+        file,
+        "## [{:04}-{:02}-{:02}T{:02}:{:02}:{:02}] {} | {}",
+        year, month, day, hours, minutes, seconds, event_type, details
+    );
+    let _ = writeln!(file);
+}
+
 /// Load manifest from disk.
 pub fn load_manifest(project_dir: &Path) -> Option<WikiManifest> {
     let path = project_dir.join(".theo").join("wiki").join("wiki.manifest.json");

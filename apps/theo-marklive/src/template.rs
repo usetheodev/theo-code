@@ -153,7 +153,7 @@ body {{
 .content {{
   margin-left: var(--sidebar-w);
   flex: 1;
-  max-width: 900px;
+  max-width: 100%;
   padding: 40px 48px;
 }}
 

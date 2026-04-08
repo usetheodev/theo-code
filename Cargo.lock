@@ -6015,6 +6015,7 @@ dependencies = [
  "theo-application",
  "theo-domain",
  "theo-engine-graph",
+ "theo-marklive",
  "thiserror 2.0.18",
 ]
 
