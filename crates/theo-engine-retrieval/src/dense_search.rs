@@ -74,13 +74,12 @@ mod inner {
                 return HashMap::new();
             }
 
-            // PRF: if top-1 is confident (2x over #2), expand query
+            // PRF: if top-1 is confident (1.3x over #2), expand query toward top-1.
+            // Finds similar files to the best match.
             if initial.len() >= 2 && initial[0].1 > initial[1].1 * 1.3 {
                 let top_path = &initial[0].0;
 
-                // Get top-1's embedding (which encodes its document text)
                 if let Some(top_emb) = cache.get(top_path) {
-                    // Create expanded query vector: 0.7 * original + 0.3 * top-1 doc
                     let expanded: Vec<f64> = query_vec.iter()
                         .zip(top_emb.iter())
                         .map(|(q, d)| 0.7 * q + 0.3 * d)

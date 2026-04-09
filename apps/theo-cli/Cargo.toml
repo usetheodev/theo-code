@@ -16,5 +16,10 @@ rustyline.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
+[features]
+default = ["tantivy-backend"]
+tantivy-backend = ["theo-application/tantivy-backend"]
+dense-retrieval = ["theo-application/dense-retrieval"]
+
 [dev-dependencies]
 tempfile.workspace = true

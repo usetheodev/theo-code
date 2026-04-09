@@ -1,11 +1,10 @@
 /// Neural embeddings for semantic code search using fastembed (ONNX).
 ///
-/// Default: Jina Embeddings v2 Base Code (768-dim, trained on code).
-/// Fallback: AllMiniLM-L6-v2 (384-dim, generic NLP) if code model fails.
+/// Default: AllMiniLM-L6-v2 (384-dim, ~200MB RAM, fast).
+/// Opt-in: Jina Code v2 (768-dim, ~2.5GB RAM) via THEO_JINA_CODE=1.
 ///
-/// Jina Code understands code semantics: "error handling" ≈ "FailureTracker",
-/// "database connection" ≈ "create_pool". This is a major quality upgrade
-/// over generic NLP models for code retrieval.
+/// AllMiniLM is the production default — works on 8GB laptops.
+/// Jina Code gives +5-10% quality but costs 12x more RAM.
 
 use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
 
@@ -15,32 +14,50 @@ pub struct NeuralEmbedder {
 }
 
 impl NeuralEmbedder {
-    /// Initialize with Jina Code embeddings (768-dim, code-trained).
+    /// Initialize with AllMiniLM-L6-v2 (384-dim, ~200MB).
     ///
-    /// Falls back to AllMiniLM-L6-v2 (384-dim) if Jina fails to load.
-    /// On first run, downloads the model to `~/.cache/fastembed/`.
+    /// Production default: lean, fast, works on 8GB laptops.
+    /// Set THEO_JINA_CODE=1 for Jina Code v2 (768-dim, +5-10% quality, ~2.5GB).
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
-        // Try Jina Code first (code-specific, 768-dim)
-        {
-            let mut jina_opts = InitOptions::default();
-            jina_opts.model_name = EmbeddingModel::JinaEmbeddingsV2BaseCode;
-            jina_opts.show_download_progress = true;
-            if let Ok(model) = TextEmbedding::try_new(jina_opts) {
-                return Ok(NeuralEmbedder { model, dim: 768 });
-            }
+        // THEO_JINA_CODE=1 opts into Jina Code (heavy but higher quality)
+        if std::env::var("THEO_JINA_CODE").is_ok() {
+            return Self::new_jina_code();
         }
 
-        // Fallback to AllMiniLM (generic NLP, 384-dim)
-        eprintln!("[neural] Jina Code model failed, falling back to AllMiniLM-L6-v2");
+        // Default: AllMiniLM (lean, ~200MB)
+        Self::new_fast()
+    }
+
+    /// Initialize with AllMiniLM-L6-v2 Quantized (384-dim, ~22MB RAM).
+    ///
+    /// Quantized ONNX: 22MB vs 200MB full-precision. ~2-3% quality loss.
+    /// Production default for lean memory footprint.
+    pub fn new_fast() -> Result<Self, Box<dyn std::error::Error>> {
         let mut options = InitOptions::default();
-        options.model_name = EmbeddingModel::AllMiniLML6V2;
+        options.model_name = EmbeddingModel::AllMiniLML6V2Q;
         options.show_download_progress = false;
         let model = TextEmbedding::try_new(options)?;
-
         Ok(NeuralEmbedder { model, dim: 384 })
     }
 
-    /// Generate embedding for a single text. Returns 384-dim vector.
+    /// Initialize with Jina Code v2 (768-dim, ~2.5GB RAM, code-trained).
+    ///
+    /// Higher quality than AllMiniLM for code search (+5-10% on benchmarks)
+    /// but 12x more RAM. Falls back to AllMiniLM if Jina fails.
+    pub fn new_jina_code() -> Result<Self, Box<dyn std::error::Error>> {
+        let mut opts = InitOptions::default();
+        opts.model_name = EmbeddingModel::JinaEmbeddingsV2BaseCode;
+        opts.show_download_progress = true;
+        match TextEmbedding::try_new(opts) {
+            Ok(model) => Ok(NeuralEmbedder { model, dim: 768 }),
+            Err(e) => {
+                eprintln!("[neural] Jina Code failed ({e}), falling back to AllMiniLM");
+                Self::new_fast()
+            }
+        }
+    }
+
+    /// Generate embedding for a single text.
     pub fn embed(&self, text: &str) -> Vec<f64> {
         match self.model.embed(vec![text], None) {
             Ok(embeddings) => {

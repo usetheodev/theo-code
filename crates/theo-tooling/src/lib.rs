@@ -29,6 +29,7 @@ pub mod todo;
 pub mod truncate;
 pub mod webfetch;
 pub mod websearch;
+pub mod wiki_tool;
 pub mod write;
 
 #[cfg(test)]
