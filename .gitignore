@@ -214,6 +214,8 @@ embeddings/
 !.claude/agents/
 !.claude/hooks/
 !.claude/skills/
+!.claude/meetings/
+!.claude/settings.json
 
 # ----------------------------------------------------------------------------
 # Docker

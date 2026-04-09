@@ -36,9 +36,36 @@ The Code Wiki is a key differentiator. It should feel like Obsidian:
 - Keyboard navigable, ARIA labels on icon-only buttons
 - Colocate styles, types, tests with components
 
+## TDD Methodology
+
+Follow RED-GREEN-REFACTOR for all frontend code:
+
+1. **RED** — Write the test first (React Testing Library / Vitest)
+   ```tsx
+   test('WikiSearch returns results for valid query', () => {
+     render(<WikiSearch />);
+     fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'retrieval' } });
+     expect(screen.getByText(/results/i)).toBeInTheDocument();
+   });
+   ```
+2. **GREEN** — Implement the minimum component to pass
+3. **REFACTOR** — Extract hooks, clean up styles, keep tests green
+
+Required tests:
+- Component renders without crashing
+- User interactions produce expected state changes
+- Keyboard navigation works
+- Error states display correctly
+- Loading states appear and disappear
+
+```bash
+cd apps/theo-ui && npm test  # Must pass before any UI change is complete
+```
+
 ## When building:
-1. Start with the component structure
-2. Use Radix primitives for interactivity
-3. Style with Tailwind utility classes
-4. Add keyboard navigation and a11y
-5. Test critical interactions
+1. **Write the test FIRST** (RED)
+2. Implement the minimum component to pass (GREEN)
+3. Add Radix primitives for interactivity
+4. Style with Tailwind utility classes
+5. Add keyboard navigation and a11y
+6. Refactor with all tests green (REFACTOR)

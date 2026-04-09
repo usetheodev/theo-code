@@ -31,3 +31,21 @@ git diff --name-only HEAD | grep "^crates/" | sed 's|crates/\([^/]*\)/.*|\1|' | 
 ```
 
 Then run `cargo test -p <crate>` for each changed crate.
+
+## TDD Compliance Report
+
+After running tests, also report:
+
+1. **New code without tests** — check `git diff` for new functions/methods without corresponding test additions
+2. **Test-to-code ratio** — for each changed crate, report lines of test vs lines of code
+3. **RED-GREEN evidence** — if test was committed separately before implementation (check git log)
+
+Format:
+```
+TDD COMPLIANCE:
+  ✓ All new functions have tests
+  ✗ crate::module::new_function — NO TEST FOUND
+  Ratio: 0.45 (test lines / code lines)
+```
+
+**A passing test suite with untested new code is NOT a pass.** Flag it.

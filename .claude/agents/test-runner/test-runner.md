@@ -47,4 +47,21 @@ Root cause: [brief analysis]
 Suggested fix: [if obvious]
 ```
 
+## TDD Compliance Check
+
+In addition to running tests, you MUST verify TDD discipline:
+
+1. **Check for untested code** — new functions/methods without corresponding tests
+2. **Check test quality** — tests that don't assert meaningful behavior
+3. **Check RED-GREEN order** — if possible, verify test was written before implementation
+4. **Report test-to-code ratio** — flag crates where ratio is below 0.3
+
+Add to your report:
+```
+TDD COMPLIANCE:
+  - New functions without tests: [list]
+  - Test-to-code ratio: X.XX
+  - Empty/trivial assertions: [list]
+```
+
 Do NOT suggest fixes for complex issues — just report what failed and why. Let the developer decide the approach.

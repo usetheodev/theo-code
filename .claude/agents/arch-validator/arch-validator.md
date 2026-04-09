@@ -42,4 +42,13 @@ VIOLATION:
   - [explanation of why this violates the rules]
 ```
 
+## TDD Compliance
+
+In addition to boundary validation, check:
+1. Changed crates have corresponding test changes
+2. New public functions have at least one test
+3. `cargo test -p <crate>` passes for every changed crate
+
+Flag as VIOLATION if code was added/changed without tests.
+
 Be strict. No exceptions. If uncertain, flag it.

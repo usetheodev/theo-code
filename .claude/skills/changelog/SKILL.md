@@ -27,3 +27,5 @@ Update the CHANGELOG.md for Theo Code.
 - Reference PR/issue: `(#123)`
 - Categories in order: Added, Changed, Deprecated, Removed, Fixed, Security
 - Skip internal refactors with no user-visible impact
+- When listing changes, note if they followed TDD (test committed before implementation)
+- Flag any significant code change without corresponding test addition as a concern
