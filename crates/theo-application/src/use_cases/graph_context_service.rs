@@ -25,7 +25,15 @@ use theo_engine_parser::tree_sitter::{self as ts, SupportedLanguage};
 use theo_engine_parser::types::{FileExtraction, ReferenceKind, SymbolKind};
 
 use theo_engine_retrieval::assembly;
-use theo_engine_retrieval::search::MultiSignalScorer;
+use theo_engine_retrieval::search::{FileBm25, MultiSignalScorer};
+
+#[cfg(feature = "tantivy-backend")]
+use theo_engine_retrieval::tantivy_search::FileTantivyIndex;
+
+#[cfg(feature = "dense-retrieval")]
+use theo_engine_retrieval::embedding::neural::NeuralEmbedder;
+#[cfg(feature = "dense-retrieval")]
+use theo_engine_retrieval::embedding::cache::EmbeddingCache;
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -46,7 +54,20 @@ const LEIDEN_RESOLUTION: f64 = 1.0;
 struct GraphState {
     graph: CodeGraph,
     communities: Vec<Community>,
+    /// MultiSignalScorer: only built when no RRF pipeline available (Tier 0 only).
+    /// When tantivy-backend is active, query_context uses FileBm25 directly,
+    /// saving ~200MB RAM from scorer's BM25 index + TF-IDF model.
+    #[cfg(not(feature = "tantivy-backend"))]
     scorer: MultiSignalScorer,
+    /// Tantivy BM25F index (Tier 1).
+    #[cfg(feature = "tantivy-backend")]
+    tantivy_index: Option<FileTantivyIndex>,
+    /// Neural embedder for dense search (Tier 2). AllMiniLM default, Jina Code opt-in.
+    #[cfg(feature = "dense-retrieval")]
+    embedder: Option<NeuralEmbedder>,
+    /// Pre-computed file embeddings (Tier 2). Cached to .theo/embeddings.bin.
+    #[cfg(feature = "dense-retrieval")]
+    embedding_cache: Option<EmbeddingCache>,
 }
 
 /// Explicit state machine for background graph build lifecycle.
@@ -112,12 +133,30 @@ impl GraphContextProvider for GraphContextService {
         let cache_path = dir.join(".theo").join("graph.bin");
 
         if let Some(graph) = try_load_cache(&cache_path, &dir) {
+            #[cfg(not(feature = "tantivy-backend"))]
             let (communities, scorer) = build_index(&graph);
+            #[cfg(feature = "tantivy-backend")]
+            let communities = build_index(&graph);
+            #[cfg(feature = "tantivy-backend")]
+            let tantivy_index = FileTantivyIndex::build(&graph).ok();
+            #[cfg(feature = "dense-retrieval")]
+            let (embedder, embedding_cache) = build_dense_components(&graph, &dir);
+
+            // Generate Code Wiki (deterministic, ~50ms, cached by graph_hash)
+            generate_wiki_if_stale(&graph, &communities, &dir);
+
             let mut state = self.state.write().await;
             *state = GraphBuildState::Ready(GraphState {
                 graph,
                 communities,
+                #[cfg(not(feature = "tantivy-backend"))]
                 scorer,
+                #[cfg(feature = "tantivy-backend")]
+                tantivy_index,
+                #[cfg(feature = "dense-retrieval")]
+                embedder,
+                #[cfg(feature = "dense-retrieval")]
+                embedding_cache,
             });
             return Ok(());
         }
@@ -157,12 +196,29 @@ impl GraphContextProvider for GraphContextService {
 
             let mut state = state_ref.write().await;
             match result {
-                Ok(Ok(Ok((graph, communities, scorer)))) => {
+                Ok(Ok(Ok((graph, communities)))) => {
                     save_cache_atomic(&cache_path, &graph, &dir_for_cache);
+                    #[cfg(not(feature = "tantivy-backend"))]
+                    let scorer = MultiSignalScorer::build(&communities, &graph);
+                    #[cfg(feature = "tantivy-backend")]
+                    let tantivy_index = FileTantivyIndex::build(&graph).ok();
+                    #[cfg(feature = "dense-retrieval")]
+                    let (embedder, embedding_cache) = build_dense_components(&graph, &dir_for_cache);
+
+                    // Generate Code Wiki (deterministic, cached)
+                    generate_wiki_if_stale(&graph, &communities, &dir_for_cache);
+
                     *state = GraphBuildState::Ready(GraphState {
                         graph,
                         communities,
+                        #[cfg(not(feature = "tantivy-backend"))]
                         scorer,
+                        #[cfg(feature = "tantivy-backend")]
+                        tantivy_index,
+                        #[cfg(feature = "dense-retrieval")]
+                        embedder,
+                        #[cfg(feature = "dense-retrieval")]
+                        embedding_cache,
                     });
                 }
                 Ok(Ok(Err(_panic))) => {
@@ -210,6 +266,64 @@ impl GraphContextProvider for GraphContextService {
             return empty;
         }
 
+        // LAYER 0: Wiki cache lookup (<5ms) with Absolute Confidence Calibration.
+        // Uses evaluate_direct_return() with 3 gates:
+        // Gate 1: BM25 absolute floor (below = never return)
+        // Gate 2: Decision confidence from raw signals (not normalized)
+        // Gate 3: Per-category threshold
+        {
+            use theo_engine_retrieval::wiki::lookup::{evaluate_direct_return, DEFAULT_BM25_FLOOR};
+
+            let wiki_dir = std::path::PathBuf::from(".theo/wiki");
+            let wiki_results = theo_engine_retrieval::wiki::lookup::lookup(&wiki_dir, query, 3);
+
+            // Ranking decision log
+            if !wiki_results.is_empty() {
+                let (allow, conf, reason) = evaluate_direct_return(&wiki_results, query, DEFAULT_BM25_FLOOR);
+                let query_class = theo_engine_retrieval::wiki::model::classify_query(query);
+                eprintln!("[wiki-decision] query=\"{}\" class={} allow={} conf={:.2} reason={} top=[{}]",
+                    query, query_class.as_str(), allow, conf, reason,
+                    wiki_results.iter().take(3).map(|r| format!("{}:T:{}:bm25={:.1}:conf={:.0}%",
+                        r.slug, r.authority_tier.as_str(), r.bm25_raw, r.confidence * 100.0
+                    )).collect::<Vec<_>>().join(", ")
+                );
+            }
+
+            let (allow, _conf, _reason) = evaluate_direct_return(&wiki_results, query, DEFAULT_BM25_FLOOR);
+
+            if allow {
+                if let Some(top) = wiki_results.first() {
+                    if top.token_count <= budget_tokens {
+                        let blocks: Vec<ContextBlock> = wiki_results.iter()
+                            .take(3)
+                            .filter(|r| r.bm25_raw >= DEFAULT_BM25_FLOOR && r.token_count <= budget_tokens)
+                            .map(|r| ContextBlock {
+                                source_id: format!("wiki:{}[T:{}]", r.slug, r.authority_tier.as_str()),
+                                content: r.content.clone(),
+                                token_count: r.token_count,
+                                score: r.confidence,
+                            })
+                            .collect();
+
+                        if !blocks.is_empty() {
+                            let total_tokens: usize = blocks.iter().map(|b| b.token_count).sum();
+                            let query_class = theo_engine_retrieval::wiki::model::classify_query(query);
+                            return Ok(GraphContextResult {
+                                total_tokens,
+                                budget_tokens,
+                                exploration_hints: format!(
+                                    "Wiki direct return: {} (T:{}, bm25={:.1}, class={}, {})",
+                                    top.title, top.authority_tier.as_str(),
+                                    top.bm25_raw, query_class.as_str(), top.page_kind
+                                ),
+                                blocks,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
         // Safe: we checked Ready or Building(stale) above.
         let graph_state = match &*state {
             GraphBuildState::Ready(gs) => gs,
@@ -217,11 +331,65 @@ impl GraphContextProvider for GraphContextService {
             _ => unreachable!(),
         };
 
-        // Score + assemble (fast, ~20-30ms).
-        let scored = graph_state
-            .scorer
-            .score(query, &graph_state.communities, &graph_state.graph);
-        let payload = assembly::assemble_greedy(&scored, &graph_state.graph, budget_tokens);
+        // Tiered scoring: use best available pipeline.
+        // Tier 2 (dense-retrieval): BM25 + Tantivy + Dense → RRF 3-ranker (MRR=0.914)
+        // Tier 1 (tantivy-backend): BM25 + Tantivy → hybrid_search (2-ranker)
+        // Tier 0 (always): BM25 only → FileBm25::search
+        //
+        // Fallback cascade: Tier 2 → 1 → 0 (infalível).
+        let file_scores: std::collections::HashMap<String, f64> = {
+            // Try Tier 2 first: full RRF 3-ranker (BM25 + Tantivy + Dense)
+            #[cfg(feature = "dense-retrieval")]
+            {
+                let has_tier2 = graph_state.tantivy_index.is_some()
+                    && graph_state.embedder.is_some()
+                    && graph_state.embedding_cache.is_some();
+
+                if has_tier2 {
+                    theo_engine_retrieval::tantivy_search::hybrid_rrf_search(
+                        &graph_state.graph,
+                        graph_state.tantivy_index.as_ref().unwrap(),
+                        graph_state.embedder.as_ref().unwrap(),
+                        graph_state.embedding_cache.as_ref().unwrap(),
+                        query,
+                        20.0, // RRF k parameter (empirically optimal)
+                    )
+                } else if graph_state.tantivy_index.is_some() {
+                    theo_engine_retrieval::tantivy_search::hybrid_search(
+                        &graph_state.graph,
+                        graph_state.tantivy_index.as_ref().unwrap(),
+                        query,
+                    )
+                } else {
+                    FileBm25::search(&graph_state.graph, query)
+                }
+            }
+            // Without dense-retrieval: try Tier 1, then Tier 0
+            #[cfg(all(feature = "tantivy-backend", not(feature = "dense-retrieval")))]
+            {
+                if graph_state.tantivy_index.is_some() {
+                    theo_engine_retrieval::tantivy_search::hybrid_search(
+                        &graph_state.graph,
+                        graph_state.tantivy_index.as_ref().unwrap(),
+                        query,
+                    )
+                } else {
+                    FileBm25::search(&graph_state.graph, query)
+                }
+            }
+            // Without any features: Tier 0 only
+            #[cfg(not(any(feature = "tantivy-backend", feature = "dense-retrieval")))]
+            {
+                FileBm25::search(&graph_state.graph, query)
+            }
+        };
+
+        let payload = assembly::assemble_files_direct(
+            &file_scores,
+            &graph_state.graph,
+            &graph_state.communities,
+            budget_tokens,
+        );
 
         let blocks: Vec<ContextBlock> = payload
             .items
@@ -233,6 +401,18 @@ impl GraphContextProvider for GraphContextService {
                 score: item.score,
             })
             .collect();
+
+        // WRITE-BACK: Save RRF result to wiki cache for future queries.
+        // This is the "knowledge compounding" cycle: each query that goes through
+        // the full pipeline enriches the wiki, making future queries faster.
+        // Only writes if: (1) we have meaningful content, (2) wiki dir exists.
+        if !blocks.is_empty() && payload.total_tokens > 100 {
+            let wiki_dir = std::path::PathBuf::from(".theo/wiki/cache");
+            if let Err(e) = write_back_to_wiki(&wiki_dir, query, &blocks) {
+                // Best-effort: don't fail the query if write-back fails
+                eprintln!("[wiki-cache] Write-back failed: {e}");
+            }
+        }
 
         Ok(GraphContextResult {
             total_tokens: payload.total_tokens,
@@ -258,7 +438,7 @@ impl GraphContextProvider for GraphContextService {
 /// Full pipeline: walk → parse → convert → build_graph → cluster → scorer.
 fn build_graph_from_project(
     project_dir: &Path,
-) -> (CodeGraph, Vec<Community>, MultiSignalScorer) {
+) -> (CodeGraph, Vec<Community>) {
     // Step 1: Walk files and parse with tree-sitter.
     let file_data = parse_project_files(project_dir);
 
@@ -268,10 +448,10 @@ fn build_graph_from_project(
     // Step 3: Apply git co-change history (best-effort, max 500 commits, 50 files/commit).
     let _ = theo_engine_graph::git::populate_cochanges_from_git(project_dir, &mut graph, 500, 50);
 
-    // Step 4: Build index (cluster + scorer).
-    let (communities, scorer) = build_index(&graph);
+    // Step 4: Cluster only (scorer built conditionally by caller).
+    let communities = tokio_safe_cluster(&graph).communities;
 
-    (graph, communities, scorer)
+    (graph, communities)
 }
 
 // EXCLUDED_DIRS imported from theo-domain::graph_context (source of truth).
@@ -430,10 +610,237 @@ fn parse_project_files(project_dir: &Path) -> Vec<FileData> {
 }
 
 /// Build clustering + scorer from a ready graph.
+/// Build clustering index. Scorer only built when no RRF pipeline (saves ~200MB).
+#[cfg(not(feature = "tantivy-backend"))]
 fn build_index(graph: &CodeGraph) -> (Vec<Community>, MultiSignalScorer) {
     let cluster_result = tokio_safe_cluster(graph);
     let scorer = MultiSignalScorer::build(&cluster_result.communities, graph);
     (cluster_result.communities, scorer)
+}
+
+/// Build clustering only (Tier 1+: scorer not needed, RRF uses FileBm25 directly).
+#[cfg(feature = "tantivy-backend")]
+fn build_index(graph: &CodeGraph) -> Vec<Community> {
+    let cluster_result = tokio_safe_cluster(graph);
+    cluster_result.communities
+}
+
+/// Build dense retrieval components: NeuralEmbedder + EmbeddingCache.
+///
+/// Generate Code Wiki if stale (graph changed since last generation).
+/// Deterministic, zero LLM cost, ~50-100ms for medium repos.
+/// Write-back: save RRF pipeline results as cached wiki page.
+///
+/// Creates `.theo/wiki/cache/{slug}.md` with the query and results.
+/// Future wiki lookups will find these cached pages.
+fn write_back_to_wiki(
+    cache_dir: &Path,
+    query: &str,
+    blocks: &[ContextBlock],
+) -> std::io::Result<()> {
+    std::fs::create_dir_all(cache_dir)?;
+
+    // Slug from query (deterministic)
+    let slug: String = query
+        .to_lowercase()
+        .split_whitespace()
+        .take(5)
+        .collect::<Vec<_>>()
+        .join("-")
+        .replace(|c: char| !c.is_alphanumeric() && c != '-', "");
+
+    if slug.is_empty() {
+        return Ok(());
+    }
+
+    let path = cache_dir.join(format!("{}.md", slug));
+
+    // Load current graph_hash for staleness tracking
+    let graph_hash = cache_dir.parent()
+        .and_then(|wiki_dir| wiki_dir.parent().and_then(|p| p.parent()))
+        .and_then(|project_dir| theo_engine_retrieval::wiki::persistence::load_manifest(project_dir))
+        .map(|m| m.graph_hash)
+        .unwrap_or(0);
+
+    // Check staleness: overwrite if existing page has different graph_hash
+    if path.exists() {
+        if let Ok(existing) = std::fs::read_to_string(&path) {
+            let fm = theo_engine_retrieval::wiki::model::parse_frontmatter(&existing);
+            if let Some(existing_hash) = fm.graph_hash {
+                if existing_hash == graph_hash {
+                    return Ok(()); // Fresh — skip
+                }
+                // Stale — will overwrite below
+            } else {
+                return Ok(()); // Legacy page without frontmatter — don't overwrite
+            }
+        }
+    }
+
+    // Build formatted markdown page with canonical frontmatter
+    let fm = theo_engine_retrieval::wiki::model::PageFrontmatter::cache(query, graph_hash);
+    let mut md = theo_engine_retrieval::wiki::model::render_frontmatter(&fm);
+
+    md += &format!("# Query: {}\n\n", query);
+    md += &format!("> Cached from GRAPHCTX pipeline | {} results\n\n", blocks.len());
+
+    // Relevant files table
+    md += "## Relevant Files\n\n";
+    md += "| File | Score |\n|------|-------|\n";
+    for block in blocks {
+        let score_str = format!("{:.2}", block.score);
+        md += &format!("| `{}` | {} |\n", block.source_id, score_str);
+    }
+    md += "\n";
+
+    // Code context from each block
+    md += "## Context\n\n";
+    for block in blocks {
+        let preview: String = block.content.lines().take(20).collect::<Vec<_>>().join("\n");
+        md += &format!("### {}\n\n{}\n\n", block.source_id, preview);
+    }
+
+    md += "---\n";
+    md += &format!("*Generated by GRAPHCTX | {} blocks, {:.0} tokens*\n",
+        blocks.len(),
+        blocks.iter().map(|b| b.token_count as f64).sum::<f64>());
+
+    std::fs::write(&path, md)?;
+
+    // Log the write-back
+    if let Some(wiki_dir) = cache_dir.parent() {
+        if let Some(project_dir) = wiki_dir.parent().and_then(|p| p.parent()) {
+            theo_engine_retrieval::wiki::persistence::append_log(
+                project_dir,
+                "query",
+                &format!("Cached result for: {} ({} blocks)", query, blocks.len()),
+            );
+        }
+    }
+
+    Ok(())
+}
+
+// parse_frontmatter_graph_hash removed — use theo_engine_retrieval::wiki::model::parse_frontmatter()
+
+fn generate_wiki_if_stale(graph: &CodeGraph, communities: &[Community], project_dir: &Path) {
+    use theo_engine_retrieval::wiki;
+
+    let hash = wiki::generator::compute_graph_hash(graph);
+    if wiki::persistence::is_fresh(project_dir, hash) {
+        return; // Wiki is up-to-date
+    }
+
+    let project_name = project_dir
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("project");
+
+    // Load or create wiki schema
+    let schema = wiki::persistence::load_schema(project_dir, project_name);
+    let _ = wiki::persistence::write_schema_default(project_dir, &schema);
+
+    // Try incremental generation first
+    let existing_manifest = wiki::persistence::load_manifest(project_dir);
+    let (wiki_data, log_detail) = if let Some(manifest) = &existing_manifest {
+        if !manifest.page_hashes.is_empty() {
+            // Load existing docs from disk for incremental merge
+            let existing_docs = wiki::generator::generate_wiki(communities, graph, project_name);
+            let (wiki, stats) = wiki::generator::generate_wiki_incremental(
+                communities, graph, project_name, manifest, &existing_docs.docs,
+            );
+            let detail = format!("incremental | {}", stats);
+            (wiki, detail)
+        } else {
+            // Old manifest without page_hashes → full regen
+            let wiki = wiki::generator::generate_wiki(communities, graph, project_name);
+            let detail = format!("full | {} pages from graph", wiki.docs.len());
+            (wiki, detail)
+        }
+    } else {
+        let wiki = wiki::generator::generate_wiki(communities, graph, project_name);
+        let detail = format!("initial | {} pages from graph", wiki.docs.len());
+        (wiki, detail)
+    };
+
+    // Cleanup orphaned pages before writing
+    let wiki_dir = project_dir.join(".theo").join("wiki");
+    let current_slugs: std::collections::HashSet<String> = wiki_data.docs.iter()
+        .map(|d| d.slug.clone())
+        .collect();
+    let removed = wiki::persistence::cleanup_orphaned_pages(&wiki_dir, &current_slugs);
+    if removed > 0 {
+        eprintln!("[wiki] Cleaned up {} orphaned pages", removed);
+    }
+
+    if let Err(e) = wiki::persistence::write_to_disk(&wiki_data, project_dir) {
+        eprintln!("[wiki] Warning: failed to write wiki: {e}");
+    } else {
+        eprintln!(
+            "[wiki] Generated {} pages in .theo/wiki/ ({})",
+            wiki_data.docs.len(), log_detail
+        );
+        wiki::persistence::append_log(project_dir, "ingest", &log_detail);
+
+        // Cache lifecycle: mark stale, GC cold (7 days)
+        let stale_moved = wiki::persistence::mark_stale_cache(&wiki_dir, hash);
+        let gc_removed = wiki::persistence::gc_cold_cache(&wiki_dir, 604800); // 7 days
+        if stale_moved > 0 || gc_removed > 0 {
+            eprintln!("[wiki] Cache lifecycle: {} marked stale, {} GC'd", stale_moved, gc_removed);
+        }
+    }
+}
+
+/// Tries to load cached embeddings from .theo/embeddings.bin first.
+/// If cache miss, initializes embedder and builds embeddings from graph.
+/// Returns (None, None) on any failure — fallback to Tier 1/0.
+#[cfg(feature = "dense-retrieval")]
+fn build_dense_components(
+    graph: &CodeGraph,
+    project_dir: &Path,
+) -> (Option<NeuralEmbedder>, Option<EmbeddingCache>) {
+    // Try loading embedder (AllMiniLM default, ~200MB; Jina Code opt-in ~1.2GB)
+    let embedder = match NeuralEmbedder::new() {
+        Ok(e) => e,
+        Err(err) => {
+            eprintln!("[graphctx] Dense retrieval disabled: embedder init failed: {err}");
+            return (None, None);
+        }
+    };
+
+    // Try loading cached embeddings
+    let cache_path = project_dir.join(".theo").join("embeddings.bin");
+    let graph_hash = {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::hash::DefaultHasher::new();
+        for node_id in graph.node_ids() {
+            if let Some(node) = graph.get_node(node_id) {
+                if node.node_type == theo_engine_graph::model::NodeType::File {
+                    let path = node.file_path.as_deref().unwrap_or(&node.name);
+                    path.hash(&mut hasher);
+                    node.last_modified.to_bits().hash(&mut hasher);
+                }
+            }
+        }
+        hasher.finish()
+    };
+
+    if let Some(cache) = EmbeddingCache::load(&cache_path, graph_hash) {
+        eprintln!("[graphctx] Loaded embedding cache ({} files)", cache.len());
+        return (Some(embedder), Some(cache));
+    }
+
+    // Build embeddings (slow: ~5-30s depending on repo size and model)
+    eprintln!("[graphctx] Building embedding cache...");
+    let cache = EmbeddingCache::build(graph, &embedder);
+    eprintln!("[graphctx] Embedding cache built ({} files)", cache.len());
+
+    // Save to disk for next startup
+    if let Err(e) = cache.save(&cache_path) {
+        eprintln!("[graphctx] Warning: failed to save embedding cache: {e}");
+    }
+
+    (Some(embedder), Some(cache))
 }
 
 /// Run clustering with a fallback: try FileLeiden first, if it panics or

@@ -18,6 +18,8 @@
 provider
 ralph-loop.local.md
 review-output
+wiki/
+wiki-site/
 
 # Cargo lock — keep for binaries, ignore for libraries
 # (we keep it: this is a binary workspace)

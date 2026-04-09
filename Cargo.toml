@@ -13,6 +13,7 @@ members = [
     "crates/theo-application",
     "apps/theo-desktop",
     "apps/theo-cli",
+    "apps/theo-marklive",
 ]
 resolver = "3"
 

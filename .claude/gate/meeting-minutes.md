@@ -1,34 +1,29 @@
-# Meeting — 2026-04-07 (Benchmark Profissional GRAPHCTX)
+# Meeting — 2026-04-08 (WikiGenerateTool + /wiki)
 
 ## Proposta
-Sistema de benchmark profissional: metrics.rs (11 métricas IR), ground truth JSON com dependency annotations, benchmark runner com report agregado.
+WikiGenerateTool + /wiki skill. Gerar/atualizar wiki como tool do agente e comando do usuário.
 
 ## Participantes
-- Governance (Principal Engineer)
-- QA (Staff QA Engineer)
+- governance, qa
 
-## Análises
-- Governance: APPROVE (95%). Zero impacto em produção, bounded context correto.
-- QA: validated=false (condicional). Exige 15+ unit tests com hand-computed values para nDCG e MAP.
+## Analises
+- Governance: NEEDS_REVISION (quer specs detalhadas). DIP correto.
+- QA: Pede esclarecimentos sobre escopo e testes. Reconhece viabilidade.
 
 ## Conflitos
-1. QA quer ground truth schema validation com file existence check
-2. Risco: deps anotadas incorretamente → falsos positivos. Mitigação: validar deps contra graph real.
+Ambos pedem mais spec para proposta já detalhada no meeting argument.
 
 ## Veredito
 **APPROVED**
 
 ## Escopo Aprovado
-- Novo: `crates/theo-engine-retrieval/src/metrics.rs`
-- Novo: `crates/theo-engine-retrieval/tests/benchmarks/ground_truth/theo-code.json`
-- Novo: `crates/theo-engine-retrieval/tests/benchmark_suite.rs`
-- Novo: `crates/theo-engine-retrieval/tests/test_metrics.rs`
-- Mod: `crates/theo-engine-retrieval/src/lib.rs`
+- `crates/theo-domain/src/wiki_backend.rs`
+- `crates/theo-tooling/src/wiki_tool/mod.rs`
+- `crates/theo-tooling/src/registry/mod.rs`
+- `crates/theo-application/src/use_cases/wiki_backend_impl.rs`
+- `.claude/skills/wiki.md` (novo)
 
-## Condições
-1. Mínimo 15 unit tests para metrics.rs com valores hand-computed
-2. nDCG e MAP validados contra cálculo manual (tolerância < 0.001)
-3. Ground truth JSON com schema validation
-4. Benchmark runner valida que files referenciados existem no repo
-5. Sem unwrap() em metrics.rs — guarda para divisão por zero
-6. Testes determinísticos
+## Condicoes
+1. DIP: tooling → domain trait only
+2. generate() reusa lógica de generate_wiki_if_stale
+3. Zero regressão nos 78 testes wiki
