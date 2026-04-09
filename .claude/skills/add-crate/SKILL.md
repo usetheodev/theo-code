@@ -1,37 +1,36 @@
 ---
 name: add-crate
-description: Use when creating a new Rust crate in the workspace. Scaffolds Cargo.toml, lib.rs, error.rs, updates workspace members, and validates with cargo check.
-allowed-tools: Bash(cargo *), Bash(mkdir *), Read, Write, Edit
+description: Scaffold a new Rust crate in the workspace. Creates Cargo.toml, lib.rs, error.rs, updates workspace members.
+user-invocable: true
+allowed-tools: Bash(cargo *) Read Write Edit Glob
+argument-hint: "theo-xxx \"description\""
 ---
 
-## Criar Novo Crate
+Create a new crate in the Theo Code workspace.
 
-Crie um novo crate no workspace seguindo as convenções do Theo Code.
+## Arguments
 
-Argumento esperado: `<nome-do-crate> <descrição>`
+- `$0`: crate name (must start with `theo-`)
+- `$1`: description (quoted string)
 
-Exemplo: `/add-crate theo-engine-symbols "Extração e indexação de símbolos cross-language"`
+## Steps
 
-### Passos:
+1. Validate: name starts with `theo-`, doesn't already exist in `crates/`
+2. Create directory: `crates/$0/src/`
+3. Create `crates/$0/Cargo.toml`:
+   ```toml
+   [package]
+   name = "$0"
+   version = "0.1.0"
+   edition = "2024"
+   description = "$1"
 
-1. Crie o diretório em `theo-code/crates/<nome>/`
-2. Crie `Cargo.toml` com:
-   - `package.name = "<nome>"`
-   - `package.version.workspace = true`
-   - `package.edition.workspace = true`
-   - `package.license.workspace = true`
-   - `package.description = "<descrição>"`
-   - Dependência de `theo-domain` via workspace
-3. Crie `src/lib.rs` com módulo base e doc comment
-4. Crie `src/error.rs` com enum de erros usando `thiserror`
-5. Adicione o crate ao `[workspace.members]` no root `Cargo.toml`
-6. Adicione ao `[workspace.dependencies]` no root `Cargo.toml`
-7. Rode `cargo check -p <nome>` para validar
-8. Atualize o CHANGELOG.md com a adição
-
-### Validações:
-- Nome DEVE começar com `theo-`
-- DEVE seguir um bounded context existente (engine-*, infra-*, etc.)
-- Se não seguir, pergunte ao usuário onde posicionar
-
-Argumento: $ARGUMENTS
+   [dependencies]
+   theo-domain = { path = "../theo-domain" }
+   thiserror.workspace = true
+   ```
+4. Create `crates/$0/src/lib.rs` with module doc comment
+5. Create `crates/$0/src/error.rs` with thiserror enum
+6. Add to workspace members in root `Cargo.toml`
+7. Run `cargo check -p $0` to validate
+8. Report success or failure
