@@ -195,6 +195,9 @@ pub enum AuthorityTier {
     PromotedCache,
     /// Raw cache pages from query write-back. Lowest authority.
     RawCache,
+    /// Episodic summaries from agent execution. Excluded from main BM25 index.
+    /// Queryable only with explicit opt-in. TTL-gated eviction.
+    EpisodicCache,
 }
 
 impl AuthorityTier {
@@ -204,6 +207,7 @@ impl AuthorityTier {
             AuthorityTier::Enriched => "enriched",
             AuthorityTier::PromotedCache => "promoted",
             AuthorityTier::RawCache => "raw_cache",
+            AuthorityTier::EpisodicCache => "episodic",
         }
     }
 
@@ -213,6 +217,7 @@ impl AuthorityTier {
             "enriched" => AuthorityTier::Enriched,
             "promoted" => AuthorityTier::PromotedCache,
             "raw_cache" => AuthorityTier::RawCache,
+            "episodic" => AuthorityTier::EpisodicCache,
             _ => AuthorityTier::RawCache,
         }
     }
@@ -224,7 +229,14 @@ impl AuthorityTier {
             AuthorityTier::Enriched => 0.95,
             AuthorityTier::PromotedCache => 0.75,
             AuthorityTier::RawCache => 0.5,
+            AuthorityTier::EpisodicCache => 0.4,
         }
+    }
+
+    /// Whether this tier should be included in the main BM25 index.
+    /// EpisodicCache is excluded by default — only queryable with explicit opt-in.
+    pub fn included_in_main_index(&self) -> bool {
+        !matches!(self, AuthorityTier::EpisodicCache)
     }
 }
 
@@ -665,7 +677,8 @@ prefixes = ["custom-"]
     #[test]
     fn authority_tier_from_str_round_trip() {
         for tier in [AuthorityTier::Deterministic, AuthorityTier::Enriched,
-                     AuthorityTier::PromotedCache, AuthorityTier::RawCache] {
+                     AuthorityTier::PromotedCache, AuthorityTier::RawCache,
+                     AuthorityTier::EpisodicCache] {
             assert_eq!(AuthorityTier::from_str(tier.as_str()), tier);
         }
     }
@@ -674,6 +687,24 @@ prefixes = ["custom-"]
     fn authority_tier_weights() {
         assert!(AuthorityTier::Deterministic.weight() > AuthorityTier::RawCache.weight());
         assert!(AuthorityTier::Enriched.weight() > AuthorityTier::PromotedCache.weight());
+        assert!(AuthorityTier::RawCache.weight() > AuthorityTier::EpisodicCache.weight());
+    }
+
+    #[test]
+    fn episodic_cache_tier_exists_and_has_low_weight() {
+        let tier = AuthorityTier::EpisodicCache;
+        assert_eq!(tier.weight(), 0.4);
+        assert_eq!(tier.as_str(), "episodic");
+        assert_eq!(AuthorityTier::from_str("episodic"), AuthorityTier::EpisodicCache);
+    }
+
+    #[test]
+    fn episodic_cache_excluded_from_main_index() {
+        assert!(!AuthorityTier::EpisodicCache.included_in_main_index());
+        assert!(AuthorityTier::Deterministic.included_in_main_index());
+        assert!(AuthorityTier::Enriched.included_in_main_index());
+        assert!(AuthorityTier::PromotedCache.included_in_main_index());
+        assert!(AuthorityTier::RawCache.included_in_main_index());
     }
 
     #[test]

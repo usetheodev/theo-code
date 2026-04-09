@@ -835,6 +835,7 @@ fn wiki_eval() {
                     wiki::model::AuthorityTier::Enriched => 1,
                     wiki::model::AuthorityTier::PromotedCache => 2,
                     wiki::model::AuthorityTier::RawCache => 3,
+                    wiki::model::AuthorityTier::EpisodicCache => 4,
                 };
                 tier_dist[tier_idx] += 1;
 

@@ -16,6 +16,7 @@ use theo_tooling::registry::ToolRegistry;
 use crate::agent_loop::AgentResult;
 use crate::budget_enforcer::BudgetEnforcer;
 use crate::config::AgentConfig;
+use crate::context_metrics::ContextMetrics;
 use crate::convergence::{
     check_git_changes, ConvergenceContext, ConvergenceEvaluator, ConvergenceMode,
     EditSuccessConvergence, GitDiffConvergence,
@@ -54,6 +55,10 @@ pub struct AgentRunEngine {
     graph_context: Option<Arc<dyn theo_domain::graph_context::GraphContextProvider>>,
     #[allow(deprecated)]
     agent_state: AgentState,
+    /// Active context scope — tracks hot files, events, hypotheses for this run.
+    working_set: theo_domain::working_set::WorkingSet,
+    /// Context breakdown metrics — measures context usage patterns.
+    context_metrics: ContextMetrics,
 }
 
 impl AgentRunEngine {
@@ -126,6 +131,8 @@ impl AgentRunEngine {
             snapshot_store: None,
             graph_context: None,
             agent_state,
+            working_set: theo_domain::working_set::WorkingSet::new(),
+            context_metrics: ContextMetrics::new(),
         }
     }
 
@@ -174,11 +181,38 @@ impl AgentRunEngine {
         result
     }
 
-    /// Record session exit: save failure patterns + session progress.
+    /// Record session exit: save failure patterns + session progress + context metrics.
     /// Best-effort — never fails, never blocks.
     fn record_session_exit(&mut self, result: &AgentResult) {
         // Save failure pattern tracker
         self.failure_tracker.save();
+
+        // Save context metrics to .theo/metrics/{run_id}.json
+        let metrics_dir = self.project_dir.join(".theo").join("metrics");
+        if std::fs::create_dir_all(&metrics_dir).is_ok() {
+            let report = self.context_metrics.to_report();
+            let metrics_path = metrics_dir.join(format!("{}.json", self.run.run_id.as_str()));
+            let _ = std::fs::write(&metrics_path, serde_json::to_string_pretty(&report).unwrap_or_default());
+        }
+
+        // Generate EpisodeSummary from run events and persist to .theo/wiki/episodes/
+        let events = self.event_bus.events();
+        if !events.is_empty() {
+            let task_objective = self.task_manager.get(&self.task_id)
+                .map(|t| t.objective.clone())
+                .unwrap_or_else(|| "unknown".to_string());
+            let summary = theo_domain::episode::EpisodeSummary::from_events(
+                self.run.run_id.as_str(),
+                Some(self.task_id.as_str()),
+                &task_objective,
+                &events,
+            );
+            let episodes_dir = self.project_dir.join(".theo").join("wiki").join("episodes");
+            if std::fs::create_dir_all(&episodes_dir).is_ok() {
+                let episode_path = episodes_dir.join(format!("{}.json", summary.summary_id));
+                let _ = std::fs::write(&episode_path, serde_json::to_string_pretty(&summary).unwrap_or_default());
+            }
+        }
 
         // Record session end for cross-session progress tracking
         if !self.config.is_subagent {
@@ -465,6 +499,13 @@ impl AgentRunEngine {
                 self.config.context_window_tokens,
                 Some(&compaction_ctx),
             );
+
+            // Record context size for metrics (estimated tokens = chars/4)
+            let estimated_context_tokens: usize = messages.iter()
+                .filter_map(|m| m.content.as_ref())
+                .map(|c| (c.len() + 3) / 4)
+                .sum();
+            self.context_metrics.record_context_size(iteration, estimated_context_tokens);
 
             // LLM call
             self.transition_run(RunState::Planning);
@@ -1261,6 +1302,38 @@ impl AgentRunEngine {
 
                 let result_msg = Message::tool_result(&call.id, name, &output);
 
+                // Update working set + context metrics with tool interaction data.
+                // This feeds the usefulness pipeline (P0: feedback data).
+                match name.as_str() {
+                    "read" | "edit" | "write" | "apply_patch" => {
+                        if let Ok(args) = call.parse_arguments() {
+                            if let Some(path) = args.get("filePath").or(args.get("file_path")).and_then(|p| p.as_str()) {
+                                self.working_set.touch_file(path);
+                                self.context_metrics.record_artifact_fetch(path, iteration);
+                                // P0: Feed usefulness pipeline — record which files agent actually uses
+                                self.context_metrics.record_tool_reference(path);
+                            }
+                        }
+                    }
+                    "grep" | "glob" | "codebase_context" => {
+                        if let Ok(args) = call.parse_arguments() {
+                            let query = args.get("pattern").or(args.get("query")).and_then(|p| p.as_str()).unwrap_or("");
+                            self.context_metrics.record_action(&format!("{}: {}", name, query), iteration);
+                            // Also record searched paths as references
+                            if let Some(path) = args.get("path").and_then(|p| p.as_str()) {
+                                self.context_metrics.record_tool_reference(path);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+
+                // Record event in working set
+                self.working_set.record_event(
+                    &format!("tool:{}:iter{}", name, iteration),
+                    20, // keep last 20 events
+                );
+
                 // Update agent state (preserved for context loop diagnostics)
                 #[allow(deprecated)]
                 match name.as_str() {
@@ -1351,7 +1424,7 @@ impl AgentRunEngine {
                         .filter_map(|m| serde_json::to_value(m).ok())
                         .collect();
 
-                    let snapshot = RunSnapshot::new(
+                    let mut snapshot = RunSnapshot::new(
                         self.run.clone(),
                         task,
                         tool_calls,
@@ -1361,6 +1434,8 @@ impl AgentRunEngine {
                         messages_json,
                         vec![], // DLQ entries
                     );
+                    snapshot.working_set = Some(self.working_set.clone());
+                    snapshot.checksum = snapshot.compute_checksum();
                     let _ = store.save(&self.run.run_id, &snapshot).await;
                 }
             }

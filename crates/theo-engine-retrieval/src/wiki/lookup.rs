@@ -62,6 +62,8 @@ pub fn can_direct_return(tier: AuthorityTier, is_stale: bool, confidence: f64) -
         (AuthorityTier::PromotedCache, true) => false,
         (AuthorityTier::RawCache, false) => confidence >= 0.7,
         (AuthorityTier::RawCache, true) => false,
+        // EpisodicCache never direct returns from main lookup — requires explicit opt-in.
+        (AuthorityTier::EpisodicCache, _) => false,
     }
 }
 

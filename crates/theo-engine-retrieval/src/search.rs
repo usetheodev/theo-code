@@ -32,6 +32,51 @@ impl Default for Bm25Config {
     }
 }
 
+/// Configurable scoring weights for multi-signal ranking.
+///
+/// Allows tuning the relative importance of each retrieval signal
+/// without recompilation. Weights are normalized to sum to 1.0.
+///
+/// Default: BM25-dominant (55%), file boost (30%), centrality (5%), recency (10%).
+#[derive(Debug, Clone)]
+pub struct ScoringWeights {
+    /// BM25 text relevance (default 0.55).
+    pub bm25: f64,
+    /// File-level symbol name match (default 0.30).
+    pub file_boost: f64,
+    /// PageRank centrality (default 0.05).
+    pub centrality: f64,
+    /// Git recency (default 0.10).
+    pub recency: f64,
+}
+
+impl Default for ScoringWeights {
+    fn default() -> Self {
+        ScoringWeights {
+            bm25: 0.55,
+            file_boost: 0.30,
+            centrality: 0.05,
+            recency: 0.10,
+        }
+    }
+}
+
+impl ScoringWeights {
+    /// Create custom weights. Normalizes to sum to 1.0.
+    pub fn new(bm25: f64, file_boost: f64, centrality: f64, recency: f64) -> Self {
+        let sum = bm25 + file_boost + centrality + recency;
+        if sum == 0.0 {
+            return Self::default();
+        }
+        ScoringWeights {
+            bm25: bm25 / sum,
+            file_boost: file_boost / sum,
+            centrality: centrality / sum,
+            recency: recency / sum,
+        }
+    }
+}
+
 /// A community with its BM25 (or composite) relevance score.
 pub struct ScoredCommunity {
     pub community: Community,
@@ -81,6 +126,8 @@ pub struct MultiSignalScorer {
     /// Weights: [bm25, semantic, file_boost, graph_attention, centrality, recency]
     #[allow(dead_code)]
     weights: [f64; 6],
+    /// Configurable scoring weights for non-neural scoring path.
+    pub scoring_weights: ScoringWeights,
 }
 
 // ---------------------------------------------------------------------------
@@ -796,6 +843,7 @@ impl MultiSignalScorer {
             tfidf_model,
             using_neural,
             weights: [0.25, 0.20, 0.20, 0.15, 0.10, 0.10],
+            scoring_weights: ScoringWeights::default(),
         }
     }
 
@@ -906,7 +954,12 @@ impl MultiSignalScorer {
         // BM25 (file-level) is the dominant query-dependent signal (55%).
         // File boost provides precision on symbol name matches (30%).
         // Centrality/recency are minimal (15% total) to avoid query-independent noise.
-        let (w_bm25, w_file, w_cent, w_rec) = (0.55, 0.30, 0.05, 0.10);
+        let (w_bm25, w_file, w_cent, w_rec) = (
+            self.scoring_weights.bm25,
+            self.scoring_weights.file_boost,
+            self.scoring_weights.centrality,
+            self.scoring_weights.recency,
+        );
 
         let mut result: Vec<ScoredCommunity> = communities
             .iter()
@@ -1104,5 +1157,38 @@ mod tests {
 
         assert!(!results.is_empty(), "BM25 should return results");
         assert!(results[0].score > 0.0, "Top result should have positive score, got {}", results[0].score);
+    }
+
+    // --- S3-T3: ScoringWeights tests ---
+
+    #[test]
+    fn scoring_weights_default_sums_to_one() {
+        let w = ScoringWeights::default();
+        let sum = w.bm25 + w.file_boost + w.centrality + w.recency;
+        assert!((sum - 1.0).abs() < 0.001, "Default weights must sum to 1.0, got {}", sum);
+    }
+
+    #[test]
+    fn scoring_weights_custom_normalizes() {
+        let w = ScoringWeights::new(2.0, 1.0, 0.5, 0.5);
+        let sum = w.bm25 + w.file_boost + w.centrality + w.recency;
+        assert!((sum - 1.0).abs() < 0.001, "Custom weights must be normalized to 1.0, got {}", sum);
+        assert!((w.bm25 - 0.5).abs() < 0.001, "2.0/4.0 = 0.5");
+        assert!((w.file_boost - 0.25).abs() < 0.001, "1.0/4.0 = 0.25");
+    }
+
+    #[test]
+    fn scoring_weights_zero_input_uses_default() {
+        let w = ScoringWeights::new(0.0, 0.0, 0.0, 0.0);
+        assert_eq!(w.bm25, ScoringWeights::default().bm25);
+    }
+
+    #[test]
+    fn scoring_weights_on_scorer() {
+        // Verify ScoringWeights is accessible on the scorer struct
+        let graph = CodeGraph::new();
+        let communities: Vec<Community> = vec![];
+        let scorer = MultiSignalScorer::build(&communities, &graph);
+        assert!((scorer.scoring_weights.bm25 - 0.55).abs() < 0.001);
     }
 }

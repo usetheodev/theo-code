@@ -334,6 +334,7 @@ mod tests {
             entity_id: "t-1".into(),
             timestamp: 1000,
             payload: serde_json::Value::Null,
+            supersedes_event_id: None,
         };
         let event2 = DomainEvent {
             event_id: EventId::new("same-id"),
@@ -341,6 +342,7 @@ mod tests {
             entity_id: "t-1".into(),
             timestamp: 2000,
             payload: serde_json::Value::Null,
+            supersedes_event_id: None,
         };
         bus.publish(event1);
         bus.publish(event2);

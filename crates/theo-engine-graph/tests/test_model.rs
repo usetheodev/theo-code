@@ -240,3 +240,111 @@ fn edge_type_default_weights() {
     let w = EdgeType::CoChanges.default_weight();
     assert!(w >= 0.0);
 }
+
+// --- S3-T1: Symbol-level hashing tests ---
+
+#[test]
+fn symbol_content_hash_deterministic() {
+    let node = Node {
+        id: "sym:foo".into(),
+        node_type: NodeType::Symbol,
+        name: "foo".into(),
+        file_path: None,
+        signature: Some("pub fn foo(x: i32) -> i32".into()),
+        kind: Some(SymbolKind::Function),
+        line_start: Some(1),
+        line_end: Some(5),
+        last_modified: 0.0,
+        doc: Some("Adds one".into()),
+    };
+    let h1 = CodeGraph::symbol_content_hash(&node);
+    let h2 = CodeGraph::symbol_content_hash(&node);
+    assert_eq!(h1, h2, "Same node must produce same hash");
+}
+
+#[test]
+fn symbol_content_hash_changes_when_signature_changes() {
+    let mut node = Node {
+        id: "sym:foo".into(),
+        node_type: NodeType::Symbol,
+        name: "foo".into(),
+        file_path: None,
+        signature: Some("pub fn foo(x: i32) -> i32".into()),
+        kind: Some(SymbolKind::Function),
+        line_start: Some(1),
+        line_end: Some(5),
+        last_modified: 0.0,
+        doc: None,
+    };
+    let h1 = CodeGraph::symbol_content_hash(&node);
+    node.signature = Some("pub fn foo(x: i32, y: i32) -> i32".into());
+    let h2 = CodeGraph::symbol_content_hash(&node);
+    assert_ne!(h1, h2, "Hash must change when signature changes");
+}
+
+#[test]
+fn symbol_content_hash_ignores_line_numbers() {
+    let mut node = Node {
+        id: "sym:foo".into(),
+        node_type: NodeType::Symbol,
+        name: "foo".into(),
+        file_path: None,
+        signature: Some("pub fn foo()".into()),
+        kind: Some(SymbolKind::Function),
+        line_start: Some(1),
+        line_end: Some(5),
+        last_modified: 0.0,
+        doc: None,
+    };
+    let h1 = CodeGraph::symbol_content_hash(&node);
+    node.line_start = Some(100);
+    node.line_end = Some(200);
+    let h2 = CodeGraph::symbol_content_hash(&node);
+    assert_eq!(h1, h2, "Line number changes should not affect hash");
+}
+
+#[test]
+fn compute_symbol_hashes_only_symbols() {
+    let mut g = CodeGraph::new();
+    g.add_node(make_file_node("file:a.rs", "a.rs"));
+    g.add_node(make_symbol_node("sym:foo", "foo", SymbolKind::Function));
+    g.add_node(make_symbol_node("sym:bar", "bar", SymbolKind::Struct));
+
+    let hashes = g.compute_symbol_hashes();
+    assert_eq!(hashes.len(), 2, "Should only hash Symbol nodes");
+    assert!(hashes.contains_key("sym:foo"));
+    assert!(hashes.contains_key("sym:bar"));
+    assert!(!hashes.contains_key("file:a.rs"), "File nodes should not be hashed");
+}
+
+#[test]
+fn community_content_hash_deterministic() {
+    let mut g = CodeGraph::new();
+    g.add_node(make_symbol_node("sym:a", "a", SymbolKind::Function));
+    g.add_node(make_symbol_node("sym:b", "b", SymbolKind::Function));
+
+    let ids = vec!["sym:a".into(), "sym:b".into()];
+    let h1 = g.community_content_hash(&ids);
+    let h2 = g.community_content_hash(&ids);
+    assert_eq!(h1, h2);
+}
+
+#[test]
+fn community_content_hash_order_independent() {
+    let mut g = CodeGraph::new();
+    g.add_node(make_symbol_node("sym:a", "a", SymbolKind::Function));
+    g.add_node(make_symbol_node("sym:b", "b", SymbolKind::Function));
+
+    let h1 = g.community_content_hash(&["sym:a".into(), "sym:b".into()]);
+    let h2 = g.community_content_hash(&["sym:b".into(), "sym:a".into()]);
+    assert_eq!(h1, h2, "Order of node_ids should not affect hash");
+}
+
+#[test]
+fn community_content_hash_none_for_no_symbols() {
+    let mut g = CodeGraph::new();
+    g.add_node(make_file_node("file:a.rs", "a.rs"));
+
+    let h = g.community_content_hash(&["file:a.rs".into()]);
+    assert!(h.is_none(), "Community with no symbols should return None");
+}
