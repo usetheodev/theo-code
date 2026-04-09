@@ -62,6 +62,7 @@ apps/*              → theo-application, theo-api-contracts
 - **Code language**: English (variables, functions, types, technical comments)
 - **Communication**: Portugues Brasil
 - **Rust edition**: 2024
+- **TDD**: RED-GREEN-REFACTOR obrigatorio. Teste primeiro, codigo depois. Sem excecoes.
 - **Tests**: Required for business logic. Arrange-Act-Assert pattern.
 - **Errors**: Typed with `thiserror`. Never swallow errors silently.
 - **Workspace deps**: Declared in root `Cargo.toml` `[workspace.dependencies]`

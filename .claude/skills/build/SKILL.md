@@ -21,4 +21,15 @@ Build the Theo Code workspace.
 1. Run the appropriate build command
 2. If errors: analyze the error, show file:line, explain the issue
 3. If warnings: list them grouped by crate
-4. Report: PASS (clean) / PASS with N warnings / FAIL with errors
+4. **Run tests**: `cargo test -p <crate>` for affected crate (TDD — build alone is not enough)
+5. Report: PASS (build + tests clean) / PASS with N warnings / FAIL with errors
+
+## TDD Gate
+
+Build is NOT complete until tests pass. After a successful build, always run:
+```bash
+cargo test -p <crate>  # For specific crate builds
+cargo test             # For full workspace builds
+```
+
+If tests fail → report as FAIL even if build succeeds. Code that compiles but fails tests is broken code.

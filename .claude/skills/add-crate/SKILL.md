@@ -32,5 +32,20 @@ Create a new crate in the Theo Code workspace.
 4. Create `crates/$0/src/lib.rs` with module doc comment
 5. Create `crates/$0/src/error.rs` with thiserror enum
 6. Add to workspace members in root `Cargo.toml`
-7. Run `cargo check -p $0` to validate
-8. Report success or failure
+7. Create `crates/$0/tests/` directory with initial integration test:
+   ```rust
+   // crates/$0/tests/smoke.rs
+   #[test]
+   fn test_crate_compiles_and_basic_types_exist() {
+       // RED-GREEN: this test validates the crate is usable
+       use $0_snake::*;  // replace hyphens with underscores
+       // Basic smoke test — expand as features are added
+   }
+   ```
+8. Run `cargo check -p $0` to validate compilation
+9. Run `cargo test -p $0` to validate tests pass (TDD — GREEN phase)
+10. Report success or failure
+
+## TDD Note
+
+Every new crate starts with at least one test. The scaffold includes a smoke test that validates the crate compiles and exports are accessible. This is the GREEN phase — the crate must be testable from day zero.
