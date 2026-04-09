@@ -414,4 +414,59 @@ impl CodeGraph {
             children.retain(|c| c != node_id);
         }
     }
+
+    // --- Symbol-level hashing (S3-T1) ------------------------------------
+
+    /// Compute a content hash for a single symbol node.
+    ///
+    /// Hash is based on: name + signature + doc (semantic content, not metadata).
+    /// Used for fine-grained invalidation — if the hash hasn't changed, the
+    /// symbol's wiki content doesn't need regeneration.
+    pub fn symbol_content_hash(node: &Node) -> String {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(node.name.as_bytes());
+        if let Some(ref sig) = node.signature {
+            hasher.update(sig.as_bytes());
+        }
+        if let Some(ref doc) = node.doc {
+            hasher.update(doc.as_bytes());
+        }
+        hasher.finalize().to_hex()[..16].to_string()
+    }
+
+    /// Compute content hashes for all symbol nodes in the graph.
+    ///
+    /// Returns a map: node_id → content_hash.
+    /// Use this to detect which symbols changed between graph builds.
+    pub fn compute_symbol_hashes(&self) -> HashMap<String, String> {
+        self.nodes.iter()
+            .filter(|(_, node)| matches!(node.node_type, NodeType::Symbol))
+            .map(|(id, node)| (id.clone(), Self::symbol_content_hash(node)))
+            .collect()
+    }
+
+    /// Compute a content hash for a community (aggregate of member symbol hashes).
+    ///
+    /// If the community hash hasn't changed, its wiki page doesn't need regeneration.
+    /// Returns None if the community has no symbol nodes.
+    pub fn community_content_hash(&self, node_ids: &[String]) -> Option<String> {
+        let mut member_hashes: Vec<String> = node_ids.iter()
+            .filter_map(|id| self.nodes.get(id))
+            .filter(|node| matches!(node.node_type, NodeType::Symbol))
+            .map(|node| Self::symbol_content_hash(node))
+            .collect();
+
+        if member_hashes.is_empty() {
+            return None;
+        }
+
+        // Sort for determinism (node order in community may vary)
+        member_hashes.sort();
+
+        let mut hasher = blake3::Hasher::new();
+        for h in &member_hashes {
+            hasher.update(h.as_bytes());
+        }
+        Some(hasher.finalize().to_hex()[..16].to_string())
+    }
 }

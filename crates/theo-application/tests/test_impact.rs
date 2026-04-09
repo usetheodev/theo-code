@@ -22,7 +22,7 @@
 ///   db_community   : [query, connect]
 ///   api_community  : [handle_request, handle_response]
 
-use theo_governance::impact::analyze_impact;
+use theo_application::use_cases::impact::analyze_impact;
 use theo_engine_graph::model::{CodeGraph, Edge, EdgeType, Node, NodeType, SymbolKind};
 use theo_engine_graph::cluster::Community;
 

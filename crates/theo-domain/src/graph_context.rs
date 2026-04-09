@@ -51,6 +51,8 @@ pub const EXCLUDED_DIRS: &[&str] = &[
 /// A single block of code context assembled by the retrieval engine.
 #[derive(Debug, Clone)]
 pub struct ContextBlock {
+    /// Unique ID for citation tracking. Generated at assembly time.
+    pub block_id: String,
     /// Identifier of the source community/cluster.
     pub source_id: String,
     /// Human-readable content (signatures, summaries, code).
@@ -182,6 +184,30 @@ pub trait GraphContextProvider: Send + Sync {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Impact analysis types
+// ---------------------------------------------------------------------------
+
+/// Result of impact analysis for a single file edit.
+///
+/// Pure data type — lives in theo-domain for cross-layer consumption.
+/// The analysis algorithm lives in theo-application (needs engine access).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ImpactReport {
+    /// The file that was edited.
+    pub edited_file: String,
+    /// Community IDs that contain at least one affected node.
+    pub affected_communities: Vec<String>,
+    /// IDs of test nodes covering affected symbols.
+    pub tests_covering_edit: Vec<String>,
+    /// File paths that historically co-change with the edited file.
+    pub co_change_candidates: Vec<String>,
+    /// Human-readable risk alerts.
+    pub risk_alerts: Vec<String>,
+    /// The BFS depth used during analysis.
+    pub bfs_depth: usize,
+}
+
 /// Navigation mode for graph traversal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NavigationMode {
@@ -215,12 +241,14 @@ mod tests {
         let result = GraphContextResult {
             blocks: vec![
                 ContextBlock {
+                    block_id: String::new(),
                     source_id: "auth".into(),
                     content: "# Auth module\npub fn verify_token()".into(),
                     token_count: 10,
                     score: 0.9,
                 },
                 ContextBlock {
+                    block_id: String::new(),
                     source_id: "db".into(),
                     content: "# DB module\npub fn query()".into(),
                     token_count: 8,

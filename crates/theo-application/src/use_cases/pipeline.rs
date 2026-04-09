@@ -12,11 +12,11 @@ use theo_engine_retrieval::budget::BudgetConfig;
 use theo_engine_retrieval::escape::ContextMembership;
 use theo_engine_retrieval::search::MultiSignalScorer;
 use theo_engine_retrieval::summary::{self, CommunitySummary, FileGitInfo};
-pub use theo_governance::impact::ImpactReport;
+pub use theo_domain::graph_context::ImpactReport;
 pub use theo_engine_graph::bridge::{BridgeStats, FileData};
 pub use theo_engine_graph::cluster::Community;
 
-use theo_governance::impact;
+use super::impact;
 use theo_engine_graph::bridge;
 use theo_engine_graph::cluster::{self, ClusterAlgorithm};
 use theo_engine_graph::git;

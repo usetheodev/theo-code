@@ -8,6 +8,7 @@ use theo_domain::budget::BudgetUsage;
 use theo_domain::event::DomainEvent;
 use theo_domain::task::Task;
 use theo_domain::tool_call::{ToolCallRecord, ToolResultRecord};
+use theo_domain::working_set::WorkingSet;
 
 use crate::dlq::DeadLetter;
 
@@ -29,9 +30,20 @@ pub struct RunSnapshot {
     pub snapshot_at: u64,
     /// Hash of serialized state (excluding the checksum field itself).
     pub checksum: String,
+    /// Schema version for forward/backward compatibility.
+    /// Defaults to 0 for legacy snapshots that lack this field.
+    #[serde(default)]
+    pub schema_version: u32,
+    /// Active context scope for the running task.
+    /// None for legacy snapshots or runs that don't use working sets.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub working_set: Option<WorkingSet>,
 }
 
 impl RunSnapshot {
+    /// Current schema version. Increment when changing the snapshot format.
+    pub const CURRENT_SCHEMA_VERSION: u32 = 1;
+
     /// Computes a deterministic checksum of the snapshot data.
     ///
     /// Uses a stable hash of the JSON-serialized content (excluding the checksum field).
@@ -47,6 +59,8 @@ impl RunSnapshot {
             messages: &self.messages,
             dlq: &self.dlq,
             snapshot_at: self.snapshot_at,
+            schema_version: self.schema_version,
+            working_set: &self.working_set,
         };
 
         let json = serde_json::to_string(&hashable).expect("snapshot serialization failed");
@@ -87,6 +101,8 @@ impl RunSnapshot {
             dlq,
             snapshot_at: now,
             checksum: String::new(),
+            schema_version: Self::CURRENT_SCHEMA_VERSION,
+            working_set: None,
         };
         snapshot.checksum = snapshot.compute_checksum();
         snapshot
@@ -105,6 +121,8 @@ struct SnapshotHashable<'a> {
     messages: &'a [serde_json::Value],
     dlq: &'a [DeadLetter],
     snapshot_at: u64,
+    schema_version: u32,
+    working_set: &'a Option<WorkingSet>,
 }
 
 #[cfg(test)]
@@ -236,6 +254,101 @@ mod tests {
         assert_eq!(back.dlq[0].tool_name, "bash");
         assert_eq!(back.dlq[0].attempts, 3);
         assert!(back.validate_checksum());
+    }
+
+    // --- Schema version tests (S0-T2) ---
+
+    #[test]
+    fn snapshot_has_schema_version() {
+        let snapshot = make_snapshot();
+        assert_eq!(snapshot.schema_version, RunSnapshot::CURRENT_SCHEMA_VERSION);
+        assert!(snapshot.schema_version > 0, "Schema version must be positive");
+    }
+
+    #[test]
+    fn snapshot_schema_version_included_in_checksum() {
+        let s1 = make_snapshot();
+        // Manually change schema_version → checksum should differ
+        let mut s2 = make_snapshot();
+        s2.schema_version = 999;
+        s2.checksum = s2.compute_checksum();
+        assert_ne!(s1.checksum, s2.checksum, "Schema version must affect checksum");
+    }
+
+    #[test]
+    fn legacy_snapshot_without_schema_version_defaults_to_zero() {
+        // Simulate a legacy JSON that doesn't have schema_version field
+        let snapshot = make_snapshot();
+        let mut json_val: serde_json::Value = serde_json::to_value(&snapshot).unwrap();
+        json_val.as_object_mut().unwrap().remove("schema_version");
+        let json_str = serde_json::to_string(&json_val).unwrap();
+
+        let restored: RunSnapshot = serde_json::from_str(&json_str).unwrap();
+        assert_eq!(restored.schema_version, 0, "Legacy snapshots should default to version 0");
+    }
+
+    // --- S1-T3: WorkingSet tests ---
+
+    #[test]
+    fn working_set_included_in_snapshot() {
+        use theo_domain::working_set::WorkingSet;
+        let mut snapshot = make_snapshot();
+        let ws = WorkingSet {
+            hot_files: vec!["src/auth.rs".into()],
+            recent_event_ids: vec!["evt-1".into()],
+            active_hypothesis: Some("jwt decode bug".into()),
+            current_plan_step: Some("run tests".into()),
+            constraints: vec!["no unwrap".into()],
+            ..WorkingSet::default()
+        };
+        snapshot.working_set = Some(ws.clone());
+        snapshot.checksum = snapshot.compute_checksum();
+
+        assert_eq!(snapshot.working_set.as_ref().unwrap().hot_files, ws.hot_files);
+        assert!(snapshot.validate_checksum());
+    }
+
+    #[test]
+    fn working_set_survives_serde_roundtrip() {
+        use theo_domain::working_set::WorkingSet;
+        let mut snapshot = make_snapshot();
+        snapshot.working_set = Some(WorkingSet {
+            hot_files: vec!["src/lib.rs".into()],
+            current_plan_step: Some("step 1".into()),
+            ..WorkingSet::default()
+        });
+        snapshot.checksum = snapshot.compute_checksum();
+
+        let json = serde_json::to_string(&snapshot).unwrap();
+        let restored: RunSnapshot = serde_json::from_str(&json).unwrap();
+        assert!(restored.working_set.is_some());
+        assert_eq!(restored.working_set.unwrap().current_plan_step, Some("step 1".into()));
+    }
+
+    #[test]
+    fn working_set_none_for_legacy_snapshots() {
+        let snapshot = make_snapshot();
+        let mut json_val: serde_json::Value = serde_json::to_value(&snapshot).unwrap();
+        json_val.as_object_mut().unwrap().remove("working_set");
+        let json_str = serde_json::to_string(&json_val).unwrap();
+
+        let restored: RunSnapshot = serde_json::from_str(&json_str).unwrap();
+        assert!(restored.working_set.is_none(), "Legacy snapshots should have no working_set");
+    }
+
+    #[test]
+    fn working_set_affects_checksum() {
+        use theo_domain::working_set::WorkingSet;
+        let s1 = make_snapshot();
+
+        let mut s2 = make_snapshot();
+        s2.working_set = Some(WorkingSet {
+            hot_files: vec!["changed.rs".into()],
+            ..WorkingSet::default()
+        });
+        s2.checksum = s2.compute_checksum();
+
+        assert_ne!(s1.checksum, s2.checksum, "WorkingSet must affect checksum");
     }
 
     #[test]

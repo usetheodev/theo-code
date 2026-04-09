@@ -139,3 +139,100 @@ fn update_cochanges_accumulates_on_repeated_commits() {
     // At minimum, there's still a co-change edge
     let _ = first_count; // suppress unused warning
 }
+
+// --- S3-T2: Impact set tests ---
+
+use theo_engine_graph::cochange::compute_impact_set;
+
+#[test]
+fn impact_set_finds_cochanged_files() {
+    let mut g = CodeGraph::new();
+    g.add_node(file_node("a.rs"));
+    g.add_node(file_node("b.rs"));
+    g.add_node(file_node("c.rs"));
+
+    // a and b co-change, a and c co-change
+    update_cochanges(&mut g, &["a.rs".into(), "b.rs".into()], 5.0);
+    update_cochanges(&mut g, &["a.rs".into(), "c.rs".into()], 10.0);
+
+    let impact = compute_impact_set(&g, &["a.rs".into()], 10, 0.0);
+
+    // Both b and c should appear
+    let files: Vec<&str> = impact.affected_files.iter().map(|(f, _)| f.as_str()).collect();
+    assert!(files.contains(&"b.rs"), "b.rs should be in impact set");
+    assert!(files.contains(&"c.rs"), "c.rs should be in impact set");
+}
+
+#[test]
+fn impact_set_excludes_changed_files() {
+    let mut g = CodeGraph::new();
+    g.add_node(file_node("a.rs"));
+    g.add_node(file_node("b.rs"));
+
+    update_cochanges(&mut g, &["a.rs".into(), "b.rs".into()], 1.0);
+
+    let impact = compute_impact_set(&g, &["a.rs".into()], 10, 0.0);
+    let files: Vec<&str> = impact.affected_files.iter().map(|(f, _)| f.as_str()).collect();
+    assert!(!files.contains(&"a.rs"), "Changed file should not appear in its own impact set");
+}
+
+#[test]
+fn impact_set_respects_top_k() {
+    let mut g = CodeGraph::new();
+    for i in 0..10 {
+        g.add_node(file_node(&format!("f{}.rs", i)));
+    }
+    // f0 co-changes with all others
+    for i in 1..10 {
+        update_cochanges(&mut g, &["f0.rs".into(), format!("f{}.rs", i)], i as f64);
+    }
+
+    let impact = compute_impact_set(&g, &["f0.rs".into()], 3, 0.0);
+    assert_eq!(impact.affected_files.len(), 3, "Should return at most top_k files");
+}
+
+#[test]
+fn impact_set_respects_min_weight() {
+    let mut g = CodeGraph::new();
+    g.add_node(file_node("a.rs"));
+    g.add_node(file_node("b.rs"));
+    g.add_node(file_node("c.rs"));
+
+    // a-b with recent co-change (high weight)
+    update_cochanges(&mut g, &["a.rs".into(), "b.rs".into()], 1.0);
+    // a-c with old co-change (low weight)
+    update_cochanges(&mut g, &["a.rs".into(), "c.rs".into()], 200.0);
+
+    let impact = compute_impact_set(&g, &["a.rs".into()], 10, 0.5);
+    let files: Vec<&str> = impact.affected_files.iter().map(|(f, _)| f.as_str()).collect();
+    assert!(files.contains(&"b.rs"), "Recent co-change should pass min_weight");
+    // c.rs has weight = exp(-0.01 * 200) ≈ 0.135 < 0.5
+    assert!(!files.contains(&"c.rs"), "Old co-change should be below min_weight");
+}
+
+#[test]
+fn impact_set_empty_for_no_cochanges() {
+    let mut g = CodeGraph::new();
+    g.add_node(file_node("a.rs"));
+    g.add_node(file_node("b.rs"));
+
+    let impact = compute_impact_set(&g, &["a.rs".into()], 10, 0.0);
+    assert!(impact.affected_files.is_empty());
+}
+
+#[test]
+fn impact_set_sorted_by_weight_descending() {
+    let mut g = CodeGraph::new();
+    g.add_node(file_node("a.rs"));
+    g.add_node(file_node("b.rs"));
+    g.add_node(file_node("c.rs"));
+
+    // a-b: recent (high weight), a-c: old (low weight)
+    update_cochanges(&mut g, &["a.rs".into(), "b.rs".into()], 1.0);
+    update_cochanges(&mut g, &["a.rs".into(), "c.rs".into()], 50.0);
+
+    let impact = compute_impact_set(&g, &["a.rs".into()], 10, 0.0);
+    assert!(impact.affected_files.len() == 2);
+    assert!(impact.affected_files[0].1 >= impact.affected_files[1].1,
+        "Should be sorted by weight descending");
+}
