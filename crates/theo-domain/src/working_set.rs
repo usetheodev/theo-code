@@ -160,8 +160,14 @@ mod tests {
 
     #[test]
     fn merge_combines_hot_files() {
-        let parent = WorkingSet { hot_files: vec!["a.rs".into()], ..Default::default() };
-        let child = WorkingSet { hot_files: vec!["b.rs".into()], ..Default::default() };
+        let parent = WorkingSet {
+            hot_files: vec!["a.rs".into()],
+            ..Default::default()
+        };
+        let child = WorkingSet {
+            hot_files: vec!["b.rs".into()],
+            ..Default::default()
+        };
         let merged = parent.merge_from(&child);
         assert_eq!(merged.hot_files.len(), 2);
         assert!(merged.hot_files.contains(&"a.rs".to_string()));
@@ -170,8 +176,14 @@ mod tests {
 
     #[test]
     fn merge_preserves_parent_constraints() {
-        let parent = WorkingSet { constraints: vec!["no unwrap".into()], ..Default::default() };
-        let child = WorkingSet { constraints: vec!["use Result".into()], ..Default::default() };
+        let parent = WorkingSet {
+            constraints: vec!["no unwrap".into()],
+            ..Default::default()
+        };
+        let child = WorkingSet {
+            constraints: vec!["use Result".into()],
+            ..Default::default()
+        };
         let merged = parent.merge_from(&child);
         assert!(merged.constraints.contains(&"no unwrap".to_string()));
         assert!(merged.constraints.contains(&"use Result".to_string()));
@@ -180,23 +192,38 @@ mod tests {
     #[test]
     fn merge_child_hypothesis_fills_empty_parent() {
         let parent = WorkingSet::default();
-        let child = WorkingSet { active_hypothesis: Some("bug in auth".into()), ..Default::default() };
+        let child = WorkingSet {
+            active_hypothesis: Some("bug in auth".into()),
+            ..Default::default()
+        };
         let merged = parent.merge_from(&child);
         assert_eq!(merged.active_hypothesis, Some("bug in auth".to_string()));
     }
 
     #[test]
     fn merge_parent_hypothesis_preserved_over_child() {
-        let parent = WorkingSet { active_hypothesis: Some("parent hyp".into()), ..Default::default() };
-        let child = WorkingSet { active_hypothesis: Some("child hyp".into()), ..Default::default() };
+        let parent = WorkingSet {
+            active_hypothesis: Some("parent hyp".into()),
+            ..Default::default()
+        };
+        let child = WorkingSet {
+            active_hypothesis: Some("child hyp".into()),
+            ..Default::default()
+        };
         let merged = parent.merge_from(&child);
         assert_eq!(merged.active_hypothesis, Some("parent hyp".to_string()));
     }
 
     #[test]
     fn merge_deduplicates_constraints() {
-        let parent = WorkingSet { constraints: vec!["no unwrap".into()], ..Default::default() };
-        let child = WorkingSet { constraints: vec!["no unwrap".into(), "test first".into()], ..Default::default() };
+        let parent = WorkingSet {
+            constraints: vec!["no unwrap".into()],
+            ..Default::default()
+        };
+        let child = WorkingSet {
+            constraints: vec!["no unwrap".into(), "test first".into()],
+            ..Default::default()
+        };
         let merged = parent.merge_from(&child);
         assert_eq!(merged.constraints.len(), 2);
     }

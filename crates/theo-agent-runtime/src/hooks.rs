@@ -54,8 +54,12 @@ pub struct HookConfig {
     pub project_hooks_enabled: bool,
 }
 
-fn default_hook_timeout() -> u64 { 5 }
-fn default_true() -> bool { true }
+fn default_hook_timeout() -> u64 {
+    5
+}
+fn default_true() -> bool {
+    true
+}
 
 impl Default for HookConfig {
     fn default() -> Self {
@@ -116,7 +120,11 @@ impl HookRunner {
     pub async fn run_pre_hook(&self, hook_type: &str, event: &HookEvent) -> HookResult {
         let scripts = self.find_hooks(hook_type);
         if scripts.is_empty() {
-            return HookResult { allowed: true, output: String::new(), exit_code: 0 };
+            return HookResult {
+                allowed: true,
+                output: String::new(),
+                exit_code: 0,
+            };
         }
 
         let event_json = serde_json::to_string(event).unwrap_or_default();
@@ -136,7 +144,11 @@ impl HookRunner {
             }
         }
 
-        HookResult { allowed: true, output: String::new(), exit_code: 0 }
+        HookResult {
+            allowed: true,
+            output: String::new(),
+            exit_code: 0,
+        }
     }
 
     /// Execute a post-hook. Fire-and-forget — errors are logged but don't affect execution.
@@ -171,7 +183,9 @@ impl HookRunner {
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
 
-        let mut child = cmd.spawn().map_err(|e| format!("Failed to spawn hook: {e}"))?;
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| format!("Failed to spawn hook: {e}"))?;
 
         // Write stdin
         if let Some(mut stdin) = child.stdin.take() {
@@ -213,7 +227,8 @@ impl HookRunner {
                 for entry in entries.flatten() {
                     let path = entry.path();
                     if path.extension().and_then(|e| e.to_str()) == Some("sh") {
-                        let name = path.file_stem()
+                        let name = path
+                            .file_stem()
                             .and_then(|s| s.to_str())
                             .unwrap_or("unknown")
                             .to_string();
@@ -234,7 +249,12 @@ fn now_millis() -> u64 {
 }
 
 /// Create a HookEvent for a tool execution.
-pub fn tool_hook_event(hook_type: &str, tool_name: &str, tool_args: &serde_json::Value, project_dir: &Path) -> HookEvent {
+pub fn tool_hook_event(
+    hook_type: &str,
+    tool_name: &str,
+    tool_args: &serde_json::Value,
+    project_dir: &Path,
+) -> HookEvent {
     HookEvent {
         hook_type: hook_type.to_string(),
         tool_name: Some(tool_name.to_string()),
@@ -293,7 +313,8 @@ mod tests {
             std::fs::set_permissions(
                 hooks_dir.join("tool.before.sh"),
                 std::fs::Permissions::from_mode(0o755),
-            ).unwrap();
+            )
+            .unwrap();
         }
 
         let runner = HookRunner::new(dir.path(), HookConfig::default());
@@ -314,7 +335,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let hooks_dir = dir.path().join(".theo").join("hooks");
         std::fs::create_dir_all(&hooks_dir).unwrap();
-        std::fs::write(hooks_dir.join("tool.before.sh"), "#!/bin/sh\necho ok\nexit 0\n").unwrap();
+        std::fs::write(
+            hooks_dir.join("tool.before.sh"),
+            "#!/bin/sh\necho ok\nexit 0\n",
+        )
+        .unwrap();
 
         #[cfg(unix)]
         {
@@ -322,7 +347,8 @@ mod tests {
             std::fs::set_permissions(
                 hooks_dir.join("tool.before.sh"),
                 std::fs::Permissions::from_mode(0o755),
-            ).unwrap();
+            )
+            .unwrap();
         }
 
         let runner = HookRunner::new(dir.path(), HookConfig::default());
@@ -351,7 +377,8 @@ mod tests {
             std::fs::set_permissions(
                 hooks_dir.join("tool.before.sh"),
                 std::fs::Permissions::from_mode(0o755),
-            ).unwrap();
+            )
+            .unwrap();
         }
 
         let mut config = HookConfig::default();
@@ -386,7 +413,8 @@ mod tests {
     #[test]
     fn tool_hook_event_creates_correct_json() {
         let event = tool_hook_event(
-            "tool.before", "bash",
+            "tool.before",
+            "bash",
             &serde_json::json!({"command": "ls"}),
             Path::new("/tmp/project"),
         );

@@ -60,7 +60,9 @@ impl SapAiCoreAuth {
         self.store.remove(PROVIDER_ID)
     }
 
-    pub fn provider_id() -> &'static str { PROVIDER_ID }
+    pub fn provider_id() -> &'static str {
+        PROVIDER_ID
+    }
 }
 
 #[cfg(test)]
@@ -77,7 +79,8 @@ mod tests {
     fn sap_store_and_retrieve() {
         let (store, _dir) = temp_store();
         let auth = SapAiCoreAuth::new(store);
-        auth.set_service_key(r#"{"key":"value"}"#.to_string()).unwrap();
+        auth.set_service_key(r#"{"key":"value"}"#.to_string())
+            .unwrap();
         let tokens = auth.get_tokens().unwrap().unwrap();
         assert_eq!(tokens.service_key, r#"{"key":"value"}"#);
     }

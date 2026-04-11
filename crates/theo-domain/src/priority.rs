@@ -42,7 +42,12 @@ mod tests {
 
     #[test]
     fn serde_roundtrip() {
-        let priorities = [Priority::Low, Priority::Normal, Priority::High, Priority::Critical];
+        let priorities = [
+            Priority::Low,
+            Priority::Normal,
+            Priority::High,
+            Priority::Critical,
+        ];
         for p in &priorities {
             let json = serde_json::to_string(p).unwrap();
             let back: Priority = serde_json::from_str(&json).unwrap();

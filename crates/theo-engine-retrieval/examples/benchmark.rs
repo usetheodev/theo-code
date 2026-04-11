@@ -7,13 +7,13 @@
 ///   cargo run --example benchmark -p theo-code-context --release
 use std::time::Instant;
 
-use theo_engine_retrieval::{
-    assembly::assemble_greedy,
-    search::{Bm25Index, MultiSignalScorer},
-};
 use theo_engine_graph::{
     cluster::Community,
     model::{CodeGraph, Edge, EdgeType, Node, NodeType, SymbolKind},
+};
+use theo_engine_retrieval::{
+    assembly::assemble_greedy,
+    search::{Bm25Index, MultiSignalScorer},
 };
 
 // ---------------------------------------------------------------------------
@@ -45,7 +45,9 @@ fn generate_graph_and_communities(
     // LCG state for pseudo-random edges.
     let mut lcg: u64 = 42;
     let lcg_next = |s: &mut u64| -> usize {
-        *s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        *s = s
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         (*s >> 33) as usize
     };
 
@@ -147,7 +149,8 @@ fn bench_bm25_query() {
             let results = index.search(query, &communities);
             std::hint::black_box(&results);
         });
-        let top_score = index.search(query, &communities)
+        let top_score = index
+            .search(query, &communities)
             .first()
             .map(|r| r.score)
             .unwrap_or(0.0);
@@ -180,16 +183,15 @@ fn bench_multi_signal() {
             std::hint::black_box(&results);
         });
 
-        let top_score = scorer.score(query, &communities, &graph)
+        let top_score = scorer
+            .score(query, &communities, &graph)
             .first()
             .map(|r| r.score)
             .unwrap_or(0.0);
 
         println!(
             "  communities={nc:<4}: build_ms(mean={:.3}, min={:.3}, max={:.3})  query_ms(mean={:.4}, min={:.4}, max={:.4})  top_score={:.4}",
-            build_mean, build_min, build_max,
-            query_mean, query_min, query_max,
-            top_score,
+            build_mean, build_min, build_max, query_mean, query_min, query_max, top_score,
         );
     }
 }
@@ -220,7 +222,9 @@ fn bench_assembly() {
             };
             println!(
                 "  candidates={nc:<4} budget={budget:<6}: time_ms(mean={:.4}, min={:.4}, max={:.4})  items_selected={}  utilization={:.2}",
-                mean, min, max,
+                mean,
+                min,
+                max,
                 payload.items.len(),
                 utilization,
             );

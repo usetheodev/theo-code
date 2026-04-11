@@ -236,10 +236,12 @@ impl Default for TtlPolicy {
 /// - task-local constraints → TimeScoped(24h)
 /// - run-local only → RunScoped (default, deleted at run end)
 pub fn infer_ttl_policy(events: &[crate::event::DomainEvent]) -> TtlPolicy {
-    let has_workspace = events.iter()
+    let has_workspace = events
+        .iter()
         .filter(|e| e.event_type == crate::event::EventType::ConstraintLearned)
         .any(|e| e.payload.get("scope").and_then(|s| s.as_str()) == Some("workspace-local"));
-    let has_task = events.iter()
+    let has_task = events
+        .iter()
         .filter(|e| e.event_type == crate::event::EventType::ConstraintLearned)
         .any(|e| e.payload.get("scope").and_then(|s| s.as_str()) == Some("task-local"));
 
@@ -257,81 +259,161 @@ impl EpisodeSummary {
     ///
     /// Extracts structured information deterministically (no LLM needed).
     /// The `objective` must be provided externally (from the Task).
-    pub fn from_events(run_id: &str, task_id: Option<&str>, objective: &str, events: &[DomainEvent]) -> Self {
+    pub fn from_events(
+        run_id: &str,
+        task_id: Option<&str>,
+        objective: &str,
+        events: &[DomainEvent],
+    ) -> Self {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("system clock before UNIX epoch")
             .as_millis() as u64;
 
-        let evidence_ids: Vec<String> = events.iter().map(|e| e.event_id.as_str().to_string()).collect();
+        let evidence_ids: Vec<String> = events
+            .iter()
+            .map(|e| e.event_id.as_str().to_string())
+            .collect();
 
-        let window_start = events.first().map(|e| e.event_id.as_str().to_string()).unwrap_or_default();
-        let window_end = events.last().map(|e| e.event_id.as_str().to_string()).unwrap_or_default();
+        let window_start = events
+            .first()
+            .map(|e| e.event_id.as_str().to_string())
+            .unwrap_or_default();
+        let window_end = events
+            .last()
+            .map(|e| e.event_id.as_str().to_string())
+            .unwrap_or_default();
 
         // Extract key actions from tool calls
-        let key_actions: Vec<String> = events.iter()
+        let key_actions: Vec<String> = events
+            .iter()
             .filter(|e| e.event_type == crate::event::EventType::ToolCallCompleted)
-            .filter_map(|e| e.payload.get("tool_name").and_then(|v| v.as_str()).map(String::from))
+            .filter_map(|e| {
+                e.payload
+                    .get("tool_name")
+                    .and_then(|v| v.as_str())
+                    .map(String::from)
+            })
             .collect();
 
         // Extract affected files from tool payloads
-        let affected_files: Vec<String> = events.iter()
-            .filter_map(|e| e.payload.get("file").and_then(|v| v.as_str()).map(String::from))
+        let affected_files: Vec<String> = events
+            .iter()
+            .filter_map(|e| {
+                e.payload
+                    .get("file")
+                    .and_then(|v| v.as_str())
+                    .map(String::from)
+            })
             .collect::<std::collections::HashSet<_>>()
             .into_iter()
             .collect();
 
         // Extract learned constraints from ConstraintLearned events
-        let mut learned_constraints: Vec<String> = events.iter()
+        let mut learned_constraints: Vec<String> = events
+            .iter()
             .filter(|e| e.event_type == crate::event::EventType::ConstraintLearned)
-            .filter_map(|e| e.payload.get("constraint").and_then(|v| v.as_str()).map(String::from))
+            .filter_map(|e| {
+                e.payload
+                    .get("constraint")
+                    .and_then(|v| v.as_str())
+                    .map(String::from)
+            })
             .collect();
 
         // Extract unresolved hypotheses (formed but not invalidated)
-        let invalidated_refs: std::collections::HashSet<String> = events.iter()
+        let invalidated_refs: std::collections::HashSet<String> = events
+            .iter()
             .filter(|e| e.event_type == crate::event::EventType::HypothesisInvalidated)
-            .filter_map(|e| e.payload.get("prior_event_id").and_then(|v| v.as_str()).map(String::from))
+            .filter_map(|e| {
+                e.payload
+                    .get("prior_event_id")
+                    .and_then(|v| v.as_str())
+                    .map(String::from)
+            })
             .collect();
-        let unresolved: Vec<String> = events.iter()
+        let unresolved: Vec<String> = events
+            .iter()
             .filter(|e| e.event_type == crate::event::EventType::HypothesisFormed)
             .filter(|e| !invalidated_refs.contains(e.event_id.as_str()))
-            .filter_map(|e| e.payload.get("hypothesis").and_then(|v| v.as_str()).map(String::from))
+            .filter_map(|e| {
+                e.payload
+                    .get("hypothesis")
+                    .and_then(|v| v.as_str())
+                    .map(String::from)
+            })
             .collect();
 
         // Extract successful steps (tool calls with success: true)
-        let successful_steps: Vec<String> = events.iter()
+        let successful_steps: Vec<String> = events
+            .iter()
             .filter(|e| e.event_type == crate::event::EventType::ToolCallCompleted)
-            .filter(|e| e.payload.get("success").and_then(|v| v.as_bool()).unwrap_or(false))
+            .filter(|e| {
+                e.payload
+                    .get("success")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false)
+            })
             .map(|e| {
-                let tool = e.payload.get("tool_name").and_then(|v| v.as_str()).unwrap_or("unknown");
+                let tool = e
+                    .payload
+                    .get("tool_name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
                 let file = e.payload.get("file").and_then(|v| v.as_str()).unwrap_or("");
-                if file.is_empty() { tool.to_string() } else { format!("{}: {}", tool, file) }
+                if file.is_empty() {
+                    tool.to_string()
+                } else {
+                    format!("{}: {}", tool, file)
+                }
             })
             .collect();
 
         // Extract failed attempts (failed tool calls + error events)
-        let mut failed_attempts: Vec<String> = events.iter()
+        let mut failed_attempts: Vec<String> = events
+            .iter()
             .filter(|e| e.event_type == crate::event::EventType::ToolCallCompleted)
             .filter(|e| e.payload.get("success").and_then(|v| v.as_bool()) == Some(false))
             .map(|e| {
-                let tool = e.payload.get("tool_name").and_then(|v| v.as_str()).unwrap_or("unknown");
-                let err = e.payload.get("error").and_then(|v| v.as_str()).unwrap_or("failed");
+                let tool = e
+                    .payload
+                    .get("tool_name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
+                let err = e
+                    .payload
+                    .get("error")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("failed");
                 format!("{}: {}", tool, err)
             })
             .collect();
         // Also include Error events
-        for e in events.iter().filter(|e| e.event_type == crate::event::EventType::Error) {
-            let msg = e.payload.get("message").and_then(|v| v.as_str()).unwrap_or("error");
+        for e in events
+            .iter()
+            .filter(|e| e.event_type == crate::event::EventType::Error)
+        {
+            let msg = e
+                .payload
+                .get("message")
+                .and_then(|v| v.as_str())
+                .unwrap_or("error");
             failed_attempts.push(msg.to_string());
         }
 
         // Determine outcome
-        let has_errors = events.iter().any(|e| e.event_type == crate::event::EventType::Error);
+        let has_errors = events
+            .iter()
+            .any(|e| e.event_type == crate::event::EventType::Error);
         let has_failures = events.iter().any(|e| {
             e.event_type == crate::event::EventType::ToolCallCompleted
                 && e.payload.get("success").and_then(|v| v.as_bool()) == Some(false)
         });
-        let outcome = if has_errors || has_failures { EpisodeOutcome::Partial } else { EpisodeOutcome::Success };
+        let outcome = if has_errors || has_failures {
+            EpisodeOutcome::Partial
+        } else {
+            EpisodeOutcome::Success
+        };
 
         // Extract failure-derived constraints (threshold ≥ 3)
         let failure_constraints = extract_failure_constraints(events, 3);
@@ -375,15 +457,24 @@ impl EpisodeSummary {
 /// Detects when the agent repeats the same tool+args 3+ times,
 /// inferring an implicit hypothesis with low confidence (0.3).
 pub fn infer_hypotheses_from_patterns(events: &[crate::event::DomainEvent]) -> Vec<Hypothesis> {
-    let mut action_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    for e in events.iter().filter(|e| e.event_type == crate::event::EventType::ToolCallCompleted) {
-        let tool = e.payload.get("tool_name").and_then(|v| v.as_str()).unwrap_or("");
+    let mut action_counts: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    for e in events
+        .iter()
+        .filter(|e| e.event_type == crate::event::EventType::ToolCallCompleted)
+    {
+        let tool = e
+            .payload
+            .get("tool_name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         let target = e.payload.get("file").and_then(|v| v.as_str()).unwrap_or("");
         let key = format!("{}:{}", tool, target);
         *action_counts.entry(key).or_insert(0) += 1;
     }
 
-    action_counts.into_iter()
+    action_counts
+        .into_iter()
         .filter(|(_, count)| *count >= 3)
         .map(|(action, count)| {
             let id = format!("inferred-{}", uuid_v4_simple());
@@ -401,15 +492,22 @@ pub fn infer_hypotheses_from_patterns(events: &[crate::event::DomainEvent]) -> V
 /// Extract failure-derived constraints from recurring error patterns.
 ///
 /// Errors appearing ≥ threshold times generate automatic constraints.
-pub fn extract_failure_constraints(events: &[crate::event::DomainEvent], threshold: usize) -> Vec<String> {
+pub fn extract_failure_constraints(
+    events: &[crate::event::DomainEvent],
+    threshold: usize,
+) -> Vec<String> {
     let mut counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    for e in events.iter().filter(|e| e.event_type == crate::event::EventType::Error) {
+    for e in events
+        .iter()
+        .filter(|e| e.event_type == crate::event::EventType::Error)
+    {
         if let Some(msg) = e.payload.get("message").and_then(|v| v.as_str()) {
             let normalized = normalize_error_for_constraint(msg);
             *counts.entry(normalized).or_insert(0) += 1;
         }
     }
-    counts.into_iter()
+    counts
+        .into_iter()
         .filter(|(_, count)| *count >= threshold)
         .map(|(msg, count)| format!("Avoid: {} (seen {} times)", msg, count))
         .collect()
@@ -459,9 +557,18 @@ mod tests {
     fn episode_summary_created_from_events() {
         // Arrange
         let events = vec![
-            make_event(EventType::ToolCallCompleted, serde_json::json!({"tool_name": "read", "file": "src/lib.rs"})),
-            make_event(EventType::ToolCallCompleted, serde_json::json!({"tool_name": "edit", "file": "src/lib.rs"})),
-            make_event(EventType::ConstraintLearned, serde_json::json!({"constraint": "no unwrap in auth", "scope": "workspace-local"})),
+            make_event(
+                EventType::ToolCallCompleted,
+                serde_json::json!({"tool_name": "read", "file": "src/lib.rs"}),
+            ),
+            make_event(
+                EventType::ToolCallCompleted,
+                serde_json::json!({"tool_name": "edit", "file": "src/lib.rs"}),
+            ),
+            make_event(
+                EventType::ConstraintLearned,
+                serde_json::json!({"constraint": "no unwrap in auth", "scope": "workspace-local"}),
+            ),
         ];
 
         // Act
@@ -474,15 +581,21 @@ mod tests {
         assert_eq!(summary.schema_version, CURRENT_SCHEMA_VERSION);
         assert_eq!(summary.machine_summary.objective, "fix auth bug");
         assert_eq!(summary.machine_summary.key_actions.len(), 2);
-        assert!(summary.machine_summary.learned_constraints.contains(&"no unwrap in auth".to_string()));
+        assert!(
+            summary
+                .machine_summary
+                .learned_constraints
+                .contains(&"no unwrap in auth".to_string())
+        );
         assert_eq!(summary.machine_summary.outcome, EpisodeOutcome::Success);
     }
 
     #[test]
     fn episode_summary_machine_part_has_structured_fields() {
-        let events = vec![
-            make_event(EventType::ToolCallCompleted, serde_json::json!({"tool_name": "bash"})),
-        ];
+        let events = vec![make_event(
+            EventType::ToolCallCompleted,
+            serde_json::json!({"tool_name": "bash"}),
+        )];
         let summary = EpisodeSummary::from_events("r-1", None, "test", &events);
 
         assert!(!summary.machine_summary.objective.is_empty());
@@ -491,9 +604,10 @@ mod tests {
 
     #[test]
     fn episode_summary_serde_roundtrip() {
-        let events = vec![
-            make_event(EventType::RunStateChanged, serde_json::json!({"from": "Planning", "to": "Executing"})),
-        ];
+        let events = vec![make_event(
+            EventType::RunStateChanged,
+            serde_json::json!({"from": "Planning", "to": "Executing"}),
+        )];
         let summary = EpisodeSummary::from_events("r-1", None, "plan", &events);
 
         let json = serde_json::to_string(&summary).unwrap();
@@ -508,8 +622,14 @@ mod tests {
     #[test]
     fn episode_summary_detects_partial_outcome_on_errors() {
         let events = vec![
-            make_event(EventType::ToolCallCompleted, serde_json::json!({"tool_name": "edit"})),
-            make_event(EventType::Error, serde_json::json!({"message": "compile error"})),
+            make_event(
+                EventType::ToolCallCompleted,
+                serde_json::json!({"tool_name": "edit"}),
+            ),
+            make_event(
+                EventType::Error,
+                serde_json::json!({"message": "compile error"}),
+            ),
         ];
         let summary = EpisodeSummary::from_events("r-1", None, "fix bug", &events);
 
@@ -518,14 +638,20 @@ mod tests {
 
     #[test]
     fn episode_summary_tracks_unresolved_hypotheses() {
-        let h1 = make_event(EventType::HypothesisFormed, serde_json::json!({
-            "hypothesis": "bug in jwt.rs", "rationale": "test fails"
-        }));
+        let h1 = make_event(
+            EventType::HypothesisFormed,
+            serde_json::json!({
+                "hypothesis": "bug in jwt.rs", "rationale": "test fails"
+            }),
+        );
         let h1_id = h1.event_id.as_str().to_string();
 
-        let h2 = make_event(EventType::HypothesisFormed, serde_json::json!({
-            "hypothesis": "race condition", "rationale": "flaky test"
-        }));
+        let h2 = make_event(
+            EventType::HypothesisFormed,
+            serde_json::json!({
+                "hypothesis": "race condition", "rationale": "flaky test"
+            }),
+        );
 
         let invalidation = DomainEvent {
             event_id: EventId::generate(),
@@ -573,7 +699,12 @@ mod tests {
 
     #[test]
     fn episode_outcome_serde_roundtrip() {
-        for outcome in &[EpisodeOutcome::Success, EpisodeOutcome::Failure, EpisodeOutcome::Partial, EpisodeOutcome::Inconclusive] {
+        for outcome in &[
+            EpisodeOutcome::Success,
+            EpisodeOutcome::Failure,
+            EpisodeOutcome::Partial,
+            EpisodeOutcome::Inconclusive,
+        ] {
             let json = serde_json::to_string(outcome).unwrap();
             let back: EpisodeOutcome = serde_json::from_str(&json).unwrap();
             assert_eq!(*outcome, back);
@@ -584,34 +715,40 @@ mod tests {
 
     #[test]
     fn ttl_promoted_to_permanent_when_workspace_constraint() {
-        let events = vec![
-            make_event(EventType::ConstraintLearned, serde_json::json!({
+        let events = vec![make_event(
+            EventType::ConstraintLearned,
+            serde_json::json!({
                 "constraint": "no unwrap in auth", "scope": "workspace-local"
-            })),
-        ];
+            }),
+        )];
         let summary = EpisodeSummary::from_events("r-1", None, "task", &events);
-        assert_eq!(summary.ttl_policy, TtlPolicy::Permanent,
-            "Workspace constraints must survive run end");
+        assert_eq!(
+            summary.ttl_policy,
+            TtlPolicy::Permanent,
+            "Workspace constraints must survive run end"
+        );
     }
 
     #[test]
     fn ttl_stays_run_scoped_when_only_run_local() {
-        let events = vec![
-            make_event(EventType::ConstraintLearned, serde_json::json!({
+        let events = vec![make_event(
+            EventType::ConstraintLearned,
+            serde_json::json!({
                 "constraint": "retry 3 times", "scope": "run-local"
-            })),
-        ];
+            }),
+        )];
         let summary = EpisodeSummary::from_events("r-1", None, "task", &events);
         assert_eq!(summary.ttl_policy, TtlPolicy::RunScoped);
     }
 
     #[test]
     fn ttl_time_scoped_when_task_local() {
-        let events = vec![
-            make_event(EventType::ConstraintLearned, serde_json::json!({
+        let events = vec![make_event(
+            EventType::ConstraintLearned,
+            serde_json::json!({
                 "constraint": "auth module fragile", "scope": "task-local"
-            })),
-        ];
+            }),
+        )];
         let summary = EpisodeSummary::from_events("r-1", None, "task", &events);
         assert_eq!(summary.ttl_policy, TtlPolicy::TimeScoped { seconds: 86400 });
     }
@@ -621,40 +758,62 @@ mod tests {
     #[test]
     fn from_events_populates_successful_steps() {
         let events = vec![
-            make_event(EventType::ToolCallCompleted, serde_json::json!({
-                "tool_name": "edit", "file": "src/auth.rs", "success": true
-            })),
-            make_event(EventType::ToolCallCompleted, serde_json::json!({
-                "tool_name": "bash", "success": true
-            })),
+            make_event(
+                EventType::ToolCallCompleted,
+                serde_json::json!({
+                    "tool_name": "edit", "file": "src/auth.rs", "success": true
+                }),
+            ),
+            make_event(
+                EventType::ToolCallCompleted,
+                serde_json::json!({
+                    "tool_name": "bash", "success": true
+                }),
+            ),
         ];
         let summary = EpisodeSummary::from_events("r-1", None, "fix", &events);
-        assert!(!summary.machine_summary.successful_steps.is_empty(),
-            "Should extract successful tool calls");
+        assert!(
+            !summary.machine_summary.successful_steps.is_empty(),
+            "Should extract successful tool calls"
+        );
     }
 
     #[test]
     fn from_events_populates_failed_attempts() {
         let events = vec![
-            make_event(EventType::Error, serde_json::json!({"message": "compile error"})),
-            make_event(EventType::ToolCallCompleted, serde_json::json!({
-                "tool_name": "edit", "success": false, "error": "file not found"
-            })),
+            make_event(
+                EventType::Error,
+                serde_json::json!({"message": "compile error"}),
+            ),
+            make_event(
+                EventType::ToolCallCompleted,
+                serde_json::json!({
+                    "tool_name": "edit", "success": false, "error": "file not found"
+                }),
+            ),
         ];
         let summary = EpisodeSummary::from_events("r-1", None, "fix", &events);
-        assert!(!summary.machine_summary.failed_attempts.is_empty(),
-            "Should extract failures");
+        assert!(
+            !summary.machine_summary.failed_attempts.is_empty(),
+            "Should extract failures"
+        );
     }
 
     #[test]
     fn from_events_separates_success_from_failure() {
         let events = vec![
-            make_event(EventType::ToolCallCompleted, serde_json::json!({
-                "tool_name": "read", "success": true, "file": "src/a.rs"
-            })),
-            make_event(EventType::ToolCallCompleted, serde_json::json!({
-                "tool_name": "edit", "success": false, "error": "permission denied"
-            })),
+            make_event(
+                EventType::ToolCallCompleted,
+                serde_json::json!({
+                    "tool_name": "read", "success": true, "file": "src/a.rs"
+                }),
+            ),
+            make_event(
+                EventType::ToolCallCompleted,
+                serde_json::json!({
+                    "tool_name": "edit", "success": false, "error": "permission denied"
+                }),
+            ),
         ];
         let summary = EpisodeSummary::from_events("r-1", None, "task", &events);
         assert_eq!(summary.machine_summary.successful_steps.len(), 1);
@@ -671,7 +830,11 @@ mod tests {
 
     #[test]
     fn lifecycle_serde_roundtrip() {
-        for lc in &[MemoryLifecycle::Active, MemoryLifecycle::Cooling, MemoryLifecycle::Archived] {
+        for lc in &[
+            MemoryLifecycle::Active,
+            MemoryLifecycle::Cooling,
+            MemoryLifecycle::Archived,
+        ] {
             let json = serde_json::to_string(lc).unwrap();
             let back: MemoryLifecycle = serde_json::from_str(&json).unwrap();
             assert_eq!(*lc, back);
@@ -701,7 +864,8 @@ mod tests {
 
     #[test]
     fn lifecycle_backward_compat() {
-        let mut val = serde_json::to_value(&EpisodeSummary::from_events("r-1", None, "t", &[])).unwrap();
+        let mut val =
+            serde_json::to_value(&EpisodeSummary::from_events("r-1", None, "t", &[])).unwrap();
         val.as_object_mut().unwrap().remove("lifecycle");
         let back: EpisodeSummary = serde_json::from_value(val).unwrap();
         assert_eq!(back.lifecycle, MemoryLifecycle::Active);
@@ -756,19 +920,32 @@ mod tests {
     #[test]
     fn recurring_error_generates_constraint() {
         let events = vec![
-            make_event(EventType::Error, serde_json::json!({"message": "file not found"})),
-            make_event(EventType::Error, serde_json::json!({"message": "file not found"})),
-            make_event(EventType::Error, serde_json::json!({"message": "file not found"})),
+            make_event(
+                EventType::Error,
+                serde_json::json!({"message": "file not found"}),
+            ),
+            make_event(
+                EventType::Error,
+                serde_json::json!({"message": "file not found"}),
+            ),
+            make_event(
+                EventType::Error,
+                serde_json::json!({"message": "file not found"}),
+            ),
         ];
         let constraints = extract_failure_constraints(&events, 3);
-        assert!(!constraints.is_empty(), "Should generate constraint for recurring error");
+        assert!(
+            !constraints.is_empty(),
+            "Should generate constraint for recurring error"
+        );
     }
 
     #[test]
     fn isolated_error_no_constraint() {
-        let events = vec![
-            make_event(EventType::Error, serde_json::json!({"message": "timeout"})),
-        ];
+        let events = vec![make_event(
+            EventType::Error,
+            serde_json::json!({"message": "timeout"}),
+        )];
         let constraints = extract_failure_constraints(&events, 3);
         assert!(constraints.is_empty());
     }
@@ -776,24 +953,51 @@ mod tests {
     #[test]
     fn from_events_includes_failure_constraints() {
         let events = vec![
-            make_event(EventType::Error, serde_json::json!({"message": "compile error"})),
-            make_event(EventType::Error, serde_json::json!({"message": "compile error"})),
-            make_event(EventType::Error, serde_json::json!({"message": "compile error"})),
+            make_event(
+                EventType::Error,
+                serde_json::json!({"message": "compile error"}),
+            ),
+            make_event(
+                EventType::Error,
+                serde_json::json!({"message": "compile error"}),
+            ),
+            make_event(
+                EventType::Error,
+                serde_json::json!({"message": "compile error"}),
+            ),
         ];
         let summary = EpisodeSummary::from_events("r-1", None, "fix", &events);
-        assert!(summary.machine_summary.learned_constraints.iter().any(|c| c.contains("compile error")),
-            "Should include failure-derived constraint in learned_constraints");
+        assert!(
+            summary
+                .machine_summary
+                .learned_constraints
+                .iter()
+                .any(|c| c.contains("compile error")),
+            "Should include failure-derived constraint in learned_constraints"
+        );
     }
 
     #[test]
     fn infer_hypotheses_from_repeated_actions() {
         let events = vec![
-            make_event(EventType::ToolCallCompleted, serde_json::json!({"tool_name": "edit", "file": "src/auth.rs"})),
-            make_event(EventType::ToolCallCompleted, serde_json::json!({"tool_name": "edit", "file": "src/auth.rs"})),
-            make_event(EventType::ToolCallCompleted, serde_json::json!({"tool_name": "edit", "file": "src/auth.rs"})),
+            make_event(
+                EventType::ToolCallCompleted,
+                serde_json::json!({"tool_name": "edit", "file": "src/auth.rs"}),
+            ),
+            make_event(
+                EventType::ToolCallCompleted,
+                serde_json::json!({"tool_name": "edit", "file": "src/auth.rs"}),
+            ),
+            make_event(
+                EventType::ToolCallCompleted,
+                serde_json::json!({"tool_name": "edit", "file": "src/auth.rs"}),
+            ),
         ];
         let hypotheses = infer_hypotheses_from_patterns(&events);
-        assert!(!hypotheses.is_empty(), "Should infer hypothesis from repeated pattern");
+        assert!(
+            !hypotheses.is_empty(),
+            "Should infer hypothesis from repeated pattern"
+        );
         assert_eq!(hypotheses[0].source, HypothesisSource::Inferred);
         assert_eq!(hypotheses[0].confidence, 0.3);
     }

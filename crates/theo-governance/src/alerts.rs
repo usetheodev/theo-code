@@ -1,5 +1,4 @@
 /// Risk alert system for GRAPHCTX governance.
-
 use crate::impact::ImpactReport;
 
 // ---------------------------------------------------------------------------

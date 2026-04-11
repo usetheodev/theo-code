@@ -6,8 +6,8 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime};
 
 use theo_domain::graph_context::{
@@ -31,9 +31,9 @@ use theo_engine_retrieval::search::{FileBm25, MultiSignalScorer};
 use theo_engine_retrieval::tantivy_search::FileTantivyIndex;
 
 #[cfg(feature = "dense-retrieval")]
-use theo_engine_retrieval::embedding::neural::NeuralEmbedder;
-#[cfg(feature = "dense-retrieval")]
 use theo_engine_retrieval::embedding::cache::EmbeddingCache;
+#[cfg(feature = "dense-retrieval")]
+use theo_engine_retrieval::embedding::neural::NeuralEmbedder;
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -123,7 +123,10 @@ impl GraphContextProvider for GraphContextService {
         // Fast path: already ready or building.
         {
             let current = self.state.read().await;
-            if matches!(*current, GraphBuildState::Ready(_) | GraphBuildState::Building { .. }) {
+            if matches!(
+                *current,
+                GraphBuildState::Ready(_) | GraphBuildState::Building { .. }
+            ) {
                 return Ok(());
             }
         }
@@ -162,7 +165,11 @@ impl GraphContextProvider for GraphContextService {
         }
 
         // Prevent concurrent builds.
-        if self.build_in_progress.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
+        if self
+            .build_in_progress
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
             return Ok(()); // Another build already running.
         }
 
@@ -203,7 +210,8 @@ impl GraphContextProvider for GraphContextService {
                     #[cfg(feature = "tantivy-backend")]
                     let tantivy_index = FileTantivyIndex::build(&graph).ok();
                     #[cfg(feature = "dense-retrieval")]
-                    let (embedder, embedding_cache) = build_dense_components(&graph, &dir_for_cache);
+                    let (embedder, embedding_cache) =
+                        build_dense_components(&graph, &dir_for_cache);
 
                     // Generate Code Wiki (deterministic, cached)
                     generate_wiki_if_stale(&graph, &communities, &dir_for_cache);
@@ -272,34 +280,57 @@ impl GraphContextProvider for GraphContextService {
         // Gate 2: Decision confidence from raw signals (not normalized)
         // Gate 3: Per-category threshold
         {
-            use theo_engine_retrieval::wiki::lookup::{evaluate_direct_return, DEFAULT_BM25_FLOOR};
+            use theo_engine_retrieval::wiki::lookup::{DEFAULT_BM25_FLOOR, evaluate_direct_return};
 
             let wiki_dir = std::path::PathBuf::from(".theo/wiki");
             let wiki_results = theo_engine_retrieval::wiki::lookup::lookup(&wiki_dir, query, 3);
 
             // Ranking decision log
             if !wiki_results.is_empty() {
-                let (allow, conf, reason) = evaluate_direct_return(&wiki_results, query, DEFAULT_BM25_FLOOR);
+                let (allow, conf, reason) =
+                    evaluate_direct_return(&wiki_results, query, DEFAULT_BM25_FLOOR);
                 let query_class = theo_engine_retrieval::wiki::model::classify_query(query);
-                eprintln!("[wiki-decision] query=\"{}\" class={} allow={} conf={:.2} reason={} top=[{}]",
-                    query, query_class.as_str(), allow, conf, reason,
-                    wiki_results.iter().take(3).map(|r| format!("{}:T:{}:bm25={:.1}:conf={:.0}%",
-                        r.slug, r.authority_tier.as_str(), r.bm25_raw, r.confidence * 100.0
-                    )).collect::<Vec<_>>().join(", ")
+                eprintln!(
+                    "[wiki-decision] query=\"{}\" class={} allow={} conf={:.2} reason={} top=[{}]",
+                    query,
+                    query_class.as_str(),
+                    allow,
+                    conf,
+                    reason,
+                    wiki_results
+                        .iter()
+                        .take(3)
+                        .map(|r| format!(
+                            "{}:T:{}:bm25={:.1}:conf={:.0}%",
+                            r.slug,
+                            r.authority_tier.as_str(),
+                            r.bm25_raw,
+                            r.confidence * 100.0
+                        ))
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 );
             }
 
-            let (allow, _conf, _reason) = evaluate_direct_return(&wiki_results, query, DEFAULT_BM25_FLOOR);
+            let (allow, _conf, _reason) =
+                evaluate_direct_return(&wiki_results, query, DEFAULT_BM25_FLOOR);
 
             if allow {
                 if let Some(top) = wiki_results.first() {
                     if top.token_count <= budget_tokens {
-                        let blocks: Vec<ContextBlock> = wiki_results.iter()
+                        let blocks: Vec<ContextBlock> = wiki_results
+                            .iter()
                             .take(3)
-                            .filter(|r| r.bm25_raw >= DEFAULT_BM25_FLOOR && r.token_count <= budget_tokens)
+                            .filter(|r| {
+                                r.bm25_raw >= DEFAULT_BM25_FLOOR && r.token_count <= budget_tokens
+                            })
                             .map(|r| ContextBlock {
                                 block_id: format!("blk-wiki-{}", r.slug),
-                                source_id: format!("wiki:{}[T:{}]", r.slug, r.authority_tier.as_str()),
+                                source_id: format!(
+                                    "wiki:{}[T:{}]",
+                                    r.slug,
+                                    r.authority_tier.as_str()
+                                ),
                                 content: r.content.clone(),
                                 token_count: r.token_count,
                                 score: r.confidence,
@@ -308,14 +339,18 @@ impl GraphContextProvider for GraphContextService {
 
                         if !blocks.is_empty() {
                             let total_tokens: usize = blocks.iter().map(|b| b.token_count).sum();
-                            let query_class = theo_engine_retrieval::wiki::model::classify_query(query);
+                            let query_class =
+                                theo_engine_retrieval::wiki::model::classify_query(query);
                             return Ok(GraphContextResult {
                                 total_tokens,
                                 budget_tokens,
                                 exploration_hints: format!(
                                     "Wiki direct return: {} (T:{}, bm25={:.1}, class={}, {})",
-                                    top.title, top.authority_tier.as_str(),
-                                    top.bm25_raw, query_class.as_str(), top.page_kind
+                                    top.title,
+                                    top.authority_tier.as_str(),
+                                    top.bm25_raw,
+                                    query_class.as_str(),
+                                    top.page_kind
                                 ),
                                 blocks,
                             });
@@ -385,41 +420,63 @@ impl GraphContextProvider for GraphContextService {
             }
         };
 
-        let payload = assembly::assemble_files_direct(
-            &file_scores,
-            &graph_state.graph,
-            &graph_state.communities,
-            budget_tokens,
-        );
+        // File Retriever: file-first pipeline with reranking + graph expansion.
+        // Falls back to community-level assembly if file retriever returns empty.
+        let blocks: Vec<ContextBlock> = {
+            let config = theo_engine_retrieval::file_retriever::RerankConfig::default();
+            let seen = std::collections::HashSet::new();
+            let retrieval_result = theo_engine_retrieval::file_retriever::retrieve_files(
+                &graph_state.graph,
+                &graph_state.communities,
+                query,
+                &config,
+                &seen,
+            );
 
-        let blocks: Vec<ContextBlock> = payload
-            .items
-            .iter()
-            .map(|item| ContextBlock {
-                block_id: format!("blk-{}", item.community_id),
-                source_id: item.community_id.clone(),
-                content: item.content.clone(),
-                token_count: item.token_count,
-                score: item.score,
-            })
-            .collect();
+            if !retrieval_result.primary_files.is_empty() {
+                // File-first path: build blocks from ranked files
+                theo_engine_retrieval::file_retriever::build_context_blocks(
+                    &retrieval_result,
+                    &graph_state.graph,
+                    budget_tokens,
+                )
+            } else {
+                // Fallback: community-level assembly (legacy path)
+                let payload = assembly::assemble_files_direct(
+                    &file_scores,
+                    &graph_state.graph,
+                    &graph_state.communities,
+                    budget_tokens,
+                );
+                payload
+                    .items
+                    .iter()
+                    .map(|item| ContextBlock {
+                        block_id: format!("blk-{}", item.community_id),
+                        source_id: item.community_id.clone(),
+                        content: item.content.clone(),
+                        token_count: item.token_count,
+                        score: item.score,
+                    })
+                    .collect()
+            }
+        };
+
+        // Compute totals from blocks
+        let total_tokens: usize = blocks.iter().map(|b| b.token_count).sum();
 
         // WRITE-BACK: Save RRF result to wiki cache for future queries.
-        // This is the "knowledge compounding" cycle: each query that goes through
-        // the full pipeline enriches the wiki, making future queries faster.
-        // Only writes if: (1) we have meaningful content, (2) wiki dir exists.
-        if !blocks.is_empty() && payload.total_tokens > 100 {
+        if !blocks.is_empty() && total_tokens > 100 {
             let wiki_dir = std::path::PathBuf::from(".theo/wiki/cache");
             if let Err(e) = write_back_to_wiki(&wiki_dir, query, &blocks) {
-                // Best-effort: don't fail the query if write-back fails
                 eprintln!("[wiki-cache] Write-back failed: {e}");
             }
         }
 
         Ok(GraphContextResult {
-            total_tokens: payload.total_tokens,
-            budget_tokens: payload.budget_tokens,
-            exploration_hints: payload.exploration_hints,
+            total_tokens,
+            budget_tokens,
+            exploration_hints: String::new(),
             blocks,
         })
     }
@@ -438,9 +495,7 @@ impl GraphContextProvider for GraphContextService {
 // ---------------------------------------------------------------------------
 
 /// Full pipeline: walk → parse → convert → build_graph → cluster → scorer.
-fn build_graph_from_project(
-    project_dir: &Path,
-) -> (CodeGraph, Vec<Community>) {
+fn build_graph_from_project(project_dir: &Path) -> (CodeGraph, Vec<Community>) {
     // Step 1: Walk files and parse with tree-sitter.
     let file_data = parse_project_files(project_dir);
 
@@ -467,7 +522,9 @@ fn detect_project_language(project_dir: &Path) -> Option<&'static str> {
         Some("rs")
     } else if project_dir.join("go.mod").exists() || project_dir.join("go.work").exists() {
         Some("go")
-    } else if project_dir.join("pyproject.toml").exists() || project_dir.join("requirements.txt").exists() {
+    } else if project_dir.join("pyproject.toml").exists()
+        || project_dir.join("requirements.txt").exists()
+    {
         Some("py")
     } else if project_dir.join("package.json").exists() {
         Some("ts") // covers TS and JS projects
@@ -489,12 +546,12 @@ fn parse_project_files(project_dir: &Path) -> Vec<FileData> {
         let _ = wb.add_ignore(project_dir.join(".gitignore"));
         wb.add_custom_ignore_filename(".theoignore");
         wb.filter_entry(|entry| {
-                if entry.file_type().map_or(false, |ft| ft.is_dir()) {
-                    let name = entry.file_name().to_str().unwrap_or("");
-                    return !theo_domain::graph_context::EXCLUDED_DIRS.contains(&name);
-                }
-                true
-            });
+            if entry.file_type().map_or(false, |ft| ft.is_dir()) {
+                let name = entry.file_name().to_str().unwrap_or("");
+                return !theo_domain::graph_context::EXCLUDED_DIRS.contains(&name);
+            }
+            true
+        });
         let walker = wb.build();
 
         let mut primary = Vec::new();
@@ -509,7 +566,9 @@ fn parse_project_files(project_dir: &Path) -> Vec<FileData> {
                 continue;
             }
             let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-            if primary_ext.is_some_and(|pe| ext == pe || (pe == "ts" && (ext == "tsx" || ext == "js" || ext == "jsx"))) {
+            if primary_ext.is_some_and(|pe| {
+                ext == pe || (pe == "ts" && (ext == "tsx" || ext == "js" || ext == "jsx"))
+            }) {
                 primary.push(path);
             } else {
                 secondary.push(path);
@@ -526,9 +585,11 @@ fn parse_project_files(project_dir: &Path) -> Vec<FileData> {
         }
 
         // Step 1: Guarantee breadth — at least 1 file per top-level directory.
-        let mut by_dir: std::collections::HashMap<String, Vec<std::path::PathBuf>> = std::collections::HashMap::new();
+        let mut by_dir: std::collections::HashMap<String, Vec<std::path::PathBuf>> =
+            std::collections::HashMap::new();
         for path in &all_files {
-            let dir = path.strip_prefix(project_dir)
+            let dir = path
+                .strip_prefix(project_dir)
                 .unwrap_or(path)
                 .components()
                 .next()
@@ -538,13 +599,18 @@ fn parse_project_files(project_dir: &Path) -> Vec<FileData> {
         }
 
         let mut selected: Vec<std::path::PathBuf> = Vec::with_capacity(MAX_FILES_TO_PARSE);
-        let mut selected_set: std::collections::HashSet<std::path::PathBuf> = std::collections::HashSet::new();
+        let mut selected_set: std::collections::HashSet<std::path::PathBuf> =
+            std::collections::HashSet::new();
 
         // Pick 1 file per dir (most recently modified)
         for (_dir, mut files) in by_dir {
             files.sort_by(|a, b| {
-                let ma = std::fs::metadata(a).and_then(|m| m.modified()).unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-                let mb = std::fs::metadata(b).and_then(|m| m.modified()).unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                let ma = std::fs::metadata(a)
+                    .and_then(|m| m.modified())
+                    .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                let mb = std::fs::metadata(b)
+                    .and_then(|m| m.modified())
+                    .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
                 mb.cmp(&ma) // newest first
             });
             if let Some(f) = files.first() {
@@ -556,8 +622,12 @@ fn parse_project_files(project_dir: &Path) -> Vec<FileData> {
 
         // Step 2: Fill remaining slots by mtime (newest first, across all dirs).
         all_files.sort_by(|a, b| {
-            let ma = std::fs::metadata(a).and_then(|m| m.modified()).unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-            let mb = std::fs::metadata(b).and_then(|m| m.modified()).unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+            let ma = std::fs::metadata(a)
+                .and_then(|m| m.modified())
+                .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+            let mb = std::fs::metadata(b)
+                .and_then(|m| m.modified())
+                .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
             mb.cmp(&ma)
         });
 
@@ -605,7 +675,12 @@ fn parse_project_files(project_dir: &Path) -> Vec<FileData> {
             .map(|d| d.as_secs_f64())
             .unwrap_or(0.0);
 
-        file_data_list.push(convert_extraction(extraction, &rel_path, language, last_modified));
+        file_data_list.push(convert_extraction(
+            extraction,
+            &rel_path,
+            language,
+            last_modified,
+        ));
     }
 
     file_data_list
@@ -658,9 +733,12 @@ fn write_back_to_wiki(
     let path = cache_dir.join(format!("{}.md", slug));
 
     // Load current graph_hash for staleness tracking
-    let graph_hash = cache_dir.parent()
+    let graph_hash = cache_dir
+        .parent()
         .and_then(|wiki_dir| wiki_dir.parent().and_then(|p| p.parent()))
-        .and_then(|project_dir| theo_engine_retrieval::wiki::persistence::load_manifest(project_dir))
+        .and_then(|project_dir| {
+            theo_engine_retrieval::wiki::persistence::load_manifest(project_dir)
+        })
         .map(|m| m.graph_hash)
         .unwrap_or(0);
 
@@ -684,7 +762,10 @@ fn write_back_to_wiki(
     let mut md = theo_engine_retrieval::wiki::model::render_frontmatter(&fm);
 
     md += &format!("# Query: {}\n\n", query);
-    md += &format!("> Cached from GRAPHCTX pipeline | {} results\n\n", blocks.len());
+    md += &format!(
+        "> Cached from GRAPHCTX pipeline | {} results\n\n",
+        blocks.len()
+    );
 
     // Relevant files table
     md += "## Relevant Files\n\n";
@@ -698,14 +779,21 @@ fn write_back_to_wiki(
     // Code context from each block
     md += "## Context\n\n";
     for block in blocks {
-        let preview: String = block.content.lines().take(20).collect::<Vec<_>>().join("\n");
+        let preview: String = block
+            .content
+            .lines()
+            .take(20)
+            .collect::<Vec<_>>()
+            .join("\n");
         md += &format!("### {}\n\n{}\n\n", block.source_id, preview);
     }
 
     md += "---\n";
-    md += &format!("*Generated by GRAPHCTX | {} blocks, {:.0} tokens*\n",
+    md += &format!(
+        "*Generated by GRAPHCTX | {} blocks, {:.0} tokens*\n",
         blocks.len(),
-        blocks.iter().map(|b| b.token_count as f64).sum::<f64>());
+        blocks.iter().map(|b| b.token_count as f64).sum::<f64>()
+    );
 
     std::fs::write(&path, md)?;
 
@@ -749,7 +837,11 @@ fn generate_wiki_if_stale(graph: &CodeGraph, communities: &[Community], project_
             // Load existing docs from disk for incremental merge
             let existing_docs = wiki::generator::generate_wiki(communities, graph, project_name);
             let (wiki, stats) = wiki::generator::generate_wiki_incremental(
-                communities, graph, project_name, manifest, &existing_docs.docs,
+                communities,
+                graph,
+                project_name,
+                manifest,
+                &existing_docs.docs,
             );
             let detail = format!("incremental | {}", stats);
             (wiki, detail)
@@ -767,9 +859,8 @@ fn generate_wiki_if_stale(graph: &CodeGraph, communities: &[Community], project_
 
     // Cleanup orphaned pages before writing
     let wiki_dir = project_dir.join(".theo").join("wiki");
-    let current_slugs: std::collections::HashSet<String> = wiki_data.docs.iter()
-        .map(|d| d.slug.clone())
-        .collect();
+    let current_slugs: std::collections::HashSet<String> =
+        wiki_data.docs.iter().map(|d| d.slug.clone()).collect();
     let removed = wiki::persistence::cleanup_orphaned_pages(&wiki_dir, &current_slugs);
     if removed > 0 {
         eprintln!("[wiki] Cleaned up {} orphaned pages", removed);
@@ -780,7 +871,8 @@ fn generate_wiki_if_stale(graph: &CodeGraph, communities: &[Community], project_
     } else {
         eprintln!(
             "[wiki] Generated {} pages in .theo/wiki/ ({})",
-            wiki_data.docs.len(), log_detail
+            wiki_data.docs.len(),
+            log_detail
         );
         wiki::persistence::append_log(project_dir, "ingest", &log_detail);
 
@@ -788,7 +880,10 @@ fn generate_wiki_if_stale(graph: &CodeGraph, communities: &[Community], project_
         let stale_moved = wiki::persistence::mark_stale_cache(&wiki_dir, hash);
         let gc_removed = wiki::persistence::gc_cold_cache(&wiki_dir, 604800); // 7 days
         if stale_moved > 0 || gc_removed > 0 {
-            eprintln!("[wiki] Cache lifecycle: {} marked stale, {} GC'd", stale_moved, gc_removed);
+            eprintln!(
+                "[wiki] Cache lifecycle: {} marked stale, {} GC'd",
+                stale_moved, gc_removed
+            );
         }
     }
 }
@@ -930,7 +1025,10 @@ fn convert_extraction(
             source_symbol: r.source_symbol.clone(),
             source_file: r.source_file.to_string_lossy().to_string(),
             target_symbol: r.target_symbol.clone(),
-            target_file: r.target_file.as_ref().map(|p| p.to_string_lossy().to_string()),
+            target_file: r
+                .target_file
+                .as_ref()
+                .map(|p| p.to_string_lossy().to_string()),
             kind: convert_reference_kind(&r.reference_kind),
         })
         .collect();
@@ -960,7 +1058,7 @@ fn convert_extraction(
     }
 }
 
-use crate::use_cases::conversion::{convert_symbol_kind, convert_reference_kind};
+use crate::use_cases::conversion::{convert_reference_kind, convert_symbol_kind};
 
 // ---------------------------------------------------------------------------
 // Cache
@@ -1001,12 +1099,12 @@ fn compute_project_hash(project_dir: &Path) -> String {
     let _ = hash_wb.add_ignore(project_dir.join(".gitignore"));
     hash_wb.add_custom_ignore_filename(".theoignore");
     hash_wb.filter_entry(|entry| {
-            if entry.file_type().map_or(false, |ft| ft.is_dir()) {
-                let name = entry.file_name().to_str().unwrap_or("");
-                return !theo_domain::graph_context::EXCLUDED_DIRS.contains(&name);
-            }
-            true
-        });
+        if entry.file_type().map_or(false, |ft| ft.is_dir()) {
+            let name = entry.file_name().to_str().unwrap_or("");
+            return !theo_domain::graph_context::EXCLUDED_DIRS.contains(&name);
+        }
+        true
+    });
     let walker = hash_wb.build();
 
     for entry in walker.flatten() {
@@ -1015,7 +1113,24 @@ fn compute_project_hash(project_dir: &Path) -> String {
             continue;
         }
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-        if !matches!(ext, "rs" | "py" | "ts" | "tsx" | "js" | "jsx" | "go" | "java" | "rb" | "php" | "c" | "cpp" | "cs" | "sh" | "yaml" | "toml") {
+        if !matches!(
+            ext,
+            "rs" | "py"
+                | "ts"
+                | "tsx"
+                | "js"
+                | "jsx"
+                | "go"
+                | "java"
+                | "rb"
+                | "php"
+                | "c"
+                | "cpp"
+                | "cs"
+                | "sh"
+                | "yaml"
+                | "toml"
+        ) {
             continue;
         }
 
@@ -1045,7 +1160,10 @@ fn compute_project_hash(project_dir: &Path) -> String {
         // Mtime or size changed (or not in cache) → read and hash
         if let Ok(content) = std::fs::read(path) {
             let file_hash = blake3::hash(&content).to_hex().to_string();
-            cached.insert(rel.clone(), (current_mtime, current_size, file_hash.clone()));
+            cached.insert(
+                rel.clone(),
+                (current_mtime, current_size, file_hash.clone()),
+            );
             entries.insert(rel, file_hash);
             cache_dirty = true;
         }
@@ -1053,7 +1171,8 @@ fn compute_project_hash(project_dir: &Path) -> String {
 
     // Remove stale entries (files that no longer exist)
     let current_keys: std::collections::HashSet<&String> = entries.keys().collect();
-    let stale: Vec<String> = cached.keys()
+    let stale: Vec<String> = cached
+        .keys()
         .filter(|k| !current_keys.contains(k))
         .cloned()
         .collect();
@@ -1067,7 +1186,10 @@ fn compute_project_hash(project_dir: &Path) -> String {
         if let Some(parent) = cache_path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        let _ = std::fs::write(&cache_path, serde_json::to_string(&cached).unwrap_or_default());
+        let _ = std::fs::write(
+            &cache_path,
+            serde_json::to_string(&cached).unwrap_or_default(),
+        );
     }
 
     let mut project_hasher = blake3::Hasher::new();
@@ -1199,7 +1321,10 @@ mod tests {
         service.initialize(tmp.path()).await.unwrap(); // Returns immediately
 
         // Wait for background build to complete.
-        assert!(wait_ready(&service, 30).await, "Build did not complete in 30s");
+        assert!(
+            wait_ready(&service, 30).await,
+            "Build did not complete in 30s"
+        );
         assert!(service.is_ready());
     }
 
@@ -1208,7 +1333,11 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         // Create enough files to make build take >0ms
         std::fs::create_dir_all(tmp.path().join("src")).unwrap();
-        std::fs::write(tmp.path().join("src/main.rs"), "fn main() { println!(\"hello\"); }").unwrap();
+        std::fs::write(
+            tmp.path().join("src/main.rs"),
+            "fn main() { println!(\"hello\"); }",
+        )
+        .unwrap();
 
         let service = GraphContextService::new();
         service.initialize(tmp.path()).await.unwrap();
@@ -1233,7 +1362,8 @@ mod tests {
         std::fs::write(
             tmp.path().join("src/main.rs"),
             "fn main() {}\nfn add(a: i32, b: i32) -> i32 { a + b }\n",
-        ).unwrap();
+        )
+        .unwrap();
 
         let service = GraphContextService::new();
         service.initialize(tmp.path()).await.unwrap();
@@ -1260,7 +1390,9 @@ mod tests {
 
     #[test]
     fn cache_miss_on_nonexistent_path() {
-        assert!(try_load_cache(Path::new("/tmp/nonexistent_graph.bin"), Path::new("/tmp")).is_none());
+        assert!(
+            try_load_cache(Path::new("/tmp/nonexistent_graph.bin"), Path::new("/tmp")).is_none()
+        );
     }
 
     // --- Content hash tests (S0-T1) ---
@@ -1277,14 +1409,20 @@ mod tests {
         // Act: set mtime to 1 hour in the future (content stays identical)
         let future_time = std::time::SystemTime::now() + Duration::from_secs(3600);
         let times = std::fs::FileTimes::new().set_modified(future_time);
-        let file = std::fs::File::options().write(true).open(&file_path).unwrap();
+        let file = std::fs::File::options()
+            .write(true)
+            .open(&file_path)
+            .unwrap();
         file.set_times(times).unwrap();
         drop(file);
 
         let hash2 = compute_project_hash(tmp.path());
 
         // Assert: hashes must be equal (content didn't change)
-        assert_eq!(hash1, hash2, "Hash changed despite identical content — mtime leak");
+        assert_eq!(
+            hash1, hash2,
+            "Hash changed despite identical content — mtime leak"
+        );
     }
 
     #[test]
@@ -1296,7 +1434,11 @@ mod tests {
         let hash1 = compute_project_hash(tmp.path());
 
         // Act: change content
-        std::fs::write(tmp.path().join("src/main.rs"), "fn main() { println!(\"hi\"); }").unwrap();
+        std::fs::write(
+            tmp.path().join("src/main.rs"),
+            "fn main() { println!(\"hi\"); }",
+        )
+        .unwrap();
         let hash2 = compute_project_hash(tmp.path());
 
         // Assert
@@ -1307,7 +1449,11 @@ mod tests {
     fn content_hash_deterministic_across_calls() {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(tmp.path().join("src")).unwrap();
-        std::fs::write(tmp.path().join("src/lib.rs"), "pub fn add(a: i32, b: i32) -> i32 { a + b }").unwrap();
+        std::fs::write(
+            tmp.path().join("src/lib.rs"),
+            "pub fn add(a: i32, b: i32) -> i32 { a + b }",
+        )
+        .unwrap();
 
         let hash1 = compute_project_hash(tmp.path());
         let hash2 = compute_project_hash(tmp.path());
@@ -1321,7 +1467,8 @@ mod tests {
         std::fs::write(
             tmp.path().join("src/main.rs"),
             "fn main() { println!(\"hello\"); }\nfn add(a: i32, b: i32) -> i32 { a + b }\n",
-        ).unwrap();
+        )
+        .unwrap();
 
         let service = GraphContextService::new();
         service.initialize(tmp.path()).await.unwrap();
@@ -1340,7 +1487,8 @@ mod tests {
         std::fs::write(
             tmp.path().join("src/lib.rs"),
             "pub fn foo() -> i32 { 1 }\npub fn bar() -> i32 { 2 }\npub fn baz() -> i32 { 3 }\n",
-        ).unwrap();
+        )
+        .unwrap();
 
         let service = GraphContextService::new();
         service.initialize(tmp.path()).await.unwrap();
@@ -1348,7 +1496,11 @@ mod tests {
 
         // Small budget
         let result = service.query_context("foo", 100).await.unwrap();
-        assert!(result.total_tokens <= 100, "Tokens {} exceeded budget 100", result.total_tokens);
+        assert!(
+            result.total_tokens <= 100,
+            "Tokens {} exceeded budget 100",
+            result.total_tokens
+        );
         assert_eq!(result.budget_tokens, 100);
     }
 
@@ -1375,7 +1527,11 @@ mod tests {
         assert!(wait_ready(&service, 30).await);
 
         let result = service.query_context("anything", 4000).await.unwrap();
-        assert_eq!(result.blocks.len(), 0, "Empty project should produce no context blocks");
+        assert_eq!(
+            result.blocks.len(),
+            0,
+            "Empty project should produce no context blocks"
+        );
     }
 
     #[test]
@@ -1404,7 +1560,11 @@ mod tests {
         std::fs::write(tmp.path().join("Cargo.toml"), "[package]\nname = \"test\"").unwrap();
         let h1 = compute_project_hash(tmp.path());
 
-        std::fs::write(tmp.path().join("Cargo.toml"), "[package]\nname = \"changed\"").unwrap();
+        std::fs::write(
+            tmp.path().join("Cargo.toml"),
+            "[package]\nname = \"changed\"",
+        )
+        .unwrap();
         let h2 = compute_project_hash(tmp.path());
 
         assert_ne!(h1, h2, "Toml file changes must change hash");
@@ -1430,7 +1590,8 @@ mod tests {
         std::fs::write(
             tmp.path().join("src/lib.rs"),
             "pub fn greet() -> &'static str { \"hello\" }\n",
-        ).unwrap();
+        )
+        .unwrap();
 
         // First build (cold)
         let service1 = GraphContextService::new();
@@ -1452,7 +1613,11 @@ mod tests {
     async fn multiple_queries_after_ready_all_succeed() {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(tmp.path().join("src")).unwrap();
-        std::fs::write(tmp.path().join("src/lib.rs"), "pub fn compute() -> i32 { 42 }").unwrap();
+        std::fs::write(
+            tmp.path().join("src/lib.rs"),
+            "pub fn compute() -> i32 { 42 }",
+        )
+        .unwrap();
 
         let service = GraphContextService::new();
         service.initialize(tmp.path()).await.unwrap();
@@ -1461,7 +1626,12 @@ mod tests {
         // Multiple queries should all succeed
         for query in &["compute", "function", "i32"] {
             let result = service.query_context(query, 4000).await;
-            assert!(result.is_ok(), "Query '{}' failed: {:?}", query, result.err());
+            assert!(
+                result.is_ok(),
+                "Query '{}' failed: {:?}",
+                query,
+                result.err()
+            );
         }
     }
 

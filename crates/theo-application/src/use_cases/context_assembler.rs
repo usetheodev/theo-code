@@ -111,7 +111,8 @@ impl ContextAssembler {
     /// Record that a community had positive signal this turn (tool use/citation).
     /// Only communities with positive signal get stability bonus.
     pub fn record_positive_signal(&mut self, community_id: &str) {
-        self.positive_signal_sources.insert(community_id.to_string());
+        self.positive_signal_sources
+            .insert(community_id.to_string());
     }
 
     /// Clear positive signals at the start of each turn.
@@ -125,13 +126,19 @@ impl ContextAssembler {
     /// Higher scores → community gets priority in future assembly.
     pub fn record_feedback(&mut self, community_id: &str, score: f64) {
         let alpha = 0.3;
-        let entry = self.feedback_scores.entry(community_id.to_string()).or_insert(0.5);
+        let entry = self
+            .feedback_scores
+            .entry(community_id.to_string())
+            .or_insert(0.5);
         *entry = alpha * score + (1.0 - alpha) * *entry;
     }
 
     /// Get the current feedback score for a community (default 0.5).
     pub fn feedback_score(&self, community_id: &str) -> f64 {
-        self.feedback_scores.get(community_id).copied().unwrap_or(0.5)
+        self.feedback_scores
+            .get(community_id)
+            .copied()
+            .unwrap_or(0.5)
     }
 
     /// Load feedback scores from a JSON file.
@@ -172,7 +179,12 @@ impl ContextAssembler {
         episode: Option<&theo_domain::episode::EpisodeSummary>,
     ) -> AssembledContext {
         // Delegate to assemble with episode pre-injection
-        let mut ctx = self.assemble(task_objective, working_set, structural_context, recent_events);
+        let mut ctx = self.assemble(
+            task_objective,
+            working_set,
+            structural_context,
+            recent_events,
+        );
 
         // P1.5: Inject episode memory BEFORE structural content (but after hard rules)
         if let Some(ep) = episode {
@@ -182,7 +194,10 @@ impl ContextAssembler {
 
             // Learned constraints from prior episodes
             if !ep.machine_summary.learned_constraints.is_empty() {
-                let text = ep.machine_summary.learned_constraints.iter()
+                let text = ep
+                    .machine_summary
+                    .learned_constraints
+                    .iter()
                     .map(|c| format!("- {}", c))
                     .collect::<Vec<_>>()
                     .join("\n");
@@ -196,7 +211,10 @@ impl ContextAssembler {
 
             // Failed attempts from prior episodes
             if !ep.machine_summary.failed_attempts.is_empty() {
-                let text = ep.machine_summary.failed_attempts.iter()
+                let text = ep
+                    .machine_summary
+                    .failed_attempts
+                    .iter()
                     .take(5)
                     .map(|f| format!("- {}", f))
                     .collect::<Vec<_>>()
@@ -261,7 +279,8 @@ impl ContextAssembler {
 
         // Include constraints (if any)
         if !working_set.constraints.is_empty() {
-            let constraints_text = working_set.constraints
+            let constraints_text = working_set
+                .constraints
                 .iter()
                 .map(|c| format!("- {}", c))
                 .collect::<Vec<_>>()
@@ -276,10 +295,18 @@ impl ContextAssembler {
 
         // Rule 4: ALWAYS include recent evidence events (up to 8)
         if !recent_events.is_empty() {
-            let evidence_lines: Vec<String> = recent_events.iter()
+            let evidence_lines: Vec<String> = recent_events
+                .iter()
                 .rev()
                 .take(8)
-                .map(|e| format!("- [{}] {}: {}", e.event_type, e.entity_id, summarize_payload(&e.payload)))
+                .map(|e| {
+                    format!(
+                        "- [{}] {}: {}",
+                        e.event_type,
+                        e.entity_id,
+                        summarize_payload(&e.payload)
+                    )
+                })
                 .collect();
             let evidence_section = format!("## Recent Events\n{}", evidence_lines.join("\n"));
             let evidence_tokens = estimate_tokens(&evidence_section);
@@ -291,7 +318,9 @@ impl ContextAssembler {
 
         // Include hot files list
         if !working_set.hot_files.is_empty() {
-            let files_text = working_set.hot_files.iter()
+            let files_text = working_set
+                .hot_files
+                .iter()
                 .map(|f| format!("- {}", f))
                 .collect::<Vec<_>>()
                 .join("\n");
@@ -307,7 +336,9 @@ impl ContextAssembler {
         // Scoring: feedback boost + stability bonus - repetition penalty.
         // P0.5: Penalty floor = 0.5 (never zero a score, protect recall).
         // P1: Stability bonus requires positive signal, decays 0.7/turn.
-        let mut blocks_with_priority: Vec<(usize, f64)> = structural_context.blocks.iter()
+        let mut blocks_with_priority: Vec<(usize, f64)> = structural_context
+            .blocks
+            .iter()
             .enumerate()
             .map(|(i, block)| {
                 let source = &block.source_id;
@@ -334,7 +365,8 @@ impl ContextAssembler {
                 (i, priority)
             })
             .collect();
-        blocks_with_priority.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        blocks_with_priority
+            .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
         // Track which communities are assembled this turn (for next turn's penalties)
         let mut assembled_this_turn = std::collections::HashSet::new();
@@ -360,8 +392,12 @@ impl ContextAssembler {
         }
 
         // Rule 1: ALWAYS respect token budget (defensive check)
-        debug_assert!(tokens_used <= self.token_budget,
-            "Token budget violated: {} > {}", tokens_used, self.token_budget);
+        debug_assert!(
+            tokens_used <= self.token_budget,
+            "Token budget violated: {} > {}",
+            tokens_used,
+            self.token_budget
+        );
 
         AssembledContext {
             sections,
@@ -381,7 +417,14 @@ fn estimate_tokens(text: &str) -> usize {
 fn summarize_payload(payload: &serde_json::Value) -> String {
     if let Some(obj) = payload.as_object() {
         // Try common fields
-        for key in &["message", "tool_name", "hypothesis", "choice", "constraint", "error"] {
+        for key in &[
+            "message",
+            "tool_name",
+            "hypothesis",
+            "choice",
+            "constraint",
+            "error",
+        ] {
             if let Some(val) = obj.get(*key) {
                 if let Some(s) = val.as_str() {
                     let truncated = if s.len() > 80 { &s[..80] } else { s };
@@ -416,13 +459,16 @@ mod tests {
 
     fn make_structural_context(blocks: Vec<(&str, usize)>) -> GraphContextResult {
         GraphContextResult {
-            blocks: blocks.iter().map(|(content, tokens)| ContextBlock {
-                block_id: String::new(),
-                source_id: "test".into(),
-                content: content.to_string(),
-                token_count: *tokens,
-                score: 0.5,
-            }).collect(),
+            blocks: blocks
+                .iter()
+                .map(|(content, tokens)| ContextBlock {
+                    block_id: String::new(),
+                    source_id: "test".into(),
+                    content: content.to_string(),
+                    token_count: *tokens,
+                    score: 0.5,
+                })
+                .collect(),
             total_tokens: blocks.iter().map(|(_, t)| t).sum(),
             budget_tokens: 4000,
             exploration_hints: String::new(),
@@ -430,11 +476,15 @@ mod tests {
     }
 
     fn make_events(n: usize) -> Vec<DomainEvent> {
-        (0..n).map(|i| DomainEvent::new(
-            EventType::ToolCallCompleted,
-            format!("run-{}", i),
-            serde_json::json!({"tool_name": format!("tool_{}", i)}),
-        )).collect()
+        (0..n)
+            .map(|i| {
+                DomainEvent::new(
+                    EventType::ToolCallCompleted,
+                    format!("run-{}", i),
+                    serde_json::json!({"tool_name": format!("tool_{}", i)}),
+                )
+            })
+            .collect()
     }
 
     #[test]
@@ -445,8 +495,11 @@ mod tests {
         let events = make_events(3);
 
         let result = assembler.assemble("fix bug", &ws, &ctx, &events);
-        assert!(result.total_tokens <= 100,
-            "Tokens {} exceeded budget 100", result.total_tokens);
+        assert!(
+            result.total_tokens <= 100,
+            "Tokens {} exceeded budget 100",
+            result.total_tokens
+        );
     }
 
     #[test]
@@ -458,8 +511,10 @@ mod tests {
 
         let result = assembler.assemble("fix authentication bug in jwt.rs", &ws, &ctx, &events);
         let full_text = result.sections.join("\n");
-        assert!(full_text.contains("fix authentication bug in jwt.rs"),
-            "Objective not found in assembled context");
+        assert!(
+            full_text.contains("fix authentication bug in jwt.rs"),
+            "Objective not found in assembled context"
+        );
     }
 
     #[test]
@@ -473,8 +528,10 @@ mod tests {
 
         let result = assembler.assemble("task", &ws, &ctx, &[]);
         let full_text = result.sections.join("\n");
-        assert!(full_text.contains("run cargo test"),
-            "Current step not found in context");
+        assert!(
+            full_text.contains("run cargo test"),
+            "Current step not found in context"
+        );
     }
 
     #[test]
@@ -482,14 +539,18 @@ mod tests {
         let mut assembler = ContextAssembler::new(4000);
         let ws = WorkingSet::default();
         let ctx = make_structural_context(vec![]);
-        let events = vec![
-            DomainEvent::new(EventType::Error, "run-1", serde_json::json!({"message": "compile error in auth.rs"})),
-        ];
+        let events = vec![DomainEvent::new(
+            EventType::Error,
+            "run-1",
+            serde_json::json!({"message": "compile error in auth.rs"}),
+        )];
 
         let result = assembler.assemble("fix", &ws, &ctx, &events);
         let full_text = result.sections.join("\n");
-        assert!(full_text.contains("compile error in auth.rs"),
-            "Evidence not found in context");
+        assert!(
+            full_text.contains("compile error in auth.rs"),
+            "Evidence not found in context"
+        );
     }
 
     #[test]
@@ -503,7 +564,10 @@ mod tests {
 
         let result = assembler.assemble("task", &ws, &ctx, &[]);
         let full_text = result.sections.join("\n");
-        assert!(full_text.contains("Auth module"), "Structural context not included");
+        assert!(
+            full_text.contains("Auth module"),
+            "Structural context not included"
+        );
         assert!(full_text.contains("DB module"), "Second block not included");
     }
 
@@ -520,7 +584,10 @@ mod tests {
         let result = assembler.assemble("task", &ws, &ctx, &[]);
         let full_text = result.sections.join("\n");
         assert!(full_text.contains("small block"), "First block should fit");
-        assert!(!full_text.contains("big block"), "Second block should be excluded");
+        assert!(
+            !full_text.contains("big block"),
+            "Second block should be excluded"
+        );
         assert!(result.total_tokens <= 200);
     }
 
@@ -547,7 +614,10 @@ mod tests {
         let ctx = make_structural_context(vec![]);
 
         let result = assembler.assemble("task", &ws, &ctx, &[]);
-        assert!(!result.sections.is_empty(), "Should at least have objective");
+        assert!(
+            !result.sections.is_empty(),
+            "Should at least have objective"
+        );
         assert!(result.total_tokens <= result.budget_tokens);
     }
 
@@ -586,13 +656,16 @@ mod tests {
 
     fn make_tagged_context(blocks: Vec<(&str, &str, usize, f64)>) -> GraphContextResult {
         GraphContextResult {
-            blocks: blocks.iter().map(|(source_id, content, tokens, score)| ContextBlock {
-                block_id: String::new(),
-                source_id: source_id.to_string(),
-                content: content.to_string(),
-                token_count: *tokens,
-                score: *score,
-            }).collect(),
+            blocks: blocks
+                .iter()
+                .map(|(source_id, content, tokens, score)| ContextBlock {
+                    block_id: String::new(),
+                    source_id: source_id.to_string(),
+                    content: content.to_string(),
+                    token_count: *tokens,
+                    score: *score,
+                })
+                .collect(),
             total_tokens: blocks.iter().map(|(_, _, t, _)| t).sum(),
             budget_tokens: 4000,
             exploration_hints: String::new(),
@@ -609,12 +682,16 @@ mod tests {
     fn record_feedback_updates_score() {
         let mut assembler = ContextAssembler::new(4000);
         assembler.record_feedback("community:auth", 1.0);
-        assert!(assembler.feedback_score("community:auth") > 0.5,
-            "High feedback should increase score above default");
+        assert!(
+            assembler.feedback_score("community:auth") > 0.5,
+            "High feedback should increase score above default"
+        );
 
         assembler.record_feedback("community:db", 0.0);
-        assert!(assembler.feedback_score("community:db") < 0.5,
-            "Low feedback should decrease score below default");
+        assert!(
+            assembler.feedback_score("community:db") < 0.5,
+            "Low feedback should decrease score below default"
+        );
     }
 
     #[test]
@@ -639,9 +716,14 @@ mod tests {
         // Auth should appear before DB due to higher feedback
         let auth_pos = full_text.find("Auth module");
         let db_pos = full_text.find("DB module");
-        assert!(auth_pos.is_some() && db_pos.is_some(), "Both blocks should be in context");
-        assert!(auth_pos.unwrap() < db_pos.unwrap(),
-            "Auth should appear before DB due to feedback boost");
+        assert!(
+            auth_pos.is_some() && db_pos.is_some(),
+            "Both blocks should be in context"
+        );
+        assert!(
+            auth_pos.unwrap() < db_pos.unwrap(),
+            "Auth should appear before DB due to feedback boost"
+        );
     }
 
     #[test]
@@ -650,9 +732,7 @@ mod tests {
         assembler.record_feedback("auth", 1.0);
 
         let ws = WorkingSet::default();
-        let ctx = make_tagged_context(vec![
-            ("auth", "huge auth content", 5000, 0.9),
-        ]);
+        let ctx = make_tagged_context(vec![("auth", "huge auth content", 5000, 0.9)]);
 
         let result = assembler.assemble("task", &ws, &ctx, &[]);
         assert!(result.total_tokens <= 100, "Budget must never be exceeded");
@@ -693,8 +773,11 @@ mod tests {
     fn adaptive_budget_mid_range() {
         // sqrt(500) * 500 ≈ 11180
         let budget = ContextAssembler::compute_adaptive_budget(500);
-        assert!(budget > 10000 && budget < 12000,
-            "500-file repo should get ~11K budget, got {}", budget);
+        assert!(
+            budget > 10000 && budget < 12000,
+            "500-file repo should get ~11K budget, got {}",
+            budget
+        );
     }
 
     #[test]
@@ -712,10 +795,13 @@ mod tests {
     fn budget_allocation_ratios() {
         let mut assembler = ContextAssembler::new(10000);
         let alloc = assembler.compute_allocation();
-        assert_eq!(alloc.task_overhead, 1500);     // 15%
-        assert_eq!(alloc.execution_context, 2500);  // 25%
-        assert_eq!(alloc.structural, 6000);          // 60%
-        assert_eq!(alloc.task_overhead + alloc.execution_context + alloc.structural, 10000);
+        assert_eq!(alloc.task_overhead, 1500); // 15%
+        assert_eq!(alloc.execution_context, 2500); // 25%
+        assert_eq!(alloc.structural, 6000); // 60%
+        assert_eq!(
+            alloc.task_overhead + alloc.execution_context + alloc.structural,
+            10000
+        );
     }
 
     #[test]
@@ -748,16 +834,16 @@ mod tests {
     fn penalty_floor_prevents_exclusion() {
         let mut assembler = ContextAssembler::new(4000);
         let ws = WorkingSet::default();
-        let ctx = make_tagged_context(vec![
-            ("auth", "# Auth module", 50, 0.8),
-        ]);
+        let ctx = make_tagged_context(vec![("auth", "# Auth module", 50, 0.8)]);
 
         // Assemble 10 times — penalty should floor at 0.5, never exclude
         for _ in 0..10 {
             let result = assembler.assemble("task", &ws, &ctx, &[]);
             let full = result.sections.join("\n");
-            assert!(full.contains("Auth module"),
-                "Penalty floor must prevent total exclusion");
+            assert!(
+                full.contains("Auth module"),
+                "Penalty floor must prevent total exclusion"
+            );
         }
     }
 
@@ -768,10 +854,7 @@ mod tests {
         let mut assembler = ContextAssembler::new(4000);
         // NO positive signal recorded
         let ws = WorkingSet::default();
-        let ctx = make_tagged_context(vec![
-            ("auth", "# Auth", 50, 0.5),
-            ("db", "# DB", 50, 0.5),
-        ]);
+        let ctx = make_tagged_context(vec![("auth", "# Auth", 50, 0.5), ("db", "# DB", 50, 0.5)]);
 
         let _r1 = assembler.assemble("task", &ws, &ctx, &[]);
 
@@ -815,8 +898,10 @@ mod tests {
 
         let result = assembler.assemble_with_memory("task", &ws, &ctx, &[], Some(&ep));
         let full = result.sections.join("\n");
-        assert!(full.contains("avoid unwrap in auth"),
-            "Episode constraints must appear in assembled context");
+        assert!(
+            full.contains("avoid unwrap in auth"),
+            "Episode constraints must appear in assembled context"
+        );
     }
 
     #[test]
@@ -829,16 +914,26 @@ mod tests {
         let mut ep = EpisodeSummary::from_events("r-1", None, "task", &[]);
         // Add many constraints (would exceed 10% = 100 tokens)
         ep.machine_summary.learned_constraints = (0..50)
-            .map(|i| format!("constraint {} with a very long description that takes many tokens", i))
+            .map(|i| {
+                format!(
+                    "constraint {} with a very long description that takes many tokens",
+                    i
+                )
+            })
             .collect();
 
         let result = assembler.assemble_with_memory("task", &ws, &ctx, &[], Some(&ep));
         // Memory content should be capped
-        let memory_tokens: usize = result.sections.iter()
+        let memory_tokens: usize = result
+            .sections
+            .iter()
             .filter(|s| s.contains("Prior Constraints") || s.contains("Prior Failures"))
             .map(|s| estimate_tokens(s))
             .sum();
-        assert!(memory_tokens <= 100, // 10% of 1000
-            "Memory tokens {} should be <= 100 (10% cap)", memory_tokens);
+        assert!(
+            memory_tokens <= 100, // 10% of 1000
+            "Memory tokens {} should be <= 100 (10% cap)",
+            memory_tokens
+        );
     }
 }

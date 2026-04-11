@@ -273,11 +273,26 @@ impl PageFrontmatter {
     /// Create frontmatter for a deterministic module page.
     pub fn module(enriched: bool, summary: &str, tags: &[String]) -> Self {
         PageFrontmatter {
-            authority_tier: Some(if enriched { "enriched" } else { "deterministic" }.into()),
+            authority_tier: Some(
+                if enriched {
+                    "enriched"
+                } else {
+                    "deterministic"
+                }
+                .into(),
+            ),
             page_kind: Some("module".into()),
             generated_by: Some("generator".into()),
-            summary: if summary.is_empty() { None } else { Some(summary.to_string()) },
-            tags: if tags.is_empty() { None } else { Some(tags.to_vec()) },
+            summary: if summary.is_empty() {
+                None
+            } else {
+                Some(summary.to_string())
+            },
+            tags: if tags.is_empty() {
+                None
+            } else {
+                Some(tags.to_vec())
+            },
             ..Default::default()
         }
     }
@@ -318,13 +333,27 @@ impl PageFrontmatter {
 /// Render frontmatter as YAML block.
 pub fn render_frontmatter(fm: &PageFrontmatter) -> String {
     let mut lines = Vec::new();
-    if let Some(ref v) = fm.authority_tier { lines.push(format!("authority_tier: {}", v)); }
-    if let Some(ref v) = fm.page_kind { lines.push(format!("page_kind: {}", v)); }
-    if let Some(ref v) = fm.generated_by { lines.push(format!("generated_by: {}", v)); }
-    if let Some(v) = fm.graph_hash { lines.push(format!("graph_hash: {}", v)); }
-    if let Some(ref v) = fm.generated_at { lines.push(format!("generated_at: \"{}\"", v)); }
-    if let Some(ref v) = fm.query { lines.push(format!("query: \"{}\"", v)); }
-    if let Some(ref v) = fm.summary { lines.push(format!("summary: \"{}\"", v.replace('"', "'"))); }
+    if let Some(ref v) = fm.authority_tier {
+        lines.push(format!("authority_tier: {}", v));
+    }
+    if let Some(ref v) = fm.page_kind {
+        lines.push(format!("page_kind: {}", v));
+    }
+    if let Some(ref v) = fm.generated_by {
+        lines.push(format!("generated_by: {}", v));
+    }
+    if let Some(v) = fm.graph_hash {
+        lines.push(format!("graph_hash: {}", v));
+    }
+    if let Some(ref v) = fm.generated_at {
+        lines.push(format!("generated_at: \"{}\"", v));
+    }
+    if let Some(ref v) = fm.query {
+        lines.push(format!("query: \"{}\"", v));
+    }
+    if let Some(ref v) = fm.summary {
+        lines.push(format!("summary: \"{}\"", v.replace('"', "'")));
+    }
     if let Some(ref tags) = fm.tags {
         lines.push(format!("tags: [{}]", tags.join(", ")));
     }
@@ -399,37 +428,72 @@ pub fn classify_query(query: &str) -> QueryClass {
     let q = query.to_lowercase();
 
     // API lookup: concrete symbols, functions, types
-    let api_terms = ["fn ", "struct ", "trait ", "impl ", "pub fn", "function", "method",
-        "verify", "parse", "token", "handler", "client", "config", "registry",
-        "search", "index", "cache", "embed"];
+    let api_terms = [
+        "fn ", "struct ", "trait ", "impl ", "pub fn", "function", "method", "verify", "parse",
+        "token", "handler", "client", "config", "registry", "search", "index", "cache", "embed",
+    ];
     if api_terms.iter().any(|t| q.contains(t)) {
         return QueryClass::ApiLookup;
     }
 
     // Call flow: execution paths
-    let flow_terms = ["flow", "call chain", "how does", "lifecycle", "pipeline",
-        "request path", "execution", "calls", "invokes"];
+    let flow_terms = [
+        "flow",
+        "call chain",
+        "how does",
+        "lifecycle",
+        "pipeline",
+        "request path",
+        "execution",
+        "calls",
+        "invokes",
+    ];
     if flow_terms.iter().any(|t| q.contains(t)) {
         return QueryClass::CallFlow;
     }
 
     // Architecture: system structure
-    let arch_terms = ["architecture", "bounded context", "layer", "structure",
-        "organized", "design", "system diagram", "dependency direction"];
+    let arch_terms = [
+        "architecture",
+        "bounded context",
+        "layer",
+        "structure",
+        "organized",
+        "design",
+        "system diagram",
+        "dependency direction",
+    ];
     if arch_terms.iter().any(|t| q.contains(t)) {
         return QueryClass::Architecture;
     }
 
     // Concept: what is X, what modules handle Y
-    let concept_terms = ["what is", "what are", "what modules", "which modules", "which crates",
-        "what components", "role of", "purpose of", "concept"];
+    let concept_terms = [
+        "what is",
+        "what are",
+        "what modules",
+        "which modules",
+        "which crates",
+        "what components",
+        "role of",
+        "purpose of",
+        "concept",
+    ];
     if concept_terms.iter().any(|t| q.contains(t)) {
         return QueryClass::Concept;
     }
 
     // Onboarding: getting started
-    let onboard_terms = ["get started", "getting started", "how to build",
-        "how to run", "where to start", "entry point", "overview", "tech stack"];
+    let onboard_terms = [
+        "get started",
+        "getting started",
+        "how to build",
+        "how to run",
+        "where to start",
+        "entry point",
+        "overview",
+        "tech stack",
+    ];
     if onboard_terms.iter().any(|t| q.contains(t)) {
         return QueryClass::Onboarding;
     }
@@ -492,21 +556,55 @@ impl Default for PageConfig {
     }
 }
 
-fn default_confidence_threshold() -> f64 { 0.5 }
+fn default_confidence_threshold() -> f64 {
+    0.5
+}
 
-fn default_min_file_count() -> usize { 1 }
-fn default_max_token_size() -> usize { 5000 }
+fn default_min_file_count() -> usize {
+    1
+}
+fn default_max_token_size() -> usize {
+    5000
+}
 
 fn default_groups() -> Vec<GroupConfig> {
     vec![
-        GroupConfig { name: "Code Intelligence".into(), prefixes: vec!["theo-engine".into()] },
-        GroupConfig { name: "Agent".into(), prefixes: vec!["theo-agent".into()] },
-        GroupConfig { name: "Infrastructure".into(), prefixes: vec!["theo-infra".into()] },
-        GroupConfig { name: "Tooling".into(), prefixes: vec!["theo-tooling".into()] },
-        GroupConfig { name: "Governance".into(), prefixes: vec!["theo-governance".into()] },
-        GroupConfig { name: "Domain".into(), prefixes: vec!["theo-domain".into()] },
-        GroupConfig { name: "Frontend".into(), prefixes: vec!["theo-ui".into(), "theo-desktop".into()] },
-        GroupConfig { name: "Application".into(), prefixes: vec!["theo-application".into(), "theo-cli".into(), "theo-benchmark".into()] },
+        GroupConfig {
+            name: "Code Intelligence".into(),
+            prefixes: vec!["theo-engine".into()],
+        },
+        GroupConfig {
+            name: "Agent".into(),
+            prefixes: vec!["theo-agent".into()],
+        },
+        GroupConfig {
+            name: "Infrastructure".into(),
+            prefixes: vec!["theo-infra".into()],
+        },
+        GroupConfig {
+            name: "Tooling".into(),
+            prefixes: vec!["theo-tooling".into()],
+        },
+        GroupConfig {
+            name: "Governance".into(),
+            prefixes: vec!["theo-governance".into()],
+        },
+        GroupConfig {
+            name: "Domain".into(),
+            prefixes: vec!["theo-domain".into()],
+        },
+        GroupConfig {
+            name: "Frontend".into(),
+            prefixes: vec!["theo-ui".into(), "theo-desktop".into()],
+        },
+        GroupConfig {
+            name: "Application".into(),
+            prefixes: vec![
+                "theo-application".into(),
+                "theo-cli".into(),
+                "theo-benchmark".into(),
+            ],
+        },
     ]
 }
 
@@ -676,9 +774,13 @@ prefixes = ["custom-"]
 
     #[test]
     fn authority_tier_from_str_round_trip() {
-        for tier in [AuthorityTier::Deterministic, AuthorityTier::Enriched,
-                     AuthorityTier::PromotedCache, AuthorityTier::RawCache,
-                     AuthorityTier::EpisodicCache] {
+        for tier in [
+            AuthorityTier::Deterministic,
+            AuthorityTier::Enriched,
+            AuthorityTier::PromotedCache,
+            AuthorityTier::RawCache,
+            AuthorityTier::EpisodicCache,
+        ] {
             assert_eq!(AuthorityTier::from_str(tier.as_str()), tier);
         }
     }
@@ -695,7 +797,10 @@ prefixes = ["custom-"]
         let tier = AuthorityTier::EpisodicCache;
         assert_eq!(tier.weight(), 0.4);
         assert_eq!(tier.as_str(), "episodic");
-        assert_eq!(AuthorityTier::from_str("episodic"), AuthorityTier::EpisodicCache);
+        assert_eq!(
+            AuthorityTier::from_str("episodic"),
+            AuthorityTier::EpisodicCache
+        );
     }
 
     #[test]

@@ -3,7 +3,6 @@
 /// # BM25 formula
 /// score(q, D) = Σ_t IDF(t) * (f(t,D) * (k1+1)) / (f(t,D) + k1 * (1 - b + b * |D|/avgdl))
 /// IDF(t) = ln((N - n(t) + 0.5) / (n(t) + 0.5) + 1)
-
 use std::collections::HashMap;
 
 use theo_engine_graph::cluster::Community;
@@ -214,7 +213,11 @@ fn split_identifier(word: &str, out: &mut Vec<String>) {
         let curr = chars[i];
         let split = if prev.is_lowercase() && curr.is_uppercase() {
             true
-        } else if prev.is_uppercase() && curr.is_uppercase() && i + 1 < len && chars[i + 1].is_lowercase() {
+        } else if prev.is_uppercase()
+            && curr.is_uppercase()
+            && i + 1 < len
+            && chars[i + 1].is_lowercase()
+        {
             true
         } else {
             false
@@ -376,7 +379,11 @@ impl Bm25Index {
             })
             .collect();
 
-        result.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        result.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         result
     }
 }
@@ -451,7 +458,9 @@ fn community_pagerank(communities: &[Community], graph: &CodeGraph) -> HashMap<S
 
     for _ in 0..20 {
         // Compute dangling mass: sum of PR of dangling nodes.
-        let dangling_mass: f64 = pr.iter().enumerate()
+        let dangling_mass: f64 = pr
+            .iter()
+            .enumerate()
             .filter(|(i, _)| dangling[*i])
             .map(|(_, &p)| p)
             .sum();
@@ -508,7 +517,10 @@ fn community_recency(communities: &[Community], graph: &CodeGraph) -> HashMap<St
         })
         .collect();
 
-    let max_ts = raw.iter().map(|(_, ts)| *ts).fold(f64::NEG_INFINITY, f64::max);
+    let max_ts = raw
+        .iter()
+        .map(|(_, ts)| *ts)
+        .fold(f64::NEG_INFINITY, f64::max);
     let min_ts = raw.iter().map(|(_, ts)| *ts).fold(f64::INFINITY, f64::min);
     let range = max_ts - min_ts;
 
@@ -529,11 +541,10 @@ fn community_recency(communities: &[Community], graph: &CodeGraph) -> HashMap<St
 // ---------------------------------------------------------------------------
 
 const RUST_STOP_WORDS: &[&str] = &[
-    "fn", "pub", "let", "mut", "use", "mod", "impl", "struct", "enum", "trait",
-    "type", "const", "static", "self", "super", "crate", "where", "for", "in",
-    "if", "else", "match", "return", "async", "await", "move", "ref", "as",
-    "str", "string", "bool", "i32", "i64", "u8", "u32", "u64", "usize", "f64",
-    "option", "result", "ok", "err", "some", "none", "vec", "box", "arc",
+    "fn", "pub", "let", "mut", "use", "mod", "impl", "struct", "enum", "trait", "type", "const",
+    "static", "self", "super", "crate", "where", "for", "in", "if", "else", "match", "return",
+    "async", "await", "move", "ref", "as", "str", "string", "bool", "i32", "i64", "u8", "u32",
+    "u64", "usize", "f64", "option", "result", "ok", "err", "some", "none", "vec", "box", "arc",
     "true", "false", "new", "default",
 ];
 
@@ -592,7 +603,8 @@ impl FileBm25 {
                 // Merge: original scores + 0.3x expanded scores
                 let mut merged = initial;
                 for (path, exp_score) in expanded {
-                    merged.entry(path)
+                    merged
+                        .entry(path)
                         .and_modify(|s| *s += exp_score * 0.3)
                         .or_insert(exp_score * 0.3);
                 }
@@ -614,7 +626,8 @@ impl FileBm25 {
             return HashMap::new();
         }
 
-        let file_nodes: Vec<(&str, &str)> = graph.node_ids()
+        let file_nodes: Vec<(&str, &str)> = graph
+            .node_ids()
             .filter_map(|id| {
                 let n = graph.get_node(id)?;
                 if n.node_type == NodeType::File {
@@ -634,7 +647,9 @@ impl FileBm25 {
         let mut doc_lengths: Vec<f64> = Vec::with_capacity(doc_count);
 
         for (idx, (file_id, _)) in file_nodes.iter().enumerate() {
-            let Some(file_node) = graph.get_node(file_id) else { continue };
+            let Some(file_node) = graph.get_node(file_id) else {
+                continue;
+            };
             let mut weighted_tf: HashMap<String, f64> = HashMap::new();
 
             // Filename: 5x boost (BM25F — Zoekt pattern)
@@ -708,13 +723,19 @@ impl FileBm25 {
             }
         }
 
-        let avg_dl = if doc_count > 0 { doc_lengths.iter().sum::<f64>() / doc_count as f64 } else { 1.0 };
+        let avg_dl = if doc_count > 0 {
+            doc_lengths.iter().sum::<f64>() / doc_count as f64
+        } else {
+            1.0
+        };
         let (k1, b) = (1.2f64, 0.75f64);
         let n = doc_count as f64;
 
         let mut scores = vec![0.0f64; doc_count];
         for term in &query_tokens {
-            let Some(posts) = postings.get(term.as_str()) else { continue };
+            let Some(posts) = postings.get(term.as_str()) else {
+                continue;
+            };
             let n_t = posts.len() as f64;
             let idf = ((n - n_t + 0.5) / (n_t + 0.5) + 1.0).ln();
             for &(doc_idx, tf) in posts {
@@ -739,17 +760,23 @@ impl FileBm25 {
         communities: &[Community],
         graph: &CodeGraph,
     ) -> HashMap<String, f64> {
-        communities.iter().map(|comm| {
-            let max_score = comm.node_ids.iter()
-                .filter_map(|nid| {
-                    graph.get_node(nid)
-                        .and_then(|n| n.file_path.as_deref())
-                        .and_then(|fp| file_scores.get(fp))
-                })
-                .copied()
-                .fold(0.0f64, f64::max);
-            (comm.id.clone(), max_score)
-        }).collect()
+        communities
+            .iter()
+            .map(|comm| {
+                let max_score = comm
+                    .node_ids
+                    .iter()
+                    .filter_map(|nid| {
+                        graph
+                            .get_node(nid)
+                            .and_then(|n| n.file_path.as_deref())
+                            .and_then(|fp| file_scores.get(fp))
+                    })
+                    .copied()
+                    .fold(0.0f64, f64::max);
+                (comm.id.clone(), max_score)
+            })
+            .collect()
     }
 }
 
@@ -767,7 +794,8 @@ impl MultiSignalScorer {
         // Pre-compute and pre-tokenize symbol names per community for file-level matching.
         // Uses contains_children index for O(degree) instead of O(total_edges).
         // Pre-tokenizes to avoid re-tokenizing on every query.
-        let mut community_symbol_tokens: HashMap<String, Vec<std::collections::HashSet<String>>> = HashMap::new();
+        let mut community_symbol_tokens: HashMap<String, Vec<std::collections::HashSet<String>>> =
+            HashMap::new();
         for comm in communities {
             let mut token_sets = Vec::new();
             for node_id in &comm.node_ids {
@@ -800,7 +828,10 @@ impl MultiSignalScorer {
         // Default = BM25/TF-IDF only (80% of signals). Neural adds 20% semantic quality
         // but costs ~28s for model load + embedding. Disabled by default for responsiveness.
         let neural_enabled = std::env::var("THEO_NEURAL").is_ok();
-        let embedder_result: Result<crate::embedding::neural::NeuralEmbedder, Box<dyn std::error::Error>> = if neural_enabled {
+        let embedder_result: Result<
+            crate::embedding::neural::NeuralEmbedder,
+            Box<dyn std::error::Error>,
+        > = if neural_enabled {
             NeuralEmbedder::new()
         } else {
             Err("Neural embeddings disabled (set THEO_NEURAL=1 to enable)".into())
@@ -871,7 +902,10 @@ impl MultiSignalScorer {
         // Full path: all 6 signals
         let large_repo = communities.len() > 500;
         if large_repo {
-            eprintln!("[tiered] fast path: {} communities > 500, skipping neural + graph attention", communities.len());
+            eprintln!(
+                "[tiered] fast path: {} communities > 500, skipping neural + graph attention",
+                communities.len()
+            );
         }
 
         // 1. BM25 scores — FILE-LEVEL with max-aggregation to community.
@@ -966,25 +1000,35 @@ impl MultiSignalScorer {
             .map(|comm| {
                 // Normalize BM25 to [0,1]
                 let raw_bm25 = *bm25_map.get(comm.id.as_str()).unwrap_or(&0.0);
-                let norm_bm25 = if bm25_range > 0.0 { (raw_bm25 - bm25_min) / bm25_range } else { 0.0 };
+                let norm_bm25 = if bm25_range > 0.0 {
+                    (raw_bm25 - bm25_min) / bm25_range
+                } else {
+                    0.0
+                };
 
                 // Centrality and recency (already [0,1])
                 let centrality = *self.centrality_scores.get(&comm.id).unwrap_or(&0.0);
                 let recency = *self.recency_scores.get(&comm.id).unwrap_or(&0.0);
 
                 // Per-file symbol match boost
-                let file_boost = if let Some(token_sets) = self.community_symbol_tokens.get(&comm.id) {
-                    let mut best = 0.0f64;
-                    for toks in token_sets {
-                        let m = query_tokens.iter().filter(|qt| toks.contains(*qt)).count();
-                        if !query_tokens.is_empty() {
-                            best = best.max(m as f64 / query_tokens.len() as f64);
+                let file_boost =
+                    if let Some(token_sets) = self.community_symbol_tokens.get(&comm.id) {
+                        let mut best = 0.0f64;
+                        for toks in token_sets {
+                            let m = query_tokens.iter().filter(|qt| toks.contains(*qt)).count();
+                            if !query_tokens.is_empty() {
+                                best = best.max(m as f64 / query_tokens.len() as f64);
+                            }
                         }
-                    }
-                    best
-                } else { 0.0 };
+                        best
+                    } else {
+                        0.0
+                    };
 
-                let score = w_bm25 * norm_bm25 + w_file * file_boost + w_cent * centrality + w_rec * recency;
+                let score = w_bm25 * norm_bm25
+                    + w_file * file_boost
+                    + w_cent * centrality
+                    + w_rec * recency;
 
                 ScoredCommunity {
                     community: comm.clone(),
@@ -993,7 +1037,11 @@ impl MultiSignalScorer {
             })
             .collect();
 
-        result.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        result.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         result
     }
 }
@@ -1051,7 +1099,9 @@ mod tests {
         let tokens = tokenise("getHTTPResponse");
         assert!(tokens.contains(&"get".to_string()));
         assert!(tokens.contains(&"http".to_string()));
-        assert!(tokens.contains(&"response".to_string()) || tokens.contains(&"respons".to_string()));
+        assert!(
+            tokens.contains(&"response".to_string()) || tokens.contains(&"respons".to_string())
+        );
     }
 
     #[test]
@@ -1084,8 +1134,8 @@ mod tests {
     /// Debug test: verify BM25 actually works with a simple community.
     #[test]
     fn debug_bm25_community_document() {
-        use theo_engine_graph::model::*;
         use theo_engine_graph::cluster::Community;
+        use theo_engine_graph::model::*;
 
         let mut graph = CodeGraph::new();
 
@@ -1136,14 +1186,26 @@ mod tests {
         // Check community_document output
         let doc = community_document(&community, &graph);
         eprintln!("COMMUNITY DOCUMENT:\n{}\n", doc);
-        assert!(doc.contains("verify_token"), "Document should contain symbol name");
-        assert!(doc.contains("verify"), "Document should contain 'verify' after tokenization");
+        assert!(
+            doc.contains("verify_token"),
+            "Document should contain symbol name"
+        );
+        assert!(
+            doc.contains("verify"),
+            "Document should contain 'verify' after tokenization"
+        );
 
         // Check tokenization
         let tokens = tokenise(&doc);
         eprintln!("TOKENS: {:?}\n", tokens);
-        assert!(tokens.contains(&"verify".to_string()), "Tokens should contain 'verify'");
-        assert!(tokens.contains(&"token".to_string()), "Tokens should contain 'token'");
+        assert!(
+            tokens.contains(&"verify".to_string()),
+            "Tokens should contain 'verify'"
+        );
+        assert!(
+            tokens.contains(&"token".to_string()),
+            "Tokens should contain 'token'"
+        );
 
         // Build BM25 index and search
         let communities = vec![community];
@@ -1156,7 +1218,11 @@ mod tests {
         }
 
         assert!(!results.is_empty(), "BM25 should return results");
-        assert!(results[0].score > 0.0, "Top result should have positive score, got {}", results[0].score);
+        assert!(
+            results[0].score > 0.0,
+            "Top result should have positive score, got {}",
+            results[0].score
+        );
     }
 
     // --- S3-T3: ScoringWeights tests ---
@@ -1165,14 +1231,22 @@ mod tests {
     fn scoring_weights_default_sums_to_one() {
         let w = ScoringWeights::default();
         let sum = w.bm25 + w.file_boost + w.centrality + w.recency;
-        assert!((sum - 1.0).abs() < 0.001, "Default weights must sum to 1.0, got {}", sum);
+        assert!(
+            (sum - 1.0).abs() < 0.001,
+            "Default weights must sum to 1.0, got {}",
+            sum
+        );
     }
 
     #[test]
     fn scoring_weights_custom_normalizes() {
         let w = ScoringWeights::new(2.0, 1.0, 0.5, 0.5);
         let sum = w.bm25 + w.file_boost + w.centrality + w.recency;
-        assert!((sum - 1.0).abs() < 0.001, "Custom weights must be normalized to 1.0, got {}", sum);
+        assert!(
+            (sum - 1.0).abs() < 0.001,
+            "Custom weights must be normalized to 1.0, got {}",
+            sum
+        );
         assert!((w.bm25 - 0.5).abs() < 0.001, "2.0/4.0 = 0.5");
         assert!((w.file_boost - 0.25).abs() < 0.001, "1.0/4.0 = 0.25");
     }

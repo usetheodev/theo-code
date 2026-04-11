@@ -5,7 +5,6 @@
 ///
 /// AllMiniLM is the production default — works on 8GB laptops.
 /// Jina Code gives +5-10% quality but costs 12x more RAM.
-
 use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
 
 pub struct NeuralEmbedder {

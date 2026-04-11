@@ -379,7 +379,11 @@ mod tests {
         let mut state = TaskState::Completed;
         let result = super::super::transition(&mut state, TaskState::Running);
         assert!(result.is_err());
-        assert_eq!(state, TaskState::Completed, "state must not change on error");
+        assert_eq!(
+            state,
+            TaskState::Completed,
+            "state must not change on error"
+        );
     }
 
     #[test]
@@ -394,8 +398,15 @@ mod tests {
     #[test]
     fn display_all_variants() {
         let expected = [
-            "Pending", "Ready", "Running", "WaitingTool", "WaitingInput",
-            "Blocked", "Completed", "Failed", "Cancelled",
+            "Pending",
+            "Ready",
+            "Running",
+            "WaitingTool",
+            "WaitingInput",
+            "Blocked",
+            "Completed",
+            "Failed",
+            "Cancelled",
         ];
         for (state, name) in ALL_STATES.iter().zip(expected.iter()) {
             assert_eq!(format!("{}", state), *name);

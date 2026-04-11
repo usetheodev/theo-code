@@ -77,11 +77,7 @@ impl TaskManager {
     ///
     /// - Invariant 4: Terminal states reject all transitions (enforced by TaskState).
     /// - Invariant 5: Publishes `DomainEvent::TaskStateChanged` with from/to payload.
-    pub fn transition(
-        &self,
-        task_id: &TaskId,
-        target: TaskState,
-    ) -> Result<(), TaskManagerError> {
+    pub fn transition(&self, task_id: &TaskId, target: TaskState) -> Result<(), TaskManagerError> {
         let mut tasks = self.tasks.lock().expect("tasks lock poisoned");
         let task = tasks
             .get_mut(task_id)
@@ -135,7 +131,11 @@ impl TaskManager {
     }
 
     /// Adds an artifact to a task.
-    pub fn add_artifact(&self, task_id: &TaskId, artifact: Artifact) -> Result<(), TaskManagerError> {
+    pub fn add_artifact(
+        &self,
+        task_id: &TaskId,
+        artifact: Artifact,
+    ) -> Result<(), TaskManagerError> {
         let mut tasks = self.tasks.lock().expect("tasks lock poisoned");
         let task = tasks
             .get_mut(task_id)
@@ -174,11 +174,8 @@ mod tests {
     #[test]
     fn create_task_has_all_required_fields() {
         let (manager, _) = setup();
-        let task_id = manager.create_task(
-            SessionId::new("s-1"),
-            AgentType::Coder,
-            "fix bug".into(),
-        );
+        let task_id =
+            manager.create_task(SessionId::new("s-1"), AgentType::Coder, "fix bug".into());
         let task = manager.get(&task_id).expect("task must exist");
         assert_eq!(task.task_id, task_id);
         assert_eq!(task.session_id, SessionId::new("s-1"));
@@ -191,11 +188,8 @@ mod tests {
     #[test]
     fn create_task_emits_task_created_event() {
         let (manager, listener) = setup();
-        let task_id = manager.create_task(
-            SessionId::new("s-1"),
-            AgentType::Coder,
-            "fix bug".into(),
-        );
+        let task_id =
+            manager.create_task(SessionId::new("s-1"), AgentType::Coder, "fix bug".into());
         let events = listener.captured();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].event_type, EventType::TaskCreated);

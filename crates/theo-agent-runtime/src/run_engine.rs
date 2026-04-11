@@ -7,10 +7,10 @@ use theo_domain::event::{DomainEvent, EventType};
 use theo_domain::identifiers::{RunId, TaskId};
 use theo_domain::session::{MessageId, SessionId};
 use theo_domain::task::TaskState;
-use theo_domain::tool_call::ToolCallState;
 use theo_domain::tool::ToolContext;
-use theo_infra_llm::types::{ChatRequest, Message};
+use theo_domain::tool_call::ToolCallState;
 use theo_infra_llm::LlmClient;
+use theo_infra_llm::types::{ChatRequest, Message};
 use theo_tooling::registry::ToolRegistry;
 
 use crate::agent_loop::AgentResult;
@@ -18,17 +18,16 @@ use crate::budget_enforcer::BudgetEnforcer;
 use crate::config::AgentConfig;
 use crate::context_metrics::ContextMetrics;
 use crate::convergence::{
-    check_git_changes, ConvergenceContext, ConvergenceEvaluator, ConvergenceMode,
-    EditSuccessConvergence, GitDiffConvergence,
+    ConvergenceContext, ConvergenceEvaluator, ConvergenceMode, EditSuccessConvergence,
+    GitDiffConvergence, check_git_changes,
 };
 use crate::event_bus::EventBus;
+use crate::loop_state::ContextLoopState;
 use crate::metrics::{MetricsCollector, RuntimeMetrics};
 use crate::persistence::SnapshotStore;
-use crate::snapshot::RunSnapshot;
-#[allow(deprecated)]
-use crate::state::AgentState;
-use crate::task_manager::TaskManager;
 use crate::skill::SkillRegistry;
+use crate::snapshot::RunSnapshot;
+use crate::task_manager::TaskManager;
 use crate::tool_bridge;
 use crate::tool_call_manager::ToolCallManager;
 
@@ -53,8 +52,7 @@ pub struct AgentRunEngine {
     failure_tracker: crate::failure_tracker::FailurePatternTracker,
     snapshot_store: Option<Arc<dyn SnapshotStore>>,
     graph_context: Option<Arc<dyn theo_domain::graph_context::GraphContextProvider>>,
-    #[allow(deprecated)]
-    agent_state: AgentState,
+    context_loop_state: ContextLoopState,
     /// Active context scope — tracks hot files, events, hypotheses for this run.
     working_set: theo_domain::working_set::WorkingSet,
     /// Context breakdown metrics — measures context usage patterns.
@@ -94,8 +92,7 @@ impl AgentRunEngine {
             }),
         ));
 
-        #[allow(deprecated)]
-        let agent_state = AgentState::new();
+        let context_loop_state = ContextLoopState::new();
 
         let budget = Budget {
             max_iterations: config.max_iterations,
@@ -130,7 +127,7 @@ impl AgentRunEngine {
             failure_tracker,
             snapshot_store: None,
             graph_context: None,
-            agent_state,
+            context_loop_state,
             working_set: theo_domain::working_set::WorkingSet::new(),
             context_metrics: ContextMetrics::new(),
         }
@@ -192,13 +189,18 @@ impl AgentRunEngine {
         if std::fs::create_dir_all(&metrics_dir).is_ok() {
             let report = self.context_metrics.to_report();
             let metrics_path = metrics_dir.join(format!("{}.json", self.run.run_id.as_str()));
-            let _ = std::fs::write(&metrics_path, serde_json::to_string_pretty(&report).unwrap_or_default());
+            let _ = std::fs::write(
+                &metrics_path,
+                serde_json::to_string_pretty(&report).unwrap_or_default(),
+            );
         }
 
         // Generate EpisodeSummary from run events and persist to .theo/wiki/episodes/
         let events = self.event_bus.events();
         if !events.is_empty() {
-            let task_objective = self.task_manager.get(&self.task_id)
+            let task_objective = self
+                .task_manager
+                .get(&self.task_id)
                 .map(|t| t.objective.clone())
                 .unwrap_or_else(|| "unknown".to_string());
             let summary = theo_domain::episode::EpisodeSummary::from_events(
@@ -210,7 +212,10 @@ impl AgentRunEngine {
             let episodes_dir = self.project_dir.join(".theo").join("wiki").join("episodes");
             if std::fs::create_dir_all(&episodes_dir).is_ok() {
                 let episode_path = episodes_dir.join(format!("{}.json", summary.summary_id));
-                let _ = std::fs::write(&episode_path, serde_json::to_string_pretty(&summary).unwrap_or_default());
+                let _ = std::fs::write(
+                    &episode_path,
+                    serde_json::to_string_pretty(&summary).unwrap_or_default(),
+                );
             }
         }
 
@@ -229,7 +234,11 @@ impl AgentRunEngine {
                     files_changed: result.files_edited.clone(),
                 }]
             };
-            let last_error = if result.success { None } else { Some(result.summary.clone()) };
+            let last_error = if result.success {
+                None
+            } else {
+                Some(result.summary.clone())
+            };
             crate::session_bootstrap::record_session_end(
                 &self.project_dir,
                 self.run.run_id.as_str(),
@@ -248,8 +257,12 @@ impl AgentRunEngine {
         self.transition_run(RunState::Planning);
 
         // Transition task to Running
-        let _ = self.task_manager.transition(&self.task_id, TaskState::Ready);
-        let _ = self.task_manager.transition(&self.task_id, TaskState::Running);
+        let _ = self
+            .task_manager
+            .transition(&self.task_id, TaskState::Ready);
+        let _ = self
+            .task_manager
+            .transition(&self.task_id, TaskState::Running);
 
         // Auto-init: create .theo/theo.md if it doesn't exist (main agent only).
         // Uses static template — instantaneous, no LLM cost. The agent can enrich later.
@@ -266,16 +279,12 @@ impl AgentRunEngine {
             self.config.system_prompt.clone()
         };
 
-        let mut messages: Vec<Message> = vec![
-            Message::system(&system_prompt),
-        ];
+        let mut messages: Vec<Message> = vec![Message::system(&system_prompt)];
 
         // Project context: .theo/theo.md prepended as separate system message
         if !self.config.is_subagent {
             if let Some(context) = crate::project_config::load_project_context(&self.project_dir) {
-                messages.push(Message::system(&format!(
-                    "## Project Context\n{context}"
-                )));
+                messages.push(Message::system(&format!("## Project Context\n{context}")));
             }
         }
 
@@ -291,10 +300,8 @@ impl AgentRunEngine {
             .join("theo")
             .join("memory");
 
-        let memory_store = theo_tooling::memory::FileMemoryStore::for_project(
-            &memory_root,
-            &self.project_dir,
-        );
+        let memory_store =
+            theo_tooling::memory::FileMemoryStore::for_project(&memory_root, &self.project_dir);
         if let Ok(memories) = memory_store.list().await {
             if !memories.is_empty() {
                 let memory_context = memories
@@ -348,7 +355,8 @@ impl AgentRunEngine {
             if let Some(ref provider) = self.graph_context {
                 if provider.is_ready() {
                     // Use the task objective (first user message) as query
-                    let planning_query = messages.iter()
+                    let planning_query = messages
+                        .iter()
                         .rev()
                         .find(|m| m.role == theo_infra_llm::types::Role::User)
                         .and_then(|m| m.content.as_deref())
@@ -360,9 +368,17 @@ impl AgentRunEngine {
                     if !planning_query.is_empty() {
                         if let Ok(ctx) = provider.query_context(&planning_query, 1000).await {
                             if !ctx.blocks.is_empty() {
-                                let file_hints: Vec<String> = ctx.blocks.iter()
+                                let file_hints: Vec<String> = ctx
+                                    .blocks
+                                    .iter()
                                     .take(5)
-                                    .map(|b| format!("- {} (relevance: {:.0}%)", b.source_id, b.score * 100.0))
+                                    .map(|b| {
+                                        format!(
+                                            "- {} (relevance: {:.0}%)",
+                                            b.source_id,
+                                            b.score * 100.0
+                                        )
+                                    })
                                     .collect();
                                 messages.push(Message::system(&format!(
                                     "## Suggested Starting Files\nBased on code graph analysis, these areas are most relevant to your task:\n{}\n\nStart here, but verify with read/grep.",
@@ -423,7 +439,9 @@ impl AgentRunEngine {
         };
 
         // Doom loop detector — tracks recent tool calls to detect repetition
-        let mut doom_tracker = self.config.doom_loop_threshold
+        let mut doom_tracker = self
+            .config
+            .doom_loop_threshold
             .map(|t| DoomLoopTracker::new(t));
 
         // Layer 1: Schema stripping — sub-agents get filtered tool definitions
@@ -443,21 +461,22 @@ impl AgentRunEngine {
             self.budget_enforcer.record_iteration();
             if let Err(violation) = self.budget_enforcer.check() {
                 self.transition_run(RunState::Aborted);
-                let _ = self.task_manager.transition(&self.task_id, TaskState::Failed);
+                let _ = self
+                    .task_manager
+                    .transition(&self.task_id, TaskState::Failed);
 
-                #[allow(deprecated)]
                 let summary = format!(
                     "Budget exceeded: {}. Edits succeeded: {}. Files: {}",
                     violation,
-                    self.agent_state.edits_succeeded,
-                    self.agent_state.edits_files.join(", ")
+                    self.context_loop_state.edits_succeeded,
+                    self.context_loop_state.edits_files.join(", ")
                 );
 
                 self.metrics.record_run_complete(false);
                 return AgentResult {
-                    success: self.agent_state.edits_succeeded > 0,
+                    success: self.context_loop_state.edits_succeeded > 0,
                     summary,
-                    files_edited: self.agent_state.edits_files.clone(),
+                    files_edited: self.context_loop_state.edits_files.clone(),
                     iterations_used: iteration,
                     was_streamed: false,
                     tokens_used: self.metrics.snapshot().total_tokens_used,
@@ -466,12 +485,13 @@ impl AgentRunEngine {
 
             // ── PLANNING phase ──
             // Context loop injection
-            #[allow(deprecated)]
             if iteration > 1 && iteration % self.config.context_loop_interval == 0 {
-                let task_objective = self.task_manager.get(&self.task_id)
+                let task_objective = self
+                    .task_manager
+                    .get(&self.task_id)
                     .map(|t| t.objective.clone())
                     .unwrap_or_default();
-                let ctx_msg = self.agent_state.build_context_loop(
+                let ctx_msg = self.context_loop_state.build_context_loop(
                     iteration,
                     self.config.max_iterations,
                     &task_objective,
@@ -480,19 +500,29 @@ impl AgentRunEngine {
             }
 
             // Phase transitions (legacy, preserved for context loop diagnostics)
-            #[allow(deprecated)]
-            self.agent_state.maybe_transition(iteration, self.config.max_iterations);
+            self.context_loop_state
+                .maybe_transition(iteration, self.config.max_iterations);
 
             // Context compaction: compress history with semantic progress context.
             let compaction_ctx = crate::compaction::CompactionContext {
-                task_objective: messages.iter()
+                task_objective: messages
+                    .iter()
                     .find(|m| m.role == theo_infra_llm::types::Role::User)
                     .and_then(|m| m.content.clone())
                     .unwrap_or_default()
-                    .chars().take(100).collect(),
+                    .chars()
+                    .take(100)
+                    .collect(),
                 current_phase: format!("{:?}", self.run.state),
-                target_files: self.agent_state.edits_files.clone(),
-                recent_errors: self.agent_state.edit_failures.iter().rev().take(2).cloned().collect(),
+                target_files: self.context_loop_state.edits_files.clone(),
+                recent_errors: self
+                    .context_loop_state
+                    .edit_failures
+                    .iter()
+                    .rev()
+                    .take(2)
+                    .cloned()
+                    .collect(),
             };
             crate::compaction::compact_if_needed_with_context(
                 &mut messages,
@@ -501,11 +531,13 @@ impl AgentRunEngine {
             );
 
             // Record context size for metrics (estimated tokens = chars/4)
-            let estimated_context_tokens: usize = messages.iter()
+            let estimated_context_tokens: usize = messages
+                .iter()
                 .filter_map(|m| m.content.as_ref())
                 .map(|c| (c.len() + 3) / 4)
                 .sum();
-            self.context_metrics.record_context_size(iteration, estimated_context_tokens);
+            self.context_metrics
+                .record_context_size(iteration, estimated_context_tokens);
 
             // LLM call
             self.transition_run(RunState::Planning);
@@ -539,23 +571,26 @@ impl AgentRunEngine {
                 let eb = event_bus_for_stream.clone();
                 let rid = run_id_for_stream.clone();
 
-                let response = self.client.chat_streaming(&request, |delta| {
-                    match delta {
+                let response = self
+                    .client
+                    .chat_streaming(&request, |delta| match delta {
                         theo_infra_llm::stream::StreamDelta::Reasoning(text) => {
                             eb.publish(DomainEvent::new(
-                                EventType::ReasoningDelta, &rid,
+                                EventType::ReasoningDelta,
+                                &rid,
                                 serde_json::json!({"text": text}),
                             ));
                         }
                         theo_infra_llm::stream::StreamDelta::Content(text) => {
                             eb.publish(DomainEvent::new(
-                                EventType::ContentDelta, &rid,
+                                EventType::ContentDelta,
+                                &rid,
                                 serde_json::json!({"text": text}),
                             ));
                         }
                         _ => {}
-                    }
-                }).await;
+                    })
+                    .await;
 
                 match response {
                     Ok(resp) => {
@@ -588,19 +623,25 @@ impl AgentRunEngine {
             let response = match llm_result.unwrap() {
                 Ok(resp) => {
                     let llm_duration = llm_start.elapsed().as_millis() as u64;
-                    let tokens = resp.usage.as_ref().map(|u| u.total_tokens as u64).unwrap_or(0);
+                    let tokens = resp
+                        .usage
+                        .as_ref()
+                        .map(|u| u.total_tokens as u64)
+                        .unwrap_or(0);
                     self.budget_enforcer.record_tokens(tokens);
                     self.metrics.record_llm_call(llm_duration, tokens);
                     resp
                 }
                 Err(e) => {
                     self.transition_run(RunState::Aborted);
-                    let _ = self.task_manager.transition(&self.task_id, TaskState::Failed);
+                    let _ = self
+                        .task_manager
+                        .transition(&self.task_id, TaskState::Failed);
                     self.metrics.record_run_complete(false);
                     return AgentResult {
                         success: false,
                         summary: format!("LLM error: {e}"),
-                        files_edited: self.agent_state.edits_files.clone(),
+                        files_edited: self.context_loop_state.edits_files.clone(),
                         iterations_used: iteration,
                         was_streamed: false,
                         tokens_used: self.metrics.snapshot().total_tokens_used,
@@ -620,12 +661,14 @@ impl AgentRunEngine {
                     // was_streamed=true: this content was already displayed via ContentDelta
                     // during chat_streaming(). The REPL must NOT re-print it.
                     self.transition_run(RunState::Converged);
-                    let _ = self.task_manager.transition(&self.task_id, TaskState::Completed);
+                    let _ = self
+                        .task_manager
+                        .transition(&self.task_id, TaskState::Completed);
                     self.metrics.record_run_complete(true);
                     return AgentResult {
                         success: true,
                         summary: content,
-                        files_edited: self.agent_state.edits_files.clone(),
+                        files_edited: self.context_loop_state.edits_files.clone(),
                         iterations_used: iteration,
                         was_streamed: true,
                         tokens_used: self.metrics.snapshot().total_tokens_used,
@@ -663,7 +706,11 @@ impl AgentRunEngine {
                     let summary = call
                         .parse_arguments()
                         .ok()
-                        .and_then(|args| args.get("summary").and_then(|s| s.as_str()).map(String::from))
+                        .and_then(|args| {
+                            args.get("summary")
+                                .and_then(|s| s.as_str())
+                                .map(String::from)
+                        })
                         .unwrap_or_else(|| "Task completed.".to_string());
 
                     // Gate 0: done_attempts hard limit — avoid burning entire budget
@@ -671,12 +718,17 @@ impl AgentRunEngine {
                     if self.done_attempts > MAX_DONE_ATTEMPTS {
                         // Exceeded max attempts — accept with warning
                         self.transition_run(RunState::Converged);
-                        let _ = self.task_manager.transition(&self.task_id, TaskState::Completed);
+                        let _ = self
+                            .task_manager
+                            .transition(&self.task_id, TaskState::Completed);
                         self.metrics.record_run_complete(true);
                         should_return = Some(AgentResult {
                             success: true,
-                            summary: format!("{} [accepted after {} done attempts]", summary, self.done_attempts),
-                            files_edited: self.agent_state.edits_files.clone(),
+                            summary: format!(
+                                "{} [accepted after {} done attempts]",
+                                summary, self.done_attempts
+                            ),
+                            files_edited: self.context_loop_state.edits_files.clone(),
                             iterations_used: iteration,
                             was_streamed: false,
                             tokens_used: self.metrics.snapshot().total_tokens_used,
@@ -688,7 +740,7 @@ impl AgentRunEngine {
                     let has_changes = check_git_changes(&self.project_dir).await;
                     let convergence_ctx = ConvergenceContext {
                         has_git_changes: has_changes,
-                        edits_succeeded: self.agent_state.edits_files.len(),
+                        edits_succeeded: self.context_loop_state.edits_files.len(),
                         done_requested: true,
                         iteration,
                         max_iterations: self.config.max_iterations,
@@ -709,7 +761,7 @@ impl AgentRunEngine {
 
                     // Review suggestion: if diff is large, suggest reviewing before accepting.
                     // Non-blocking — just a hint to encourage careful review.
-                    if self.agent_state.edits_files.len() > 3 {
+                    if self.context_loop_state.edits_files.len() > 3 {
                         let diff_stat = tokio::process::Command::new("git")
                             .args(["diff", "--stat"])
                             .current_dir(&self.project_dir)
@@ -717,7 +769,8 @@ impl AgentRunEngine {
                             .await;
                         if let Ok(output) = diff_stat {
                             let stat = String::from_utf8_lossy(&output.stdout);
-                            let lines_changed: usize = stat.lines()
+                            let lines_changed: usize = stat
+                                .lines()
                                 .filter_map(|l| {
                                     // Parse "N insertions(+), M deletions(-)" from last line
                                     if l.contains("insertion") || l.contains("deletion") {
@@ -731,13 +784,12 @@ impl AgentRunEngine {
                                 })
                                 .sum();
                             if lines_changed > 100 {
-                                messages.push(Message::user(
-                                    &format!(
-                                        "Note: This change touches {} files with ~{} lines changed. \
+                                messages.push(Message::user(&format!(
+                                    "Note: This change touches {} files with ~{} lines changed. \
                                          Consider reviewing the diff carefully before finalizing.",
-                                        self.agent_state.edits_files.len(), lines_changed
-                                    )
-                                ));
+                                    self.context_loop_state.edits_files.len(),
+                                    lines_changed
+                                )));
                             }
                         }
                     }
@@ -746,25 +798,31 @@ impl AgentRunEngine {
                     // Best-effort: skip if not Rust, timeout 60s, never hard-abort.
                     if self.project_dir.join("Cargo.toml").exists() {
                         // Determine which crate was affected for targeted test
-                        let test_args = if let Some(first_file) = self.agent_state.edits_files.first() {
-                            // Try to find crate name from edited file path
-                            let crate_name = std::path::Path::new(first_file)
-                                .components()
-                                .zip(std::path::Path::new(first_file).components().skip(1))
-                                .find(|(a, _)| {
-                                    let s = a.as_os_str().to_string_lossy();
-                                    s == "crates" || s == "apps"
-                                })
-                                .map(|(_, b)| b.as_os_str().to_string_lossy().to_string());
-                            if let Some(name) = crate_name {
-                                vec!["test".to_string(), "-p".to_string(), name, "--no-fail-fast".to_string()]
+                        let test_args =
+                            if let Some(first_file) = self.context_loop_state.edits_files.first() {
+                                // Try to find crate name from edited file path
+                                let crate_name = std::path::Path::new(first_file)
+                                    .components()
+                                    .zip(std::path::Path::new(first_file).components().skip(1))
+                                    .find(|(a, _)| {
+                                        let s = a.as_os_str().to_string_lossy();
+                                        s == "crates" || s == "apps"
+                                    })
+                                    .map(|(_, b)| b.as_os_str().to_string_lossy().to_string());
+                                if let Some(name) = crate_name {
+                                    vec![
+                                        "test".to_string(),
+                                        "-p".to_string(),
+                                        name,
+                                        "--no-fail-fast".to_string(),
+                                    ]
+                                } else {
+                                    vec!["test".to_string(), "--no-fail-fast".to_string()]
+                                }
                             } else {
-                                vec!["test".to_string(), "--no-fail-fast".to_string()]
-                            }
-                        } else {
-                            // No files edited — just cargo check as sanity
-                            vec!["check".to_string(), "--message-format=short".to_string()]
-                        };
+                                // No files edited — just cargo check as sanity
+                                vec!["check".to_string(), "--message-format=short".to_string()]
+                            };
 
                         let test_result = tokio::time::timeout(
                             std::time::Duration::from_secs(60),
@@ -805,7 +863,14 @@ impl AgentRunEngine {
 
                         if let Some(errors) = check_failed {
                             let error_preview = if errors.len() > 2000 {
-                                format!("{}...\n[truncated]", &errors[..errors.char_indices().nth(2000).map(|(i,_)| i).unwrap_or(errors.len())])
+                                format!(
+                                    "{}...\n[truncated]",
+                                    &errors[..errors
+                                        .char_indices()
+                                        .nth(2000)
+                                        .map(|(i, _)| i)
+                                        .unwrap_or(errors.len())]
+                                )
                             } else {
                                 errors
                             };
@@ -824,13 +889,15 @@ impl AgentRunEngine {
                     }
 
                     self.transition_run(RunState::Converged);
-                    let _ = self.task_manager.transition(&self.task_id, TaskState::Completed);
+                    let _ = self
+                        .task_manager
+                        .transition(&self.task_id, TaskState::Completed);
                     self.metrics.record_run_complete(true);
 
                     should_return = Some(AgentResult {
                         success: true,
                         summary,
-                        files_edited: self.agent_state.edits_files.clone(),
+                        files_edited: self.context_loop_state.edits_files.clone(),
                         iterations_used: iteration,
                         was_streamed: false,
                         tokens_used: self.metrics.snapshot().total_tokens_used,
@@ -841,8 +908,14 @@ impl AgentRunEngine {
                 // Handle `subagent` meta-tool — delegate to sub-agent
                 if name == "subagent" {
                     let args = call.parse_arguments().unwrap_or_default();
-                    let role_str = args.get("role").and_then(|v| v.as_str()).unwrap_or("explorer");
-                    let objective = args.get("objective").and_then(|v| v.as_str()).unwrap_or("No objective provided");
+                    let role_str = args
+                        .get("role")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("explorer");
+                    let objective = args
+                        .get("objective")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("No objective provided");
 
                     let role = crate::subagent::SubAgentRole::from_str(role_str)
                         .unwrap_or(crate::subagent::SubAgentRole::Explorer);
@@ -866,15 +939,24 @@ impl AgentRunEngine {
                     let sub_result = manager.spawn(role, objective, None).await;
 
                     let result_msg = if sub_result.success {
-                        format!("[{} sub-agent completed] {}", role.display_name(), sub_result.summary)
+                        format!(
+                            "[{} sub-agent completed] {}",
+                            role.display_name(),
+                            sub_result.summary
+                        )
                     } else {
-                        format!("[{} sub-agent failed] {}", role.display_name(), sub_result.summary)
+                        format!(
+                            "[{} sub-agent failed] {}",
+                            role.display_name(),
+                            sub_result.summary
+                        )
                     };
 
                     // Record sub-agent files as parent's edits
                     for file in &sub_result.files_edited {
                         if !file.is_empty() {
-                            self.agent_state.record_edit_attempt(file, true, None);
+                            self.context_loop_state
+                                .record_edit_attempt(file, true, None);
                         }
                     }
 
@@ -933,7 +1015,8 @@ impl AgentRunEngine {
                             ));
                             for file in &result.files_edited {
                                 if !file.is_empty() {
-                                    self.agent_state.record_edit_attempt(file, true, None);
+                                    self.context_loop_state
+                                        .record_edit_attempt(file, true, None);
                                 }
                             }
                             // Aggregate parallel sub-agent tokens into parent budget + metrics
@@ -941,7 +1024,11 @@ impl AgentRunEngine {
                             self.metrics.record_delegated_tokens(result.tokens_used);
                         }
 
-                        messages.push(Message::tool_result(&call.id, "subagent_parallel", &combined));
+                        messages.push(Message::tool_result(
+                            &call.id,
+                            "subagent_parallel",
+                            &combined,
+                        ));
                         continue;
                     } else {
                         messages.push(Message::tool_result(
@@ -974,7 +1061,10 @@ impl AgentRunEngine {
                                 messages.push(Message::tool_result(
                                     &call.id,
                                     "skill",
-                                    &format!("Skill '{}' loaded. Follow the instructions above.", skill_name),
+                                    &format!(
+                                        "Skill '{}' loaded. Follow the instructions above.",
+                                        skill_name
+                                    ),
                                 ));
                             }
                             crate::skill::SkillMode::SubAgent { role } => {
@@ -994,17 +1084,25 @@ impl AgentRunEngine {
                                     self.project_dir.clone(),
                                 );
 
-                                let sub_result = manager.spawn(*role, &skill.instructions, None).await;
+                                let sub_result =
+                                    manager.spawn(*role, &skill.instructions, None).await;
 
                                 let result_msg = if sub_result.success {
-                                    format!("[Skill '{}' completed] {}", skill_name, sub_result.summary)
+                                    format!(
+                                        "[Skill '{}' completed] {}",
+                                        skill_name, sub_result.summary
+                                    )
                                 } else {
-                                    format!("[Skill '{}' failed] {}", skill_name, sub_result.summary)
+                                    format!(
+                                        "[Skill '{}' failed] {}",
+                                        skill_name, sub_result.summary
+                                    )
                                 };
 
                                 for file in &sub_result.files_edited {
                                     if !file.is_empty() {
-                                        self.agent_state.record_edit_attempt(file, true, None);
+                                        self.context_loop_state
+                                            .record_edit_attempt(file, true, None);
                                     }
                                 }
 
@@ -1017,7 +1115,11 @@ impl AgentRunEngine {
                         }
                     } else {
                         let available: Vec<String> = {
-                            skill_registry.list().iter().map(|s| s.name.clone()).collect()
+                            skill_registry
+                                .list()
+                                .iter()
+                                .map(|s| s.name.clone())
+                                .collect()
                         };
                         messages.push(Message::tool_result(
                             &call.id,
@@ -1039,7 +1141,8 @@ impl AgentRunEngine {
 
                     if let Some(calls) = calls_array {
                         const MAX_BATCH: usize = 25;
-                        const BLOCKED: &[&str] = &["batch", "done", "subagent", "subagent_parallel", "skill"];
+                        const BLOCKED: &[&str] =
+                            &["batch", "done", "subagent", "subagent_parallel", "skill"];
 
                         let total = calls.len().min(MAX_BATCH);
 
@@ -1050,11 +1153,22 @@ impl AgentRunEngine {
                         let mut blocked_results: Vec<(usize, String, String)> = Vec::new(); // (index, name, error)
 
                         for (i, batch_call) in calls.iter().take(MAX_BATCH).enumerate() {
-                            let tool_name = batch_call.get("tool").and_then(|v| v.as_str()).unwrap_or("?").to_string();
-                            let tool_args = batch_call.get("args").cloned().unwrap_or(serde_json::json!({}));
+                            let tool_name = batch_call
+                                .get("tool")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("?")
+                                .to_string();
+                            let tool_args = batch_call
+                                .get("args")
+                                .cloned()
+                                .unwrap_or(serde_json::json!({}));
 
                             if BLOCKED.contains(&tool_name.as_str()) {
-                                blocked_results.push((i, tool_name.clone(), format!("cannot use '{}' inside batch", tool_name)));
+                                blocked_results.push((
+                                    i,
+                                    tool_name.clone(),
+                                    format!("cannot use '{}' inside batch", tool_name),
+                                ));
                                 continue;
                             }
 
@@ -1084,8 +1198,11 @@ impl AgentRunEngine {
 
                             futures.push(async move {
                                 let (msg, success) = tool_bridge::execute_tool_call(
-                                    &reg, &batch_tool_call, &batch_ctx,
-                                ).await;
+                                    &reg,
+                                    &batch_tool_call,
+                                    &batch_ctx,
+                                )
+                                .await;
                                 (i, tool_name, tool_args, msg, success)
                             });
                         }
@@ -1105,7 +1222,9 @@ impl AgentRunEngine {
                             let status = if success { "ok" } else { "error" };
                             let preview = if output.len() > 200 {
                                 let mut end = 200;
-                                while end > 0 && !output.is_char_boundary(end) { end -= 1; }
+                                while end > 0 && !output.is_char_boundary(end) {
+                                    end -= 1;
+                                }
                                 format!("{}...", &output[..end])
                             } else {
                                 output.clone()
@@ -1114,7 +1233,13 @@ impl AgentRunEngine {
                             all_results.push((
                                 i,
                                 tool_name.clone(),
-                                format!("{}({}): {} — {}", tool_name, truncate_batch_args(&tool_args), status, preview),
+                                format!(
+                                    "{}({}): {} — {}",
+                                    tool_name,
+                                    truncate_batch_args(&tool_args),
+                                    status,
+                                    preview
+                                ),
                                 success,
                             ));
 
@@ -1123,13 +1248,16 @@ impl AgentRunEngine {
                             self.metrics.record_tool_call(&tool_name, 0, success);
 
                             // Track edits
-                            #[allow(deprecated)]
-                            if success && matches!(tool_name.as_str(), "edit" | "write" | "apply_patch") {
-                                let file = tool_args.get("filePath")
+                            if success
+                                && matches!(tool_name.as_str(), "edit" | "write" | "apply_patch")
+                            {
+                                let file = tool_args
+                                    .get("filePath")
                                     .and_then(|p| p.as_str())
                                     .unwrap_or("");
                                 if !file.is_empty() {
-                                    self.agent_state.record_edit_attempt(file, true, None);
+                                    self.context_loop_state
+                                        .record_edit_attempt(file, true, None);
                                 }
                             }
                         }
@@ -1179,8 +1307,12 @@ impl AgentRunEngine {
                     let is_write_tool = matches!(name.as_str(), "edit" | "write" | "apply_patch");
                     if is_write_tool {
                         let is_roadmap_write = name == "write"
-                            && call.parse_arguments().ok()
-                                .and_then(|a| a.get("filePath").and_then(|p| p.as_str()).map(String::from))
+                            && call
+                                .parse_arguments()
+                                .ok()
+                                .and_then(|a| {
+                                    a.get("filePath").and_then(|p| p.as_str()).map(String::from)
+                                })
                                 .map(|p| p.contains(".theo/plans/"))
                                 .unwrap_or(false);
 
@@ -1199,12 +1331,16 @@ impl AgentRunEngine {
                 if let Some(ref runner) = hook_runner {
                     let hook_args = call.parse_arguments().unwrap_or_default();
                     let event = crate::hooks::tool_hook_event(
-                        "tool.before", name, &hook_args, &self.project_dir,
+                        "tool.before",
+                        name,
+                        &hook_args,
+                        &self.project_dir,
                     );
                     let hook_result = runner.run_pre_hook("tool.before", &event).await;
                     if !hook_result.allowed {
                         messages.push(Message::tool_result(
-                            &call.id, name,
+                            &call.id,
+                            name,
                             &format!("BLOCKED by hook: {}", hook_result.output.trim()),
                         ));
                         continue;
@@ -1217,17 +1353,18 @@ impl AgentRunEngine {
                     Err(e) => {
                         // Report parse error to LLM so it can fix and retry
                         messages.push(Message::tool_result(
-                            &call.id, name,
-                            &format!("Failed to parse arguments: {e}. Please retry with valid JSON."),
+                            &call.id,
+                            name,
+                            &format!(
+                                "Failed to parse arguments: {e}. Please retry with valid JSON."
+                            ),
                         ));
                         continue;
                     }
                 };
-                let tool_call_id = self.tool_call_manager.enqueue(
-                    self.task_id.clone(),
-                    name.clone(),
-                    tool_args,
-                );
+                let tool_call_id =
+                    self.tool_call_manager
+                        .enqueue(self.task_id.clone(), name.clone(), tool_args);
 
                 let ctx = ToolContext {
                     session_id: SessionId::new("agent"),
@@ -1239,7 +1376,8 @@ impl AgentRunEngine {
                     graph_context: self.graph_context.clone(),
                 };
 
-                let tool_result = self.tool_call_manager
+                let tool_result = self
+                    .tool_call_manager
                     .dispatch_and_execute(&tool_call_id, &self.registry, &ctx)
                     .await;
 
@@ -1267,7 +1405,8 @@ impl AgentRunEngine {
                         let warning = format!(
                             "⚠️ DOOM LOOP DETECTED: You have called '{}' with identical arguments {} times in a row. \
                              You are stuck in a loop. Try a DIFFERENT approach or tool.",
-                            name, self.config.doom_loop_threshold.unwrap_or(3)
+                            name,
+                            self.config.doom_loop_threshold.unwrap_or(3)
                         );
                         self.event_bus.publish(DomainEvent::new(
                             EventType::Error,
@@ -1283,15 +1422,18 @@ impl AgentRunEngine {
                         // Hard abort after 2x threshold (warning wasn't enough)
                         if tracker.should_abort() {
                             self.transition_run(RunState::Aborted);
-                            let _ = self.task_manager.transition(&self.task_id, TaskState::Failed);
+                            let _ = self
+                                .task_manager
+                                .transition(&self.task_id, TaskState::Failed);
                             self.metrics.record_run_complete(false);
                             return AgentResult {
                                 success: false,
                                 summary: format!(
                                     "Doom loop abort: '{}' called identically {} times. Agent is stuck.",
-                                    name, self.config.doom_loop_threshold.unwrap_or(3) * 2
+                                    name,
+                                    self.config.doom_loop_threshold.unwrap_or(3) * 2
                                 ),
-                                files_edited: self.agent_state.edits_files.clone(),
+                                files_edited: self.context_loop_state.edits_files.clone(),
                                 iterations_used: iteration,
                                 was_streamed: false,
                                 tokens_used: self.metrics.snapshot().total_tokens_used,
@@ -1307,7 +1449,11 @@ impl AgentRunEngine {
                 match name.as_str() {
                     "read" | "edit" | "write" | "apply_patch" => {
                         if let Ok(args) = call.parse_arguments() {
-                            if let Some(path) = args.get("filePath").or(args.get("file_path")).and_then(|p| p.as_str()) {
+                            if let Some(path) = args
+                                .get("filePath")
+                                .or(args.get("file_path"))
+                                .and_then(|p| p.as_str())
+                            {
                                 self.working_set.touch_file(path);
                                 self.context_metrics.record_artifact_fetch(path, iteration);
                                 // P0: Feed usefulness pipeline — record which files agent actually uses
@@ -1317,8 +1463,13 @@ impl AgentRunEngine {
                     }
                     "grep" | "glob" | "codebase_context" => {
                         if let Ok(args) = call.parse_arguments() {
-                            let query = args.get("pattern").or(args.get("query")).and_then(|p| p.as_str()).unwrap_or("");
-                            self.context_metrics.record_action(&format!("{}: {}", name, query), iteration);
+                            let query = args
+                                .get("pattern")
+                                .or(args.get("query"))
+                                .and_then(|p| p.as_str())
+                                .unwrap_or("");
+                            self.context_metrics
+                                .record_action(&format!("{}: {}", name, query), iteration);
                             // Also record searched paths as references
                             if let Some(path) = args.get("path").and_then(|p| p.as_str()) {
                                 self.context_metrics.record_tool_reference(path);
@@ -1334,23 +1485,22 @@ impl AgentRunEngine {
                     20, // keep last 20 events
                 );
 
-                // Update agent state (preserved for context loop diagnostics)
-                #[allow(deprecated)]
+                // Update context-loop diagnostics state
                 match name.as_str() {
                     "read" => {
                         if let Ok(args) = call.parse_arguments() {
                             if let Some(path) = args.get("filePath").and_then(|p| p.as_str()) {
-                                self.agent_state.record_read(path);
+                                self.context_loop_state.record_read(path);
                             }
                         }
                     }
-                    "grep" | "glob" => self.agent_state.record_search(),
+                    "grep" | "glob" => self.context_loop_state.record_search(),
                     "edit" | "write" | "apply_patch" => {
                         // RPI sensor: warn if editing without prior research.
                         // Research = codebase_context, grep, glob, or read calls.
-                        if self.agent_state.searches_done == 0
-                            && self.agent_state.files_read.is_empty()
-                            && self.agent_state.edit_attempts == 0
+                        if self.context_loop_state.searches_done == 0
+                            && self.context_loop_state.files_read.is_empty()
+                            && self.context_loop_state.edit_attempts == 0
                         {
                             messages.push(Message::user(
                                 "⚠️ You are editing files without prior research (no grep, glob, read, or codebase_context calls). \
@@ -1368,19 +1518,23 @@ impl AgentRunEngine {
                                     .map(String::from)
                                     // For apply_patch: extract from patchText
                                     .or_else(|| {
-                                        args.get("patchText")
-                                            .and_then(|p| p.as_str())
-                                            .and_then(|patch| {
-                                                patch.lines()
+                                        args.get("patchText").and_then(|p| p.as_str()).and_then(
+                                            |patch| {
+                                                patch
+                                                    .lines()
                                                     .find(|l| l.starts_with("+++ "))
-                                                    .and_then(|l| l.strip_prefix("+++ b/").or(l.strip_prefix("+++ ")))
+                                                    .and_then(|l| {
+                                                        l.strip_prefix("+++ b/")
+                                                            .or(l.strip_prefix("+++ "))
+                                                    })
                                                     .filter(|f| *f != "/dev/null")
                                                     .map(String::from)
-                                            })
+                                            },
+                                        )
                                     })
                             })
                             .unwrap_or_default();
-                        self.agent_state.record_edit_attempt(
+                        self.context_loop_state.record_edit_attempt(
                             &file,
                             success,
                             if success { None } else { Some(output.clone()) },
@@ -1395,7 +1549,10 @@ impl AgentRunEngine {
                 if let Some(ref runner) = hook_runner {
                     let hook_args = call.parse_arguments().unwrap_or_default();
                     let event = crate::hooks::tool_hook_event(
-                        "tool.after", name, &hook_args, &self.project_dir,
+                        "tool.after",
+                        name,
+                        &hook_args,
+                        &self.project_dir,
                     );
                     runner.run_post_hook("tool.after", &event).await;
                 }
@@ -1536,7 +1693,8 @@ fn auto_init_project_context(project_dir: &std::path::Path) {
         sections.push("See `docs/adr/` for Architecture Decision Records.\n".to_string());
     }
     if !has_readme && !has_docs {
-        sections.push("<!-- Run `theo init` to generate detailed project context -->\n".to_string());
+        sections
+            .push("<!-- Run `theo init` to generate detailed project context -->\n".to_string());
     }
 
     // Point to key config files
@@ -1596,7 +1754,12 @@ fn detect_project_name_simple(project_dir: &std::path::Path) -> Option<String> {
             let t = line.trim().trim_start_matches('{').trim();
             if t.starts_with("\"name\"") {
                 if let Some(val) = t.split(':').nth(1) {
-                    let name = val.trim().trim_end_matches('}').trim_matches(',').trim().trim_matches('"');
+                    let name = val
+                        .trim()
+                        .trim_end_matches('}')
+                        .trim_matches(',')
+                        .trim()
+                        .trim_matches('"');
                     if !name.is_empty() {
                         return Some(name.to_string());
                     }
@@ -1692,15 +1855,23 @@ mod tests {
             bus.subscribe(listener.clone());
             let tm = Arc::new(TaskManager::new(bus.clone()));
             let tcm = Arc::new(ToolCallManager::new(bus.clone()));
-            Self { bus, listener, tm, tcm }
+            Self {
+                bus,
+                listener,
+                tm,
+                tcm,
+            }
         }
 
         fn create_engine(&self, task_objective: &str) -> AgentRunEngine {
-            let task_id = self.tm.create_task(
-                SessionId::new("s"), AgentType::Coder, task_objective.into(),
-            );
+            let task_id =
+                self.tm
+                    .create_task(SessionId::new("s"), AgentType::Coder, task_objective.into());
             AgentRunEngine::new(
-                task_id, self.tm.clone(), self.tcm.clone(), self.bus.clone(),
+                task_id,
+                self.tm.clone(),
+                self.tcm.clone(),
+                self.bus.clone(),
                 LlmClient::new("http://localhost:9999", None, "test"),
                 Arc::new(theo_tooling::registry::create_default_registry()),
                 AgentConfig::default(),
@@ -1731,7 +1902,9 @@ mod tests {
         let engine = setup.create_engine("test");
 
         let events = setup.listener.captured();
-        let run_init = events.iter().find(|e| e.event_type == EventType::RunInitialized);
+        let run_init = events
+            .iter()
+            .find(|e| e.event_type == EventType::RunInitialized);
         assert!(run_init.is_some(), "RunInitialized event must be published");
         assert_eq!(run_init.unwrap().entity_id, engine.run_id().as_str());
     }
@@ -1745,7 +1918,8 @@ mod tests {
         assert_eq!(engine.state(), RunState::Planning);
 
         let events = setup.listener.captured();
-        let state_changed: Vec<_> = events.iter()
+        let state_changed: Vec<_> = events
+            .iter()
             .filter(|e| e.event_type == EventType::RunStateChanged)
             .collect();
         assert!(!state_changed.is_empty());
@@ -1764,7 +1938,10 @@ mod tests {
         engine.transition_run(RunState::Evaluating);
         engine.transition_run(RunState::Converged);
 
-        let state_events: Vec<_> = setup.listener.captured().iter()
+        let state_events: Vec<_> = setup
+            .listener
+            .captured()
+            .iter()
             .filter(|e| e.event_type == EventType::RunStateChanged)
             .cloned()
             .collect();
@@ -1845,21 +2022,20 @@ mod tests {
         engine.transition_run(RunState::Converged);
 
         engine.transition_run(RunState::Planning);
-        assert_eq!(engine.state(), RunState::Converged, "terminal state must not change");
+        assert_eq!(
+            engine.state(),
+            RunState::Converged,
+            "terminal state must not change"
+        );
     }
 
-    // -----------------------------------------------------------------------
-    // Backward compat
-    // -----------------------------------------------------------------------
-
-    #[allow(deprecated)]
     #[test]
-    fn phase_enum_still_compiles_with_deprecated() {
-        use crate::state::Phase;
-        let p = Phase::Explore;
-        let e = Phase::Edit;
-        let v = Phase::Verify;
-        let d = Phase::Done;
+    fn loop_phase_variants_are_distinct() {
+        use crate::loop_state::LoopPhase;
+        let p = LoopPhase::Explore;
+        let e = LoopPhase::Edit;
+        let v = LoopPhase::Verify;
+        let d = LoopPhase::Done;
 
         // Verify variants are distinct (no discriminant collision)
         assert_ne!(format!("{p:?}"), format!("{e:?}"));
@@ -1883,23 +2059,23 @@ mod tests {
         assert_eq!(result.iterations_used, 5);
     }
 
-    #[allow(deprecated)]
     #[test]
-    fn agent_loop_new_signature_backward_compat() {
-        // Verify AgentLoop::new still accepts the old (config, registry, sink) signature
+    fn agent_loop_new_signature_current_contract() {
+        // Verify AgentLoop::new still accepts the current (config, registry) signature
         use crate::agent_loop::AgentLoop;
-        use crate::events::{NullEventSink, EventSink};
         let config = AgentConfig::default();
         let registry = theo_tooling::registry::create_default_registry();
-        let sink: Arc<dyn EventSink> = Arc::new(NullEventSink);
-        let agent_loop = AgentLoop::new(config, registry, sink);
+        let agent_loop = AgentLoop::new(config, registry);
 
         // Verify run() method exists and is callable (signature contract)
         // We can't call it without an LLM, but we can verify the type is correct
         let _: &AgentLoop = &agent_loop;
         // If AgentLoop::new signature changes, this test fails at compile time.
         // If AgentLoop type is renamed or removed, this test fails at compile time.
-        assert!(std::mem::size_of_val(&agent_loop) > 0, "AgentLoop should have non-zero size");
+        assert!(
+            std::mem::size_of_val(&agent_loop) > 0,
+            "AgentLoop should have non-zero size"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -1912,7 +2088,10 @@ mod tests {
         let args = serde_json::json!({"filePath": "/tmp/test"});
         assert!(!tracker.record("read", &args));
         assert!(!tracker.record("read", &args));
-        assert!(tracker.record("read", &args), "3rd identical call should trigger doom loop");
+        assert!(
+            tracker.record("read", &args),
+            "3rd identical call should trigger doom loop"
+        );
     }
 
     #[test]
@@ -1944,6 +2123,9 @@ mod tests {
         for _ in 0..4 {
             assert!(!tracker.record("bash", &args));
         }
-        assert!(tracker.record("bash", &args), "5th call should trigger with threshold=5");
+        assert!(
+            tracker.record("bash", &args),
+            "5th call should trigger with threshold=5"
+        );
     }
 }

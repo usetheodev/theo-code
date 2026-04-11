@@ -6,7 +6,7 @@
 //! - Unknown commands get default (strict) config
 
 use theo_domain::sandbox::{
-    FilesystemPolicy, NetworkPolicy, ProcessPolicy, SandboxConfig, AuditPolicy,
+    AuditPolicy, FilesystemPolicy, NetworkPolicy, ProcessPolicy, SandboxConfig,
 };
 
 /// Risk level assigned to a command.
@@ -264,7 +264,17 @@ mod tests {
     #[test]
     fn generate_config_includes_project_dir() {
         let config = generate_config("echo test", "/my/project");
-        assert!(config.filesystem.allowed_read.contains(&"/my/project".to_string()));
-        assert!(config.filesystem.allowed_write.contains(&"/my/project".to_string()));
+        assert!(
+            config
+                .filesystem
+                .allowed_read
+                .contains(&"/my/project".to_string())
+        );
+        assert!(
+            config
+                .filesystem
+                .allowed_write
+                .contains(&"/my/project".to_string())
+        );
     }
 }

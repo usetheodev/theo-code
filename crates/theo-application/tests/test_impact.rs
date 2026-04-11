@@ -21,10 +21,9 @@
 ///   auth_community : [login, validate_token]
 ///   db_community   : [query, connect]
 ///   api_community  : [handle_request, handle_response]
-
 use theo_application::use_cases::impact::analyze_impact;
-use theo_engine_graph::model::{CodeGraph, Edge, EdgeType, Node, NodeType, SymbolKind};
 use theo_engine_graph::cluster::Community;
+use theo_engine_graph::model::{CodeGraph, Edge, EdgeType, Node, NodeType, SymbolKind};
 
 // ---------------------------------------------------------------------------
 // Helper: build the standard test graph
@@ -58,17 +57,52 @@ fn build_test_graph() -> CodeGraph {
     let mut g = CodeGraph::new();
 
     // File nodes
-    g.add_node(make_node("auth.py", NodeType::File, "auth.py", Some("auth.py")));
+    g.add_node(make_node(
+        "auth.py",
+        NodeType::File,
+        "auth.py",
+        Some("auth.py"),
+    ));
     g.add_node(make_node("db.py", NodeType::File, "db.py", Some("db.py")));
-    g.add_node(make_node("api.py", NodeType::File, "api.py", Some("api.py")));
+    g.add_node(make_node(
+        "api.py",
+        NodeType::File,
+        "api.py",
+        Some("api.py"),
+    ));
 
     // Symbol nodes
-    g.add_node(make_node("login", NodeType::Symbol, "login", Some("auth.py")));
-    g.add_node(make_node("validate_token", NodeType::Symbol, "validate_token", Some("auth.py")));
+    g.add_node(make_node(
+        "login",
+        NodeType::Symbol,
+        "login",
+        Some("auth.py"),
+    ));
+    g.add_node(make_node(
+        "validate_token",
+        NodeType::Symbol,
+        "validate_token",
+        Some("auth.py"),
+    ));
     g.add_node(make_node("query", NodeType::Symbol, "query", Some("db.py")));
-    g.add_node(make_node("connect", NodeType::Symbol, "connect", Some("db.py")));
-    g.add_node(make_node("handle_request", NodeType::Symbol, "handle_request", Some("api.py")));
-    g.add_node(make_node("handle_response", NodeType::Symbol, "handle_response", Some("api.py")));
+    g.add_node(make_node(
+        "connect",
+        NodeType::Symbol,
+        "connect",
+        Some("db.py"),
+    ));
+    g.add_node(make_node(
+        "handle_request",
+        NodeType::Symbol,
+        "handle_request",
+        Some("api.py"),
+    ));
+    g.add_node(make_node(
+        "handle_response",
+        NodeType::Symbol,
+        "handle_response",
+        Some("api.py"),
+    ));
 
     // Test nodes
     g.add_node(make_node("test_login", NodeType::Test, "test_login", None));
@@ -76,11 +110,26 @@ fn build_test_graph() -> CodeGraph {
 
     // CONTAINS edges: file -> symbol
     g.add_edge(make_edge("auth.py", "login", EdgeType::Contains, 1.0));
-    g.add_edge(make_edge("auth.py", "validate_token", EdgeType::Contains, 1.0));
+    g.add_edge(make_edge(
+        "auth.py",
+        "validate_token",
+        EdgeType::Contains,
+        1.0,
+    ));
     g.add_edge(make_edge("db.py", "query", EdgeType::Contains, 1.0));
     g.add_edge(make_edge("db.py", "connect", EdgeType::Contains, 1.0));
-    g.add_edge(make_edge("api.py", "handle_request", EdgeType::Contains, 1.0));
-    g.add_edge(make_edge("api.py", "handle_response", EdgeType::Contains, 1.0));
+    g.add_edge(make_edge(
+        "api.py",
+        "handle_request",
+        EdgeType::Contains,
+        1.0,
+    ));
+    g.add_edge(make_edge(
+        "api.py",
+        "handle_response",
+        EdgeType::Contains,
+        1.0,
+    ));
 
     // CALLS edges
     g.add_edge(make_edge("handle_request", "login", EdgeType::Calls, 1.0));
@@ -135,7 +184,9 @@ fn test_edit_auth_affects_auth_community() {
     let communities = build_communities();
     let report = analyze_impact("auth.py", &graph, &communities, 3);
     assert!(
-        report.affected_communities.contains(&"auth_community".to_string()),
+        report
+            .affected_communities
+            .contains(&"auth_community".to_string()),
         "auth_community must be affected when auth.py is edited, got: {:?}",
         report.affected_communities
     );
@@ -148,7 +199,9 @@ fn test_edit_auth_affects_db_community_via_bfs() {
     let communities = build_communities();
     let report = analyze_impact("auth.py", &graph, &communities, 3);
     assert!(
-        report.affected_communities.contains(&"db_community".to_string()),
+        report
+            .affected_communities
+            .contains(&"db_community".to_string()),
         "db_community must be affected via CALLS login->query, got: {:?}",
         report.affected_communities
     );
@@ -172,7 +225,9 @@ fn test_tests_covering_edit_includes_test_login() {
     let communities = build_communities();
     let report = analyze_impact("auth.py", &graph, &communities, 3);
     assert!(
-        report.tests_covering_edit.contains(&"test_login".to_string()),
+        report
+            .tests_covering_edit
+            .contains(&"test_login".to_string()),
         "test_login must cover auth.py edit, got: {:?}",
         report.tests_covering_edit
     );
@@ -200,10 +255,9 @@ fn test_cross_cluster_alert_when_multiple_communities_affected() {
     let communities = build_communities();
     let report = analyze_impact("auth.py", &graph, &communities, 3);
     // At least auth_community and db_community are affected
-    let has_cross_cluster = report
-        .risk_alerts
-        .iter()
-        .any(|a| a.contains("Cross-cluster") || a.contains("cross-cluster") || a.contains("communities"));
+    let has_cross_cluster = report.risk_alerts.iter().any(|a| {
+        a.contains("Cross-cluster") || a.contains("cross-cluster") || a.contains("communities")
+    });
     assert!(
         has_cross_cluster,
         "Expected cross-cluster alert since multiple communities affected, got: {:?}",
@@ -215,8 +269,18 @@ fn test_cross_cluster_alert_when_multiple_communities_affected() {
 fn test_untested_symbol_generates_alert() {
     // Build a graph with a symbol that has no test coverage
     let mut graph = CodeGraph::new();
-    graph.add_node(make_node("auth.py", NodeType::File, "auth.py", Some("auth.py")));
-    graph.add_node(make_node("login", NodeType::Symbol, "login", Some("auth.py")));
+    graph.add_node(make_node(
+        "auth.py",
+        NodeType::File,
+        "auth.py",
+        Some("auth.py"),
+    ));
+    graph.add_node(make_node(
+        "login",
+        NodeType::Symbol,
+        "login",
+        Some("auth.py"),
+    ));
     graph.add_edge(make_edge("auth.py", "login", EdgeType::Contains, 1.0));
     // No TESTS edge for login
 
@@ -259,7 +323,9 @@ fn test_max_depth_zero_does_not_bfs_expand() {
     // So db_community (only reachable via login->query) should NOT be affected
     let report = analyze_impact("auth.py", &graph, &communities, 0);
     assert!(
-        !report.affected_communities.contains(&"db_community".to_string()),
+        !report
+            .affected_communities
+            .contains(&"db_community".to_string()),
         "db_community must NOT be affected at depth 0, got: {:?}",
         report.affected_communities
     );

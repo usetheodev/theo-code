@@ -58,7 +58,8 @@ impl ContextMetrics {
 
     /// Record a hypothesis change at a given iteration.
     pub fn record_hypothesis_change(&mut self, iteration: usize, description: &str) {
-        self.hypothesis_changes.push((iteration, description.to_string()));
+        self.hypothesis_changes
+            .push((iteration, description.to_string()));
     }
 
     /// Average context size across all recorded iterations.
@@ -72,7 +73,11 @@ impl ContextMetrics {
 
     /// Maximum context size across all recorded iterations.
     pub fn max_context_size(&self) -> usize {
-        self.context_sizes.iter().map(|(_, t)| *t).max().unwrap_or(0)
+        self.context_sizes
+            .iter()
+            .map(|(_, t)| *t)
+            .max()
+            .unwrap_or(0)
     }
 
     /// Number of times a specific artifact was fetched.
@@ -83,16 +88,23 @@ impl ContextMetrics {
     /// Overall refetch rate: fraction of fetches that are re-fetches (fetch count > 1).
     pub fn refetch_rate(&self) -> f64 {
         let total: usize = self.artifact_fetches.values().map(|v| v.len()).sum();
-        let refetches: usize = self.artifact_fetches.values()
+        let refetches: usize = self
+            .artifact_fetches
+            .values()
             .filter(|v| v.len() > 1)
             .map(|v| v.len() - 1)
             .sum();
-        if total == 0 { 0.0 } else { refetches as f64 / total as f64 }
+        if total == 0 {
+            0.0
+        } else {
+            refetches as f64 / total as f64
+        }
     }
 
     /// Actions that were performed more than once (potential repetitions).
     pub fn repeated_actions(&self) -> Vec<String> {
-        self.actions.iter()
+        self.actions
+            .iter()
             .filter(|(_, iters)| iters.len() > 1)
             .map(|(action, _)| action.clone())
             .collect()
@@ -101,11 +113,17 @@ impl ContextMetrics {
     /// Rate of action repetition (repeated / total).
     pub fn action_repetition_rate(&self) -> f64 {
         let total: usize = self.actions.values().map(|v| v.len()).sum();
-        let repeated: usize = self.actions.values()
+        let repeated: usize = self
+            .actions
+            .values()
             .filter(|v| v.len() > 1)
             .map(|v| v.len() - 1)
             .sum();
-        if total == 0 { 0.0 } else { repeated as f64 / total as f64 }
+        if total == 0 {
+            0.0
+        } else {
+            repeated as f64 / total as f64
+        }
     }
 
     /// Total number of hypothesis changes recorded.
@@ -117,7 +135,10 @@ impl ContextMetrics {
 
     /// Record an assembled context chunk with its community ID and file paths.
     pub fn record_assembled_chunk(&mut self, community_id: &str, files: Vec<String>) {
-        self.assembled_chunks.entry(community_id.to_string()).or_default().extend(files);
+        self.assembled_chunks
+            .entry(community_id.to_string())
+            .or_default()
+            .extend(files);
     }
 
     /// Record a file reference from agent tool call (read, edit, grep).
@@ -130,15 +151,26 @@ impl ContextMetrics {
     /// Score = number of community files referenced by tools / total files in community.
     /// Range: 0.0 (nothing used) to 1.0 (everything used).
     pub fn compute_usefulness(&self) -> HashMap<String, f64> {
-        let ref_set: std::collections::HashSet<&str> = self.tool_references.iter().map(|s| s.as_str()).collect();
-        self.assembled_chunks.iter().map(|(community_id, files)| {
-            if files.is_empty() {
-                return (community_id.clone(), 0.0);
-            }
-            let unique_files: std::collections::HashSet<&str> = files.iter().map(|s| s.as_str()).collect();
-            let used = unique_files.iter().filter(|f| ref_set.contains(**f)).count();
-            (community_id.clone(), used as f64 / unique_files.len() as f64)
-        }).collect()
+        let ref_set: std::collections::HashSet<&str> =
+            self.tool_references.iter().map(|s| s.as_str()).collect();
+        self.assembled_chunks
+            .iter()
+            .map(|(community_id, files)| {
+                if files.is_empty() {
+                    return (community_id.clone(), 0.0);
+                }
+                let unique_files: std::collections::HashSet<&str> =
+                    files.iter().map(|s| s.as_str()).collect();
+                let used = unique_files
+                    .iter()
+                    .filter(|f| ref_set.contains(**f))
+                    .count();
+                (
+                    community_id.clone(),
+                    used as f64 / unique_files.len() as f64,
+                )
+            })
+            .collect()
     }
 
     /// Get the list of assembled community IDs (for EpisodeSummary).
@@ -152,7 +184,10 @@ impl ContextMetrics {
     pub fn record_shadow_citation(&mut self, block_id: &str, score: f64) {
         // Shadow mode: record but with low influence factor
         let alpha = 0.1;
-        let entry = self.assembled_chunks.entry(block_id.to_string()).or_default();
+        let entry = self
+            .assembled_chunks
+            .entry(block_id.to_string())
+            .or_default();
         // Store citation signal alongside files (we reuse the structure)
         let _ = (entry, alpha, score); // Signal recorded via compute_usefulness which uses tool_references
     }
@@ -176,7 +211,9 @@ impl ContextMetrics {
 
     /// Top N most-refetched artifacts.
     fn top_refetched(&self, n: usize) -> Vec<(String, usize)> {
-        let mut items: Vec<(String, usize)> = self.artifact_fetches.iter()
+        let mut items: Vec<(String, usize)> = self
+            .artifact_fetches
+            .iter()
             .map(|(path, iters)| (path.clone(), iters.len()))
             .filter(|(_, count)| *count > 1)
             .collect();
@@ -195,7 +232,8 @@ pub fn extract_citations(
     block_map: &HashMap<String, Vec<String>>, // block_id → file paths
 ) -> Vec<String> {
     let args_str = tool_args.to_string();
-    block_map.iter()
+    block_map
+        .iter()
         .filter(|(_, files)| files.iter().any(|f| args_str.contains(f)))
         .map(|(block_id, _)| block_id.clone())
         .collect()
@@ -319,8 +357,12 @@ mod tests {
     #[test]
     fn top_refetched_returns_sorted() {
         let mut m = ContextMetrics::new();
-        for i in 0..5 { m.record_artifact_fetch("a.rs", i); }
-        for i in 0..3 { m.record_artifact_fetch("b.rs", i); }
+        for i in 0..5 {
+            m.record_artifact_fetch("a.rs", i);
+        }
+        for i in 0..3 {
+            m.record_artifact_fetch("b.rs", i);
+        }
         m.record_artifact_fetch("c.rs", 0); // single fetch, not a refetch
 
         let top = m.top_refetched(10);
@@ -349,8 +391,10 @@ mod tests {
         m.record_assembled_chunk("community:auth", vec!["src/auth.rs".into()]);
         m.record_tool_reference("src/auth.rs");
         let scores = m.compute_usefulness();
-        assert!(*scores.get("community:auth").unwrap() > 0.0,
-            "Auth community should have positive usefulness");
+        assert!(
+            *scores.get("community:auth").unwrap() > 0.0,
+            "Auth community should have positive usefulness"
+        );
     }
 
     #[test]
@@ -359,21 +403,34 @@ mod tests {
         m.record_assembled_chunk("community:db", vec!["src/db.rs".into()]);
         m.record_tool_reference("src/auth.rs"); // different file
         let scores = m.compute_usefulness();
-        assert_eq!(*scores.get("community:db").unwrap(), 0.0,
-            "DB community should have zero usefulness");
+        assert_eq!(
+            *scores.get("community:db").unwrap(),
+            0.0,
+            "DB community should have zero usefulness"
+        );
     }
 
     #[test]
     fn usefulness_partial_when_some_files_referenced() {
         let mut m = ContextMetrics::new();
-        m.record_assembled_chunk("community:mixed", vec![
-            "src/a.rs".into(), "src/b.rs".into(), "src/c.rs".into(), "src/d.rs".into(),
-        ]);
+        m.record_assembled_chunk(
+            "community:mixed",
+            vec![
+                "src/a.rs".into(),
+                "src/b.rs".into(),
+                "src/c.rs".into(),
+                "src/d.rs".into(),
+            ],
+        );
         m.record_tool_reference("src/a.rs");
         m.record_tool_reference("src/b.rs");
         let scores = m.compute_usefulness();
         let score = *scores.get("community:mixed").unwrap();
-        assert!((score - 0.5).abs() < 0.001, "2/4 files = 0.5, got {}", score);
+        assert!(
+            (score - 0.5).abs() < 0.001,
+            "2/4 files = 0.5, got {}",
+            score
+        );
     }
 
     #[test]
@@ -405,16 +462,20 @@ mod tests {
             ("blk-2".to_string(), vec!["src/db.rs".to_string()]),
         ]);
         let cited = extract_citations(&tool_args, &block_map);
-        assert!(cited.contains(&"blk-1".to_string()), "auth block should be cited");
-        assert!(cited.contains(&"blk-2".to_string()), "db block should be cited");
+        assert!(
+            cited.contains(&"blk-1".to_string()),
+            "auth block should be cited"
+        );
+        assert!(
+            cited.contains(&"blk-2".to_string()),
+            "db block should be cited"
+        );
     }
 
     #[test]
     fn citation_extractor_empty_when_no_match() {
         let tool_args = serde_json::json!({"filePath": "src/unknown.rs"});
-        let block_map = HashMap::from([
-            ("blk-1".to_string(), vec!["src/auth.rs".to_string()]),
-        ]);
+        let block_map = HashMap::from([("blk-1".to_string(), vec!["src/auth.rs".to_string()])]);
         let cited = extract_citations(&tool_args, &block_map);
         assert!(cited.is_empty());
     }
@@ -422,9 +483,7 @@ mod tests {
     #[test]
     fn citation_extractor_handles_empty_args() {
         let tool_args = serde_json::json!({});
-        let block_map = HashMap::from([
-            ("blk-1".to_string(), vec!["src/auth.rs".to_string()]),
-        ]);
+        let block_map = HashMap::from([("blk-1".to_string(), vec!["src/auth.rs".to_string()])]);
         let cited = extract_citations(&tool_args, &block_map);
         assert!(cited.is_empty());
     }

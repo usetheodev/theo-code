@@ -145,7 +145,13 @@ impl FileMemoryStore {
 /// Sanitize key for use as filename (alphanumeric + underscore + hyphen).
 fn sanitize_key(key: &str) -> String {
     key.chars()
-        .map(|c| if c.is_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
         .take(128)
         .collect()
 }
@@ -229,9 +235,13 @@ impl Tool for MemoryTool {
 
         match action {
             "save" => {
-                let key = args.get("key").and_then(|v| v.as_str())
+                let key = args
+                    .get("key")
+                    .and_then(|v| v.as_str())
                     .ok_or_else(|| ToolError::InvalidArgs("save requires 'key'".to_string()))?;
-                let value = args.get("value").and_then(|v| v.as_str())
+                let value = args
+                    .get("value")
+                    .and_then(|v| v.as_str())
                     .ok_or_else(|| ToolError::InvalidArgs("save requires 'value'".to_string()))?;
 
                 let entry = AgentMemoryEntry {
@@ -250,7 +260,9 @@ impl Tool for MemoryTool {
                 })
             }
             "recall" => {
-                let key = args.get("key").and_then(|v| v.as_str())
+                let key = args
+                    .get("key")
+                    .and_then(|v| v.as_str())
                     .ok_or_else(|| ToolError::InvalidArgs("recall requires 'key'".to_string()))?;
 
                 match store.recall(key).await? {
@@ -288,7 +300,9 @@ impl Tool for MemoryTool {
                 })
             }
             "search" => {
-                let query = args.get("query").and_then(|v| v.as_str())
+                let query = args
+                    .get("query")
+                    .and_then(|v| v.as_str())
                     .ok_or_else(|| ToolError::InvalidArgs("search requires 'query'".to_string()))?;
 
                 let results = store.search(query).await?;
@@ -310,7 +324,9 @@ impl Tool for MemoryTool {
                 })
             }
             "delete" => {
-                let key = args.get("key").and_then(|v| v.as_str())
+                let key = args
+                    .get("key")
+                    .and_then(|v| v.as_str())
                     .ok_or_else(|| ToolError::InvalidArgs("delete requires 'key'".to_string()))?;
 
                 let deleted = store.delete(key).await?;
@@ -380,12 +396,15 @@ mod tests {
         let store = FileMemoryStore::new(tmp.path().to_path_buf());
 
         for key in &["alpha", "beta", "gamma"] {
-            store.save(&AgentMemoryEntry {
-                key: key.to_string(),
-                value: format!("value_{}", key),
-                created_at: 1000,
-                run_id: "r".to_string(),
-            }).await.unwrap();
+            store
+                .save(&AgentMemoryEntry {
+                    key: key.to_string(),
+                    value: format!("value_{}", key),
+                    created_at: 1000,
+                    run_id: "r".to_string(),
+                })
+                .await
+                .unwrap();
         }
 
         let all = store.list().await.unwrap();
@@ -398,19 +417,25 @@ mod tests {
         let tmp = TestDir::new();
         let store = FileMemoryStore::new(tmp.path().to_path_buf());
 
-        store.save(&AgentMemoryEntry {
-            key: "db_schema".to_string(),
-            value: "PostgreSQL with UUID primary keys".to_string(),
-            created_at: 1000,
-            run_id: "r".to_string(),
-        }).await.unwrap();
+        store
+            .save(&AgentMemoryEntry {
+                key: "db_schema".to_string(),
+                value: "PostgreSQL with UUID primary keys".to_string(),
+                created_at: 1000,
+                run_id: "r".to_string(),
+            })
+            .await
+            .unwrap();
 
-        store.save(&AgentMemoryEntry {
-            key: "api_style".to_string(),
-            value: "REST with JSON".to_string(),
-            created_at: 1000,
-            run_id: "r".to_string(),
-        }).await.unwrap();
+        store
+            .save(&AgentMemoryEntry {
+                key: "api_style".to_string(),
+                value: "REST with JSON".to_string(),
+                created_at: 1000,
+                run_id: "r".to_string(),
+            })
+            .await
+            .unwrap();
 
         let results = store.search("postgres").await.unwrap();
         assert_eq!(results.len(), 1);
@@ -422,12 +447,15 @@ mod tests {
         let tmp = TestDir::new();
         let store = FileMemoryStore::new(tmp.path().to_path_buf());
 
-        store.save(&AgentMemoryEntry {
-            key: "temp".to_string(),
-            value: "temporary".to_string(),
-            created_at: 1000,
-            run_id: "r".to_string(),
-        }).await.unwrap();
+        store
+            .save(&AgentMemoryEntry {
+                key: "temp".to_string(),
+                value: "temporary".to_string(),
+                created_at: 1000,
+                run_id: "r".to_string(),
+            })
+            .await
+            .unwrap();
 
         assert!(store.delete("temp").await.unwrap());
         assert!(store.recall("temp").await.unwrap().is_none());
@@ -448,12 +476,15 @@ mod tests {
         let store_a = FileMemoryStore::for_project(root, Path::new("/project/a"));
         let store_b = FileMemoryStore::for_project(root, Path::new("/project/b"));
 
-        store_a.save(&AgentMemoryEntry {
-            key: "only_a".to_string(),
-            value: "project a".to_string(),
-            created_at: 1000,
-            run_id: "r".to_string(),
-        }).await.unwrap();
+        store_a
+            .save(&AgentMemoryEntry {
+                key: "only_a".to_string(),
+                value: "project a".to_string(),
+                created_at: 1000,
+                run_id: "r".to_string(),
+            })
+            .await
+            .unwrap();
 
         // Store B should not see Store A's memories
         assert!(store_b.recall("only_a").await.unwrap().is_none());
@@ -497,14 +528,21 @@ mod tests {
         // Save
         tool.execute(
             serde_json::json!({"action": "save", "key": "framework", "value": "Axum"}),
-            &ctx, &mut perms,
-        ).await.unwrap();
+            &ctx,
+            &mut perms,
+        )
+        .await
+        .unwrap();
 
         // Recall
-        let result = tool.execute(
-            serde_json::json!({"action": "recall", "key": "framework"}),
-            &ctx, &mut perms,
-        ).await.unwrap();
+        let result = tool
+            .execute(
+                serde_json::json!({"action": "recall", "key": "framework"}),
+                &ctx,
+                &mut perms,
+            )
+            .await
+            .unwrap();
 
         // Note: this may fail because memory_root uses dirs_next::config_dir
         // which points to real ~/.config/theo/memory/, not tempdir.
@@ -519,10 +557,9 @@ mod tests {
         let mut perms = PermissionCollector::new();
 
         let tool = MemoryTool::new();
-        let result = tool.execute(
-            serde_json::json!({"action": "invalid"}),
-            &ctx, &mut perms,
-        ).await;
+        let result = tool
+            .execute(serde_json::json!({"action": "invalid"}), &ctx, &mut perms)
+            .await;
 
         assert!(result.is_err());
     }
@@ -536,7 +573,9 @@ mod tests {
     fn tool_schema_has_action() {
         let tool = MemoryTool::new();
         let schema = tool.schema();
-        let required: Vec<&str> = schema.params.iter()
+        let required: Vec<&str> = schema
+            .params
+            .iter()
             .filter(|p| p.required)
             .map(|p| p.name.as_str())
             .collect();

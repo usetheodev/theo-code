@@ -15,8 +15,8 @@ use std::path::Path;
 use tree_sitter::{Node, Tree};
 
 use crate::patterns;
-use crate::types::*;
 use crate::tree_sitter::SupportedLanguage;
+use crate::types::*;
 
 use super::common::{self, anchor_from_node, node_text, node_text_ref, truncate_call_text};
 
@@ -808,7 +808,9 @@ mod tests {
 
     fn extract_cs(source: &str) -> FileExtraction {
         let path = PathBuf::from("Controller.cs");
-        let parsed = crate::tree_sitter::parse_source(&path, source, SupportedLanguage::CSharp, None).unwrap();
+        let parsed =
+            crate::tree_sitter::parse_source(&path, source, SupportedLanguage::CSharp, None)
+                .unwrap();
         extract(&path, source, &parsed.tree, SupportedLanguage::CSharp)
     }
 

@@ -30,7 +30,11 @@ pub async fn auth_start_device_flow() -> Result<serde_json::Value, String> {
 }
 
 #[tauri::command]
-pub async fn auth_poll_device_flow(device_code: String, interval: u64, expires_in: u64) -> Result<serde_json::Value, String> {
+pub async fn auth_poll_device_flow(
+    device_code: String,
+    interval: u64,
+    expires_in: u64,
+) -> Result<serde_json::Value, String> {
     let auth = OpenAIAuth::with_default_store();
     let dc = theo_infra_auth::openai::DeviceCode {
         user_code: String::new(),
@@ -39,7 +43,10 @@ pub async fn auth_poll_device_flow(device_code: String, interval: u64, expires_i
         interval,
         expires_in,
     };
-    let tokens = auth.poll_device_flow(&dc).await.map_err(|e| e.to_string())?;
+    let tokens = auth
+        .poll_device_flow(&dc)
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(serde_json::json!({
         "success": true,
         "account_id": tokens.account_id,
@@ -99,7 +106,9 @@ pub async fn auth_apply_to_config(state: State<'_, AppState>) -> Result<bool, St
 
     // Set ChatGPT-Account-Id header if available
     if let Some(ref account_id) = tokens.account_id {
-        config.extra_headers.insert("ChatGPT-Account-Id".to_string(), account_id.clone());
+        config
+            .extra_headers
+            .insert("ChatGPT-Account-Id".to_string(), account_id.clone());
     }
 
     // Set a sensible default model
@@ -107,8 +116,10 @@ pub async fn auth_apply_to_config(state: State<'_, AppState>) -> Result<bool, St
         config.model = CODEX_MODEL.to_string();
     }
 
-    eprintln!("[theo] OAuth applied: endpoint={} model={} account={:?}",
-        CODEX_ENDPOINT, config.model, tokens.account_id);
+    eprintln!(
+        "[theo] OAuth applied: endpoint={} model={} account={:?}",
+        CODEX_ENDPOINT, config.model, tokens.account_id
+    );
 
     Ok(true)
 }

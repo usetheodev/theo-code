@@ -123,7 +123,15 @@ theo --mode ask "explain auth"    # Ask mode — questions only
 theo pilot "implement feature X"  # Pilot — autonomous loop with circuit breaker
 ```
 
-### 21+ Built-in Tools
+### Tool Surface
+
+Theo exposes three different tool layers:
+
+- **Default registry tools**: the concrete built-ins registered by `theo-tooling`
+- **Meta-tools**: runtime-injected orchestration surfaces like `done`, `subagent`, `skill`, `batch`
+- **Experimental modules**: code that exists in-tree but is not part of the default registry and may still be partial or stubbed
+
+The current source of truth lives in `crates/theo-tooling/src/tool_manifest.rs`.
 
 | Category | Tools |
 |---|---|
@@ -131,7 +139,9 @@ theo pilot "implement feature X"  # Pilot — autonomous loop with circuit break
 | **Intelligence** | `codebase_context`, `webfetch`, `think`, `reflect`, `memory` |
 | **Git** | `git_status`, `git_diff`, `git_log`, `git_commit` |
 | **HTTP** | `http_get`, `http_post` (SSRF-protected) |
-| **Meta** | `batch` (parallel), `subagent`, `skill`, `done` |
+| **Meta-tools** | `batch` (parallel), `subagent`, `skill`, `done` |
+
+Experimental modules currently present in-tree but not in the default registry include `websearch`, `codesearch`, `lsp`, `multiedit`, `question`, `task`, `ls`, and `plan_exit`. Some are partial or stubbed and are not part of the main runtime promise until promoted into the default registry.
 
 ### Sub-Agents
 

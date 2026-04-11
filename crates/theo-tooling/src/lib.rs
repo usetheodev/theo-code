@@ -26,6 +26,7 @@ pub mod skill;
 pub mod task;
 pub mod think;
 pub mod todo;
+pub mod tool_manifest;
 pub mod truncate;
 pub mod webfetch;
 pub mod websearch;

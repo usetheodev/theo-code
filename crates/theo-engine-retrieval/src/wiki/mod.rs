@@ -9,10 +9,10 @@
 //! - `renderer.rs`: WikiDoc → Markdown (Obsidian-compatible)
 //! - `persistence.rs`: Disk I/O + cache invalidation
 
-pub mod model;
 pub mod generator;
-pub mod renderer;
-pub mod persistence;
-pub mod lookup;
 pub mod lint;
+pub mod lookup;
+pub mod model;
+pub mod persistence;
+pub mod renderer;
 pub mod runtime;

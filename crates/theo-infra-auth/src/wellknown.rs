@@ -92,15 +92,15 @@ impl WellKnownAuth {
 
         let token = String::from_utf8_lossy(&output.stdout).trim().to_string();
         if token.is_empty() {
-            return Err(AuthError::OAuth("auth command returned empty token".to_string()));
+            return Err(AuthError::OAuth(
+                "auth command returned empty token".to_string(),
+            ));
         }
 
         // Store with provider ID based on URL
         let provider_id = provider_id_for_url(url);
-        self.store.set(
-            &provider_id,
-            AuthEntry::ApiKey { key: token.clone() },
-        )?;
+        self.store
+            .set(&provider_id, AuthEntry::ApiKey { key: token.clone() })?;
 
         Ok(WellKnownTokens {
             token,
@@ -149,15 +149,28 @@ mod tests {
 
     #[test]
     fn provider_id_from_url() {
-        assert_eq!(provider_id_for_url("https://ai.company.com"), "wellknown:ai.company.com");
-        assert_eq!(provider_id_for_url("http://localhost:8080"), "wellknown:localhost:8080");
+        assert_eq!(
+            provider_id_for_url("https://ai.company.com"),
+            "wellknown:ai.company.com"
+        );
+        assert_eq!(
+            provider_id_for_url("http://localhost:8080"),
+            "wellknown:localhost:8080"
+        );
     }
 
     #[test]
     fn wellknown_store_and_retrieve() {
         let (store, _dir) = temp_store();
         let provider_id = provider_id_for_url("https://ai.test.com");
-        store.set(&provider_id, AuthEntry::ApiKey { key: "wk-token".to_string() }).unwrap();
+        store
+            .set(
+                &provider_id,
+                AuthEntry::ApiKey {
+                    key: "wk-token".to_string(),
+                },
+            )
+            .unwrap();
 
         let auth = WellKnownAuth::new(store);
         let tokens = auth.get_tokens("https://ai.test.com").unwrap().unwrap();
@@ -168,7 +181,14 @@ mod tests {
     fn wellknown_logout() {
         let (store, _dir) = temp_store();
         let provider_id = provider_id_for_url("https://ai.test.com");
-        store.set(&provider_id, AuthEntry::ApiKey { key: "token".to_string() }).unwrap();
+        store
+            .set(
+                &provider_id,
+                AuthEntry::ApiKey {
+                    key: "token".to_string(),
+                },
+            )
+            .unwrap();
 
         let auth = WellKnownAuth::new(store);
         auth.logout("https://ai.test.com").unwrap();
@@ -177,7 +197,8 @@ mod tests {
 
     #[test]
     fn wellknown_config_deserializes() {
-        let json = r#"{"auth":{"command":["gcloud","auth","print-access-token"],"env":"GOOGLE_TOKEN"}}"#;
+        let json =
+            r#"{"auth":{"command":["gcloud","auth","print-access-token"],"env":"GOOGLE_TOKEN"}}"#;
         let config: WellKnownConfig = serde_json::from_str(json).unwrap();
         let auth = config.auth.unwrap();
         assert_eq!(auth.command, vec!["gcloud", "auth", "print-access-token"]);

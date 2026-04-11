@@ -68,7 +68,12 @@ mod tests {
 
     #[test]
     fn retryable_errors() {
-        assert!(LlmError::RateLimited { retry_after: Some(5) }.is_retryable());
+        assert!(
+            LlmError::RateLimited {
+                retry_after: Some(5)
+            }
+            .is_retryable()
+        );
         assert!(LlmError::ServiceUnavailable.is_retryable());
         assert!(LlmError::Timeout.is_retryable());
     }
@@ -82,16 +87,33 @@ mod tests {
 
     #[test]
     fn from_status_maps_correctly() {
-        assert!(matches!(LlmError::from_status(401, "".into()), LlmError::AuthFailed(_)));
-        assert!(matches!(LlmError::from_status(429, "".into()), LlmError::RateLimited { .. }));
-        assert!(matches!(LlmError::from_status(503, "".into()), LlmError::ServiceUnavailable));
-        assert!(matches!(LlmError::from_status(504, "".into()), LlmError::Timeout));
-        assert!(matches!(LlmError::from_status(500, "err".into()), LlmError::Api { .. }));
+        assert!(matches!(
+            LlmError::from_status(401, "".into()),
+            LlmError::AuthFailed(_)
+        ));
+        assert!(matches!(
+            LlmError::from_status(429, "".into()),
+            LlmError::RateLimited { .. }
+        ));
+        assert!(matches!(
+            LlmError::from_status(503, "".into()),
+            LlmError::ServiceUnavailable
+        ));
+        assert!(matches!(
+            LlmError::from_status(504, "".into()),
+            LlmError::Timeout
+        ));
+        assert!(matches!(
+            LlmError::from_status(500, "err".into()),
+            LlmError::Api { .. }
+        ));
     }
 
     #[test]
     fn retry_after_secs() {
-        let e = LlmError::RateLimited { retry_after: Some(30) };
+        let e = LlmError::RateLimited {
+            retry_after: Some(30),
+        };
         assert_eq!(e.retry_after_secs(), Some(30));
         assert_eq!(LlmError::Timeout.retry_after_secs(), None);
     }

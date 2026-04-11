@@ -1,5 +1,5 @@
 /// Tests for co-change temporal decay and edge update logic.
-use theo_engine_graph::cochange::{update_cochanges, temporal_decay, DEFAULT_LAMBDA};
+use theo_engine_graph::cochange::{DEFAULT_LAMBDA, temporal_decay, update_cochanges};
 use theo_engine_graph::model::{CodeGraph, EdgeType, Node, NodeType};
 
 fn file_node(id: &str) -> Node {
@@ -30,7 +30,10 @@ fn decay_at_half_life_is_approximately_half() {
     // Half-life: t where exp(-lambda*t) = 0.5  =>  t = ln(2)/lambda ≈ 69.3 days
     let half_life = std::f64::consts::LN_2 / DEFAULT_LAMBDA;
     let w = temporal_decay(half_life, DEFAULT_LAMBDA);
-    assert!((w - 0.5).abs() < 0.01, "Expected ~0.5 at half-life, got {w}");
+    assert!(
+        (w - 0.5).abs() < 0.01,
+        "Expected ~0.5 at half-life, got {w}"
+    );
 }
 
 #[test]
@@ -68,7 +71,11 @@ fn update_cochanges_creates_edges_between_all_pairs() {
         g.add_node(file_node(id));
     }
 
-    let changed = vec!["src/a.rs".to_string(), "src/b.rs".to_string(), "src/c.rs".to_string()];
+    let changed = vec![
+        "src/a.rs".to_string(),
+        "src/b.rs".to_string(),
+        "src/c.rs".to_string(),
+    ];
     update_cochanges(&mut g, &changed, 0.0);
 
     // Should create edges: a-b, a-c, b-c (and reverse? check at least 3 co-change edges)
@@ -87,7 +94,10 @@ fn update_cochanges_single_file_no_edges() {
 
     update_cochanges(&mut g, &["src/a.rs".to_string()], 0.0);
     let cochange_edges = g.edges_of_type(&EdgeType::CoChanges);
-    assert!(cochange_edges.is_empty(), "Single file should not create co-change edges");
+    assert!(
+        cochange_edges.is_empty(),
+        "Single file should not create co-change edges"
+    );
 }
 
 #[test]
@@ -104,7 +114,11 @@ fn update_cochanges_edge_weight_equals_decay() {
     g.add_node(file_node("src/b.rs"));
 
     let days = 30.0;
-    update_cochanges(&mut g, &["src/a.rs".to_string(), "src/b.rs".to_string()], days);
+    update_cochanges(
+        &mut g,
+        &["src/a.rs".to_string(), "src/b.rs".to_string()],
+        days,
+    );
 
     let edges = g.edges_between("src/a.rs", "src/b.rs");
     assert!(!edges.is_empty(), "Expected co-change edge between a and b");
@@ -126,12 +140,20 @@ fn update_cochanges_accumulates_on_repeated_commits() {
     g.add_node(file_node("src/b.rs"));
 
     // First commit
-    update_cochanges(&mut g, &["src/a.rs".to_string(), "src/b.rs".to_string()], 5.0);
+    update_cochanges(
+        &mut g,
+        &["src/a.rs".to_string(), "src/b.rs".to_string()],
+        5.0,
+    );
     let first_edges = g.edges_between("src/a.rs", "src/b.rs");
     let first_count = first_edges.len();
 
     // Second commit — adds another co-change edge or updates weight
-    update_cochanges(&mut g, &["src/a.rs".to_string(), "src/b.rs".to_string()], 10.0);
+    update_cochanges(
+        &mut g,
+        &["src/a.rs".to_string(), "src/b.rs".to_string()],
+        10.0,
+    );
     let second_edges = g.edges_between("src/a.rs", "src/b.rs");
 
     // Either a second edge was added, or the weight was updated (not empty)
@@ -158,7 +180,11 @@ fn impact_set_finds_cochanged_files() {
     let impact = compute_impact_set(&g, &["a.rs".into()], 10, 0.0);
 
     // Both b and c should appear
-    let files: Vec<&str> = impact.affected_files.iter().map(|(f, _)| f.as_str()).collect();
+    let files: Vec<&str> = impact
+        .affected_files
+        .iter()
+        .map(|(f, _)| f.as_str())
+        .collect();
     assert!(files.contains(&"b.rs"), "b.rs should be in impact set");
     assert!(files.contains(&"c.rs"), "c.rs should be in impact set");
 }
@@ -172,8 +198,15 @@ fn impact_set_excludes_changed_files() {
     update_cochanges(&mut g, &["a.rs".into(), "b.rs".into()], 1.0);
 
     let impact = compute_impact_set(&g, &["a.rs".into()], 10, 0.0);
-    let files: Vec<&str> = impact.affected_files.iter().map(|(f, _)| f.as_str()).collect();
-    assert!(!files.contains(&"a.rs"), "Changed file should not appear in its own impact set");
+    let files: Vec<&str> = impact
+        .affected_files
+        .iter()
+        .map(|(f, _)| f.as_str())
+        .collect();
+    assert!(
+        !files.contains(&"a.rs"),
+        "Changed file should not appear in its own impact set"
+    );
 }
 
 #[test]
@@ -188,7 +221,11 @@ fn impact_set_respects_top_k() {
     }
 
     let impact = compute_impact_set(&g, &["f0.rs".into()], 3, 0.0);
-    assert_eq!(impact.affected_files.len(), 3, "Should return at most top_k files");
+    assert_eq!(
+        impact.affected_files.len(),
+        3,
+        "Should return at most top_k files"
+    );
 }
 
 #[test]
@@ -204,10 +241,20 @@ fn impact_set_respects_min_weight() {
     update_cochanges(&mut g, &["a.rs".into(), "c.rs".into()], 200.0);
 
     let impact = compute_impact_set(&g, &["a.rs".into()], 10, 0.5);
-    let files: Vec<&str> = impact.affected_files.iter().map(|(f, _)| f.as_str()).collect();
-    assert!(files.contains(&"b.rs"), "Recent co-change should pass min_weight");
+    let files: Vec<&str> = impact
+        .affected_files
+        .iter()
+        .map(|(f, _)| f.as_str())
+        .collect();
+    assert!(
+        files.contains(&"b.rs"),
+        "Recent co-change should pass min_weight"
+    );
     // c.rs has weight = exp(-0.01 * 200) ≈ 0.135 < 0.5
-    assert!(!files.contains(&"c.rs"), "Old co-change should be below min_weight");
+    assert!(
+        !files.contains(&"c.rs"),
+        "Old co-change should be below min_weight"
+    );
 }
 
 #[test]
@@ -233,6 +280,8 @@ fn impact_set_sorted_by_weight_descending() {
 
     let impact = compute_impact_set(&g, &["a.rs".into()], 10, 0.0);
     assert!(impact.affected_files.len() == 2);
-    assert!(impact.affected_files[0].1 >= impact.affected_files[1].1,
-        "Should be sorted by weight descending");
+    assert!(
+        impact.affected_files[0].1 >= impact.affected_files[1].1,
+        "Should be sorted by weight descending"
+    );
 }

@@ -5,13 +5,11 @@ use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
+use rustyline::error::ReadlineError;
 
 use theo_agent_runtime::config::{AgentMode, system_prompt_for_mode};
 use theo_agent_runtime::event_bus::EventBus;
-#[allow(deprecated)]
-use theo_agent_runtime::events::PrintEventSink;
 use theo_agent_runtime::{AgentConfig, AgentLoop};
 use theo_domain::graph_context::GraphContextProvider;
 use theo_infra_llm::types::Message;
@@ -119,7 +117,10 @@ impl Repl {
                                 if let Some(mode) = AgentMode::from_str(mode_str.trim()) {
                                     self.set_mode(mode);
                                 } else {
-                                    eprintln!("  Unknown mode: {}. Use: agent, plan, ask", mode_str);
+                                    eprintln!(
+                                        "  Unknown mode: {}. Use: agent, plan, ask",
+                                        mode_str
+                                    );
                                 }
                             } else {
                                 eprintln!("  Current mode: \x1b[36m{}\x1b[0m", self.mode);
@@ -173,10 +174,8 @@ impl Repl {
         event_bus.subscribe(renderer);
 
         // Create agent with GRAPHCTX if available
-        #[allow(deprecated)]
-        let event_sink = Arc::new(PrintEventSink);
         let registry = create_default_registry();
-        let mut agent = AgentLoop::new(self.config.clone(), registry, event_sink);
+        let mut agent = AgentLoop::new(self.config.clone(), registry);
         if let Some(ref gc) = self.graph_context {
             agent = agent.with_graph_context(gc.clone());
         }
@@ -216,7 +215,10 @@ impl Repl {
 
         // Result status with token usage
         let token_str = if result.tokens_used > 0 {
-            format!(", \x1b[90m{} tokens\x1b[0m", format_tokens(result.tokens_used))
+            format!(
+                ", \x1b[90m{} tokens\x1b[0m",
+                format_tokens(result.tokens_used)
+            )
         } else {
             String::new()
         };
@@ -233,12 +235,14 @@ impl Repl {
         } else if !result.success {
             eprintln!(
                 "\x1b[31m✗ Failed\x1b[0m — {} iterations{}",
-                result.iterations_used,
-                token_str,
+                result.iterations_used, token_str,
             );
             eprintln!();
         } else if result.tokens_used > 0 {
-            eprintln!("\x1b[90m{} tokens\x1b[0m", format_tokens(result.tokens_used));
+            eprintln!(
+                "\x1b[90m{} tokens\x1b[0m",
+                format_tokens(result.tokens_used)
+            );
             eprintln!();
         }
     }
@@ -356,10 +360,7 @@ mod tests {
         let project = tmp.path().join("my-project");
         std::fs::create_dir_all(&project).unwrap();
 
-        let messages = vec![
-            Message::user("hello"),
-            Message::assistant("world"),
-        ];
+        let messages = vec![Message::user("hello"), Message::assistant("world")];
         save_session(&project, &messages);
 
         let loaded = load_session(&project);

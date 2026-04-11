@@ -3,7 +3,7 @@
 //! Uses a whitelist approach: only explicitly allowed vars pass through.
 //! ALWAYS_STRIPPED_ENV_PREFIXES are removed regardless of whitelist.
 
-use theo_domain::sandbox::{ProcessPolicy, ALWAYS_STRIPPED_ENV_PREFIXES};
+use theo_domain::sandbox::{ALWAYS_STRIPPED_ENV_PREFIXES, ProcessPolicy};
 
 /// Compute the set of env vars to pass to the sandboxed process.
 ///
@@ -17,7 +17,11 @@ pub fn sanitized_env(policy: &ProcessPolicy) -> Vec<(String, String)> {
 
     for (key, value) in std::env::vars() {
         // Check if variable is in the allowed list
-        if !policy.allowed_env_vars.iter().any(|allowed| allowed == &key) {
+        if !policy
+            .allowed_env_vars
+            .iter()
+            .any(|allowed| allowed == &key)
+        {
             continue;
         }
 
@@ -42,10 +46,7 @@ fn is_always_stripped(var_name: &str) -> bool {
 /// Apply sanitized environment to a Command.
 ///
 /// Clears all env vars and sets only the allowed ones.
-pub fn apply_to_command(
-    cmd: &mut std::process::Command,
-    policy: &ProcessPolicy,
-) {
+pub fn apply_to_command(cmd: &mut std::process::Command, policy: &ProcessPolicy) {
     let allowed = sanitized_env(policy);
     cmd.env_clear();
     for (key, value) in allowed {
@@ -56,7 +57,6 @@ pub fn apply_to_command(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use theo_domain::sandbox::DEFAULT_ALLOWED_ENV_VARS;
 
     fn default_policy() -> ProcessPolicy {
         ProcessPolicy::default()
@@ -91,7 +91,9 @@ mod tests {
     fn sanitized_env_strips_aws_even_if_in_whitelist() {
         // Even if someone adds AWS_ to allowed, ALWAYS_STRIPPED takes precedence
         let mut policy = default_policy();
-        policy.allowed_env_vars.push("AWS_SECRET_ACCESS_KEY".to_string());
+        policy
+            .allowed_env_vars
+            .push("AWS_SECRET_ACCESS_KEY".to_string());
 
         unsafe { std::env::set_var("AWS_SECRET_ACCESS_KEY", "AKIAIOSFODNN7EXAMPLE") };
         let env = sanitized_env(&policy);

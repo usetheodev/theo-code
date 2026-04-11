@@ -2,7 +2,8 @@
 
 /// Build the complete self-contained HTML page.
 pub fn build_html(title: &str, sidebar_html: &str, pages_html: &str, search_index: &str) -> String {
-    format!(r##"<!DOCTYPE html>
+    format!(
+        r##"<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -562,5 +563,10 @@ document.addEventListener('DOMContentLoaded', function() {{
 }});
 </script>
 </body>
-</html>"##, title=title, sidebar_html=sidebar_html, pages_html=pages_html, search_index=search_index)
+</html>"##,
+        title = title,
+        sidebar_html = sidebar_html,
+        pages_html = pages_html,
+        search_index = search_index
+    )
 }

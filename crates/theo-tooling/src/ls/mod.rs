@@ -1,10 +1,10 @@
 use async_trait::async_trait;
+use std::path::PathBuf;
 use theo_domain::error::ToolError;
 use theo_domain::tool::{
     PermissionCollector, Tool, ToolCategory, ToolContext, ToolOutput, ToolParam, ToolSchema,
     optional_string,
 };
-use std::path::PathBuf;
 
 pub struct LsTool;
 
@@ -54,7 +54,11 @@ impl Tool for LsTool {
             .await
             .map_err(|e| ToolError::Execution(format!("Failed to read directory: {e}")))?;
 
-        while let Some(entry) = dir.next_entry().await.map_err(|e| ToolError::Execution(format!("{e}")))? {
+        while let Some(entry) = dir
+            .next_entry()
+            .await
+            .map_err(|e| ToolError::Execution(format!("{e}")))?
+        {
             let name = entry.file_name().to_string_lossy().to_string();
             let is_dir = entry.metadata().await.map(|m| m.is_dir()).unwrap_or(false);
             if is_dir {

@@ -45,9 +45,7 @@ fn ground_truth() -> Vec<EvalQuery> {
         EvalQuery {
             query: "louvain_phase1",
             category: "symbol",
-            expected_files: vec![
-                "crates/theo-engine-graph/src/cluster.rs",
-            ],
+            expected_files: vec!["crates/theo-engine-graph/src/cluster.rs"],
         },
         EvalQuery {
             query: "AgentRunEngine execute",
@@ -65,7 +63,6 @@ fn ground_truth() -> Vec<EvalQuery> {
                 "crates/theo-engine-retrieval/src/search.rs",
             ],
         },
-
         // --- B. Module ---
         EvalQuery {
             query: "sandbox bwrap bubblewrap executor",
@@ -113,7 +110,6 @@ fn ground_truth() -> Vec<EvalQuery> {
                 "crates/theo-agent-runtime/src/convergence.rs",
             ],
         },
-
         // --- C. Semantic ---
         EvalQuery {
             query: "error handling recovery retry",
@@ -163,7 +159,6 @@ fn ground_truth() -> Vec<EvalQuery> {
                 "crates/theo-governance/src/sandbox_audit.rs",
             ],
         },
-
         // --- D. Cross-cutting ---
         EvalQuery {
             query: "sandbox security tests",
@@ -229,7 +224,11 @@ fn recall_at_k(returned_files: &[String], expected: &[&str], k: usize) -> f64 {
     let top_k: HashSet<&str> = returned_files.iter().take(k).map(|s| s.as_str()).collect();
     let relevant: HashSet<&str> = expected.iter().copied().collect();
     let hits = top_k.iter().filter(|f| relevant.contains(**f)).count();
-    if relevant.is_empty() { 0.0 } else { hits as f64 / relevant.len() as f64 }
+    if relevant.is_empty() {
+        0.0
+    } else {
+        hits as f64 / relevant.len() as f64
+    }
 }
 
 fn mrr(returned_files: &[String], expected: &[&str]) -> f64 {
@@ -251,7 +250,9 @@ fn extract_files_from_scores(scores: &std::collections::HashMap<String, f64>) ->
 }
 
 /// Extract unique file paths from assembly context items, ordered by item score.
-fn extract_files_from_content(items: &[theo_engine_retrieval::assembly::ContextItem]) -> Vec<String> {
+fn extract_files_from_content(
+    items: &[theo_engine_retrieval::assembly::ContextItem],
+) -> Vec<String> {
     let mut files = Vec::new();
     let mut seen = HashSet::new();
     // Items are already sorted by score (descending). Extract files preserving that order.
@@ -278,23 +279,34 @@ fn extract_files_from_content(items: &[theo_engine_retrieval::assembly::ContextI
 #[test]
 #[ignore] // Heavy test — run explicitly with --ignored
 fn eval_graphctx_retrieval_quality() {
-    use theo_engine_graph::cluster::{hierarchical_cluster, ClusterAlgorithm};
     use theo_engine_graph::bridge;
-    use theo_engine_retrieval::search::MultiSignalScorer;
-    use theo_engine_retrieval::assembly::{assemble_greedy, assemble_by_symbol, assemble_files_direct};
+    use theo_engine_graph::cluster::{ClusterAlgorithm, hierarchical_cluster};
+    use theo_engine_retrieval::assembly::{
+        assemble_by_symbol, assemble_files_direct, assemble_greedy,
+    };
     use theo_engine_retrieval::search::FileBm25;
+    use theo_engine_retrieval::search::MultiSignalScorer;
 
     let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent().unwrap()  // crates/
-        .parent().unwrap(); // workspace root
+        .parent()
+        .unwrap() // crates/
+        .parent()
+        .unwrap(); // workspace root
 
     // Build graph from workspace
     eprintln!("Building graph from {}...", workspace_root.display());
     let (files, stats) = theo_application::use_cases::extraction::extract_repo(workspace_root);
-    eprintln!("Parsed {}/{} files, {} symbols", stats.files_parsed, stats.files_found, stats.symbols_extracted);
+    eprintln!(
+        "Parsed {}/{} files, {} symbols",
+        stats.files_parsed, stats.files_found, stats.symbols_extracted
+    );
 
     let (mut graph, _bridge_stats) = bridge::build_graph(&files);
-    eprintln!("Graph: {} nodes, {} edges", graph.node_count(), graph.edge_count());
+    eprintln!(
+        "Graph: {} nodes, {} edges",
+        graph.node_count(),
+        graph.edge_count()
+    );
 
     // SCIP enrichment: if index.scip exists, merge exact cross-file edges.
     // This adds compiler-verified Calls/Imports edges that Tree-Sitter misses.
@@ -316,23 +328,43 @@ fn eval_graphctx_retrieval_quality() {
                 eprintln!("SCIP: index.scip exists but failed to parse");
             }
         } else {
-            eprintln!("SCIP: no index.scip found (run `rust-analyzer scip . --output .theo/index.scip` to enable)");
+            eprintln!(
+                "SCIP: no index.scip found (run `rust-analyzer scip . --output .theo/index.scip` to enable)"
+            );
         }
     }
 
     // Use FileLeiden for eval — same as production.
     // Note: Leiden is non-deterministic. Results vary ±10% between runs.
-    let cluster_result = hierarchical_cluster(&graph, ClusterAlgorithm::FileLeiden { resolution: 0.5 });
+    let cluster_result =
+        hierarchical_cluster(&graph, ClusterAlgorithm::FileLeiden { resolution: 0.5 });
     let communities = cluster_result.communities;
-    eprintln!("Communities: {} (FileLeiden, non-deterministic)", communities.len());
+    eprintln!(
+        "Communities: {} (FileLeiden, non-deterministic)",
+        communities.len()
+    );
 
     // DEBUG: Check BM25 index quality for multiple queries
     let bm25_debug = theo_engine_retrieval::search::Bm25Index::build(&communities, &graph);
-    for debug_query in &["assemble_greedy", "LLM provider registry", "OAuth authentication", "error types"] {
+    for debug_query in &[
+        "assemble_greedy",
+        "LLM provider registry",
+        "OAuth authentication",
+        "error types",
+    ] {
         let debug_results = bm25_debug.search(debug_query, &communities);
         let non_zero = debug_results.iter().filter(|r| r.score > 0.0).count();
-        let top = debug_results.first().map(|r| format!("{} ({:.2})", r.community.name, r.score)).unwrap_or("none".into());
-        eprintln!("BM25 '{}': {}/{} non-zero, top: {}", debug_query, non_zero, communities.len(), top);
+        let top = debug_results
+            .first()
+            .map(|r| format!("{} ({:.2})", r.community.name, r.score))
+            .unwrap_or("none".into());
+        eprintln!(
+            "BM25 '{}': {}/{} non-zero, top: {}",
+            debug_query,
+            non_zero,
+            communities.len(),
+            top
+        );
     }
 
     let scorer = MultiSignalScorer::build(&communities, &graph);
@@ -344,9 +376,13 @@ fn eval_graphctx_retrieval_quality() {
     let mut total_precision = 0.0;
     let mut total_recall = 0.0;
     let mut total_mrr = 0.0;
-    let mut category_scores: std::collections::HashMap<&str, Vec<(f64, f64, f64)>> = std::collections::HashMap::new();
+    let mut category_scores: std::collections::HashMap<&str, Vec<(f64, f64, f64)>> =
+        std::collections::HashMap::new();
 
-    eprintln!("\n{:<5} {:<45} {:>8} {:>8} {:>6}", "#", "Query", "P@5", "R@5", "MRR");
+    eprintln!(
+        "\n{:<5} {:<45} {:>8} {:>8} {:>6}",
+        "#", "Query", "P@5", "R@5", "MRR"
+    );
     eprintln!("{}", "-".repeat(80));
 
     for (i, eq) in queries.iter().enumerate() {
@@ -373,7 +409,11 @@ fn eval_graphctx_retrieval_quality() {
             for (j, (path, score)) in top_files.iter().take(5).enumerate() {
                 eprintln!("  {}: {} score={:.4}", j, path, score);
             }
-            eprintln!("  Assembly items: {}, returned files: {:?}", payload.items.len(), &returned_files[..returned_files.len().min(5)]);
+            eprintln!(
+                "  Assembly items: {}, returned files: {:?}",
+                payload.items.len(),
+                &returned_files[..returned_files.len().min(5)]
+            );
         }
 
         let p = precision_at_k(&returned_files, &eq.expected_files, k);
@@ -384,19 +424,31 @@ fn eval_graphctx_retrieval_quality() {
         total_recall += r;
         total_mrr += m;
 
-        category_scores.entry(eq.category).or_default().push((p, r, m));
+        category_scores
+            .entry(eq.category)
+            .or_default()
+            .push((p, r, m));
 
         eprintln!(
             "{:<5} {:<45} {:>8.2} {:>8.2} {:>6.2}",
             format!("{}.", i + 1),
-            if eq.query.len() > 44 { &eq.query[..44] } else { eq.query },
-            p, r, m
+            if eq.query.len() > 44 {
+                &eq.query[..44]
+            } else {
+                eq.query
+            },
+            p,
+            r,
+            m
         );
 
         // Show what was returned vs expected
         if p < 0.4 {
             eprintln!("  MISS! Expected: {:?}", eq.expected_files);
-            eprintln!("  Got: {:?}", &returned_files[..returned_files.len().min(5)]);
+            eprintln!(
+                "  Got: {:?}",
+                &returned_files[..returned_files.len().min(5)]
+            );
         }
     }
 
@@ -406,7 +458,10 @@ fn eval_graphctx_retrieval_quality() {
     let avg_m = total_mrr / n;
 
     eprintln!("\n{}", "=".repeat(80));
-    eprintln!("OVERALL: P@5={:.3}  R@5={:.3}  MRR={:.3}", avg_p, avg_r, avg_m);
+    eprintln!(
+        "OVERALL: P@5={:.3}  R@5={:.3}  MRR={:.3}",
+        avg_p, avg_r, avg_m
+    );
     eprintln!();
 
     for (cat, scores) in &category_scores {
@@ -421,7 +476,10 @@ fn eval_graphctx_retrieval_quality() {
 
     // Soft assertion — report but don't fail on first run (calibration)
     if avg_p < 0.30 {
-        eprintln!("\nWARNING: Average precision@5 ({:.3}) is below minimum threshold (0.30)", avg_p);
+        eprintln!(
+            "\nWARNING: Average precision@5 ({:.3}) is below minimum threshold (0.30)",
+            avg_p
+        );
         eprintln!("This suggests fundamental retrieval problems.");
     }
 }
@@ -434,22 +492,31 @@ fn eval_graphctx_retrieval_quality() {
 #[cfg(feature = "dense-retrieval")]
 fn eval_rrf_dense() {
     use theo_engine_graph::bridge;
-    use theo_engine_retrieval::tantivy_search::{FileTantivyIndex, hybrid_rrf_search};
-    use theo_engine_retrieval::embedding::neural::NeuralEmbedder;
-    use theo_engine_retrieval::embedding::cache::EmbeddingCache;
-    use theo_engine_retrieval::search::FileBm25;
     use theo_engine_retrieval::dense_search::FileDenseSearch;
+    use theo_engine_retrieval::embedding::cache::EmbeddingCache;
+    use theo_engine_retrieval::embedding::neural::NeuralEmbedder;
+    use theo_engine_retrieval::search::FileBm25;
+    use theo_engine_retrieval::tantivy_search::{FileTantivyIndex, hybrid_rrf_search};
 
     let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent().unwrap()
-        .parent().unwrap();
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
 
     eprintln!("Building graph...");
     let (files, stats) = theo_application::use_cases::extraction::extract_repo(workspace_root);
-    eprintln!("Parsed {}/{} files, {} symbols", stats.files_parsed, stats.files_found, stats.symbols_extracted);
+    eprintln!(
+        "Parsed {}/{} files, {} symbols",
+        stats.files_parsed, stats.files_found, stats.symbols_extracted
+    );
 
     let (graph, _) = bridge::build_graph(&files);
-    eprintln!("Graph: {} nodes, {} edges", graph.node_count(), graph.edge_count());
+    eprintln!(
+        "Graph: {} nodes, {} edges",
+        graph.node_count(),
+        graph.edge_count()
+    );
 
     // Build Tantivy index
     let tantivy_index = FileTantivyIndex::build(&graph).expect("Tantivy index build failed");
@@ -461,7 +528,11 @@ fn eval_rrf_dense() {
     let start = std::time::Instant::now();
     let cache = EmbeddingCache::build(&graph, &embedder);
     let build_time = start.elapsed();
-    eprintln!("Embedding cache: {} files, built in {:.1}s", cache.len(), build_time.as_secs_f64());
+    eprintln!(
+        "Embedding cache: {} files, built in {:.1}s",
+        cache.len(),
+        build_time.as_secs_f64()
+    );
 
     let queries = ground_truth();
     let k = 5;
@@ -477,7 +548,11 @@ fn eval_rrf_dense() {
             total_m += mrr(&files, &eq.expected_files);
         }
         let n = queries.len() as f64;
-        eprintln!("\nBASELINE (BM25 only): P@5={:.3}  MRR={:.3}", total_p / n, total_m / n);
+        eprintln!(
+            "\nBASELINE (BM25 only): P@5={:.3}  MRR={:.3}",
+            total_p / n,
+            total_m / n
+        );
     }
 
     // --- Dense only (with diagnostic for weak queries) ---
@@ -494,21 +569,33 @@ fn eval_rrf_dense() {
 
             // For weak queries: show where expected files rank in dense
             if p < 0.40 {
-                let expected_ranks: Vec<String> = eq.expected_files.iter().map(|ef| {
-                    match files.iter().position(|f| f == *ef) {
+                let expected_ranks: Vec<String> = eq
+                    .expected_files
+                    .iter()
+                    .map(|ef| match files.iter().position(|f| f == *ef) {
                         Some(pos) => format!("{}@{}", ef.split('/').last().unwrap_or(ef), pos + 1),
                         None => format!("{}@MISS", ef.split('/').last().unwrap_or(ef)),
-                    }
-                }).collect();
-                eprintln!("  Q{} '{}': P@5={:.2} dense_ranks=[{}]",
+                    })
+                    .collect();
+                eprintln!(
+                    "  Q{} '{}': P@5={:.2} dense_ranks=[{}]",
                     i + 1,
-                    if eq.query.len() > 30 { &eq.query[..30] } else { eq.query },
+                    if eq.query.len() > 30 {
+                        &eq.query[..30]
+                    } else {
+                        eq.query
+                    },
                     p,
-                    expected_ranks.join(", "));
+                    expected_ranks.join(", ")
+                );
             }
         }
         let n = queries.len() as f64;
-        eprintln!("DENSE ONLY: P@5={:.3}  MRR={:.3}\n", total_p / n, total_m / n);
+        eprintln!(
+            "DENSE ONLY: P@5={:.3}  MRR={:.3}\n",
+            total_p / n,
+            total_m / n
+        );
     }
 
     // --- RRF 3-ranker with different k values ---
@@ -519,11 +606,15 @@ fn eval_rrf_dense() {
         let mut total_m = 0.0;
 
         eprintln!("\n=== RRF 3-RANKER k={} ===", rrf_k);
-        eprintln!("{:<5} {:<45} {:>8} {:>8} {:>6}", "#", "Query", "P@5", "R@5", "MRR");
+        eprintln!(
+            "{:<5} {:<45} {:>8} {:>8} {:>6}",
+            "#", "Query", "P@5", "R@5", "MRR"
+        );
         eprintln!("{}", "-".repeat(80));
 
         for (i, eq) in queries.iter().enumerate() {
-            let rrf_scores = hybrid_rrf_search(&graph, &tantivy_index, &embedder, &cache, eq.query, rrf_k);
+            let rrf_scores =
+                hybrid_rrf_search(&graph, &tantivy_index, &embedder, &cache, eq.query, rrf_k);
             // Extract files directly from scores — no assembly expansion
             let returned_files = extract_files_from_scores(&rrf_scores);
 
@@ -538,13 +629,22 @@ fn eval_rrf_dense() {
             eprintln!(
                 "{:<5} {:<45} {:>8.2} {:>8.2} {:>6.2}",
                 format!("{}.", i + 1),
-                if eq.query.len() > 44 { &eq.query[..44] } else { eq.query },
-                p, r, m
+                if eq.query.len() > 44 {
+                    &eq.query[..44]
+                } else {
+                    eq.query
+                },
+                p,
+                r,
+                m
             );
 
             if p < 0.2 {
                 eprintln!("  MISS! Expected: {:?}", eq.expected_files);
-                eprintln!("  Got: {:?}", &returned_files[..returned_files.len().min(5)]);
+                eprintln!(
+                    "  Got: {:?}",
+                    &returned_files[..returned_files.len().min(5)]
+                );
             }
         }
 
@@ -553,15 +653,19 @@ fn eval_rrf_dense() {
         let avg_r = total_r / n;
         let avg_m = total_m / n;
 
-        eprintln!("\nRRF k={}: P@5={:.3}  R@5={:.3}  MRR={:.3}", rrf_k, avg_p, avg_r, avg_m);
+        eprintln!(
+            "\nRRF k={}: P@5={:.3}  R@5={:.3}  MRR={:.3}",
+            rrf_k, avg_p, avg_r, avg_m
+        );
     }
 
     // --- RRF + Assembly (reverse dep boost + test penalty) ---
     {
-        use theo_engine_graph::cluster::{hierarchical_cluster, ClusterAlgorithm};
+        use theo_engine_graph::cluster::{ClusterAlgorithm, hierarchical_cluster};
         use theo_engine_retrieval::assembly::assemble_files_direct;
 
-        let cluster_result = hierarchical_cluster(&graph, ClusterAlgorithm::FileLeiden { resolution: 0.5 });
+        let cluster_result =
+            hierarchical_cluster(&graph, ClusterAlgorithm::FileLeiden { resolution: 0.5 });
         let communities = cluster_result.communities;
 
         eprintln!("\n=== RRF k=20 + ASSEMBLY (reverse dep boost) ===");
@@ -570,7 +674,8 @@ fn eval_rrf_dense() {
         let mut total_m = 0.0;
 
         for (i, eq) in queries.iter().enumerate() {
-            let rrf_scores = hybrid_rrf_search(&graph, &tantivy_index, &embedder, &cache, eq.query, 20.0);
+            let rrf_scores =
+                hybrid_rrf_search(&graph, &tantivy_index, &embedder, &cache, eq.query, 20.0);
             let payload = assemble_files_direct(&rrf_scores, &graph, &communities, 16_384);
             let returned_files = extract_files_from_content(&payload.items);
 
@@ -583,12 +688,21 @@ fn eval_rrf_dense() {
             total_m += m;
 
             if p < 0.2 {
-                eprintln!("  Q{} MISS: {:?}", i + 1, &returned_files[..returned_files.len().min(5)]);
+                eprintln!(
+                    "  Q{} MISS: {:?}",
+                    i + 1,
+                    &returned_files[..returned_files.len().min(5)]
+                );
             }
         }
 
         let n = queries.len() as f64;
-        eprintln!("RRF+ASSEMBLY: P@5={:.3}  R@5={:.3}  MRR={:.3}", total_p / n, total_r / n, total_m / n);
+        eprintln!(
+            "RRF+ASSEMBLY: P@5={:.3}  R@5={:.3}  MRR={:.3}",
+            total_p / n,
+            total_r / n,
+            total_m / n
+        );
     }
 
     // --- 2-RANKER RRF (BM25 + Dense, no Tantivy) ---
@@ -614,19 +728,42 @@ fn eval_rrf_dense() {
             let bm25_ranked = to_ranked(&bm25_scores);
             let dense_ranked = to_ranked(&dense_scores);
 
-            let bm25_rank: std::collections::HashMap<String, usize> = bm25_ranked.iter().enumerate().map(|(i, p)| (p.clone(), i)).collect();
-            let dense_rank: std::collections::HashMap<String, usize> = dense_ranked.iter().enumerate().map(|(i, p)| (p.clone(), i)).collect();
+            let bm25_rank: std::collections::HashMap<String, usize> = bm25_ranked
+                .iter()
+                .enumerate()
+                .map(|(i, p)| (p.clone(), i))
+                .collect();
+            let dense_rank: std::collections::HashMap<String, usize> = dense_ranked
+                .iter()
+                .enumerate()
+                .map(|(i, p)| (p.clone(), i))
+                .collect();
 
             let mut all: std::collections::HashSet<String> = std::collections::HashSet::new();
-            for k in bm25_scores.keys() { if !is_noise(k) { all.insert(k.clone()); } }
-            for k in dense_scores.keys() { if !is_noise(k) { all.insert(k.clone()); } }
+            for k in bm25_scores.keys() {
+                if !is_noise(k) {
+                    all.insert(k.clone());
+                }
+            }
+            for k in dense_scores.keys() {
+                if !is_noise(k) {
+                    all.insert(k.clone());
+                }
+            }
 
-            let mut merged: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
+            let mut merged: std::collections::HashMap<String, f64> =
+                std::collections::HashMap::new();
             for path in all {
                 let mut s = 0.0;
-                if let Some(&r) = bm25_rank.get(&path) { s += 1.0 / (60.0 + r as f64); }
-                if let Some(&r) = dense_rank.get(&path) { s += 1.0 / (60.0 + r as f64); }
-                if s > 0.0 { merged.insert(path, s); }
+                if let Some(&r) = bm25_rank.get(&path) {
+                    s += 1.0 / (60.0 + r as f64);
+                }
+                if let Some(&r) = dense_rank.get(&path) {
+                    s += 1.0 / (60.0 + r as f64);
+                }
+                if s > 0.0 {
+                    merged.insert(path, s);
+                }
             }
 
             let returned_files = extract_files_from_scores(&merged);
@@ -647,23 +784,32 @@ fn eval_rrf_dense() {
 #[cfg(feature = "reranker")]
 fn eval_full_pipeline() {
     use theo_engine_graph::bridge;
-    use theo_engine_retrieval::tantivy_search::FileTantivyIndex;
-    use theo_engine_retrieval::embedding::neural::NeuralEmbedder;
     use theo_engine_retrieval::embedding::cache::EmbeddingCache;
-    use theo_engine_retrieval::reranker::CrossEncoderReranker;
+    use theo_engine_retrieval::embedding::neural::NeuralEmbedder;
     use theo_engine_retrieval::pipeline::retrieve_and_rerank;
+    use theo_engine_retrieval::reranker::CrossEncoderReranker;
+    use theo_engine_retrieval::tantivy_search::FileTantivyIndex;
     use theo_engine_retrieval::tantivy_search::hybrid_rrf_search;
 
     let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent().unwrap()
-        .parent().unwrap();
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
 
     eprintln!("Building graph...");
     let (files, stats) = theo_application::use_cases::extraction::extract_repo(workspace_root);
-    eprintln!("Parsed {}/{} files, {} symbols", stats.files_parsed, stats.files_found, stats.symbols_extracted);
+    eprintln!(
+        "Parsed {}/{} files, {} symbols",
+        stats.files_parsed, stats.files_found, stats.symbols_extracted
+    );
 
     let (graph, _) = bridge::build_graph(&files);
-    eprintln!("Graph: {} nodes, {} edges", graph.node_count(), graph.edge_count());
+    eprintln!(
+        "Graph: {} nodes, {} edges",
+        graph.node_count(),
+        graph.edge_count()
+    );
 
     let tantivy_index = FileTantivyIndex::build(&graph).expect("Tantivy index build failed");
     eprintln!("Tantivy: {} docs indexed", tantivy_index.num_docs());
@@ -688,7 +834,11 @@ fn eval_full_pipeline() {
         rrf_total_m += mrr(&files, &eq.expected_files);
     }
     let n = queries.len() as f64;
-    eprintln!("\nRRF-ONLY: P@5={:.3}  MRR={:.3}", rrf_total_p / n, rrf_total_m / n);
+    eprintln!(
+        "\nRRF-ONLY: P@5={:.3}  MRR={:.3}",
+        rrf_total_p / n,
+        rrf_total_m / n
+    );
 
     // --- Full pipeline: RRF + Reranker ---
     let mut total_p = 0.0;
@@ -697,14 +847,23 @@ fn eval_full_pipeline() {
     let mut total_rerank_ms = 0.0;
 
     eprintln!("\n=== FULL PIPELINE (RRF k=20 + Reranker top-20) ===");
-    eprintln!("{:<5} {:<45} {:>8} {:>8} {:>6} {:>8}", "#", "Query", "P@5", "R@5", "MRR", "ms");
+    eprintln!(
+        "{:<5} {:<45} {:>8} {:>8} {:>6} {:>8}",
+        "#", "Query", "P@5", "R@5", "MRR", "ms"
+    );
     eprintln!("{}", "-".repeat(90));
 
     for (i, eq) in queries.iter().enumerate() {
         let start = std::time::Instant::now();
         let reranked = retrieve_and_rerank(
-            &graph, &tantivy_index, &embedder, &cache, &reranker,
-            eq.query, 20.0, 20,
+            &graph,
+            &tantivy_index,
+            &embedder,
+            &cache,
+            &reranker,
+            eq.query,
+            20.0,
+            20,
         );
         let elapsed = start.elapsed();
         total_rerank_ms += elapsed.as_millis() as f64;
@@ -722,13 +881,23 @@ fn eval_full_pipeline() {
         eprintln!(
             "{:<5} {:<45} {:>8.2} {:>8.2} {:>6.2} {:>8.0}",
             format!("{}.", i + 1),
-            if eq.query.len() > 44 { &eq.query[..44] } else { eq.query },
-            p, r, m, elapsed.as_millis()
+            if eq.query.len() > 44 {
+                &eq.query[..44]
+            } else {
+                eq.query
+            },
+            p,
+            r,
+            m,
+            elapsed.as_millis()
         );
 
         if p < 0.2 {
             eprintln!("  MISS! Expected: {:?}", eq.expected_files);
-            eprintln!("  Got: {:?}", &returned_files[..returned_files.len().min(5)]);
+            eprintln!(
+                "  Got: {:?}",
+                &returned_files[..returned_files.len().min(5)]
+            );
         }
     }
 
@@ -738,9 +907,20 @@ fn eval_full_pipeline() {
     let avg_ms = total_rerank_ms / n;
 
     eprintln!("\n{}", "=".repeat(90));
-    eprintln!("FULL PIPELINE: P@5={:.3}  R@5={:.3}  MRR={:.3}  avg_ms={:.0}", avg_p, avg_r, avg_m, avg_ms);
-    eprintln!("vs RRF-ONLY:   P@5={:.3}  MRR={:.3}", rrf_total_p / n, rrf_total_m / n);
-    eprintln!("Delta:         P@5={:+.3}  MRR={:+.3}", avg_p - rrf_total_p / n, avg_m - rrf_total_m / n);
+    eprintln!(
+        "FULL PIPELINE: P@5={:.3}  R@5={:.3}  MRR={:.3}  avg_ms={:.0}",
+        avg_p, avg_r, avg_m, avg_ms
+    );
+    eprintln!(
+        "vs RRF-ONLY:   P@5={:.3}  MRR={:.3}",
+        rrf_total_p / n,
+        rrf_total_m / n
+    );
+    eprintln!(
+        "Delta:         P@5={:+.3}  MRR={:+.3}",
+        avg_p - rrf_total_p / n,
+        avg_m - rrf_total_m / n
+    );
 }
 
 /// A/B benchmark: Custom FileBm25 vs Tantivy backend.
@@ -753,24 +933,34 @@ fn eval_full_pipeline() {
 #[ignore]
 #[cfg(feature = "tantivy-backend")]
 fn eval_tantivy_vs_custom() {
-    use theo_engine_graph::cluster::{hierarchical_cluster, ClusterAlgorithm};
     use theo_engine_graph::bridge;
+    use theo_engine_graph::cluster::{ClusterAlgorithm, hierarchical_cluster};
+    use theo_engine_retrieval::assembly::assemble_files_direct;
     use theo_engine_retrieval::search::FileBm25;
     use theo_engine_retrieval::tantivy_search::FileTantivyIndex;
-    use theo_engine_retrieval::assembly::assemble_files_direct;
 
     let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent().unwrap()
-        .parent().unwrap();
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
 
     eprintln!("Building graph...");
     let (files, stats) = theo_application::use_cases::extraction::extract_repo(workspace_root);
-    eprintln!("Parsed {}/{} files, {} symbols", stats.files_parsed, stats.files_found, stats.symbols_extracted);
+    eprintln!(
+        "Parsed {}/{} files, {} symbols",
+        stats.files_parsed, stats.files_found, stats.symbols_extracted
+    );
 
     let (graph, _) = bridge::build_graph(&files);
-    eprintln!("Graph: {} nodes, {} edges", graph.node_count(), graph.edge_count());
+    eprintln!(
+        "Graph: {} nodes, {} edges",
+        graph.node_count(),
+        graph.edge_count()
+    );
 
-    let cluster_result = hierarchical_cluster(&graph, ClusterAlgorithm::FileLeiden { resolution: 0.5 });
+    let cluster_result =
+        hierarchical_cluster(&graph, ClusterAlgorithm::FileLeiden { resolution: 0.5 });
     let communities = cluster_result.communities;
     eprintln!("Communities: {}", communities.len());
 
@@ -786,7 +976,10 @@ fn eval_tantivy_vs_custom() {
     let mut tantivy_total_p = 0.0;
     let mut tantivy_total_m = 0.0;
 
-    eprintln!("\n{:<5} {:<40} {:>10} {:>10} {:>10} {:>10}", "#", "Query", "Custom P@5", "Tantivy P@5", "Custom MRR", "Tantivy MRR");
+    eprintln!(
+        "\n{:<5} {:<40} {:>10} {:>10} {:>10} {:>10}",
+        "#", "Query", "Custom P@5", "Tantivy P@5", "Custom MRR", "Tantivy MRR"
+    );
     eprintln!("{}", "-".repeat(95));
 
     for (i, eq) in queries.iter().enumerate() {
@@ -796,7 +989,9 @@ fn eval_tantivy_vs_custom() {
         let custom_files = extract_files_from_content(&custom_payload.items);
 
         // Tantivy
-        let tantivy_scores = tantivy_index.search_with_prf(&graph, eq.query, 50).unwrap_or_default();
+        let tantivy_scores = tantivy_index
+            .search_with_prf(&graph, eq.query, 50)
+            .unwrap_or_default();
         let tantivy_payload = assemble_files_direct(&tantivy_scores, &graph, &communities, 16_384);
         let tantivy_files = extract_files_from_content(&tantivy_payload.items);
 
@@ -810,20 +1005,42 @@ fn eval_tantivy_vs_custom() {
         tantivy_total_p += tp;
         tantivy_total_m += tm;
 
-        let winner = if tp > cp { "TANTIVY" } else if cp > tp { "CUSTOM" } else { "TIE" };
+        let winner = if tp > cp {
+            "TANTIVY"
+        } else if cp > tp {
+            "CUSTOM"
+        } else {
+            "TIE"
+        };
 
         eprintln!(
             "{:<5} {:<40} {:>10.2} {:>10.2} {:>10.2} {:>10.2}  {}",
             format!("{}.", i + 1),
-            if eq.query.len() > 39 { &eq.query[..39] } else { eq.query },
-            cp, tp, cm, tm, winner
+            if eq.query.len() > 39 {
+                &eq.query[..39]
+            } else {
+                eq.query
+            },
+            cp,
+            tp,
+            cm,
+            tm,
+            winner
         );
     }
 
     let n = queries.len() as f64;
     eprintln!("\n{}", "=".repeat(95));
-    eprintln!("CUSTOM:  P@5={:.3}  MRR={:.3}", custom_total_p / n, custom_total_m / n);
-    eprintln!("TANTIVY: P@5={:.3}  MRR={:.3}", tantivy_total_p / n, tantivy_total_m / n);
+    eprintln!(
+        "CUSTOM:  P@5={:.3}  MRR={:.3}",
+        custom_total_p / n,
+        custom_total_m / n
+    );
+    eprintln!(
+        "TANTIVY: P@5={:.3}  MRR={:.3}",
+        tantivy_total_p / n,
+        tantivy_total_m / n
+    );
 
     let p5_gate = 0.40;
     let mrr_gate = 0.85;
@@ -831,9 +1048,20 @@ fn eval_tantivy_vs_custom() {
     let tantivy_mrr = tantivy_total_m / n;
 
     eprintln!("\nGate: P@5 >= {:.2}, MRR >= {:.2}", p5_gate, mrr_gate);
-    eprintln!("Tantivy: P@5={:.3} {}, MRR={:.3} {}",
-        tantivy_p5, if tantivy_p5 >= p5_gate { "PASS" } else { "FAIL" },
-        tantivy_mrr, if tantivy_mrr >= mrr_gate { "PASS" } else { "FAIL" },
+    eprintln!(
+        "Tantivy: P@5={:.3} {}, MRR={:.3} {}",
+        tantivy_p5,
+        if tantivy_p5 >= p5_gate {
+            "PASS"
+        } else {
+            "FAIL"
+        },
+        tantivy_mrr,
+        if tantivy_mrr >= mrr_gate {
+            "PASS"
+        } else {
+            "FAIL"
+        },
     );
 }
 
@@ -844,23 +1072,33 @@ fn eval_tantivy_vs_custom() {
 #[ignore]
 #[cfg(feature = "tantivy-backend")]
 fn eval_hybrid_search() {
-    use theo_engine_graph::cluster::{hierarchical_cluster, ClusterAlgorithm};
     use theo_engine_graph::bridge;
-    use theo_engine_retrieval::tantivy_search::{FileTantivyIndex, hybrid_search};
+    use theo_engine_graph::cluster::{ClusterAlgorithm, hierarchical_cluster};
     use theo_engine_retrieval::assembly::assemble_files_direct;
+    use theo_engine_retrieval::tantivy_search::{FileTantivyIndex, hybrid_search};
 
     let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent().unwrap()
-        .parent().unwrap();
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
 
     eprintln!("Building graph...");
     let (files, stats) = theo_application::use_cases::extraction::extract_repo(workspace_root);
-    eprintln!("Parsed {}/{} files, {} symbols", stats.files_parsed, stats.files_found, stats.symbols_extracted);
+    eprintln!(
+        "Parsed {}/{} files, {} symbols",
+        stats.files_parsed, stats.files_found, stats.symbols_extracted
+    );
 
     let (graph, _) = bridge::build_graph(&files);
-    eprintln!("Graph: {} nodes, {} edges", graph.node_count(), graph.edge_count());
+    eprintln!(
+        "Graph: {} nodes, {} edges",
+        graph.node_count(),
+        graph.edge_count()
+    );
 
-    let cluster_result = hierarchical_cluster(&graph, ClusterAlgorithm::FileLeiden { resolution: 0.5 });
+    let cluster_result =
+        hierarchical_cluster(&graph, ClusterAlgorithm::FileLeiden { resolution: 0.5 });
     let communities = cluster_result.communities;
 
     let tantivy_index = FileTantivyIndex::build(&graph).expect("Tantivy index build failed");
@@ -873,7 +1111,10 @@ fn eval_hybrid_search() {
     let mut total_r = 0.0;
     let mut total_m = 0.0;
 
-    eprintln!("\n{:<5} {:<45} {:>8} {:>8} {:>6}", "#", "Query", "P@5", "R@5", "MRR");
+    eprintln!(
+        "\n{:<5} {:<45} {:>8} {:>8} {:>6}",
+        "#", "Query", "P@5", "R@5", "MRR"
+    );
     eprintln!("{}", "-".repeat(80));
 
     for (i, eq) in queries.iter().enumerate() {
@@ -892,13 +1133,22 @@ fn eval_hybrid_search() {
         eprintln!(
             "{:<5} {:<45} {:>8.2} {:>8.2} {:>6.2}",
             format!("{}.", i + 1),
-            if eq.query.len() > 44 { &eq.query[..44] } else { eq.query },
-            p, r, m
+            if eq.query.len() > 44 {
+                &eq.query[..44]
+            } else {
+                eq.query
+            },
+            p,
+            r,
+            m
         );
 
         if p < 0.2 {
             eprintln!("  MISS! Expected: {:?}", eq.expected_files);
-            eprintln!("  Got: {:?}", &returned_files[..returned_files.len().min(5)]);
+            eprintln!(
+                "  Got: {:?}",
+                &returned_files[..returned_files.len().min(5)]
+            );
         }
     }
 
@@ -908,13 +1158,19 @@ fn eval_hybrid_search() {
     let avg_m = total_m / n;
 
     eprintln!("\n{}", "=".repeat(80));
-    eprintln!("HYBRID: P@5={:.3}  R@5={:.3}  MRR={:.3}", avg_p, avg_r, avg_m);
+    eprintln!(
+        "HYBRID: P@5={:.3}  R@5={:.3}  MRR={:.3}",
+        avg_p, avg_r, avg_m
+    );
 
     let p5_gate = 0.40;
     let mrr_gate = 0.85;
-    eprintln!("\nGate: P@5 >= {:.2} {}, MRR >= {:.2} {}",
-        p5_gate, if avg_p >= p5_gate { "PASS" } else { "FAIL" },
-        mrr_gate, if avg_m >= mrr_gate { "PASS" } else { "FAIL" },
+    eprintln!(
+        "\nGate: P@5 >= {:.2} {}, MRR >= {:.2} {}",
+        p5_gate,
+        if avg_p >= p5_gate { "PASS" } else { "FAIL" },
+        mrr_gate,
+        if avg_m >= mrr_gate { "PASS" } else { "FAIL" },
     );
 }
 
@@ -928,55 +1184,89 @@ fn eval_hybrid_search() {
 #[test]
 #[ignore]
 fn eval_graph_attention_ab() {
-    use theo_engine_graph::cluster::{hierarchical_cluster, ClusterAlgorithm};
     use theo_engine_graph::bridge;
-    use theo_engine_retrieval::search::MultiSignalScorer;
+    use theo_engine_graph::cluster::{ClusterAlgorithm, hierarchical_cluster};
     use theo_engine_retrieval::assembly::assemble_greedy;
+    use theo_engine_retrieval::search::MultiSignalScorer;
 
     let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent().unwrap()
-        .parent().unwrap();
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
 
     eprintln!("Building graph...");
     let (files, _) = theo_application::use_cases::extraction::extract_repo(workspace_root);
     let (graph, _) = bridge::build_graph(&files);
-    let cluster_result = hierarchical_cluster(&graph, ClusterAlgorithm::FileLeiden { resolution: 0.5 });
+    let cluster_result =
+        hierarchical_cluster(&graph, ClusterAlgorithm::FileLeiden { resolution: 0.5 });
     let communities = cluster_result.communities;
 
     // Score WITH graph attention (default)
     // SAFETY: test-only, single-threaded (#[ignore] test), no other threads reading env.
-    unsafe { std::env::remove_var("THEO_NO_GRAPH_ATTENTION"); }
+    unsafe {
+        std::env::remove_var("THEO_NO_GRAPH_ATTENTION");
+    }
     let scorer_with = MultiSignalScorer::build(&communities, &graph);
 
     // Score WITHOUT graph attention
-    unsafe { std::env::set_var("THEO_NO_GRAPH_ATTENTION", "1"); }
+    unsafe {
+        std::env::set_var("THEO_NO_GRAPH_ATTENTION", "1");
+    }
     let scorer_without = MultiSignalScorer::build(&communities, &graph);
-    unsafe { std::env::remove_var("THEO_NO_GRAPH_ATTENTION"); }
+    unsafe {
+        std::env::remove_var("THEO_NO_GRAPH_ATTENTION");
+    }
 
     let queries = ground_truth();
     let mut changed_count = 0;
     let total = queries.len();
 
-    eprintln!("\n{:<5} {:<45} {:<20} {:<20} {:>6}", "#", "Query", "Top3 WITH", "Top3 WITHOUT", "Changed?");
+    eprintln!(
+        "\n{:<5} {:<45} {:<20} {:<20} {:>6}",
+        "#", "Query", "Top3 WITH", "Top3 WITHOUT", "Changed?"
+    );
     eprintln!("{}", "-".repeat(100));
 
     for (i, eq) in queries.iter().enumerate() {
         let scored_with = scorer_with.score(eq.query, &communities, &graph);
         let scored_without = scorer_without.score(eq.query, &communities, &graph);
 
-        let top3_with: Vec<&str> = scored_with.iter().take(3).map(|s| s.community.id.as_str()).collect();
-        let top3_without: Vec<&str> = scored_without.iter().take(3).map(|s| s.community.id.as_str()).collect();
+        let top3_with: Vec<&str> = scored_with
+            .iter()
+            .take(3)
+            .map(|s| s.community.id.as_str())
+            .collect();
+        let top3_without: Vec<&str> = scored_without
+            .iter()
+            .take(3)
+            .map(|s| s.community.id.as_str())
+            .collect();
 
         let changed = top3_with != top3_without;
-        if changed { changed_count += 1; }
+        if changed {
+            changed_count += 1;
+        }
 
-        let w_names: Vec<&str> = scored_with.iter().take(3).map(|s| s.community.name.as_str()).collect();
-        let wo_names: Vec<&str> = scored_without.iter().take(3).map(|s| s.community.name.as_str()).collect();
+        let w_names: Vec<&str> = scored_with
+            .iter()
+            .take(3)
+            .map(|s| s.community.name.as_str())
+            .collect();
+        let wo_names: Vec<&str> = scored_without
+            .iter()
+            .take(3)
+            .map(|s| s.community.name.as_str())
+            .collect();
 
         eprintln!(
             "{:<5} {:<45} {:<20} {:<20} {:>6}",
             format!("{}.", i + 1),
-            if eq.query.len() > 44 { &eq.query[..44] } else { eq.query },
+            if eq.query.len() > 44 {
+                &eq.query[..44]
+            } else {
+                eq.query
+            },
             w_names.first().unwrap_or(&"?"),
             wo_names.first().unwrap_or(&"?"),
             if changed { "YES" } else { "no" }
@@ -985,11 +1275,16 @@ fn eval_graph_attention_ab() {
 
     let change_pct = (changed_count as f64 / total as f64) * 100.0;
     eprintln!("\n{}", "=".repeat(100));
-    eprintln!("RESULT: {}/{} queries ({:.0}%) had top-3 changed by graph attention", changed_count, total, change_pct);
+    eprintln!(
+        "RESULT: {}/{} queries ({:.0}%) had top-3 changed by graph attention",
+        changed_count, total, change_pct
+    );
 
     if change_pct < 20.0 {
         eprintln!("VERDICT: Graph attention changes <20% of rankings → RECOMMEND REMOVAL");
-        eprintln!("  The signal adds complexity (graph_attention.rs + 25% weight) without measurable impact.");
+        eprintln!(
+            "  The signal adds complexity (graph_attention.rs + 25% weight) without measurable impact."
+        );
     } else {
         eprintln!("VERDICT: Graph attention changes >=20% of rankings → KEEP");
         eprintln!("  The signal contributes meaningfully to ranking diversity.");

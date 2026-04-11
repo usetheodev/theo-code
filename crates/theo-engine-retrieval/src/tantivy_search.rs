@@ -17,9 +17,11 @@ mod inner {
 
     use tantivy::collector::TopDocs;
     use tantivy::query::{BooleanQuery, BoostQuery, Occur, Query, TermQuery};
-    use tantivy::schema::{Field, Schema, STORED, IndexRecordOption, TextFieldIndexing, TextOptions, Value};
-    use tantivy::tokenizer::{SimpleTokenizer, TextAnalyzer, LowerCaser};
-    use tantivy::{doc, Index, IndexWriter, TantivyDocument};
+    use tantivy::schema::{
+        Field, IndexRecordOption, STORED, Schema, TextFieldIndexing, TextOptions, Value,
+    };
+    use tantivy::tokenizer::{LowerCaser, SimpleTokenizer, TextAnalyzer};
+    use tantivy::{Index, IndexWriter, TantivyDocument, doc};
 
     use theo_engine_graph::model::{CodeGraph, NodeType};
 
@@ -57,7 +59,7 @@ mod inner {
         TextOptions::default().set_indexing_options(
             TextFieldIndexing::default()
                 .set_tokenizer(CODE_TOKENIZER)
-                .set_index_option(IndexRecordOption::WithFreqsAndPositions)
+                .set_index_option(IndexRecordOption::WithFreqsAndPositions),
         )
     }
 
@@ -102,7 +104,9 @@ mod inner {
             let mut writer: IndexWriter = index.writer(50_000_000)?; // 50MB heap
 
             for node_id in graph.node_ids() {
-                let Some(node) = graph.get_node(node_id) else { continue };
+                let Some(node) = graph.get_node(node_id) else {
+                    continue;
+                };
                 if node.node_type != NodeType::File {
                     continue;
                 }
@@ -189,7 +193,11 @@ mod inner {
         ///
         /// Returns file_path → score mapping, same interface as `FileBm25::search`.
         /// Field boosts: filename 5x, symbol 3x, signature 1x, doc 1x.
-        pub fn search(&self, query: &str, top_k: usize) -> Result<HashMap<String, f64>, tantivy::TantivyError> {
+        pub fn search(
+            &self,
+            query: &str,
+            top_k: usize,
+        ) -> Result<HashMap<String, f64>, tantivy::TantivyError> {
             let reader = self.index.reader()?;
             let searcher = reader.searcher();
 
@@ -204,47 +212,65 @@ mod inner {
             for token in &query_tokens {
                 let term_queries: Vec<(Occur, Box<dyn Query>)> = vec![
                     // filename: 5x boost
-                    (Occur::Should, Box::new(BoostQuery::new(
-                        Box::new(TermQuery::new(
-                            tantivy::Term::from_field_text(self.f_filename, token),
-                            IndexRecordOption::WithFreqs,
+                    (
+                        Occur::Should,
+                        Box::new(BoostQuery::new(
+                            Box::new(TermQuery::new(
+                                tantivy::Term::from_field_text(self.f_filename, token),
+                                IndexRecordOption::WithFreqs,
+                            )),
+                            5.0,
                         )),
-                        5.0,
-                    ))),
+                    ),
                     // path segments: 3x boost (disambiguates mod.rs files by directory)
-                    (Occur::Should, Box::new(BoostQuery::new(
-                        Box::new(TermQuery::new(
-                            tantivy::Term::from_field_text(self.f_path_segments, token),
-                            IndexRecordOption::WithFreqs,
+                    (
+                        Occur::Should,
+                        Box::new(BoostQuery::new(
+                            Box::new(TermQuery::new(
+                                tantivy::Term::from_field_text(self.f_path_segments, token),
+                                IndexRecordOption::WithFreqs,
+                            )),
+                            3.0,
                         )),
-                        3.0,
-                    ))),
+                    ),
                     // symbol: 3x boost
-                    (Occur::Should, Box::new(BoostQuery::new(
-                        Box::new(TermQuery::new(
-                            tantivy::Term::from_field_text(self.f_symbol, token),
-                            IndexRecordOption::WithFreqs,
+                    (
+                        Occur::Should,
+                        Box::new(BoostQuery::new(
+                            Box::new(TermQuery::new(
+                                tantivy::Term::from_field_text(self.f_symbol, token),
+                                IndexRecordOption::WithFreqs,
+                            )),
+                            3.0,
                         )),
-                        3.0,
-                    ))),
+                    ),
                     // signature: 1x
-                    (Occur::Should, Box::new(TermQuery::new(
-                        tantivy::Term::from_field_text(self.f_signature, token),
-                        IndexRecordOption::WithFreqs,
-                    ))),
-                    // doc: 1x
-                    (Occur::Should, Box::new(TermQuery::new(
-                        tantivy::Term::from_field_text(self.f_doc, token),
-                        IndexRecordOption::WithFreqs,
-                    ))),
-                    // imports: 0.5x (captures "who uses this")
-                    (Occur::Should, Box::new(BoostQuery::new(
+                    (
+                        Occur::Should,
                         Box::new(TermQuery::new(
-                            tantivy::Term::from_field_text(self.f_imports, token),
+                            tantivy::Term::from_field_text(self.f_signature, token),
                             IndexRecordOption::WithFreqs,
                         )),
-                        0.5,
-                    ))),
+                    ),
+                    // doc: 1x
+                    (
+                        Occur::Should,
+                        Box::new(TermQuery::new(
+                            tantivy::Term::from_field_text(self.f_doc, token),
+                            IndexRecordOption::WithFreqs,
+                        )),
+                    ),
+                    // imports: 0.5x (captures "who uses this")
+                    (
+                        Occur::Should,
+                        Box::new(BoostQuery::new(
+                            Box::new(TermQuery::new(
+                                tantivy::Term::from_field_text(self.f_imports, token),
+                                IndexRecordOption::WithFreqs,
+                            )),
+                            0.5,
+                        )),
+                    ),
                 ];
 
                 // Each token's field matches are OR'd together
@@ -307,7 +333,8 @@ mod inner {
                     // Merge: original + 0.3x expanded
                     let mut merged = initial;
                     for (path, exp_score) in expanded {
-                        merged.entry(path)
+                        merged
+                            .entry(path)
                             .and_modify(|s| *s += exp_score * 0.3)
                             .or_insert(exp_score * 0.3);
                     }
@@ -320,7 +347,8 @@ mod inner {
 
         /// Number of documents in the index.
         pub fn num_docs(&self) -> u64 {
-            self.index.reader()
+            self.index
+                .reader()
                 .map(|r| r.searcher().num_docs())
                 .unwrap_or(0)
         }
@@ -350,8 +378,12 @@ pub fn hybrid_search(
 
     // Collect all file paths from both
     let mut all_paths: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for k in custom_scores.keys() { all_paths.insert(k.clone()); }
-    for k in tantivy_scores.keys() { all_paths.insert(k.clone()); }
+    for k in custom_scores.keys() {
+        all_paths.insert(k.clone());
+    }
+    for k in tantivy_scores.keys() {
+        all_paths.insert(k.clone());
+    }
 
     if all_paths.is_empty() {
         return HashMap::new();
@@ -359,14 +391,19 @@ pub fn hybrid_search(
 
     // Min-max normalize each ranker to [0, 1]
     let normalize = |scores: &HashMap<String, f64>| -> HashMap<String, f64> {
-        if scores.is_empty() { return HashMap::new(); }
+        if scores.is_empty() {
+            return HashMap::new();
+        }
         let max = scores.values().cloned().fold(f64::NEG_INFINITY, f64::max);
         let min = scores.values().cloned().fold(f64::INFINITY, f64::min);
         let range = max - min;
         if range <= 0.0 {
             scores.iter().map(|(k, _)| (k.clone(), 1.0)).collect()
         } else {
-            scores.iter().map(|(k, v)| (k.clone(), (v - min) / range)).collect()
+            scores
+                .iter()
+                .map(|(k, v)| (k.clone(), (v - min) / range))
+                .collect()
         }
     };
 
@@ -377,7 +414,8 @@ pub fn hybrid_search(
     // For files in BOTH rankers: take max of normalized scores.
     // For files ONLY in Tantivy: add with a small bonus (0.3x of custom's min non-zero).
     // This preserves Custom's ranking while capturing Tantivy-only discoveries.
-    let custom_min_nonzero = norm_custom.values()
+    let custom_min_nonzero = norm_custom
+        .values()
         .filter(|v| **v > 0.01)
         .cloned()
         .fold(f64::INFINITY, f64::min)
@@ -433,8 +471,8 @@ pub fn hybrid_rrf_search(
     query: &str,
     k_param: f64,
 ) -> HashMap<String, f64> {
-    use crate::search::FileBm25;
     use crate::dense_search::FileDenseSearch;
+    use crate::search::FileBm25;
 
     // Get scores from all 3 rankers
     // NOTE: Query expansion with synonyms TESTED but REVERTED — hurt MRR (0.914→0.886)
@@ -452,9 +490,7 @@ pub fn hybrid_rrf_search(
     };
 
     let to_ranked = |scores: &HashMap<String, f64>| -> Vec<String> {
-        let mut sorted: Vec<_> = scores.iter()
-            .filter(|(k, _)| !is_noise(k))
-            .collect();
+        let mut sorted: Vec<_> = scores.iter().filter(|(k, _)| !is_noise(k)).collect();
         sorted.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap_or(std::cmp::Ordering::Equal));
         sorted.into_iter().map(|(k, _)| k.clone()).collect()
     };
@@ -464,7 +500,11 @@ pub fn hybrid_rrf_search(
     let dense_ranked = to_ranked(&dense_scores);
 
     let rank_map = |ranked: &[String]| -> HashMap<String, usize> {
-        ranked.iter().enumerate().map(|(i, p)| (p.clone(), i)).collect()
+        ranked
+            .iter()
+            .enumerate()
+            .map(|(i, p)| (p.clone(), i))
+            .collect()
     };
 
     let bm25_rank = rank_map(&bm25_ranked);
@@ -472,9 +512,21 @@ pub fn hybrid_rrf_search(
     let dense_rank = rank_map(&dense_ranked);
 
     let mut all_paths: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for k in bm25_scores.keys() { if !is_noise(k) { all_paths.insert(k.clone()); } }
-    for k in tantivy_scores.keys() { if !is_noise(k) { all_paths.insert(k.clone()); } }
-    for k in dense_scores.keys() { if !is_noise(k) { all_paths.insert(k.clone()); } }
+    for k in bm25_scores.keys() {
+        if !is_noise(k) {
+            all_paths.insert(k.clone());
+        }
+    }
+    for k in tantivy_scores.keys() {
+        if !is_noise(k) {
+            all_paths.insert(k.clone());
+        }
+    }
+    for k in dense_scores.keys() {
+        if !is_noise(k) {
+            all_paths.insert(k.clone());
+        }
+    }
 
     if all_paths.is_empty() {
         return HashMap::new();
@@ -523,23 +575,26 @@ pub fn symbol_first_search(
     query: &str,
     k_param: f64,
 ) -> HashMap<String, f64> {
-    use theo_engine_graph::model::{NodeType, SymbolKind};
     use crate::code_tokenizer::tokenize_code;
+    use theo_engine_graph::model::{NodeType, SymbolKind};
 
     // Stage A: File retrieval via existing RRF → top-20 files
     let file_scores = hybrid_rrf_search(graph, tantivy_index, embedder, cache, query, k_param);
     let mut sorted_files: Vec<_> = file_scores.iter().collect();
     sorted_files.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap_or(std::cmp::Ordering::Equal));
-    let top_files: Vec<&str> = sorted_files.iter().take(20).map(|(k, _)| k.as_str()).collect();
+    let top_files: Vec<&str> = sorted_files
+        .iter()
+        .take(20)
+        .map(|(k, _)| k.as_str())
+        .collect();
 
     if top_files.is_empty() {
         return HashMap::new();
     }
 
     // Query tokens for matching
-    let query_tokens: std::collections::HashSet<String> = tokenize_code(query)
-        .into_iter()
-        .collect();
+    let query_tokens: std::collections::HashSet<String> =
+        tokenize_code(query).into_iter().collect();
 
     if query_tokens.is_empty() {
         return file_scores;
@@ -553,35 +608,44 @@ pub fn symbol_first_search(
         let file_id = format!("file:{}", file_path);
 
         for sym_id in graph.contains_children(&file_id) {
-            let Some(sym) = graph.get_node(sym_id) else { continue };
-            if sym.node_type != NodeType::Symbol { continue; }
+            let Some(sym) = graph.get_node(sym_id) else {
+                continue;
+            };
+            if sym.node_type != NodeType::Symbol {
+                continue;
+            }
 
             // Score symbol against query: name token overlap + signature bonus
-            let name_tokens: std::collections::HashSet<String> = tokenize_code(&sym.name)
-                .into_iter()
-                .collect();
+            let name_tokens: std::collections::HashSet<String> =
+                tokenize_code(&sym.name).into_iter().collect();
 
-            let name_overlap = query_tokens.iter()
+            let name_overlap = query_tokens
+                .iter()
                 .filter(|qt| name_tokens.contains(*qt))
                 .count();
 
-            if name_overlap == 0 { continue; } // No match at all
+            if name_overlap == 0 {
+                continue;
+            } // No match at all
 
             let mut score = name_overlap as f64;
 
             // Bonus for signature match
             if let Some(sig) = &sym.signature {
-                let sig_tokens: std::collections::HashSet<String> = tokenize_code(sig)
-                    .into_iter()
-                    .collect();
-                let sig_overlap = query_tokens.iter()
+                let sig_tokens: std::collections::HashSet<String> =
+                    tokenize_code(sig).into_iter().collect();
+                let sig_overlap = query_tokens
+                    .iter()
                     .filter(|qt| sig_tokens.contains(*qt))
                     .count();
                 score += sig_overlap as f64 * 0.5;
             }
 
             // Bonus for function/method (more specific than types)
-            if matches!(sym.kind, Some(SymbolKind::Function) | Some(SymbolKind::Method)) {
+            if matches!(
+                sym.kind,
+                Some(SymbolKind::Function) | Some(SymbolKind::Method)
+            ) {
                 score *= 1.2;
             }
 
@@ -608,12 +672,20 @@ pub fn symbol_first_search(
     for (sym_id, _source_file, sym_score) in &top_symbols {
         // Hub filter: skip symbols with too many callers
         let reverse = graph.reverse_neighbors(sym_id);
-        if reverse.len() > hub_threshold { continue; }
+        if reverse.len() > hub_threshold {
+            continue;
+        }
 
         for caller_id in &reverse {
-            let Some(caller) = graph.get_node(caller_id) else { continue };
-            let Some(caller_fp) = caller.file_path.as_deref() else { continue };
-            if is_noise(caller_fp) || is_hub(caller_fp) { continue; }
+            let Some(caller) = graph.get_node(caller_id) else {
+                continue;
+            };
+            let Some(caller_fp) = caller.file_path.as_deref() else {
+                continue;
+            };
+            if is_noise(caller_fp) || is_hub(caller_fp) {
+                continue;
+            }
 
             // Boost proportional to symbol score
             let boost = sym_score * 0.5;
@@ -657,7 +729,7 @@ pub fn symbol_first_search(
 #[cfg(all(test, feature = "tantivy-backend"))]
 mod tests {
     use super::*;
-    use theo_engine_graph::model::{CodeGraph, Node, Edge, EdgeType, NodeType, SymbolKind};
+    use theo_engine_graph::model::{CodeGraph, Edge, EdgeType, Node, NodeType, SymbolKind};
 
     fn build_test_graph() -> CodeGraph {
         let mut graph = CodeGraph::new();
@@ -780,7 +852,10 @@ mod tests {
         let index = FileTantivyIndex::build(&graph).unwrap();
         let results = index.search("jwt token verification", 10).unwrap();
 
-        assert!(!results.is_empty(), "expected results for 'jwt token verification'");
+        assert!(
+            !results.is_empty(),
+            "expected results for 'jwt token verification'"
+        );
 
         // oauth.rs should rank highest (has verify_jwt_token)
         let mut sorted: Vec<_> = results.iter().collect();
@@ -794,7 +869,10 @@ mod tests {
         let index = FileTantivyIndex::build(&graph).unwrap();
         let results = index.search("database connection pool", 10).unwrap();
 
-        assert!(!results.is_empty(), "expected results for 'database connection pool'");
+        assert!(
+            !results.is_empty(),
+            "expected results for 'database connection pool'"
+        );
 
         let mut sorted: Vec<_> = results.iter().collect();
         sorted.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap());
@@ -850,7 +928,9 @@ mod tests {
     fn tantivy_prf_works() {
         let graph = build_test_graph();
         let index = FileTantivyIndex::build(&graph).unwrap();
-        let results = index.search_with_prf(&graph, "jwt verification", 10).unwrap();
+        let results = index
+            .search_with_prf(&graph, "jwt verification", 10)
+            .unwrap();
 
         assert!(!results.is_empty());
         let mut sorted: Vec<_> = results.iter().collect();

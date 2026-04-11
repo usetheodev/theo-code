@@ -155,8 +155,14 @@ mod tests {
             completed_at: None,
         };
         RunSnapshot::new(
-            run, task, vec![], vec![], vec![],
-            BudgetUsage::default(), vec![], vec![],
+            run,
+            task,
+            vec![],
+            vec![],
+            vec![],
+            BudgetUsage::default(),
+            vec![],
+            vec![],
         )
     }
 
@@ -232,20 +238,24 @@ mod tests {
             completed_at: None,
         };
 
-        let dlq = vec![
-            DeadLetter {
-                call_id: CallId::new("c-1"),
-                tool_name: "bash".into(),
-                input: serde_json::json!({"command": "ls"}),
-                error: "timeout".into(),
-                attempts: 3,
-                created_at: 1500,
-            },
-        ];
+        let dlq = vec![DeadLetter {
+            call_id: CallId::new("c-1"),
+            tool_name: "bash".into(),
+            input: serde_json::json!({"command": "ls"}),
+            error: "timeout".into(),
+            attempts: 3,
+            created_at: 1500,
+        }];
 
         let snapshot = RunSnapshot::new(
-            run, task, vec![], vec![], vec![],
-            BudgetUsage::default(), vec![], dlq,
+            run,
+            task,
+            vec![],
+            vec![],
+            vec![],
+            BudgetUsage::default(),
+            vec![],
+            dlq,
         );
 
         let json = serde_json::to_string(&snapshot).unwrap();
@@ -262,7 +272,10 @@ mod tests {
     fn snapshot_has_schema_version() {
         let snapshot = make_snapshot();
         assert_eq!(snapshot.schema_version, RunSnapshot::CURRENT_SCHEMA_VERSION);
-        assert!(snapshot.schema_version > 0, "Schema version must be positive");
+        assert!(
+            snapshot.schema_version > 0,
+            "Schema version must be positive"
+        );
     }
 
     #[test]
@@ -272,7 +285,10 @@ mod tests {
         let mut s2 = make_snapshot();
         s2.schema_version = 999;
         s2.checksum = s2.compute_checksum();
-        assert_ne!(s1.checksum, s2.checksum, "Schema version must affect checksum");
+        assert_ne!(
+            s1.checksum, s2.checksum,
+            "Schema version must affect checksum"
+        );
     }
 
     #[test]
@@ -284,7 +300,10 @@ mod tests {
         let json_str = serde_json::to_string(&json_val).unwrap();
 
         let restored: RunSnapshot = serde_json::from_str(&json_str).unwrap();
-        assert_eq!(restored.schema_version, 0, "Legacy snapshots should default to version 0");
+        assert_eq!(
+            restored.schema_version, 0,
+            "Legacy snapshots should default to version 0"
+        );
     }
 
     // --- S1-T3: WorkingSet tests ---
@@ -304,7 +323,10 @@ mod tests {
         snapshot.working_set = Some(ws.clone());
         snapshot.checksum = snapshot.compute_checksum();
 
-        assert_eq!(snapshot.working_set.as_ref().unwrap().hot_files, ws.hot_files);
+        assert_eq!(
+            snapshot.working_set.as_ref().unwrap().hot_files,
+            ws.hot_files
+        );
         assert!(snapshot.validate_checksum());
     }
 
@@ -322,7 +344,10 @@ mod tests {
         let json = serde_json::to_string(&snapshot).unwrap();
         let restored: RunSnapshot = serde_json::from_str(&json).unwrap();
         assert!(restored.working_set.is_some());
-        assert_eq!(restored.working_set.unwrap().current_plan_step, Some("step 1".into()));
+        assert_eq!(
+            restored.working_set.unwrap().current_plan_step,
+            Some("step 1".into())
+        );
     }
 
     #[test]
@@ -333,7 +358,10 @@ mod tests {
         let json_str = serde_json::to_string(&json_val).unwrap();
 
         let restored: RunSnapshot = serde_json::from_str(&json_str).unwrap();
-        assert!(restored.working_set.is_none(), "Legacy snapshots should have no working_set");
+        assert!(
+            restored.working_set.is_none(),
+            "Legacy snapshots should have no working_set"
+        );
     }
 
     #[test]
@@ -375,8 +403,14 @@ mod tests {
             completed_at: None,
         };
         let s2 = RunSnapshot::new(
-            run2, task2, vec![], vec![], vec![],
-            BudgetUsage::default(), vec![], vec![],
+            run2,
+            task2,
+            vec![],
+            vec![],
+            vec![],
+            BudgetUsage::default(),
+            vec![],
+            vec![],
         );
         assert_ne!(s1.checksum, s2.checksum);
     }

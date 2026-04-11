@@ -46,7 +46,10 @@ impl EventBus {
     }
 
     pub fn subscribe(&self, listener: Arc<dyn EventListener>) {
-        self.listeners.lock().expect("listeners lock poisoned").push(listener);
+        self.listeners
+            .lock()
+            .expect("listeners lock poisoned")
+            .push(listener);
     }
 
     /// Publishes an event: appends to the log and notifies all listeners.
@@ -66,7 +69,11 @@ impl EventBus {
         }
 
         // Notify listeners (with panic protection)
-        let listeners = self.listeners.lock().expect("listeners lock poisoned").clone();
+        let listeners = self
+            .listeners
+            .lock()
+            .expect("listeners lock poisoned")
+            .clone();
         for listener in &listeners {
             let listener = Arc::clone(listener);
             let event_ref = &event;
@@ -122,10 +129,7 @@ impl EventListener for PrintEventListener {
     fn on_event(&self, event: &DomainEvent) {
         eprintln!(
             "[{}] {} entity={} payload={}",
-            event.event_type,
-            event.event_id,
-            event.entity_id,
-            event.payload,
+            event.event_type, event.event_id, event.entity_id, event.payload,
         );
     }
 }
@@ -166,7 +170,7 @@ impl EventListener for CapturingListener {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use theo_domain::event::{EventType, ALL_EVENT_TYPES};
+    use theo_domain::event::{ALL_EVENT_TYPES, EventType};
 
     fn make_event(event_type: EventType, entity: &str) -> DomainEvent {
         DomainEvent::new(event_type, entity, serde_json::Value::Null)

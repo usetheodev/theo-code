@@ -144,7 +144,9 @@ fn handle_skills(project_dir: &Path) {
                 // Can't easily return &str from format!, use leak-free approach
                 match role {
                     theo_agent_runtime::subagent::SubAgentRole::Explorer => "sub-agent:explorer",
-                    theo_agent_runtime::subagent::SubAgentRole::Implementer => "sub-agent:implementer",
+                    theo_agent_runtime::subagent::SubAgentRole::Implementer => {
+                        "sub-agent:implementer"
+                    }
                     theo_agent_runtime::subagent::SubAgentRole::Verifier => "sub-agent:verifier",
                     theo_agent_runtime::subagent::SubAgentRole::Reviewer => "sub-agent:reviewer",
                 }

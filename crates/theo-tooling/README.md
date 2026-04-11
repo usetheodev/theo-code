@@ -58,57 +58,82 @@ pub trait Tool: Send + Sync {
 7. ToolOutput retorna ao caller com titulo, output, metadata e attachments
 ```
 
+## Surface status
+
+`theo-tooling` contains more modules than the default runtime registry exposes.
+
+Use these status labels when reading this package:
+
+- `default-registry`: registered by `create_default_registry()` and available to the main agent runtime
+- `meta-tool`: injected by `theo-agent-runtime::tool_bridge`, not registered here
+- `experimental`: code exists in-tree but is not part of the default registry
+- `stub`: module exists but `execute()` still returns not implemented or placeholder behavior
+
+The source of truth is `src/tool_manifest.rs`.
+
 ## Tools implementadas
 
 ### Operacoes de arquivo
 
-| Tool | ID | Descricao | Testes |
-|------|----|-----------|--------|
-| **ReadTool** | `read` | Le arquivos com suporte a offset/limit, detecta binarios, retorna imagens como attachments | 18 |
-| **WriteTool** | `write` | Escreve conteudo em arquivos, cria diretorios pai automaticamente | 11 |
-| **EditTool** | `edit` | Substitui texto em arquivos, preserva line endings (LF/CRLF), suporta replaceAll | 16 |
-| **ApplyPatchTool** | `apply_patch` | Aplica patches unificados com add/update/delete/move, suporta heredoc e EOF anchor | 13 |
-| **MultiEditTool** | `multiedit` | Multiplas edicoes sequenciais em um unico arquivo | -- |
+| Tool | ID | Status | Descricao | Testes |
+|------|----|--------|-----------|--------|
+| **ReadTool** | `read` | `default-registry` | Le arquivos com suporte a offset/limit, detecta binarios, retorna imagens como attachments | 18 |
+| **WriteTool** | `write` | `default-registry` | Escreve conteudo em arquivos, cria diretorios pai automaticamente | 11 |
+| **EditTool** | `edit` | `default-registry` | Substitui texto em arquivos, preserva line endings (LF/CRLF), suporta replaceAll | 16 |
+| **ApplyPatchTool** | `apply_patch` | `default-registry` | Aplica patches unificados com add/update/delete/move, suporta heredoc e EOF anchor | 13 |
+| **MultiEditTool** | `multiedit` | `experimental`, `stub` | Modulo existe, mas ainda nao implementa edicoes sequenciais reais e nao entra no registry padrao | -- |
 
 ### Busca e navegacao
 
-| Tool | ID | Descricao | Testes |
-|------|----|-----------|--------|
-| **GrepTool** | `grep` | Busca conteudo com regex via grep, limita a 100 matches | 6 |
-| **GlobTool** | `glob` | Encontra arquivos por glob pattern, limita a 100 resultados | 2 |
-| **LsTool** | `ls` | Lista conteudo de diretorio | -- |
-| **LspTool** | `lsp` | Operacoes LSP: go-to-definition, references, hover (experimental) | -- |
+| Tool | ID | Status | Descricao | Testes |
+|------|----|--------|-----------|--------|
+| **GrepTool** | `grep` | `default-registry` | Busca conteudo com regex via grep, limita a 100 matches | 6 |
+| **GlobTool** | `glob` | `default-registry` | Encontra arquivos por glob pattern, limita a 100 resultados | 2 |
+| **LsTool** | `ls` | `experimental` | Modulo existe, mas nao entra hoje no registry padrao | -- |
+| **LspTool** | `lsp` | `experimental`, `stub` | Operacoes LSP ainda nao implementadas; nao entra no registry padrao | -- |
 
 ### Execucao
 
-| Tool | ID | Descricao | Testes |
-|------|----|-----------|--------|
-| **BashTool** | `bash` | Executa comandos shell com deteccao de permissoes, truncation automatico | 14 |
+| Tool | ID | Status | Descricao | Testes |
+|------|----|--------|-----------|--------|
+| **BashTool** | `bash` | `default-registry` | Executa comandos shell com deteccao de permissoes, truncation automatico | 14 |
 
 ### Web e busca externa
 
-| Tool | ID | Descricao | Testes |
-|------|----|-----------|--------|
-| **WebFetchTool** | `webfetch` | Busca URLs, retorna imagens como attachments, SVG como texto | 5 |
-| **WebSearchTool** | `websearch` | Busca web via API externa | -- |
-| **CodeSearchTool** | `codesearch` | Busca contexto de codigo via API externa | -- |
+| Tool | ID | Status | Descricao | Testes |
+|------|----|--------|-----------|--------|
+| **WebFetchTool** | `webfetch` | `default-registry` | Busca URLs, retorna imagens como attachments, SVG como texto | 5 |
+| **WebSearchTool** | `websearch` | `experimental`, `stub` | Modulo existe, mas ainda retorna not implemented e nao entra no registry padrao | -- |
+| **CodeSearchTool** | `codesearch` | `experimental`, `stub` | Modulo existe, mas ainda retorna not implemented e nao entra no registry padrao | -- |
 
 ### Agentes e interacao
 
-| Tool | ID | Descricao | Testes |
-|------|----|-----------|--------|
-| **TaskTool** | `task` | Spawna subagentes para tarefas especializadas | 1 |
-| **SkillTool** | `skill` | Carrega skills especializadas com arquivos bundled | 2 |
-| **QuestionTool** | `question` | Faz perguntas interativas ao usuario | 2 |
+| Tool | ID | Status | Descricao | Testes |
+|------|----|--------|-----------|--------|
+| **TaskTool** | `task` | `experimental`, `partial` | Modulo existe, mas hoje devolve output placeholder e nao faz spawn real no registry padrao | 1 |
+| **SkillTool** | `skill` | `meta-tool` | A superficie principal de skill e injetada pelo runtime; o modulo existe, mas nao entra no registry padrao | 2 |
+| **QuestionTool** | `question` | `experimental` | Modulo existe, mas nao entra hoje no registry padrao | 2 |
 
 ### Utilitarios
 
-| Tool | ID | Descricao | Testes |
-|------|----|-----------|--------|
-| **TodoTool** | `todo` | Atualiza lista de tarefas da sessao | -- |
-| **InvalidTool** | `invalid` | Placeholder de erro para tool calls invalidas | -- |
-| **BatchTool** | `batch` | Executa ate 25 tool calls em paralelo (experimental) | -- |
-| **PlanExitTool** | `plan_exit` | Sai do modo planejamento (experimental) | -- |
+| Tool | ID | Status | Descricao | Testes |
+|------|----|--------|-----------|--------|
+| **TodoTool** | `todo` | `default-registry` | Atualiza lista de tarefas da sessao | -- |
+| **InvalidTool** | `invalid` | `internal` | Placeholder de erro para tool calls invalidas; nao entra no registry padrao | -- |
+| **BatchTool** | `batch` | `meta-tool` | Executa ate 25 tool calls em paralelo; adicionado pelo runtime, nao pelo registry padrao | -- |
+| **PlanExitTool** | `plan_exit` | `experimental` | Sai do modo planejamento; nao entra hoje no registry padrao | -- |
+
+### Meta-tools adicionadas pelo runtime
+
+Essas surfaces nao sao registradas por `create_default_registry()`. Elas entram em `theo-agent-runtime/src/tool_bridge.rs`.
+
+| Tool | Status | Descricao |
+|------|--------|-----------|
+| `done` | `meta-tool` | Sinaliza conclusao de tarefa |
+| `subagent` | `meta-tool` | Delegacao para subagente |
+| `subagent_parallel` | `meta-tool` | Delegacao concorrente |
+| `skill` | `meta-tool` | Invocacao de skills |
+| `batch` | `meta-tool` | Execucao paralela de tool calls |
 
 ### Infraestrutura
 
@@ -158,12 +183,12 @@ Output que excede os limites e truncado automaticamente:
 cargo test --workspace
 
 # Rodar apenas testes de tools
-cargo test -p theo-code-tools
+cargo test -p theo-tooling
 
 # Rodar testes de um modulo especifico
-cargo test -p theo-code-tools bash
-cargo test -p theo-code-tools edit
-cargo test -p theo-code-tools apply_patch
+cargo test -p theo-tooling bash
+cargo test -p theo-tooling edit
+cargo test -p theo-tooling apply_patch
 ```
 
 ### Cobertura por modulo

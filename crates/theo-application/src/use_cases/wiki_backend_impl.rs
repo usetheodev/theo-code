@@ -3,8 +3,8 @@
 //! This is the concrete implementation of the WikiBackend trait from theo-domain.
 //! It bridges the abstract tool interface to the actual wiki retrieval + runtime modules.
 
-use std::path::{Path, PathBuf};
 use async_trait::async_trait;
+use std::path::{Path, PathBuf};
 use theo_domain::wiki_backend::*;
 
 /// Concrete wiki backend backed by theo-engine-retrieval.
@@ -25,32 +25,35 @@ impl WikiRetrievalBackend {
 #[async_trait]
 impl WikiBackend for WikiRetrievalBackend {
     async fn query(&self, question: &str, max_results: usize) -> Vec<WikiQueryResult> {
-        let results = theo_engine_retrieval::wiki::lookup::lookup(&self.wiki_dir, question, max_results);
+        let results =
+            theo_engine_retrieval::wiki::lookup::lookup(&self.wiki_dir, question, max_results);
 
-        results.into_iter().map(|r| {
-            // Extract summary from frontmatter if available
-            let fm = theo_engine_retrieval::wiki::model::parse_frontmatter(&r.content);
-            let summary = fm.summary.unwrap_or_default();
+        results
+            .into_iter()
+            .map(|r| {
+                // Extract summary from frontmatter if available
+                let fm = theo_engine_retrieval::wiki::model::parse_frontmatter(&r.content);
+                let summary = fm.summary.unwrap_or_default();
 
-            WikiQueryResult {
-                slug: r.slug,
-                title: r.title,
-                summary,
-                content: r.content,
-                confidence: r.confidence,
-                authority_tier: r.authority_tier.as_str().to_string(),
-                is_stale: r.is_stale,
-            }
-        }).collect()
+                WikiQueryResult {
+                    slug: r.slug,
+                    title: r.title,
+                    summary,
+                    content: r.content,
+                    confidence: r.confidence,
+                    authority_tier: r.authority_tier.as_str().to_string(),
+                    is_stale: r.is_stale,
+                }
+            })
+            .collect()
     }
 
     async fn ingest(&self, input: WikiInsightInput) -> Result<WikiIngestResult, String> {
         use theo_engine_retrieval::wiki::runtime;
 
         // Extract affected entities from output
-        let (affected_files, affected_symbols) = runtime::extract_affected_entities(
-            &input.stdout, &input.stderr,
-        );
+        let (affected_files, affected_symbols) =
+            runtime::extract_affected_entities(&input.stdout, &input.stderr);
 
         // Extract error summary
         let error_summary = runtime::extract_error_summary(&input.stderr);
@@ -62,7 +65,10 @@ impl WikiBackend for WikiRetrievalBackend {
             .as_secs();
 
         // Load graph hash from manifest
-        let project_dir = self.wiki_dir.parent().and_then(|p| p.parent())
+        let project_dir = self
+            .wiki_dir
+            .parent()
+            .and_then(|p| p.parent())
             .unwrap_or(Path::new("."));
         let graph_hash = theo_engine_retrieval::wiki::persistence::load_manifest(project_dir)
             .map(|m| m.graph_hash)
@@ -98,7 +104,7 @@ impl WikiBackend for WikiRetrievalBackend {
 
     async fn generate(&self) -> Result<WikiGenerateResult, String> {
         use theo_engine_graph::bridge;
-        use theo_engine_graph::cluster::{hierarchical_cluster, ClusterAlgorithm};
+        use theo_engine_graph::cluster::{ClusterAlgorithm, hierarchical_cluster};
         use theo_engine_retrieval::wiki;
 
         let start = std::time::Instant::now();
@@ -130,13 +136,12 @@ impl WikiBackend for WikiRetrievalBackend {
         }
 
         // Step 4: Cluster
-        let cluster = hierarchical_cluster(
-            &graph,
-            ClusterAlgorithm::FileLeiden { resolution: 1.0 },
-        );
+        let cluster =
+            hierarchical_cluster(&graph, ClusterAlgorithm::FileLeiden { resolution: 1.0 });
 
         // Step 5: Generate wiki
-        let project_name = self.project_dir
+        let project_name = self
+            .project_dir
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("project");
@@ -163,9 +168,12 @@ impl WikiBackend for WikiRetrievalBackend {
         wiki::persistence::append_log(
             &self.project_dir,
             "generate",
-            &format!("{} pages in {}ms ({})",
-                total_pages, duration.as_millis(),
-                if wiki_exists { "update" } else { "initial" }),
+            &format!(
+                "{} pages in {}ms ({})",
+                total_pages,
+                duration.as_millis(),
+                if wiki_exists { "update" } else { "initial" }
+            ),
         );
 
         let is_incremental = wiki_exists;

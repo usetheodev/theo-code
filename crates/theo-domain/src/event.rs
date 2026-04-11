@@ -60,13 +60,20 @@ pub enum EventValidationError {
     #[error("missing required field '{field}' in {event_type} payload")]
     MissingField { event_type: String, field: String },
     #[error("invalid value for field '{field}' in {event_type}: {reason}")]
-    InvalidValue { event_type: String, field: String, reason: String },
+    InvalidValue {
+        event_type: String,
+        field: String,
+        reason: String,
+    },
 }
 
 /// Validates that cognitive event payloads satisfy their causal invariants.
 ///
 /// Non-cognitive events always pass validation (no constraints).
-pub fn validate_cognitive_event(event_type: EventType, payload: &serde_json::Value) -> Result<(), EventValidationError> {
+pub fn validate_cognitive_event(
+    event_type: EventType,
+    payload: &serde_json::Value,
+) -> Result<(), EventValidationError> {
     match event_type {
         EventType::HypothesisFormed => {
             require_field(payload, "hypothesis", "HypothesisFormed")?;
@@ -86,16 +93,22 @@ pub fn validate_cognitive_event(event_type: EventType, payload: &serde_json::Val
         EventType::ConstraintLearned => {
             require_field(payload, "constraint", "ConstraintLearned")?;
             let scope_val = require_field(payload, "scope", "ConstraintLearned")?;
-            let scope_str = scope_val.as_str().ok_or_else(|| EventValidationError::InvalidValue {
-                event_type: "ConstraintLearned".into(),
-                field: "scope".into(),
-                reason: "must be a string".into(),
-            })?;
+            let scope_str =
+                scope_val
+                    .as_str()
+                    .ok_or_else(|| EventValidationError::InvalidValue {
+                        event_type: "ConstraintLearned".into(),
+                        field: "scope".into(),
+                        reason: "must be a string".into(),
+                    })?;
             if !matches!(scope_str, "run-local" | "task-local" | "workspace-local") {
                 return Err(EventValidationError::InvalidValue {
                     event_type: "ConstraintLearned".into(),
                     field: "scope".into(),
-                    reason: format!("invalid scope '{}', expected run-local|task-local|workspace-local", scope_str),
+                    reason: format!(
+                        "invalid scope '{}', expected run-local|task-local|workspace-local",
+                        scope_str
+                    ),
                 });
             }
             Ok(())
@@ -104,11 +117,17 @@ pub fn validate_cognitive_event(event_type: EventType, payload: &serde_json::Val
     }
 }
 
-fn require_field<'a>(payload: &'a serde_json::Value, field: &str, event_type: &str) -> Result<&'a serde_json::Value, EventValidationError> {
-    payload.get(field).ok_or_else(|| EventValidationError::MissingField {
-        event_type: event_type.into(),
-        field: field.into(),
-    })
+fn require_field<'a>(
+    payload: &'a serde_json::Value,
+    field: &str,
+    event_type: &str,
+) -> Result<&'a serde_json::Value, EventValidationError> {
+    payload
+        .get(field)
+        .ok_or_else(|| EventValidationError::MissingField {
+            event_type: event_type.into(),
+            field: field.into(),
+        })
 }
 
 /// Validates cognitive event payloads with referential integrity checking.
@@ -212,7 +231,11 @@ pub struct DomainEvent {
 
 impl DomainEvent {
     /// Creates a new DomainEvent with an auto-generated event_id and current timestamp.
-    pub fn new(event_type: EventType, entity_id: impl Into<String>, payload: serde_json::Value) -> Self {
+    pub fn new(
+        event_type: EventType,
+        entity_id: impl Into<String>,
+        payload: serde_json::Value,
+    ) -> Self {
         Self {
             event_id: EventId::generate(),
             event_type,
@@ -255,10 +278,17 @@ mod tests {
     #[test]
     fn display_all_event_types() {
         let expected = [
-            "TaskCreated", "TaskStateChanged",
-            "ToolCallQueued", "ToolCallDispatched", "ToolCallCompleted",
-            "RunInitialized", "RunStateChanged",
-            "LlmCallStart", "LlmCallEnd", "BudgetExceeded", "Error",
+            "TaskCreated",
+            "TaskStateChanged",
+            "ToolCallQueued",
+            "ToolCallDispatched",
+            "ToolCallCompleted",
+            "RunInitialized",
+            "RunStateChanged",
+            "LlmCallStart",
+            "LlmCallEnd",
+            "BudgetExceeded",
+            "Error",
         ];
         for (et, name) in ALL_EVENT_TYPES.iter().zip(expected.iter()) {
             assert_eq!(format!("{}", et), *name);
@@ -332,7 +362,8 @@ mod tests {
 
     #[test]
     fn hypothesis_invalidated_must_reference_prior() {
-        let valid = serde_json::json!({"prior_event_id": "evt-123", "reason": "test passed after revert"});
+        let valid =
+            serde_json::json!({"prior_event_id": "evt-123", "reason": "test passed after revert"});
         assert!(validate_cognitive_event(EventType::HypothesisInvalidated, &valid).is_ok());
 
         let missing_ref = serde_json::json!({"reason": "test passed"});
@@ -354,7 +385,8 @@ mod tests {
 
     #[test]
     fn constraint_learned_has_scope() {
-        let valid = serde_json::json!({"constraint": "no unwrap in auth", "scope": "workspace-local"});
+        let valid =
+            serde_json::json!({"constraint": "no unwrap in auth", "scope": "workspace-local"});
         assert!(validate_cognitive_event(EventType::ConstraintLearned, &valid).is_ok());
 
         let no_scope = serde_json::json!({"constraint": "no unwrap in auth"});
@@ -374,7 +406,11 @@ mod tests {
 
     #[test]
     fn constraint_scope_serde_roundtrip() {
-        for scope in &[ConstraintScope::RunLocal, ConstraintScope::TaskLocal, ConstraintScope::WorkspaceLocal] {
+        for scope in &[
+            ConstraintScope::RunLocal,
+            ConstraintScope::TaskLocal,
+            ConstraintScope::WorkspaceLocal,
+        ] {
             let json = serde_json::to_string(scope).unwrap();
             let back: ConstraintScope = serde_json::from_str(&json).unwrap();
             assert_eq!(*scope, back);
@@ -392,11 +428,13 @@ mod tests {
     #[test]
     fn domain_event_new_superseding_carries_reference() {
         let original = DomainEvent::new(
-            EventType::HypothesisFormed, "run-1",
+            EventType::HypothesisFormed,
+            "run-1",
             serde_json::json!({"hypothesis": "h1", "rationale": "r1"}),
         );
         let invalidation = DomainEvent::new_superseding(
-            EventType::HypothesisInvalidated, "run-1",
+            EventType::HypothesisInvalidated,
+            "run-1",
             serde_json::json!({"prior_event_id": original.event_id.as_str(), "reason": "disproved"}),
             original.event_id.clone(),
         );
@@ -406,7 +444,8 @@ mod tests {
     #[test]
     fn supersedes_event_id_survives_serde_roundtrip() {
         let event = DomainEvent::new_superseding(
-            EventType::HypothesisInvalidated, "run-1",
+            EventType::HypothesisInvalidated,
+            "run-1",
             serde_json::json!({"prior_event_id": "evt-1", "reason": "test"}),
             EventId::new("evt-1"),
         );
@@ -418,8 +457,11 @@ mod tests {
     #[test]
     fn legacy_event_without_supersedes_deserializes_to_none() {
         let mut val: serde_json::Value = serde_json::to_value(&DomainEvent::new(
-            EventType::TaskCreated, "t-1", serde_json::json!({}),
-        )).unwrap();
+            EventType::TaskCreated,
+            "t-1",
+            serde_json::json!({}),
+        ))
+        .unwrap();
         val.as_object_mut().unwrap().remove("supersedes_event_id");
         let json = serde_json::to_string(&val).unwrap();
         let back: DomainEvent = serde_json::from_str(&json).unwrap();
@@ -439,21 +481,21 @@ mod tests {
 
     #[test]
     fn validate_in_context_rejects_nonexistent_prior() {
-        let known: std::collections::HashSet<String> = ["evt-1", "evt-2"].iter().map(|s| s.to_string()).collect();
+        let known: std::collections::HashSet<String> =
+            ["evt-1", "evt-2"].iter().map(|s| s.to_string()).collect();
         let payload = serde_json::json!({"prior_event_id": "evt-999", "reason": "disproved"});
-        let result = validate_cognitive_event_in_context(
-            EventType::HypothesisInvalidated, &payload, &known
-        );
+        let result =
+            validate_cognitive_event_in_context(EventType::HypothesisInvalidated, &payload, &known);
         assert!(result.is_err(), "Should reject nonexistent prior_event_id");
     }
 
     #[test]
     fn validate_in_context_accepts_existing_prior() {
-        let known: std::collections::HashSet<String> = ["evt-1", "evt-2"].iter().map(|s| s.to_string()).collect();
+        let known: std::collections::HashSet<String> =
+            ["evt-1", "evt-2"].iter().map(|s| s.to_string()).collect();
         let payload = serde_json::json!({"prior_event_id": "evt-1", "reason": "test passed"});
-        let result = validate_cognitive_event_in_context(
-            EventType::HypothesisInvalidated, &payload, &known
-        );
+        let result =
+            validate_cognitive_event_in_context(EventType::HypothesisInvalidated, &payload, &known);
         assert!(result.is_ok());
     }
 
@@ -461,9 +503,11 @@ mod tests {
     fn validate_in_context_passes_non_cognitive_events() {
         let known: std::collections::HashSet<String> = std::collections::HashSet::new();
         let payload = serde_json::json!({"tool_name": "bash"});
-        let result = validate_cognitive_event_in_context(
-            EventType::ToolCallCompleted, &payload, &known
+        let result =
+            validate_cognitive_event_in_context(EventType::ToolCallCompleted, &payload, &known);
+        assert!(
+            result.is_ok(),
+            "Non-cognitive events pass without context check"
         );
-        assert!(result.is_ok(), "Non-cognitive events pass without context check");
     }
 }

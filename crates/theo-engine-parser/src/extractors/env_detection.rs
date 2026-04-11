@@ -21,8 +21,8 @@ use std::path::Path;
 
 use tree_sitter::{Node, Tree};
 
-use crate::types::EnvDependency;
 use crate::tree_sitter::SupportedLanguage;
+use crate::types::EnvDependency;
 
 use super::common::anchor_from_node;
 

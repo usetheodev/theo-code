@@ -74,7 +74,9 @@ impl CodeIntelProvider for ScipCodeIntelProvider {
         for sym_id in canonical_ids {
             if let Some(file_path) = self.index.symbol_definitions.get(sym_id) {
                 // Find the exact line from references
-                let line = self.index.symbol_references
+                let line = self
+                    .index
+                    .symbol_references
                     .get(sym_id)
                     .and_then(|refs| refs.iter().find(|(_, _, r)| r == "definition"))
                     .map(|(_, l, _)| *l)

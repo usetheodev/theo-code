@@ -18,10 +18,10 @@ pub struct Budget {
 impl Default for Budget {
     fn default() -> Self {
         Self {
-            max_time_secs: 3_600,       // 1 hour (Claude Code has no time limit)
-            max_tokens: 1_000_000,      // 1M tokens (Claude Code context window)
-            max_iterations: 200,        // Effectively no practical limit
-            max_tool_calls: 500,        // Generous tool call budget
+            max_time_secs: 3_600,  // 1 hour (Claude Code has no time limit)
+            max_tokens: 1_000_000, // 1M tokens (Claude Code context window)
+            max_iterations: 200,   // Effectively no practical limit
+            max_tool_calls: 500,   // Generous tool call budget
         }
     }
 }
@@ -119,43 +119,103 @@ mod tests {
 
     #[test]
     fn exceeds_returns_time_exceeded() {
-        let budget = Budget { max_time_secs: 60, ..Budget::default() };
-        let usage = BudgetUsage { elapsed_secs: 61, ..Default::default() };
+        let budget = Budget {
+            max_time_secs: 60,
+            ..Budget::default()
+        };
+        let usage = BudgetUsage {
+            elapsed_secs: 61,
+            ..Default::default()
+        };
         let violation = usage.exceeds(&budget).unwrap();
-        assert!(matches!(violation, BudgetViolation::TimeExceeded { limit: 60, actual: 61 }));
+        assert!(matches!(
+            violation,
+            BudgetViolation::TimeExceeded {
+                limit: 60,
+                actual: 61
+            }
+        ));
     }
 
     #[test]
     fn exceeds_returns_tokens_exceeded() {
-        let budget = Budget { max_tokens: 1000, ..Budget::default() };
-        let usage = BudgetUsage { tokens_used: 1001, ..Default::default() };
+        let budget = Budget {
+            max_tokens: 1000,
+            ..Budget::default()
+        };
+        let usage = BudgetUsage {
+            tokens_used: 1001,
+            ..Default::default()
+        };
         let violation = usage.exceeds(&budget).unwrap();
-        assert!(matches!(violation, BudgetViolation::TokensExceeded { limit: 1000, actual: 1001 }));
+        assert!(matches!(
+            violation,
+            BudgetViolation::TokensExceeded {
+                limit: 1000,
+                actual: 1001
+            }
+        ));
     }
 
     #[test]
     fn exceeds_returns_iterations_exceeded() {
-        let budget = Budget { max_iterations: 10, ..Budget::default() };
-        let usage = BudgetUsage { iterations_used: 11, ..Default::default() };
+        let budget = Budget {
+            max_iterations: 10,
+            ..Budget::default()
+        };
+        let usage = BudgetUsage {
+            iterations_used: 11,
+            ..Default::default()
+        };
         let violation = usage.exceeds(&budget).unwrap();
-        assert!(matches!(violation, BudgetViolation::IterationsExceeded { limit: 10, actual: 11 }));
+        assert!(matches!(
+            violation,
+            BudgetViolation::IterationsExceeded {
+                limit: 10,
+                actual: 11
+            }
+        ));
     }
 
     #[test]
     fn exceeds_returns_tool_calls_exceeded() {
-        let budget = Budget { max_tool_calls: 5, ..Budget::default() };
-        let usage = BudgetUsage { tool_calls_used: 6, ..Default::default() };
+        let budget = Budget {
+            max_tool_calls: 5,
+            ..Budget::default()
+        };
+        let usage = BudgetUsage {
+            tool_calls_used: 6,
+            ..Default::default()
+        };
         let violation = usage.exceeds(&budget).unwrap();
-        assert!(matches!(violation, BudgetViolation::ToolCallsExceeded { limit: 5, actual: 6 }));
+        assert!(matches!(
+            violation,
+            BudgetViolation::ToolCallsExceeded {
+                limit: 5,
+                actual: 6
+            }
+        ));
     }
 
     #[test]
     fn budget_violation_serde_roundtrip() {
         let violations = [
-            BudgetViolation::TimeExceeded { limit: 300, actual: 350 },
-            BudgetViolation::TokensExceeded { limit: 200_000, actual: 250_000 },
-            BudgetViolation::IterationsExceeded { limit: 30, actual: 31 },
-            BudgetViolation::ToolCallsExceeded { limit: 100, actual: 101 },
+            BudgetViolation::TimeExceeded {
+                limit: 300,
+                actual: 350,
+            },
+            BudgetViolation::TokensExceeded {
+                limit: 200_000,
+                actual: 250_000,
+            },
+            BudgetViolation::IterationsExceeded {
+                limit: 30,
+                actual: 31,
+            },
+            BudgetViolation::ToolCallsExceeded {
+                limit: 100,
+                actual: 101,
+            },
         ];
         for v in &violations {
             let json = serde_json::to_string(v).unwrap();
@@ -175,7 +235,10 @@ mod tests {
 
     #[test]
     fn display_budget_violation() {
-        let v = BudgetViolation::TimeExceeded { limit: 300, actual: 350 };
+        let v = BudgetViolation::TimeExceeded {
+            limit: 300,
+            actual: 350,
+        };
         assert_eq!(format!("{}", v), "time exceeded: 350s > 300s limit");
     }
 }

@@ -23,25 +23,44 @@ pub const EXCLUDED_DIRS: &[&str] = &[
     // Rust
     "target",
     // Node.js / JavaScript / TypeScript
-    "node_modules", ".next", ".nuxt", "bower_components",
+    "node_modules",
+    ".next",
+    ".nuxt",
+    "bower_components",
     // Python
-    "__pycache__", ".venv", "venv", ".tox", ".eggs", ".mypy_cache",
+    "__pycache__",
+    ".venv",
+    "venv",
+    ".tox",
+    ".eggs",
+    ".mypy_cache",
     // Go
     "vendor",
     // Java / Kotlin / Gradle
-    ".gradle", ".mvn",
+    ".gradle",
+    ".mvn",
     // Generic build output
-    "dist", "build", "out", ".output",
+    "dist",
+    "build",
+    "out",
+    ".output",
     // Coverage / testing
-    "coverage", ".nyc_output", "htmlcov",
+    "coverage",
+    ".nyc_output",
+    "htmlcov",
     // Caches
-    ".cache", ".parcel-cache", ".turbo",
+    ".cache",
+    ".parcel-cache",
+    ".turbo",
     // Rust toolchain (if somehow in tree)
-    ".cargo", ".rustup",
+    ".cargo",
+    ".rustup",
     // Generated code
-    "__generated__", "generated",
+    "__generated__",
+    "generated",
     // IDE / editor
-    ".idea", ".vscode",
+    ".idea",
+    ".vscode",
 ];
 
 // ---------------------------------------------------------------------------

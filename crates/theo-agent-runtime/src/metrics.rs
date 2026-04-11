@@ -36,7 +36,10 @@ impl RuntimeMetrics {
     }
 
     pub fn tool_success_rate(&self) -> f64 {
-        safe_div(self.successful_tool_calls as f64, self.total_tool_calls as f64)
+        safe_div(
+            self.successful_tool_calls as f64,
+            self.total_tool_calls as f64,
+        )
     }
 
     pub fn convergence_rate(&self) -> f64 {
@@ -110,7 +113,10 @@ impl MetricsCollector {
 
     /// Returns a snapshot of current metrics (clone, does not consume).
     pub fn snapshot(&self) -> RuntimeMetrics {
-        self.metrics.read().expect("metrics read lock poisoned").clone()
+        self.metrics
+            .read()
+            .expect("metrics read lock poisoned")
+            .clone()
     }
 }
 
@@ -239,7 +245,13 @@ mod tests {
         collector.record_delegated_tokens(300); // another sub-agent
 
         let m = collector.snapshot();
-        assert_eq!(m.total_tokens_used, 1800, "tokens should include parent + delegated");
-        assert_eq!(m.total_llm_calls, 1, "delegated tokens should NOT increment llm_calls");
+        assert_eq!(
+            m.total_tokens_used, 1800,
+            "tokens should include parent + delegated"
+        );
+        assert_eq!(
+            m.total_llm_calls, 1,
+            "delegated tokens should NOT increment llm_calls"
+        );
     }
 }

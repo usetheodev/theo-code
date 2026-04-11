@@ -5966,6 +5966,7 @@ dependencies = [
  "theo-agent-runtime",
  "theo-api-contracts",
  "theo-application",
+ "theo-domain",
  "theo-infra-auth",
  "theo-infra-llm",
  "theo-tooling",

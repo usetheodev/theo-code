@@ -8,9 +8,9 @@
 //!
 //! Run: cargo test -p theo-engine-retrieval --test benchmark_suite -- --ignored --nocapture
 
-use std::collections::HashMap;
 use serde::Deserialize;
-use theo_engine_retrieval::metrics::{self, RetrievalMetrics, DepEdge};
+use std::collections::HashMap;
+use theo_engine_retrieval::metrics::{self, DepEdge, RetrievalMetrics};
 
 // ---------------------------------------------------------------------------
 // Ground truth schema
@@ -100,24 +100,26 @@ fn extract_files_from_scores(scores: &HashMap<String, f64>) -> Vec<String> {
 // Report formatting
 // ---------------------------------------------------------------------------
 
-fn emit_report(
-    repo: &RepoInfo,
-    results: &[QueryResult],
-    pipeline_name: &str,
-) {
+fn emit_report(repo: &RepoInfo, results: &[QueryResult], pipeline_name: &str) {
     let all_metrics: Vec<RetrievalMetrics> = results.iter().map(|r| r.metrics.clone()).collect();
     let overall = RetrievalMetrics::average(&all_metrics);
 
     // Per-category aggregation
     let mut by_category: HashMap<&str, Vec<RetrievalMetrics>> = HashMap::new();
     for r in results {
-        by_category.entry(r.category.as_str()).or_default().push(r.metrics.clone());
+        by_category
+            .entry(r.category.as_str())
+            .or_default()
+            .push(r.metrics.clone());
     }
 
     // Per-difficulty aggregation
     let mut by_difficulty: HashMap<&str, Vec<RetrievalMetrics>> = HashMap::new();
     for r in results {
-        by_difficulty.entry(r.difficulty.as_str()).or_default().push(r.metrics.clone());
+        by_difficulty
+            .entry(r.difficulty.as_str())
+            .or_default()
+            .push(r.metrics.clone());
     }
 
     eprintln!("\n{}", "=".repeat(100));
@@ -130,12 +132,27 @@ fn emit_report(
 
     // Overall metrics
     eprintln!("OVERALL METRICS:");
-    eprintln!("  Recall@5  = {:.3}    Recall@10 = {:.3}", overall.recall_at_5, overall.recall_at_10);
-    eprintln!("  P@5       = {:.3}    MRR       = {:.3}", overall.precision_at_5, overall.mrr);
-    eprintln!("  Hit@5     = {:.3}    Hit@10    = {:.3}", overall.hit_rate_at_5, overall.hit_rate_at_10);
-    eprintln!("  nDCG@5    = {:.3}    nDCG@10   = {:.3}", overall.ndcg_at_5, overall.ndcg_at_10);
+    eprintln!(
+        "  Recall@5  = {:.3}    Recall@10 = {:.3}",
+        overall.recall_at_5, overall.recall_at_10
+    );
+    eprintln!(
+        "  P@5       = {:.3}    MRR       = {:.3}",
+        overall.precision_at_5, overall.mrr
+    );
+    eprintln!(
+        "  Hit@5     = {:.3}    Hit@10    = {:.3}",
+        overall.hit_rate_at_5, overall.hit_rate_at_10
+    );
+    eprintln!(
+        "  nDCG@5    = {:.3}    nDCG@10   = {:.3}",
+        overall.ndcg_at_5, overall.ndcg_at_10
+    );
     eprintln!("  MAP       = {:.3}", overall.average_precision);
-    eprintln!("  DepCov    = {:.3}    MissDep   = {:.3}", overall.dep_coverage, overall.missing_dep_rate);
+    eprintln!(
+        "  DepCov    = {:.3}    MissDep   = {:.3}",
+        overall.dep_coverage, overall.missing_dep_rate
+    );
     eprintln!();
 
     // Gates
@@ -149,8 +166,18 @@ fn emit_report(
         ("MissDep", overall.missing_dep_rate, 0.10, false), // lower is better
     ];
     for (name, actual, target, higher_better) in &gates {
-        let pass = if *higher_better { *actual >= *target } else { *actual <= *target };
-        eprintln!("  {:<12} {:.3} / {:.3}  {}", name, actual, target, if pass { "PASS" } else { "FAIL" });
+        let pass = if *higher_better {
+            *actual >= *target
+        } else {
+            *actual <= *target
+        };
+        eprintln!(
+            "  {:<12} {:.3} / {:.3}  {}",
+            name,
+            actual,
+            target,
+            if pass { "PASS" } else { "FAIL" }
+        );
     }
     eprintln!();
 
@@ -158,8 +185,10 @@ fn emit_report(
     eprintln!("BY CATEGORY:");
     for (cat, cat_metrics) in &by_category {
         let avg = RetrievalMetrics::average(cat_metrics);
-        eprintln!("  {:<15} R@5={:.3}  R@10={:.3}  MRR={:.3}  nDCG@5={:.3}  DepCov={:.3}",
-            cat, avg.recall_at_5, avg.recall_at_10, avg.mrr, avg.ndcg_at_5, avg.dep_coverage);
+        eprintln!(
+            "  {:<15} R@5={:.3}  R@10={:.3}  MRR={:.3}  nDCG@5={:.3}  DepCov={:.3}",
+            cat, avg.recall_at_5, avg.recall_at_10, avg.mrr, avg.ndcg_at_5, avg.dep_coverage
+        );
     }
     eprintln!();
 
@@ -167,8 +196,14 @@ fn emit_report(
     eprintln!("BY DIFFICULTY:");
     for (diff, diff_metrics) in &by_difficulty {
         let avg = RetrievalMetrics::average(diff_metrics);
-        eprintln!("  {:<10} R@5={:.3}  MRR={:.3}  nDCG@5={:.3}  ({} queries)",
-            diff, avg.recall_at_5, avg.mrr, avg.ndcg_at_5, diff_metrics.len());
+        eprintln!(
+            "  {:<10} R@5={:.3}  MRR={:.3}  nDCG@5={:.3}  ({} queries)",
+            diff,
+            avg.recall_at_5,
+            avg.mrr,
+            avg.ndcg_at_5,
+            diff_metrics.len()
+        );
     }
     eprintln!();
 
@@ -176,11 +211,30 @@ fn emit_report(
     eprintln!("FAILURES (P@5 < 0.40):");
     for r in results {
         if r.metrics.precision_at_5 < 0.40 {
-            eprintln!("  {} '{}' P@5={:.2} R@5={:.2} MRR={:.2} DepCov={:.2}",
-                r.id, r.query, r.metrics.precision_at_5, r.metrics.recall_at_5,
-                r.metrics.mrr, r.metrics.dep_coverage);
-            eprintln!("    Expected: {:?}", r.expected_files.iter().map(|f| f.split('/').last().unwrap_or(f)).collect::<Vec<_>>());
-            eprintln!("    Got top5: {:?}", r.returned_top_10.iter().take(5).map(|f| f.split('/').last().unwrap_or(f)).collect::<Vec<_>>());
+            eprintln!(
+                "  {} '{}' P@5={:.2} R@5={:.2} MRR={:.2} DepCov={:.2}",
+                r.id,
+                r.query,
+                r.metrics.precision_at_5,
+                r.metrics.recall_at_5,
+                r.metrics.mrr,
+                r.metrics.dep_coverage
+            );
+            eprintln!(
+                "    Expected: {:?}",
+                r.expected_files
+                    .iter()
+                    .map(|f| f.split('/').last().unwrap_or(f))
+                    .collect::<Vec<_>>()
+            );
+            eprintln!(
+                "    Got top5: {:?}",
+                r.returned_top_10
+                    .iter()
+                    .take(5)
+                    .map(|f| f.split('/').last().unwrap_or(f))
+                    .collect::<Vec<_>>()
+            );
         }
     }
 
@@ -203,15 +257,24 @@ fn benchmark_bm25_baseline() {
     let gt = load_ground_truth("theo-code");
 
     let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent().unwrap()
-        .parent().unwrap();
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
 
     eprintln!("Building graph from {}...", workspace_root.display());
     let (files, stats) = theo_application::use_cases::extraction::extract_repo(workspace_root);
-    eprintln!("Parsed {}/{} files, {} symbols", stats.files_parsed, stats.files_found, stats.symbols_extracted);
+    eprintln!(
+        "Parsed {}/{} files, {} symbols",
+        stats.files_parsed, stats.files_found, stats.symbols_extracted
+    );
 
     let (graph, _) = bridge::build_graph(&files);
-    eprintln!("Graph: {} nodes, {} edges", graph.node_count(), graph.edge_count());
+    eprintln!(
+        "Graph: {} nodes, {} edges",
+        graph.node_count(),
+        graph.edge_count()
+    );
 
     let mut results: Vec<QueryResult> = Vec::new();
 
@@ -245,32 +308,43 @@ fn benchmark_bm25_baseline() {
 #[cfg(feature = "dense-retrieval")]
 fn benchmark_rrf_dense() {
     use theo_engine_graph::bridge;
-    use theo_engine_retrieval::tantivy_search::{FileTantivyIndex, hybrid_rrf_search};
-    use theo_engine_retrieval::embedding::neural::NeuralEmbedder;
     use theo_engine_retrieval::embedding::cache::EmbeddingCache;
+    use theo_engine_retrieval::embedding::neural::NeuralEmbedder;
+    use theo_engine_retrieval::tantivy_search::{FileTantivyIndex, hybrid_rrf_search};
 
     let gt = load_ground_truth("theo-code");
 
     let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent().unwrap()
-        .parent().unwrap();
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
 
     eprintln!("Building graph...");
     let (files, stats) = theo_application::use_cases::extraction::extract_repo(workspace_root);
     eprintln!("Parsed {}/{} files", stats.files_parsed, stats.files_found);
 
     let (graph, _) = bridge::build_graph(&files);
-    eprintln!("Graph: {} nodes, {} edges", graph.node_count(), graph.edge_count());
+    eprintln!(
+        "Graph: {} nodes, {} edges",
+        graph.node_count(),
+        graph.edge_count()
+    );
 
     let tantivy_index = FileTantivyIndex::build(&graph).expect("Tantivy build failed");
     let embedder = NeuralEmbedder::new().expect("NeuralEmbedder init failed");
     let cache = EmbeddingCache::build(&graph, &embedder);
-    eprintln!("Tantivy: {} docs, Embeddings: {} files", tantivy_index.num_docs(), cache.len());
+    eprintln!(
+        "Tantivy: {} docs, Embeddings: {} files",
+        tantivy_index.num_docs(),
+        cache.len()
+    );
 
     let mut results: Vec<QueryResult> = Vec::new();
 
     for bq in &gt.queries {
-        let rrf_scores = hybrid_rrf_search(&graph, &tantivy_index, &embedder, &cache, &bq.query, 20.0);
+        let rrf_scores =
+            hybrid_rrf_search(&graph, &tantivy_index, &embedder, &cache, &bq.query, 20.0);
         let returned_files = extract_files_from_scores(&rrf_scores);
         let expected_refs: Vec<&str> = bq.expected_files.iter().map(|s| s.as_str()).collect();
         let dep_edges: Vec<DepEdge> = bq.dependencies.iter().map(|d| d.to_dep_edge()).collect();
@@ -288,7 +362,11 @@ fn benchmark_rrf_dense() {
         });
     }
 
-    emit_report(&gt.repo, &results, "RRF 3-ranker (BM25+Tantivy+Dense, Jina Code)");
+    emit_report(
+        &gt.repo,
+        &results,
+        "RRF 3-ranker (BM25+Tantivy+Dense, Jina Code)",
+    );
 }
 
 /// A/B benchmark: Symbol-First vs RRF baseline.
@@ -299,15 +377,19 @@ fn benchmark_rrf_dense() {
 #[cfg(feature = "dense-retrieval")]
 fn benchmark_symbol_first_ab() {
     use theo_engine_graph::bridge;
-    use theo_engine_retrieval::tantivy_search::{FileTantivyIndex, hybrid_rrf_search, symbol_first_search};
-    use theo_engine_retrieval::embedding::neural::NeuralEmbedder;
     use theo_engine_retrieval::embedding::cache::EmbeddingCache;
+    use theo_engine_retrieval::embedding::neural::NeuralEmbedder;
+    use theo_engine_retrieval::tantivy_search::{
+        FileTantivyIndex, hybrid_rrf_search, symbol_first_search,
+    };
 
     let gt = load_ground_truth("theo-code");
 
     let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent().unwrap()
-        .parent().unwrap();
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
 
     eprintln!("Building graph...");
     let (files, stats) = theo_application::use_cases::extraction::extract_repo(workspace_root);
@@ -317,8 +399,12 @@ fn benchmark_symbol_first_ab() {
     let tantivy_index = FileTantivyIndex::build(&graph).expect("Tantivy build failed");
     let embedder = NeuralEmbedder::new().expect("NeuralEmbedder init failed");
     let cache = EmbeddingCache::build(&graph, &embedder);
-    eprintln!("Ready: {} nodes, Tantivy {} docs, Embeddings {} files",
-        graph.node_count(), tantivy_index.num_docs(), cache.len());
+    eprintln!(
+        "Ready: {} nodes, Tantivy {} docs, Embeddings {} files",
+        graph.node_count(),
+        tantivy_index.num_docs(),
+        cache.len()
+    );
 
     let k = 5;
 
@@ -331,9 +417,12 @@ fn benchmark_symbol_first_ab() {
         let deps: Vec<DepEdge> = bq.dependencies.iter().map(|d| d.to_dep_edge()).collect();
         let m = RetrievalMetrics::compute(&returned, &expected, &deps);
         rrf_results.push(QueryResult {
-            id: bq.id.clone(), query: bq.query.clone(),
-            category: bq.category.clone(), difficulty: bq.difficulty.clone(),
-            metrics: m, returned_top_10: returned.into_iter().take(10).collect(),
+            id: bq.id.clone(),
+            query: bq.query.clone(),
+            category: bq.category.clone(),
+            difficulty: bq.difficulty.clone(),
+            metrics: m,
+            returned_top_10: returned.into_iter().take(10).collect(),
             expected_files: bq.expected_files.clone(),
         });
     }
@@ -341,43 +430,104 @@ fn benchmark_symbol_first_ab() {
     // --- Variant: Symbol-First ---
     let mut sym_results: Vec<QueryResult> = Vec::new();
     for bq in &gt.queries {
-        let scores = symbol_first_search(&graph, &tantivy_index, &embedder, &cache, &bq.query, 20.0);
+        let scores =
+            symbol_first_search(&graph, &tantivy_index, &embedder, &cache, &bq.query, 20.0);
         let returned = extract_files_from_scores(&scores);
         let expected: Vec<&str> = bq.expected_files.iter().map(|s| s.as_str()).collect();
         let deps: Vec<DepEdge> = bq.dependencies.iter().map(|d| d.to_dep_edge()).collect();
         let m = RetrievalMetrics::compute(&returned, &expected, &deps);
         sym_results.push(QueryResult {
-            id: bq.id.clone(), query: bq.query.clone(),
-            category: bq.category.clone(), difficulty: bq.difficulty.clone(),
-            metrics: m, returned_top_10: returned.into_iter().take(10).collect(),
+            id: bq.id.clone(),
+            query: bq.query.clone(),
+            category: bq.category.clone(),
+            difficulty: bq.difficulty.clone(),
+            metrics: m,
+            returned_top_10: returned.into_iter().take(10).collect(),
             expected_files: bq.expected_files.clone(),
         });
     }
 
     // --- A/B Comparison ---
-    let rrf_avg = RetrievalMetrics::average(&rrf_results.iter().map(|r| r.metrics.clone()).collect::<Vec<_>>());
-    let sym_avg = RetrievalMetrics::average(&sym_results.iter().map(|r| r.metrics.clone()).collect::<Vec<_>>());
+    let rrf_avg = RetrievalMetrics::average(
+        &rrf_results
+            .iter()
+            .map(|r| r.metrics.clone())
+            .collect::<Vec<_>>(),
+    );
+    let sym_avg = RetrievalMetrics::average(
+        &sym_results
+            .iter()
+            .map(|r| r.metrics.clone())
+            .collect::<Vec<_>>(),
+    );
 
     eprintln!("\n{}", "=".repeat(90));
     eprintln!("A/B: SYMBOL-FIRST vs RRF BASELINE");
     eprintln!("{}", "=".repeat(90));
-    eprintln!("{:<20} {:>10} {:>10} {:>10}", "", "RRF", "Symbol-1st", "Delta");
+    eprintln!(
+        "{:<20} {:>10} {:>10} {:>10}",
+        "", "RRF", "Symbol-1st", "Delta"
+    );
     eprintln!("{}", "-".repeat(60));
-    eprintln!("{:<20} {:>10.3} {:>10.3} {:>+10.3}", "Recall@5", rrf_avg.recall_at_5, sym_avg.recall_at_5, sym_avg.recall_at_5 - rrf_avg.recall_at_5);
-    eprintln!("{:<20} {:>10.3} {:>10.3} {:>+10.3}", "Recall@10", rrf_avg.recall_at_10, sym_avg.recall_at_10, sym_avg.recall_at_10 - rrf_avg.recall_at_10);
-    eprintln!("{:<20} {:>10.3} {:>10.3} {:>+10.3}", "MRR", rrf_avg.mrr, sym_avg.mrr, sym_avg.mrr - rrf_avg.mrr);
-    eprintln!("{:<20} {:>10.3} {:>10.3} {:>+10.3}", "Hit@5", rrf_avg.hit_rate_at_5, sym_avg.hit_rate_at_5, sym_avg.hit_rate_at_5 - rrf_avg.hit_rate_at_5);
-    eprintln!("{:<20} {:>10.3} {:>10.3} {:>+10.3}", "nDCG@5", rrf_avg.ndcg_at_5, sym_avg.ndcg_at_5, sym_avg.ndcg_at_5 - rrf_avg.ndcg_at_5);
-    eprintln!("{:<20} {:>10.3} {:>10.3} {:>+10.3}", "MAP", rrf_avg.average_precision, sym_avg.average_precision, sym_avg.average_precision - rrf_avg.average_precision);
-    eprintln!("{:<20} {:>10.3} {:>10.3} {:>+10.3}", "DepCov", rrf_avg.dep_coverage, sym_avg.dep_coverage, sym_avg.dep_coverage - rrf_avg.dep_coverage);
+    eprintln!(
+        "{:<20} {:>10.3} {:>10.3} {:>+10.3}",
+        "Recall@5",
+        rrf_avg.recall_at_5,
+        sym_avg.recall_at_5,
+        sym_avg.recall_at_5 - rrf_avg.recall_at_5
+    );
+    eprintln!(
+        "{:<20} {:>10.3} {:>10.3} {:>+10.3}",
+        "Recall@10",
+        rrf_avg.recall_at_10,
+        sym_avg.recall_at_10,
+        sym_avg.recall_at_10 - rrf_avg.recall_at_10
+    );
+    eprintln!(
+        "{:<20} {:>10.3} {:>10.3} {:>+10.3}",
+        "MRR",
+        rrf_avg.mrr,
+        sym_avg.mrr,
+        sym_avg.mrr - rrf_avg.mrr
+    );
+    eprintln!(
+        "{:<20} {:>10.3} {:>10.3} {:>+10.3}",
+        "Hit@5",
+        rrf_avg.hit_rate_at_5,
+        sym_avg.hit_rate_at_5,
+        sym_avg.hit_rate_at_5 - rrf_avg.hit_rate_at_5
+    );
+    eprintln!(
+        "{:<20} {:>10.3} {:>10.3} {:>+10.3}",
+        "nDCG@5",
+        rrf_avg.ndcg_at_5,
+        sym_avg.ndcg_at_5,
+        sym_avg.ndcg_at_5 - rrf_avg.ndcg_at_5
+    );
+    eprintln!(
+        "{:<20} {:>10.3} {:>10.3} {:>+10.3}",
+        "MAP",
+        rrf_avg.average_precision,
+        sym_avg.average_precision,
+        sym_avg.average_precision - rrf_avg.average_precision
+    );
+    eprintln!(
+        "{:<20} {:>10.3} {:>10.3} {:>+10.3}",
+        "DepCov",
+        rrf_avg.dep_coverage,
+        sym_avg.dep_coverage,
+        sym_avg.dep_coverage - rrf_avg.dep_coverage
+    );
 
     // Per-query delta for queries that improved
     eprintln!("\nPER-QUERY DELTA (R@5 changed):");
     for (rrf_r, sym_r) in rrf_results.iter().zip(sym_results.iter()) {
         let delta = sym_r.metrics.recall_at_5 - rrf_r.metrics.recall_at_5;
         if delta.abs() > 0.01 {
-            eprintln!("  {} '{}': R@5 {:.2} → {:.2} ({:+.2})",
-                rrf_r.id, rrf_r.query, rrf_r.metrics.recall_at_5, sym_r.metrics.recall_at_5, delta);
+            eprintln!(
+                "  {} '{}': R@5 {:.2} → {:.2} ({:+.2})",
+                rrf_r.id, rrf_r.query, rrf_r.metrics.recall_at_5, sym_r.metrics.recall_at_5, delta
+            );
         }
     }
 
@@ -396,11 +546,14 @@ fn benchmark_symbol_first_ab() {
 #[cfg(feature = "dense-retrieval")]
 fn benchmark_external_rrf() {
     use theo_engine_graph::bridge;
-    use theo_engine_retrieval::tantivy_search::{FileTantivyIndex, hybrid_rrf_search};
-    use theo_engine_retrieval::embedding::neural::NeuralEmbedder;
     use theo_engine_retrieval::embedding::cache::EmbeddingCache;
+    use theo_engine_retrieval::embedding::neural::NeuralEmbedder;
+    use theo_engine_retrieval::tantivy_search::{FileTantivyIndex, hybrid_rrf_search};
 
-    let gt_dir = format!("{}/tests/benchmarks/ground_truth", env!("CARGO_MANIFEST_DIR"));
+    let gt_dir = format!(
+        "{}/tests/benchmarks/ground_truth",
+        env!("CARGO_MANIFEST_DIR")
+    );
     let entries = std::fs::read_dir(&gt_dir).expect("Failed to read ground_truth dir");
 
     let embedder = NeuralEmbedder::new().expect("NeuralEmbedder init failed");
@@ -422,23 +575,38 @@ fn benchmark_external_rrf() {
         }
 
         let gt = load_ground_truth(repo_name);
-        eprintln!("\n--- Benchmarking {} ({}) with RRF+Dense ---", gt.repo.name, gt.repo.language);
+        eprintln!(
+            "\n--- Benchmarking {} ({}) with RRF+Dense ---",
+            gt.repo.name, gt.repo.language
+        );
 
         let repo_root = std::path::Path::new(&repo_path);
         let (files, stats) = theo_application::use_cases::extraction::extract_repo(repo_root);
-        eprintln!("Parsed {}/{} files, {} symbols", stats.files_parsed, stats.files_found, stats.symbols_extracted);
+        eprintln!(
+            "Parsed {}/{} files, {} symbols",
+            stats.files_parsed, stats.files_found, stats.symbols_extracted
+        );
 
         let (graph, _) = bridge::build_graph(&files);
-        eprintln!("Graph: {} nodes, {} edges", graph.node_count(), graph.edge_count());
+        eprintln!(
+            "Graph: {} nodes, {} edges",
+            graph.node_count(),
+            graph.edge_count()
+        );
 
         let tantivy_index = FileTantivyIndex::build(&graph).expect("Tantivy build failed");
         let cache = EmbeddingCache::build(&graph, &embedder);
-        eprintln!("Tantivy: {} docs, Embeddings: {} files", tantivy_index.num_docs(), cache.len());
+        eprintln!(
+            "Tantivy: {} docs, Embeddings: {} files",
+            tantivy_index.num_docs(),
+            cache.len()
+        );
 
         let mut results: Vec<QueryResult> = Vec::new();
 
         for bq in &gt.queries {
-            let rrf_scores = hybrid_rrf_search(&graph, &tantivy_index, &embedder, &cache, &bq.query, 20.0);
+            let rrf_scores =
+                hybrid_rrf_search(&graph, &tantivy_index, &embedder, &cache, &bq.query, 20.0);
             let returned_files = extract_files_from_scores(&rrf_scores);
             let expected_refs: Vec<&str> = bq.expected_files.iter().map(|s| s.as_str()).collect();
             let dep_edges: Vec<DepEdge> = bq.dependencies.iter().map(|d| d.to_dep_edge()).collect();
@@ -456,7 +624,11 @@ fn benchmark_external_rrf() {
             });
         }
 
-        emit_report(&gt.repo, &results, "RRF 3-ranker (BM25+Tantivy+Dense, Jina Code)");
+        emit_report(
+            &gt.repo,
+            &results,
+            "RRF 3-ranker (BM25+Tantivy+Dense, Jina Code)",
+        );
     }
 }
 
@@ -473,7 +645,10 @@ fn benchmark_external_bm25() {
     use theo_engine_retrieval::search::FileBm25;
 
     // Discover all ground truth files
-    let gt_dir = format!("{}/tests/benchmarks/ground_truth", env!("CARGO_MANIFEST_DIR"));
+    let gt_dir = format!(
+        "{}/tests/benchmarks/ground_truth",
+        env!("CARGO_MANIFEST_DIR")
+    );
     let entries = std::fs::read_dir(&gt_dir).expect("Failed to read ground_truth dir");
 
     for entry in entries {
@@ -493,14 +668,24 @@ fn benchmark_external_bm25() {
         }
 
         let gt = load_ground_truth(repo_name);
-        eprintln!("\n--- Benchmarking {} ({}) ---", gt.repo.name, gt.repo.language);
+        eprintln!(
+            "\n--- Benchmarking {} ({}) ---",
+            gt.repo.name, gt.repo.language
+        );
 
         let repo_root = std::path::Path::new(&repo_path);
         let (files, stats) = theo_application::use_cases::extraction::extract_repo(repo_root);
-        eprintln!("Parsed {}/{} files, {} symbols", stats.files_parsed, stats.files_found, stats.symbols_extracted);
+        eprintln!(
+            "Parsed {}/{} files, {} symbols",
+            stats.files_parsed, stats.files_found, stats.symbols_extracted
+        );
 
         let (graph, _) = bridge::build_graph(&files);
-        eprintln!("Graph: {} nodes, {} edges", graph.node_count(), graph.edge_count());
+        eprintln!(
+            "Graph: {} nodes, {} edges",
+            graph.node_count(),
+            graph.edge_count()
+        );
 
         let mut results: Vec<QueryResult> = Vec::new();
 
@@ -534,35 +719,65 @@ fn benchmark_external_bm25() {
 #[ignore]
 fn wiki_e2e() {
     use theo_engine_graph::bridge;
-    use theo_engine_graph::cluster::{hierarchical_cluster, ClusterAlgorithm};
+    use theo_engine_graph::cluster::{ClusterAlgorithm, hierarchical_cluster};
     use theo_engine_retrieval::wiki;
 
     let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent().unwrap()
-        .parent().unwrap();
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
 
     eprintln!("=== CODE WIKI E2E TEST ===\n");
 
     let (files, stats) = theo_application::use_cases::extraction::extract_repo(workspace_root);
-    eprintln!("Parsed: {}/{} files, {} symbols", stats.files_parsed, stats.files_found, stats.symbols_extracted);
+    eprintln!(
+        "Parsed: {}/{} files, {} symbols",
+        stats.files_parsed, stats.files_found, stats.symbols_extracted
+    );
 
     let (graph, _) = bridge::build_graph(&files);
-    eprintln!("Graph: {} nodes, {} edges", graph.node_count(), graph.edge_count());
+    eprintln!(
+        "Graph: {} nodes, {} edges",
+        graph.node_count(),
+        graph.edge_count()
+    );
 
     let cluster = hierarchical_cluster(&graph, ClusterAlgorithm::FileLeiden { resolution: 1.0 });
     eprintln!("Communities: {}", cluster.communities.len());
 
     // Debug: count node types
-    let test_nodes = graph.node_ids().filter(|id| {
-        graph.get_node(id).map_or(false, |n| n.node_type == theo_engine_graph::model::NodeType::Test)
-    }).count();
-    let test_edges = graph.all_edges().iter().filter(|e| e.edge_type == theo_engine_graph::model::EdgeType::Tests).count();
-    eprintln!("DEBUG: {} Test nodes, {} Tests edges in graph", test_nodes, test_edges);
+    let test_nodes = graph
+        .node_ids()
+        .filter(|id| {
+            graph.get_node(id).map_or(false, |n| {
+                n.node_type == theo_engine_graph::model::NodeType::Test
+            })
+        })
+        .count();
+    let test_edges = graph
+        .all_edges()
+        .iter()
+        .filter(|e| e.edge_type == theo_engine_graph::model::EdgeType::Tests)
+        .count();
+    eprintln!(
+        "DEBUG: {} Test nodes, {} Tests edges in graph",
+        test_nodes, test_edges
+    );
 
     let start = std::time::Instant::now();
-    let wiki_data = wiki::generator::generate_wiki_with_root(&cluster.communities, &graph, "theo-code", Some(workspace_root));
+    let wiki_data = wiki::generator::generate_wiki_with_root(
+        &cluster.communities,
+        &graph,
+        "theo-code",
+        Some(workspace_root),
+    );
     let gen_time = start.elapsed();
-    eprintln!("Wiki: {} pages in {:.0}ms\n", wiki_data.docs.len(), gen_time.as_millis());
+    eprintln!(
+        "Wiki: {} pages in {:.0}ms\n",
+        wiki_data.docs.len(),
+        gen_time.as_millis()
+    );
 
     wiki::persistence::write_to_disk(&wiki_data, workspace_root).unwrap();
 
@@ -575,26 +790,41 @@ fn wiki_e2e() {
     assert!(page_count > 0, "must have module pages");
 
     // Stats
-    eprintln!("{:30} {:>5} {:>6} {:>4} {:>4} {:>8}", "MODULE", "FILES", "SYMS", "ENTR", "DEPS", "COVER");
+    eprintln!(
+        "{:30} {:>5} {:>6} {:>4} {:>4} {:>8}",
+        "MODULE", "FILES", "SYMS", "ENTR", "DEPS", "COVER"
+    );
     eprintln!("{}", "-".repeat(65));
     for doc in &wiki_data.docs {
-        eprintln!("{:30} {:>5} {:>6} {:>4} {:>4} {:>7.1}%",
+        eprintln!(
+            "{:30} {:>5} {:>6} {:>4} {:>4} {:>7.1}%",
             &doc.title[..doc.title.len().min(30)],
-            doc.file_count, doc.symbol_count,
-            doc.entry_points.len(), doc.dependencies.len(),
-            doc.test_coverage.percentage);
+            doc.file_count,
+            doc.symbol_count,
+            doc.entry_points.len(),
+            doc.dependencies.len(),
+            doc.test_coverage.percentage
+        );
     }
 
     // Provenance check
     for doc in &wiki_data.docs {
-        assert!(!doc.source_refs.is_empty(), "{} has no provenance", doc.slug);
+        assert!(
+            !doc.source_refs.is_empty(),
+            "{} has no provenance",
+            doc.slug
+        );
     }
 
     // Cache check
     let hash = wiki::generator::compute_graph_hash(&graph);
     assert!(wiki::persistence::is_fresh(workspace_root, hash));
 
-    eprintln!("\n=== WIKI E2E: {} pages, {:.0}ms, PASSED ===", wiki_data.docs.len(), gen_time.as_millis());
+    eprintln!(
+        "\n=== WIKI E2E: {} pages, {:.0}ms, PASSED ===",
+        wiki_data.docs.len(),
+        gen_time.as_millis()
+    );
 }
 
 /// Knowledge Compounding Loop: demonstrates the full cycle
@@ -607,8 +837,10 @@ fn wiki_knowledge_loop() {
     use theo_engine_retrieval::wiki;
 
     let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent().unwrap()
-        .parent().unwrap();
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
 
     let wiki_dir = workspace_root.join(".theo/wiki");
     if !wiki_dir.exists() {
@@ -639,7 +871,12 @@ fn wiki_knowledge_loop() {
     } else {
         eprintln!("  Result: {} hits from module pages:", results1.len());
         for r in &results1 {
-            eprintln!("    - {} (conf: {:.0}%, ~{} tokens)", r.title, r.confidence * 100.0, r.token_count);
+            eprintln!(
+                "    - {} (conf: {:.0}%, ~{} tokens)",
+                r.title,
+                r.confidence * 100.0,
+                r.token_count
+            );
         }
     }
 
@@ -698,12 +935,21 @@ fn wiki_knowledge_loop() {
     eprintln!("  Result: {} hits:", results2.len());
     for r in &results2 {
         let source = if r.slug == slug { " <-- CACHE HIT" } else { "" };
-        eprintln!("    - {} (conf: {:.0}%, ~{} tokens){}", r.title, r.confidence * 100.0, r.token_count, source);
+        eprintln!(
+            "    - {} (conf: {:.0}%, ~{} tokens){}",
+            r.title,
+            r.confidence * 100.0,
+            r.token_count,
+            source
+        );
     }
 
     let cache_hit = results2.iter().find(|r| r.slug == slug);
     assert!(cache_hit.is_some(), "Cache page should appear in results");
-    eprintln!("\n  Cache page found with confidence: {:.0}%", cache_hit.unwrap().confidence * 100.0);
+    eprintln!(
+        "\n  Cache page found with confidence: {:.0}%",
+        cache_hit.unwrap().confidence * 100.0
+    );
 
     // ─── STEP 4: Related query → also benefits from cache ───
     let query2 = "device flow RFC 8628 headless CLI";
@@ -718,8 +964,18 @@ fn wiki_knowledge_loop() {
     if !results3.is_empty() {
         eprintln!("  Result: {} hits:", results3.len());
         for r in &results3 {
-            let source = if r.slug == slug { " <-- CACHE COMPOUND" } else { "" };
-            eprintln!("    - {} (conf: {:.0}%, ~{} tokens){}", r.title, r.confidence * 100.0, r.token_count, source);
+            let source = if r.slug == slug {
+                " <-- CACHE COMPOUND"
+            } else {
+                ""
+            };
+            eprintln!(
+                "    - {} (conf: {:.0}%, ~{} tokens){}",
+                r.title,
+                r.confidence * 100.0,
+                r.token_count,
+                source
+            );
         }
     }
 
@@ -736,19 +992,30 @@ fn wiki_knowledge_loop() {
     eprintln!("\nSTEP 6: Wiki Lint (health check)");
     let report = wiki::lint::lint(&wiki_dir);
     eprintln!("  {}", format!("{}", report).lines().next().unwrap_or(""));
-    let cache_count = std::fs::read_dir(&cache_dir).map(|e| e.count()).unwrap_or(0);
+    let cache_count = std::fs::read_dir(&cache_dir)
+        .map(|e| e.count())
+        .unwrap_or(0);
     eprintln!("  Cache pages: {}", cache_count);
 
     // ─── Summary ───
     eprintln!("\n══════════════════════════════════════════════════");
     eprintln!(" KNOWLEDGE COMPOUNDING PROVEN:");
-    eprintln!("  1. Initial query: {:?}ms ({} results)",
-        t1.as_millis(), results1.len());
+    eprintln!(
+        "  1. Initial query: {:?}ms ({} results)",
+        t1.as_millis(),
+        results1.len()
+    );
     eprintln!("  2. Write-back: cache page created");
-    eprintln!("  3. Re-query:   {:?}ms ({} results, cache HIT)",
-        t3.as_millis(), results2.len());
-    eprintln!("  4. Related:    {:?}ms ({} results, compound benefit)",
-        t5.as_millis(), results3.len());
+    eprintln!(
+        "  3. Re-query:   {:?}ms ({} results, cache HIT)",
+        t3.as_millis(),
+        results2.len()
+    );
+    eprintln!(
+        "  4. Related:    {:?}ms ({} results, compound benefit)",
+        t5.as_millis(),
+        results3.len()
+    );
     eprintln!("  5. Unrelated:  auth cache correctly NOT returned");
     eprintln!("  6. Wiki grows with usage, not just with ingest");
     eprintln!("══════════════════════════════════════════════════");
@@ -765,12 +1032,14 @@ fn wiki_knowledge_loop() {
 #[ignore]
 fn wiki_eval() {
     use theo_engine_retrieval::wiki;
-    use wiki::lookup::{evaluate_direct_return, DEFAULT_BM25_FLOOR};
+    use wiki::lookup::{DEFAULT_BM25_FLOOR, evaluate_direct_return};
     use wiki::model::classify_query;
 
     let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent().unwrap()
-        .parent().unwrap();
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
 
     let wiki_dir = workspace_root.join(".theo/wiki");
     if !wiki_dir.exists() {
@@ -800,7 +1069,10 @@ fn wiki_eval() {
     let eval: EvalData = serde_json::from_str(&eval_json).expect("Failed to parse");
 
     eprintln!("══════════════════════════════════════════════════════════════════════════");
-    eprintln!(" WIKI EVAL — RANKING + DECISION POLICY ({} queries)", eval.queries.len());
+    eprintln!(
+        " WIKI EVAL — RANKING + DECISION POLICY ({} queries)",
+        eval.queries.len()
+    );
     eprintln!("══════════════════════════════════════════════════════════════════════════\n");
 
     // ═══════════════════════════════════════════
@@ -810,8 +1082,10 @@ fn wiki_eval() {
 
     let floors = [1.0, 1.5, 2.0, 2.5, 3.0];
 
-    eprintln!("{:>5} | {:>7} | {:>9} | {:>8} | {:>6} | {:>12}",
-        "Floor", "Direct%", "Precision", "Fallback", "FP%", "Tier[D/E/P/R]");
+    eprintln!(
+        "{:>5} | {:>7} | {:>9} | {:>8} | {:>6} | {:>12}",
+        "Floor", "Direct%", "Precision", "Fallback", "FP%", "Tier[D/E/P/R]"
+    );
     eprintln!("{}", "-".repeat(65));
 
     for &floor in &floors {
@@ -820,7 +1094,11 @@ fn wiki_eval() {
         let mut false_positives = 0usize;
         let mut tier_dist = [0usize; 4];
         let total = eval.queries.len();
-        let negatives = eval.queries.iter().filter(|q| q.category == "negative").count();
+        let negatives = eval
+            .queries
+            .iter()
+            .filter(|q| q.category == "negative")
+            .count();
 
         for q in &eval.queries {
             let results = wiki::lookup::lookup(&wiki_dir, &q.query, 3);
@@ -841,7 +1119,9 @@ fn wiki_eval() {
 
                 if q.should_hit_layer0 {
                     if let Some(ref expected) = q.expected_slug_contains {
-                        if top.slug.contains(expected.as_str()) || top.title.to_lowercase().contains(&expected.to_lowercase()) {
+                        if top.slug.contains(expected.as_str())
+                            || top.title.to_lowercase().contains(&expected.to_lowercase())
+                        {
                             correct_directs += 1;
                         }
                     } else {
@@ -854,28 +1134,63 @@ fn wiki_eval() {
         }
 
         let direct_rate = direct_returns as f64 / total as f64;
-        let precision = if direct_returns > 0 { correct_directs as f64 / direct_returns as f64 } else { 1.0 };
+        let precision = if direct_returns > 0 {
+            correct_directs as f64 / direct_returns as f64
+        } else {
+            1.0
+        };
         let fallback_rate = 1.0 - direct_rate;
-        let fp_rate = if negatives > 0 { false_positives as f64 / negatives as f64 } else { 0.0 };
-        let marker = if floor == DEFAULT_BM25_FLOOR { " ← current" } else { "" };
+        let fp_rate = if negatives > 0 {
+            false_positives as f64 / negatives as f64
+        } else {
+            0.0
+        };
+        let marker = if floor == DEFAULT_BM25_FLOOR {
+            " ← current"
+        } else {
+            ""
+        };
 
-        eprintln!("{:>5.1} | {:>6.0}% | {:>8.0}% | {:>7.0}% | {:>5.0}% | {:>3}/{}/{}/{}{}",
-            floor, direct_rate * 100.0, precision * 100.0, fallback_rate * 100.0,
-            fp_rate * 100.0, tier_dist[0], tier_dist[1], tier_dist[2], tier_dist[3], marker);
+        eprintln!(
+            "{:>5.1} | {:>6.0}% | {:>8.0}% | {:>7.0}% | {:>5.0}% | {:>3}/{}/{}/{}{}",
+            floor,
+            direct_rate * 100.0,
+            precision * 100.0,
+            fallback_rate * 100.0,
+            fp_rate * 100.0,
+            tier_dist[0],
+            tier_dist[1],
+            tier_dist[2],
+            tier_dist[3],
+            marker
+        );
     }
 
     // ═══════════════════════════════════════════
     // BLOCK 2: Category breakdown (decision policy)
     // ═══════════════════════════════════════════
-    eprintln!("\n─── CATEGORY BREAKDOWN (floor={:.1}) ───\n", DEFAULT_BM25_FLOOR);
+    eprintln!(
+        "\n─── CATEGORY BREAKDOWN (floor={:.1}) ───\n",
+        DEFAULT_BM25_FLOOR
+    );
 
-    let categories = ["api_lookup", "architecture", "call_flow", "concept", "onboarding", "negative"];
-    eprintln!("{:>12} | {:>5} | {:>7} | {:>9} | {:>10} | {:>7}",
-        "Category", "Total", "Direct%", "Precision", "QueryClass", "AvgBM25");
+    let categories = [
+        "api_lookup",
+        "architecture",
+        "call_flow",
+        "concept",
+        "onboarding",
+        "negative",
+    ];
+    eprintln!(
+        "{:>12} | {:>5} | {:>7} | {:>9} | {:>10} | {:>7}",
+        "Category", "Total", "Direct%", "Precision", "QueryClass", "AvgBM25"
+    );
     eprintln!("{}", "-".repeat(70));
 
     for cat in &categories {
-        let cat_queries: Vec<&EvalQuery> = eval.queries.iter().filter(|q| q.category == *cat).collect();
+        let cat_queries: Vec<&EvalQuery> =
+            eval.queries.iter().filter(|q| q.category == *cat).collect();
         let mut cat_directs = 0;
         let mut cat_correct = 0;
         let mut total_bm25 = 0.0f64;
@@ -894,7 +1209,12 @@ fn wiki_eval() {
                 cat_directs += 1;
                 if q.should_hit_layer0 {
                     if let Some(ref exp) = q.expected_slug_contains {
-                        if results[0].slug.contains(exp.as_str()) || results[0].title.to_lowercase().contains(&exp.to_lowercase()) {
+                        if results[0].slug.contains(exp.as_str())
+                            || results[0]
+                                .title
+                                .to_lowercase()
+                                .contains(&exp.to_lowercase())
+                        {
                             cat_correct += 1;
                         }
                     } else {
@@ -904,21 +1224,45 @@ fn wiki_eval() {
             }
         }
 
-        let direct = if !cat_queries.is_empty() { cat_directs as f64 / cat_queries.len() as f64 } else { 0.0 };
-        let prec = if cat_directs > 0 { cat_correct as f64 / cat_directs as f64 } else { 1.0 };
-        let avg_bm25 = if bm25_count > 0 { total_bm25 / bm25_count as f64 } else { 0.0 };
-        let sample_class = cat_queries.first().map(|q| classify_query(&q.query).as_str()).unwrap_or("?");
+        let direct = if !cat_queries.is_empty() {
+            cat_directs as f64 / cat_queries.len() as f64
+        } else {
+            0.0
+        };
+        let prec = if cat_directs > 0 {
+            cat_correct as f64 / cat_directs as f64
+        } else {
+            1.0
+        };
+        let avg_bm25 = if bm25_count > 0 {
+            total_bm25 / bm25_count as f64
+        } else {
+            0.0
+        };
+        let sample_class = cat_queries
+            .first()
+            .map(|q| classify_query(&q.query).as_str())
+            .unwrap_or("?");
 
-        eprintln!("{:>12} | {:>5} | {:>6.0}% | {:>8.0}% | {:>10} | {:>7.1}",
-            cat, cat_queries.len(), direct * 100.0, prec * 100.0, sample_class, avg_bm25);
+        eprintln!(
+            "{:>12} | {:>5} | {:>6.0}% | {:>8.0}% | {:>10} | {:>7.1}",
+            cat,
+            cat_queries.len(),
+            direct * 100.0,
+            prec * 100.0,
+            sample_class,
+            avg_bm25
+        );
     }
 
     // ═══════════════════════════════════════════
     // BLOCK 3: Per-query detail (reason codes)
     // ═══════════════════════════════════════════
     eprintln!("\n─── PER-QUERY DECISIONS (first 15) ───\n");
-    eprintln!("{:>10} | {:>12} | {:>5} | {:>6} | {:>5} | {:>12} | {}",
-        "ID", "Category", "Allow", "Conf", "BM25", "Reason", "Top Slug");
+    eprintln!(
+        "{:>10} | {:>12} | {:>5} | {:>6} | {:>5} | {:>12} | {}",
+        "ID", "Category", "Allow", "Conf", "BM25", "Reason", "Top Slug"
+    );
     eprintln!("{}", "-".repeat(80));
 
     for q in eval.queries.iter().take(15) {
@@ -927,8 +1271,10 @@ fn wiki_eval() {
         let top_slug = results.first().map(|r| r.slug.as_str()).unwrap_or("-");
         let top_bm25 = results.first().map(|r| r.bm25_raw).unwrap_or(0.0);
 
-        eprintln!("{:>10} | {:>12} | {:>5} | {:>5.2} | {:>5.1} | {:>12} | {}",
-            q.id, q.category, allow, conf, top_bm25, reason, top_slug);
+        eprintln!(
+            "{:>10} | {:>12} | {:>5} | {:>5.2} | {:>5.1} | {:>12} | {}",
+            q.id, q.category, allow, conf, top_bm25, reason, top_slug
+        );
     }
 
     // ═══════════════════════════════════════════
@@ -946,39 +1292,71 @@ fn wiki_eval() {
 
         let top1_slug = results.first().map(|r| r.slug.as_str()).unwrap_or("-");
         let top1_bm25 = results.first().map(|r| r.bm25_raw).unwrap_or(0.0);
-        let top1_tier = results.first().map(|r| r.authority_tier.as_str()).unwrap_or("-");
+        let top1_tier = results
+            .first()
+            .map(|r| r.authority_tier.as_str())
+            .unwrap_or("-");
         let top2_slug = results.get(1).map(|r| r.slug.as_str()).unwrap_or("-");
         let top2_bm25 = results.get(1).map(|r| r.bm25_raw).unwrap_or(0.0);
         let gap = top1_bm25 - top2_bm25;
 
-        let expected = if q.should_hit_layer0 { "direct_return" } else { "fallback" };
+        let expected = if q.should_hit_layer0 {
+            "direct_return"
+        } else {
+            "fallback"
+        };
         let actual = if allow { "direct_return" } else { "fallback" };
         let correct = if q.should_hit_layer0 {
             if allow {
-                q.expected_slug_contains.as_ref().map_or(true, |exp|
-                    top1_slug.contains(exp.as_str()) || results.first().map_or(false, |r| r.title.to_lowercase().contains(&exp.to_lowercase()))
-                )
-            } else { false }
-        } else { !allow };
+                q.expected_slug_contains.as_ref().map_or(true, |exp| {
+                    top1_slug.contains(exp.as_str())
+                        || results.first().map_or(false, |r| {
+                            r.title.to_lowercase().contains(&exp.to_lowercase())
+                        })
+                })
+            } else {
+                false
+            }
+        } else {
+            !allow
+        };
 
         traces += &format!(
             "{{\"id\":\"{}\",\"query\":\"{}\",\"category\":\"{}\",\"query_class\":\"{}\",\"top1\":\"{}\",\"top1_tier\":\"{}\",\"top2\":\"{}\",\"bm25_top1\":{:.1},\"bm25_top2\":{:.1},\"gap\":{:.1},\"threshold\":{:.1},\"decision_confidence\":{:.2},\"decision\":\"{}\",\"reason\":\"{}\",\"expected\":\"{}\",\"correct\":{}}}\n",
-            q.id, q.query.replace('"', "'"), q.category, qclass.as_str(),
-            top1_slug, top1_tier, top2_slug,
-            top1_bm25, top2_bm25, gap,
+            q.id,
+            q.query.replace('"', "'"),
+            q.category,
+            qclass.as_str(),
+            top1_slug,
+            top1_tier,
+            top2_slug,
+            top1_bm25,
+            top2_bm25,
+            gap,
             wiki::lookup::default_category_threshold(qclass),
-            conf, actual, reason, expected, correct
+            conf,
+            actual,
+            reason,
+            expected,
+            correct
         );
     }
     std::fs::write(bundle_dir.join("eval_traces.jsonl"), &traces).unwrap();
-    eprintln!("\nExported: eval_traces.jsonl ({} queries)", eval.queries.len());
+    eprintln!(
+        "\nExported: eval_traces.jsonl ({} queries)",
+        eval.queries.len()
+    );
 
     // --- eval_summary.md ---
     {
         let mut total_direct = 0usize;
         let mut total_correct = 0usize;
         let mut total_fp = 0usize;
-        let negatives = eval.queries.iter().filter(|q| q.category == "negative").count();
+        let negatives = eval
+            .queries
+            .iter()
+            .filter(|q| q.category == "negative")
+            .count();
 
         for q in &eval.queries {
             let results = wiki::lookup::lookup(&wiki_dir, &q.query, 3);
@@ -987,9 +1365,13 @@ fn wiki_eval() {
                 total_direct += 1;
                 if q.should_hit_layer0 {
                     let top = &results[0];
-                    let ok = q.expected_slug_contains.as_ref().map_or(true, |exp|
-                        top.slug.contains(exp.as_str()) || top.title.to_lowercase().contains(&exp.to_lowercase()));
-                    if ok { total_correct += 1; }
+                    let ok = q.expected_slug_contains.as_ref().map_or(true, |exp| {
+                        top.slug.contains(exp.as_str())
+                            || top.title.to_lowercase().contains(&exp.to_lowercase())
+                    });
+                    if ok {
+                        total_correct += 1;
+                    }
                 } else {
                     total_fp += 1;
                 }
@@ -998,8 +1380,16 @@ fn wiki_eval() {
 
         let total = eval.queries.len();
         let direct_rate = total_direct as f64 / total as f64;
-        let precision = if total_direct > 0 { total_correct as f64 / total_direct as f64 } else { 1.0 };
-        let fp_rate = if negatives > 0 { total_fp as f64 / negatives as f64 } else { 0.0 };
+        let precision = if total_direct > 0 {
+            total_correct as f64 / total_direct as f64
+        } else {
+            1.0
+        };
+        let fp_rate = if negatives > 0 {
+            total_fp as f64 / negatives as f64
+        } else {
+            0.0
+        };
 
         let mut md = format!("# Wiki Eval Summary\n\n");
         md += &format!("**Commit**: `{}`\n", env!("CARGO_PKG_VERSION"));
@@ -1027,17 +1417,37 @@ fn wiki_eval() {
                 if allow {
                     cd += 1;
                     if q.should_hit_layer0 {
-                        let ok = q.expected_slug_contains.as_ref().map_or(true, |exp|
-                            results[0].slug.contains(exp.as_str()) || results[0].title.to_lowercase().contains(&exp.to_lowercase()));
-                        if ok { cc += 1; }
+                        let ok = q.expected_slug_contains.as_ref().map_or(true, |exp| {
+                            results[0].slug.contains(exp.as_str())
+                                || results[0]
+                                    .title
+                                    .to_lowercase()
+                                    .contains(&exp.to_lowercase())
+                        });
+                        if ok {
+                            cc += 1;
+                        }
                     }
                 }
             }
-            let dr = if !cq.is_empty() { cd as f64 / cq.len() as f64 } else { 0.0 };
+            let dr = if !cq.is_empty() {
+                cd as f64 / cq.len() as f64
+            } else {
+                0.0
+            };
             let pr = if cd > 0 { cc as f64 / cd as f64 } else { 1.0 };
-            let sample_class = cq.first().map(|q| classify_query(&q.query)).unwrap_or(wiki::model::QueryClass::Unknown);
+            let sample_class = cq
+                .first()
+                .map(|q| classify_query(&q.query))
+                .unwrap_or(wiki::model::QueryClass::Unknown);
             let thr = wiki::lookup::default_category_threshold(sample_class);
-            md += &format!("| {} | {:.1} | {:.0}% | {:.0}% |\n", cat, thr, dr * 100.0, pr * 100.0);
+            md += &format!(
+                "| {} | {:.1} | {:.0}% | {:.0}% |\n",
+                cat,
+                thr,
+                dr * 100.0,
+                pr * 100.0
+            );
         }
 
         std::fs::write(bundle_dir.join("eval_summary.md"), &md).unwrap();
@@ -1062,13 +1472,15 @@ fn wiki_eval() {
 #[ignore]
 fn wiki_ab_benchmark() {
     use theo_engine_graph::bridge;
-    use theo_engine_graph::cluster::{hierarchical_cluster, ClusterAlgorithm};
-    use theo_engine_retrieval::wiki;
+    use theo_engine_graph::cluster::{ClusterAlgorithm, hierarchical_cluster};
     use theo_engine_retrieval::search::FileBm25;
+    use theo_engine_retrieval::wiki;
 
     let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent().unwrap()
-        .parent().unwrap();
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
 
     eprintln!("=== A/B BENCHMARK: Wiki Cache vs RRF-only ===\n");
 
@@ -1081,7 +1493,10 @@ fn wiki_ab_benchmark() {
     let wiki_hash = wiki::generator::compute_graph_hash(&graph);
     if !wiki::persistence::is_fresh(workspace_root, wiki_hash) {
         let wiki_data = wiki::generator::generate_wiki_with_root(
-            &cluster.communities, &graph, "theo-code", Some(workspace_root)
+            &cluster.communities,
+            &graph,
+            "theo-code",
+            Some(workspace_root),
         );
         wiki::persistence::write_to_disk(&wiki_data, workspace_root).unwrap();
     }
@@ -1092,8 +1507,10 @@ fn wiki_ab_benchmark() {
     let k = 5;
 
     // Step 3: Run A/B for each query
-    eprintln!("{:<5} {:<40} {:>8} {:>8} {:>10} {:>10} {:>8}",
-        "#", "Query", "Wiki?", "P@5", "Lat(ms)A", "Lat(ms)B", "Delta");
+    eprintln!(
+        "{:<5} {:<40} {:>8} {:>8} {:>10} {:>10} {:>8}",
+        "#", "Query", "Wiki?", "P@5", "Lat(ms)A", "Lat(ms)B", "Delta"
+    );
     eprintln!("{}", "-".repeat(95));
 
     let mut wiki_hits = 0;
@@ -1119,10 +1536,16 @@ fn wiki_ab_benchmark() {
             for r in &wiki_results {
                 // Wiki pages mention file paths in backticks
                 for line in r.content.lines() {
-                    if line.contains('`') && (line.contains(".rs") || line.contains(".py") || line.contains(".ts")) {
+                    if line.contains('`')
+                        && (line.contains(".rs") || line.contains(".py") || line.contains(".ts"))
+                    {
                         // Extract path from backtick
                         for part in line.split('`') {
-                            if part.contains('/') && (part.ends_with(".rs") || part.ends_with(".py") || part.ends_with(".ts")) {
+                            if part.contains('/')
+                                && (part.ends_with(".rs")
+                                    || part.ends_with(".py")
+                                    || part.ends_with(".ts"))
+                            {
                                 files.push(part.to_string());
                             }
                         }
@@ -1161,10 +1584,20 @@ fn wiki_ab_benchmark() {
         let hit_str = if wiki_hit { "HIT" } else { "miss" };
         let delta = if lat_a < lat_b { "faster" } else { "slower" };
 
-        eprintln!("{:<5} {:<40} {:>8} {:>8.2} {:>10.1} {:>10.1} {:>8}",
+        eprintln!(
+            "{:<5} {:<40} {:>8} {:>8.2} {:>10.1} {:>10.1} {:>8}",
             format!("{}.", i + 1),
-            if bq.query.len() > 39 { &bq.query[..39] } else { &bq.query },
-            hit_str, p5_a, lat_a, lat_b, delta);
+            if bq.query.len() > 39 {
+                &bq.query[..39]
+            } else {
+                &bq.query
+            },
+            hit_str,
+            p5_a,
+            lat_a,
+            lat_b,
+            delta
+        );
     }
 
     let n = gt.queries.len() as f64;
@@ -1173,17 +1606,32 @@ fn wiki_ab_benchmark() {
     eprintln!("\n{}", "=".repeat(95));
     eprintln!("RESULTS ({} queries):\n", gt.queries.len());
 
-    eprintln!("{:<25} {:>15} {:>15} {:>15}", "", "Wiki+Fallback", "BM25-only", "Improvement");
+    eprintln!(
+        "{:<25} {:>15} {:>15} {:>15}",
+        "", "Wiki+Fallback", "BM25-only", "Improvement"
+    );
     eprintln!("{}", "-".repeat(70));
-    eprintln!("{:<25} {:>15.1} {:>15.1} {:>14.0}%",
-        "Avg latency (ms)", wiki_total_lat / n, rrf_total_lat / n,
-        (1.0 - wiki_total_lat / rrf_total_lat) * 100.0);
-    eprintln!("{:<25} {:>15.3} {:>15.3} {:>+14.3}",
-        "Avg P@5", wiki_total_p5 / n, rrf_total_p5 / n,
-        wiki_total_p5 / n - rrf_total_p5 / n);
-    eprintln!("{:<25} {:>15} {:>15} {:>14.0}%",
-        "Total tokens", wiki_total_tokens, rrf_total_tokens,
-        (1.0 - wiki_total_tokens as f64 / rrf_total_tokens as f64) * 100.0);
+    eprintln!(
+        "{:<25} {:>15.1} {:>15.1} {:>14.0}%",
+        "Avg latency (ms)",
+        wiki_total_lat / n,
+        rrf_total_lat / n,
+        (1.0 - wiki_total_lat / rrf_total_lat) * 100.0
+    );
+    eprintln!(
+        "{:<25} {:>15.3} {:>15.3} {:>+14.3}",
+        "Avg P@5",
+        wiki_total_p5 / n,
+        rrf_total_p5 / n,
+        wiki_total_p5 / n - rrf_total_p5 / n
+    );
+    eprintln!(
+        "{:<25} {:>15} {:>15} {:>14.0}%",
+        "Total tokens",
+        wiki_total_tokens,
+        rrf_total_tokens,
+        (1.0 - wiki_total_tokens as f64 / rrf_total_tokens as f64) * 100.0
+    );
     eprintln!("{:<25} {:>14.0}%", "Wiki hit rate", hit_rate);
     eprintln!("{:<25} {:>15}", "Wiki hits", wiki_hits);
 
@@ -1208,7 +1656,7 @@ fn wiki_ab_benchmark() {
 #[ignore]
 fn wiki_external() {
     use theo_engine_graph::bridge;
-    use theo_engine_graph::cluster::{hierarchical_cluster, ClusterAlgorithm};
+    use theo_engine_graph::cluster::{ClusterAlgorithm, hierarchical_cluster};
     use theo_engine_retrieval::wiki;
 
     let repo_path = std::env::var("WIKI_REPO").unwrap_or_else(|_| "/tmp/fastapi".to_string());
@@ -1219,24 +1667,40 @@ fn wiki_external() {
         return;
     }
 
-    let repo_name = repo_root.file_name().and_then(|n| n.to_str()).unwrap_or("project");
+    let repo_name = repo_root
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("project");
     eprintln!("=== WIKI EXTERNAL: {} ===\n", repo_name);
 
     // Parse
     let start = std::time::Instant::now();
     let (files, stats) = theo_application::use_cases::extraction::extract_repo(repo_root);
-    eprintln!("Parsed: {}/{} files, {} symbols ({:.1}s)",
-        stats.files_parsed, stats.files_found, stats.symbols_extracted,
-        start.elapsed().as_secs_f64());
+    eprintln!(
+        "Parsed: {}/{} files, {} symbols ({:.1}s)",
+        stats.files_parsed,
+        stats.files_found,
+        stats.symbols_extracted,
+        start.elapsed().as_secs_f64()
+    );
 
     // Build graph
     let (graph, _) = bridge::build_graph(&files);
-    eprintln!("Graph: {} nodes, {} edges", graph.node_count(), graph.edge_count());
+    eprintln!(
+        "Graph: {} nodes, {} edges",
+        graph.node_count(),
+        graph.edge_count()
+    );
 
     // Count test nodes
-    let test_nodes = graph.node_ids().filter(|id| {
-        graph.get_node(id).map_or(false, |n| n.node_type == theo_engine_graph::model::NodeType::Test)
-    }).count();
+    let test_nodes = graph
+        .node_ids()
+        .filter(|id| {
+            graph.get_node(id).map_or(false, |n| {
+                n.node_type == theo_engine_graph::model::NodeType::Test
+            })
+        })
+        .count();
     eprintln!("Test nodes: {}", test_nodes);
 
     // Cluster
@@ -1246,22 +1710,36 @@ fn wiki_external() {
     // Generate wiki
     let start = std::time::Instant::now();
     let wiki_data = wiki::generator::generate_wiki_with_root(
-        &cluster.communities, &graph, repo_name, Some(repo_root)
+        &cluster.communities,
+        &graph,
+        repo_name,
+        Some(repo_root),
     );
     let gen_time = start.elapsed();
-    eprintln!("Wiki: {} pages in {:.0}ms", wiki_data.docs.len(), gen_time.as_millis());
+    eprintln!(
+        "Wiki: {} pages in {:.0}ms",
+        wiki_data.docs.len(),
+        gen_time.as_millis()
+    );
 
     // Write wiki markdown
     wiki::persistence::write_to_disk(&wiki_data, repo_root).unwrap();
     eprintln!("Written to {}/.theo/wiki/\n", repo_path);
 
     // Stats
-    eprintln!("{:40} {:>5} {:>6} {:>8}", "MODULE", "FILES", "SYMS", "COVER");
+    eprintln!(
+        "{:40} {:>5} {:>6} {:>8}",
+        "MODULE", "FILES", "SYMS", "COVER"
+    );
     eprintln!("{}", "-".repeat(65));
     for doc in wiki_data.docs.iter().take(20) {
-        eprintln!("{:40} {:>5} {:>6} {:>7.1}%",
+        eprintln!(
+            "{:40} {:>5} {:>6} {:>7.1}%",
             &doc.title[..doc.title.len().min(40)],
-            doc.file_count, doc.symbol_count, doc.test_coverage.percentage);
+            doc.file_count,
+            doc.symbol_count,
+            doc.test_coverage.percentage
+        );
     }
     if wiki_data.docs.len() > 20 {
         eprintln!("  ... and {} more", wiki_data.docs.len() - 20);
@@ -1269,14 +1747,22 @@ fn wiki_external() {
 
     // Render HTML
     let wiki_dir = repo_root.join(".theo/wiki");
-    let html = theo_marklive::render(&wiki_dir, theo_marklive::Config {
-        title: format!("{} — Code Wiki", repo_name),
-        search: true,
-    }).unwrap();
+    let html = theo_marklive::render(
+        &wiki_dir,
+        theo_marklive::Config {
+            title: format!("{} — Code Wiki", repo_name),
+            search: true,
+        },
+    )
+    .unwrap();
 
     let output = format!("/tmp/{}-wiki.html", repo_name);
     std::fs::write(&output, &html).unwrap();
-    eprintln!("\nHTML: {} ({:.0} KB)", output, std::fs::metadata(&output).unwrap().len() as f64 / 1024.0);
+    eprintln!(
+        "\nHTML: {} ({:.0} KB)",
+        output,
+        std::fs::metadata(&output).unwrap().len() as f64 / 1024.0
+    );
 
     eprintln!("\n=== DONE: open {} in browser ===", output);
 }

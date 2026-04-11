@@ -109,7 +109,9 @@ mod tests {
 
         assert_eq!(result.unwrap(), 42);
         // No retry events — succeeded first time
-        let retry_events: Vec<_> = listener.captured().iter()
+        let retry_events: Vec<_> = listener
+            .captured()
+            .iter()
             .filter(|e| e.payload.get("type").and_then(|v| v.as_str()) == Some("retry"))
             .cloned()
             .collect();
@@ -161,7 +163,9 @@ mod tests {
 
         assert_eq!(result.unwrap_err(), "permanent failure");
         // 2 retry events (attempt 1 and 2, the 3rd attempt is the final one with no event)
-        let retry_events: Vec<_> = listener.captured().iter()
+        let retry_events: Vec<_> = listener
+            .captured()
+            .iter()
             .filter(|e| e.payload.get("type").and_then(|v| v.as_str()) == Some("retry"))
             .cloned()
             .collect();
@@ -187,7 +191,11 @@ mod tests {
         .await;
 
         assert_eq!(result.unwrap_err(), "auth failed");
-        assert_eq!(call_count.load(Ordering::SeqCst), 1, "should only call once for non-retryable");
+        assert_eq!(
+            call_count.load(Ordering::SeqCst),
+            1,
+            "should only call once for non-retryable"
+        );
     }
 
     #[tokio::test]
@@ -206,7 +214,8 @@ mod tests {
         .await;
 
         let events = listener.captured();
-        let retry_events: Vec<_> = events.iter()
+        let retry_events: Vec<_> = events
+            .iter()
             .filter(|e| e.payload.get("type").and_then(|v| v.as_str()) == Some("retry"))
             .collect();
 

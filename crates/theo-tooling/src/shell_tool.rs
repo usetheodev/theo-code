@@ -63,13 +63,14 @@ impl Tool for ShellTool {
         ctx: &ToolContext,
         _permissions: &mut PermissionCollector,
     ) -> Result<ToolOutput, ToolError> {
-        use tokio::process::Command;
         use tokio::io::AsyncWriteExt;
+        use tokio::process::Command;
 
         let args_json = serde_json::to_string(&serde_json::json!({
             "args": args,
             "project_dir": ctx.project_dir.display().to_string(),
-        })).unwrap_or_default();
+        }))
+        .unwrap_or_default();
 
         let mut cmd = Command::new("sh");
         cmd.arg(&self.script_path);
@@ -112,10 +113,13 @@ impl Tool for ShellTool {
                 }
             }
             Ok(Err(e)) => Err(ToolError::Execution(format!(
-                "Plugin tool '{}' error: {e}", self.name
+                "Plugin tool '{}' error: {e}",
+                self.name
             ))),
             Err(_) => Err(ToolError::Execution(format!(
-                "Plugin tool '{}' timed out after {}s", self.name, self.timeout.as_secs()
+                "Plugin tool '{}' timed out after {}s",
+                self.name,
+                self.timeout.as_secs()
             ))),
         }
     }
