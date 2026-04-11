@@ -1,9 +1,7 @@
-#![allow(deprecated)]
-
 use std::path::Path;
 use std::sync::Arc;
 
-use theo_agent_runtime::events::EventSink;
+use theo_agent_runtime::event_bus::EventListener;
 use theo_agent_runtime::{AgentConfig, AgentLoop, AgentResult};
 use theo_domain::graph_context::GraphContextProvider;
 use theo_tooling::registry::create_default_registry;
@@ -30,7 +28,7 @@ pub async fn run_agent_session(
     config: AgentConfig,
     task: &str,
     project_dir: &Path,
-    event_sink: Arc<dyn EventSink>,
+    event_listener: Arc<dyn EventListener>,
 ) -> Result<AgentResult, RunSessionError> {
     if config.api_key.is_none() {
         return Err(RunSessionError::MissingApiKey);
@@ -55,7 +53,7 @@ pub async fn run_agent_session(
         };
 
     let registry = create_default_registry();
-    let mut agent = AgentLoop::new(config, registry, event_sink);
+    let mut agent = AgentLoop::new(config, registry).with_event_listener(event_listener);
     if let Some(gc) = graph_context {
         agent = agent.with_graph_context(gc);
     }

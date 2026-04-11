@@ -8,8 +8,8 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use crate::code_tokenizer::tokenize_code;
 use super::model::{AuthorityTier, PageFrontmatter, QueryClass, classify_query, parse_frontmatter};
+use crate::code_tokenizer::tokenize_code;
 
 /// Result of a wiki lookup.
 pub struct WikiLookupResult {
@@ -128,10 +128,16 @@ pub fn evaluate_direct_return(
     let bm25_top2 = results.get(1).map_or(0.0, |r| r.bm25_raw);
     let query_tokens: HashSet<String> = tokenize_code(query).into_iter().collect();
     let title_tokens: HashSet<String> = tokenize_code(&top1.title).into_iter().collect();
-    let title_match = query_tokens.iter().any(|qt| title_tokens.contains(qt.as_str()));
+    let title_match = query_tokens
+        .iter()
+        .any(|qt| title_tokens.contains(qt.as_str()));
 
     let confidence = compute_decision_confidence(
-        top1.bm25_raw, bm25_top2, title_match, top1.authority_tier, top1.is_stale,
+        top1.bm25_raw,
+        bm25_top2,
+        title_match,
+        top1.authority_tier,
+        top1.is_stale,
     );
 
     // Gate 3: Per-category threshold
@@ -162,7 +168,8 @@ pub fn lookup(wiki_dir: &Path, query: &str, max_results: usize) -> Vec<WikiLooku
     }
 
     // Load manifest hash for staleness check
-    let manifest_hash = wiki_dir.parent()
+    let manifest_hash = wiki_dir
+        .parent()
         .and_then(|p| p.parent())
         .and_then(|project_dir| super::persistence::load_manifest(project_dir))
         .map(|m| m.graph_hash);
@@ -183,18 +190,31 @@ pub fn lookup(wiki_dir: &Path, query: &str, max_results: usize) -> Vec<WikiLooku
     let mut pages: Vec<PageEntry> = Vec::new();
 
     for (dir, dir_name) in [(&modules_dir, "modules"), (&cache_dir, "cache")] {
-        if !dir.exists() { continue; }
+        if !dir.exists() {
+            continue;
+        }
         let entries = match std::fs::read_dir(dir) {
             Ok(e) => e,
             Err(_) => continue,
         };
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) != Some("md") { continue; }
-            if path.to_string_lossy().contains(".enriched.") { continue; }
-            let Ok(content) = std::fs::read_to_string(&path) else { continue };
-            let slug = path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
-            let title = content.lines()
+            if path.extension().and_then(|e| e.to_str()) != Some("md") {
+                continue;
+            }
+            if path.to_string_lossy().contains(".enriched.") {
+                continue;
+            }
+            let Ok(content) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let slug = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_string();
+            let title = content
+                .lines()
                 .find(|l| l.starts_with("# "))
                 .map(|l| l.trim_start_matches("# ").trim().to_string())
                 .unwrap_or_else(|| slug.clone());
@@ -208,7 +228,14 @@ pub fn lookup(wiki_dir: &Path, query: &str, max_results: usize) -> Vec<WikiLooku
                 _ => false, // No hash info → assume fresh
             };
 
-            pages.push(PageEntry { slug, title, content, tier, is_stale, page_kind });
+            pages.push(PageEntry {
+                slug,
+                title,
+                content,
+                tier,
+                is_stale,
+                page_kind,
+            });
         }
     }
 
@@ -252,7 +279,9 @@ pub fn lookup(wiki_dir: &Path, query: &str, max_results: usize) -> Vec<WikiLooku
     // BM25 scoring
     let mut scores = vec![0.0f64; doc_count];
     for token in &query_tokens {
-        let Some(posts) = postings.get(token.as_str()) else { continue };
+        let Some(posts) = postings.get(token.as_str()) else {
+            continue;
+        };
         let n_t = posts.len() as f64;
         let idf = ((n - n_t + 0.5) / (n_t + 0.5) + 1.0).ln();
         for &(doc_idx, tf) in posts {
@@ -268,11 +297,20 @@ pub fn lookup(wiki_dir: &Path, query: &str, max_results: usize) -> Vec<WikiLooku
         let page = &pages[idx];
         // Check if any query token matches the title
         let title_tokens: HashSet<String> = tokenize_code(&page.title).into_iter().collect();
-        let title_match = query_tokens.iter().any(|qt| title_tokens.contains(qt.as_str()));
+        let title_match = query_tokens
+            .iter()
+            .any(|qt| title_tokens.contains(qt.as_str()));
         let normalized = if scores.iter().cloned().fold(0.0f64, f64::max) > 0.0 {
             raw_score / scores.iter().cloned().fold(0.0f64, f64::max)
-        } else { 0.0 };
-        final_scores.push(compute_final_score(normalized, page.tier, title_match, page.is_stale));
+        } else {
+            0.0
+        };
+        final_scores.push(compute_final_score(
+            normalized,
+            page.tier,
+            title_match,
+            page.is_stale,
+        ));
     }
 
     // Normalize final scores to 0-1
@@ -280,9 +318,17 @@ pub fn lookup(wiki_dir: &Path, query: &str, max_results: usize) -> Vec<WikiLooku
 
     let mut results: Vec<WikiLookupResult> = Vec::new();
     for (idx, &fscore) in final_scores.iter().enumerate() {
-        if fscore <= 0.0 { continue; }
-        let confidence = if max_final > 0.0 { fscore / max_final } else { 0.0 };
-        if confidence < MIN_CONFIDENCE { continue; }
+        if fscore <= 0.0 {
+            continue;
+        }
+        let confidence = if max_final > 0.0 {
+            fscore / max_final
+        } else {
+            0.0
+        };
+        if confidence < MIN_CONFIDENCE {
+            continue;
+        }
 
         let page = &pages[idx];
         results.push(WikiLookupResult {
@@ -298,7 +344,11 @@ pub fn lookup(wiki_dir: &Path, query: &str, max_results: usize) -> Vec<WikiLooku
         });
     }
 
-    results.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal));
+    results.sort_by(|a, b| {
+        b.confidence
+            .partial_cmp(&a.confidence)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     results.truncate(max_results);
 
     results
@@ -317,21 +367,22 @@ pub fn lookup(wiki_dir: &Path, query: &str, max_results: usize) -> Vec<WikiLooku
 ///
 /// Suppress if 2 of 3 signals are high. This avoids near-duplicate cache pages
 /// while allowing genuinely different perspectives on the same topic.
-pub fn should_suppress_write(
-    wiki_dir: &Path,
-    query: &str,
-    new_source_ids: &[String],
-) -> bool {
+pub fn should_suppress_write(wiki_dir: &Path, query: &str, new_source_ids: &[String]) -> bool {
     let candidates = lookup(wiki_dir, query, 1);
-    let Some(top) = candidates.first() else { return false };
+    let Some(top) = candidates.first() else {
+        return false;
+    };
 
     // Signal 1: Query similarity (already BM25 scored)
     let query_sim_high = top.confidence >= 0.7;
 
     // Signal 2: Content token overlap
-    let existing_tokens: HashSet<String> = tokenize_code(&top.content[..top.content.len().min(2000)])
-        .into_iter().collect();
-    let new_tokens: HashSet<String> = new_source_ids.iter()
+    let existing_tokens: HashSet<String> =
+        tokenize_code(&top.content[..top.content.len().min(2000)])
+            .into_iter()
+            .collect();
+    let new_tokens: HashSet<String> = new_source_ids
+        .iter()
         .flat_map(|s| tokenize_code(s))
         .collect();
     let content_overlap = if existing_tokens.is_empty() || new_tokens.is_empty() {
@@ -357,7 +408,9 @@ pub fn should_suppress_write(
 
     // Suppress if 2 of 3 signals are high
     let high_count = [query_sim_high, content_overlap_high, source_overlap_high]
-        .iter().filter(|&&x| x).count();
+        .iter()
+        .filter(|&&x| x)
+        .count();
 
     high_count >= 2
 }
@@ -393,7 +446,9 @@ mod tests {
 
         fs::write(dir.join("index.md"), "# Wiki\n").unwrap();
 
-        fs::write(modules.join("auth.md"), r#"# Authentication Module
+        fs::write(
+            modules.join("auth.md"),
+            r#"# Authentication Module
 
 > 3 files | rs | 15 symbols
 
@@ -414,9 +469,13 @@ pub struct OAuthConfig
 ## Dependencies
 
 - → [[domain]] (Imports)
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
-        fs::write(modules.join("search.md"), r#"# Search Engine
+        fs::write(
+            modules.join("search.md"),
+            r#"# Search Engine
 
 > 5 files | rs | 30 symbols
 
@@ -433,7 +492,9 @@ pub struct FileBm25
 pub struct MultiSignalScorer
 pub fn tokenise(text: &str) -> Vec<String>
 ```
-"#).unwrap();
+"#,
+        )
+        .unwrap();
     }
 
     #[test]
@@ -540,8 +601,15 @@ pub fn tokenise(text: &str) -> Vec<String>
         let results = lookup(dir.path(), "JWT token authentication verify", 5);
         assert!(results.len() >= 2, "should find both pages");
         // Module page (Deterministic tier) should rank first
-        assert_eq!(results[0].authority_tier, AuthorityTier::Deterministic,
-            "module should outrank cache: {:?}", results.iter().map(|r| (&r.slug, r.authority_tier)).collect::<Vec<_>>());
+        assert_eq!(
+            results[0].authority_tier,
+            AuthorityTier::Deterministic,
+            "module should outrank cache: {:?}",
+            results
+                .iter()
+                .map(|r| (&r.slug, r.authority_tier))
+                .collect::<Vec<_>>()
+        );
     }
 
     #[test]
@@ -550,7 +618,12 @@ pub fn tokenise(text: &str) -> Vec<String>
         let s1 = compute_final_score(0.8, AuthorityTier::Deterministic, false, false);
         // RawCache, no stale, no title match
         let s2 = compute_final_score(0.8, AuthorityTier::RawCache, false, false);
-        assert!(s1 > s2, "Deterministic should score higher: {} vs {}", s1, s2);
+        assert!(
+            s1 > s2,
+            "Deterministic should score higher: {} vs {}",
+            s1,
+            s2
+        );
 
         // Title match bonus
         let s3 = compute_final_score(0.8, AuthorityTier::Deterministic, true, false);
@@ -564,10 +637,15 @@ pub fn tokenise(text: &str) -> Vec<String>
     #[test]
     fn absolute_floor_blocks_weak_match() {
         let results = vec![WikiLookupResult {
-            content: String::new(), slug: "weak".into(), title: "Weak".into(),
-            confidence: 0.9, bm25_raw: 8.0, // below floor of 12.0
-            token_count: 100, authority_tier: AuthorityTier::Deterministic,
-            is_stale: false, page_kind: "module".into(),
+            content: String::new(),
+            slug: "weak".into(),
+            title: "Weak".into(),
+            confidence: 0.9,
+            bm25_raw: 8.0, // below floor of 12.0
+            token_count: 100,
+            authority_tier: AuthorityTier::Deterministic,
+            is_stale: false,
+            page_kind: "module".into(),
         }];
         let (allow, _, reason) = evaluate_direct_return(&results, "anything", DEFAULT_BM25_FLOOR);
         assert!(!allow, "should reject below floor");
@@ -577,12 +655,18 @@ pub fn tokenise(text: &str) -> Vec<String>
     #[test]
     fn absolute_floor_allows_strong_match() {
         let results = vec![WikiLookupResult {
-            content: String::new(), slug: "strong".into(), title: "Strong Auth".into(),
-            confidence: 0.9, bm25_raw: 25.0, // well above floor
-            token_count: 100, authority_tier: AuthorityTier::Deterministic,
-            is_stale: false, page_kind: "module".into(),
+            content: String::new(),
+            slug: "strong".into(),
+            title: "Strong Auth".into(),
+            confidence: 0.9,
+            bm25_raw: 25.0, // well above floor
+            token_count: 100,
+            authority_tier: AuthorityTier::Deterministic,
+            is_stale: false,
+            page_kind: "module".into(),
         }];
-        let (allow, conf, _) = evaluate_direct_return(&results, "strong auth token", DEFAULT_BM25_FLOOR);
+        let (allow, conf, _) =
+            evaluate_direct_return(&results, "strong auth token", DEFAULT_BM25_FLOOR);
         assert!(conf > 0.0, "confidence should be positive for strong match");
         // May or may not pass category threshold depending on query class
     }
@@ -590,28 +674,58 @@ pub fn tokenise(text: &str) -> Vec<String>
     #[test]
     fn gap_based_confidence_higher_with_separation() {
         // Top1 strong, top2 weak → high gap → high confidence
-        let conf_high_gap = compute_decision_confidence(5.0, 1.0, true, AuthorityTier::Deterministic, false);
+        let conf_high_gap =
+            compute_decision_confidence(5.0, 1.0, true, AuthorityTier::Deterministic, false);
         // Top1 strong, top2 also strong → low gap → lower confidence
-        let conf_low_gap = compute_decision_confidence(5.0, 4.5, true, AuthorityTier::Deterministic, false);
-        assert!(conf_high_gap > conf_low_gap, "high gap should give higher confidence: {} vs {}", conf_high_gap, conf_low_gap);
+        let conf_low_gap =
+            compute_decision_confidence(5.0, 4.5, true, AuthorityTier::Deterministic, false);
+        assert!(
+            conf_high_gap > conf_low_gap,
+            "high gap should give higher confidence: {} vs {}",
+            conf_high_gap,
+            conf_low_gap
+        );
     }
 
     #[test]
     fn decision_confidence_penalizes_stale() {
         let fresh = compute_decision_confidence(5.0, 1.0, true, AuthorityTier::RawCache, false);
         let stale = compute_decision_confidence(5.0, 1.0, true, AuthorityTier::RawCache, true);
-        assert!(fresh > stale, "stale should be penalized: {} vs {}", fresh, stale);
+        assert!(
+            fresh > stale,
+            "stale should be penalized: {} vs {}",
+            fresh,
+            stale
+        );
     }
 
     #[test]
     fn query_classification() {
         use super::super::model::classify_query;
-        assert_eq!(classify_query("JWT token authentication verify"), QueryClass::ApiLookup);
-        assert_eq!(classify_query("bounded context architecture layers"), QueryClass::Architecture);
-        assert_eq!(classify_query("how does query_context call chain work"), QueryClass::CallFlow);
-        assert_eq!(classify_query("what modules handle code intelligence"), QueryClass::Concept);
-        assert_eq!(classify_query("how to get started building"), QueryClass::Onboarding);
-        assert_eq!(classify_query("kubernetes deployment nginx"), QueryClass::Unknown);
+        assert_eq!(
+            classify_query("JWT token authentication verify"),
+            QueryClass::ApiLookup
+        );
+        assert_eq!(
+            classify_query("bounded context architecture layers"),
+            QueryClass::Architecture
+        );
+        assert_eq!(
+            classify_query("how does query_context call chain work"),
+            QueryClass::CallFlow
+        );
+        assert_eq!(
+            classify_query("what modules handle code intelligence"),
+            QueryClass::Concept
+        );
+        assert_eq!(
+            classify_query("how to get started building"),
+            QueryClass::Onboarding
+        );
+        assert_eq!(
+            classify_query("kubernetes deployment nginx"),
+            QueryClass::Unknown
+        );
     }
 
     #[test]

@@ -17,11 +17,7 @@ use super::model::*;
 /// Generate complete wiki from communities + graph.
 ///
 /// `repo_root` is needed to scan source files for test coverage detection.
-pub fn generate_wiki(
-    communities: &[Community],
-    graph: &CodeGraph,
-    project_name: &str,
-) -> Wiki {
+pub fn generate_wiki(communities: &[Community], graph: &CodeGraph, project_name: &str) -> Wiki {
     generate_wiki_with_root(communities, graph, project_name, None)
 }
 
@@ -59,7 +55,11 @@ pub fn generate_wiki_with_root(
                     doc.crate_description = Some(desc.clone());
                 }
                 // Module doc: //! comments from lib.rs
-                let crate_dir = if meta.crate_dir.is_empty() { &crate_name } else { &meta.crate_dir };
+                let crate_dir = if meta.crate_dir.is_empty() {
+                    &crate_name
+                } else {
+                    &meta.crate_dir
+                };
                 if let Some(module_doc) = extract_module_doc(project_dir, crate_dir) {
                     doc.module_doc = Some(module_doc);
                 }
@@ -114,8 +114,12 @@ fn generate_doc(
     let mut lang_counts: HashMap<String, usize> = HashMap::new();
 
     for node_id in &community.node_ids {
-        let Some(node) = graph.get_node(node_id) else { continue };
-        if node.node_type != NodeType::File { continue; }
+        let Some(node) = graph.get_node(node_id) else {
+            continue;
+        };
+        if node.node_type != NodeType::File {
+            continue;
+        }
 
         let file_path = node.file_path.as_deref().unwrap_or(&node.name);
         let sr = SourceRef::file(file_path);
@@ -130,8 +134,12 @@ fn generate_doc(
         let mut file_symbols = 0;
 
         for child_id in &children {
-            let Some(child) = graph.get_node(child_id) else { continue };
-            if child.node_type != NodeType::Symbol { continue; }
+            let Some(child) = graph.get_node(child_id) else {
+                continue;
+            };
+            if child.node_type != NodeType::Symbol {
+                continue;
+            }
             file_symbols += 1;
 
             let kind = match &child.kind {
@@ -242,15 +250,21 @@ fn find_entry_points(
         for candidate_id in candidates {
             let reverse = graph.reverse_neighbors(candidate_id);
             // Entry point = no callers from WITHIN the community
-            let internal_callers = reverse.iter().filter(|r| {
-                if let Some(node) = graph.get_node(r) {
-                    // Check if caller is in this community AND it's a Calls edge
-                    member_ids.contains(node.id.as_str())
-                        && graph.edges_between(r, candidate_id).iter().any(|e| e.edge_type == EdgeType::Calls)
-                } else {
-                    false
-                }
-            }).count();
+            let internal_callers = reverse
+                .iter()
+                .filter(|r| {
+                    if let Some(node) = graph.get_node(r) {
+                        // Check if caller is in this community AND it's a Calls edge
+                        member_ids.contains(node.id.as_str())
+                            && graph
+                                .edges_between(r, candidate_id)
+                                .iter()
+                                .any(|e| e.edge_type == EdgeType::Calls)
+                    } else {
+                        false
+                    }
+                })
+                .count();
 
             if internal_callers == 0 {
                 entry_points.push(sym.clone());
@@ -274,27 +288,43 @@ fn find_call_flow(
     let mut visited: HashSet<String> = HashSet::new();
 
     for node_id in member_ids {
-        if visited.contains(*node_id) { continue; }
-        let Some(node) = graph.get_node(node_id) else { continue; };
-        if node.node_type != NodeType::Symbol { continue; }
+        if visited.contains(*node_id) {
+            continue;
+        }
+        let Some(node) = graph.get_node(node_id) else {
+            continue;
+        };
+        if node.node_type != NodeType::Symbol {
+            continue;
+        }
 
         // BFS from this symbol
         let mut queue = vec![(node_id.to_string(), 0usize)];
         while let Some((current, depth)) = queue.pop() {
-            if depth >= max_depth { continue; }
-            if !visited.insert(current.clone()) { continue; }
+            if depth >= max_depth {
+                continue;
+            }
+            if !visited.insert(current.clone()) {
+                continue;
+            }
 
             for neighbor_id in graph.neighbors(&current) {
-                let Some(neighbor) = graph.get_node(neighbor_id) else { continue };
-                if neighbor.node_type != NodeType::Symbol { continue; }
+                let Some(neighbor) = graph.get_node(neighbor_id) else {
+                    continue;
+                };
+                if neighbor.node_type != NodeType::Symbol {
+                    continue;
+                }
 
                 // Only follow Calls edges
-                let has_call = graph.edges_between(&current, neighbor_id)
+                let has_call = graph
+                    .edges_between(&current, neighbor_id)
                     .iter()
                     .any(|e| e.edge_type == EdgeType::Calls);
 
                 if has_call {
-                    let from_name = graph.get_node(&current)
+                    let from_name = graph
+                        .get_node(&current)
                         .map(|n| n.name.clone())
                         .unwrap_or_default();
 
@@ -318,7 +348,9 @@ fn find_call_flow(
         }
 
         // Limit steps per page
-        if steps.len() > 20 { break; }
+        if steps.len() > 20 {
+            break;
+        }
     }
 
     steps.truncate(20);
@@ -334,8 +366,12 @@ fn find_cross_deps(
     let mut deps: HashMap<String, (String, String)> = HashMap::new(); // slug → (name, edge_type)
 
     for edge in graph.all_edges() {
-        if !member_ids.contains(edge.source.as_str()) { continue; }
-        if member_ids.contains(edge.target.as_str()) { continue; }
+        if !member_ids.contains(edge.source.as_str()) {
+            continue;
+        }
+        if member_ids.contains(edge.target.as_str()) {
+            continue;
+        }
 
         let edge_type = match edge.edge_type {
             EdgeType::Imports => "Imports",
@@ -346,7 +382,10 @@ fn find_cross_deps(
 
         // Find which community the target belongs to
         if let Some(target_node) = graph.get_node(&edge.target) {
-            let target_path = target_node.file_path.as_deref().unwrap_or(&target_node.name);
+            let target_path = target_node
+                .file_path
+                .as_deref()
+                .unwrap_or(&target_node.name);
             if let Some(target_slug) = file_to_community.get(target_path) {
                 deps.entry(target_slug.clone())
                     .or_insert_with(|| (target_slug.clone(), edge_type.to_string()));
@@ -379,7 +418,9 @@ fn compute_test_coverage(
     // Count production symbols (non-test) in this community
     let mut production_symbols: Vec<String> = Vec::new();
     for node_id in member_ids {
-        let Some(node) = graph.get_node(node_id) else { continue };
+        let Some(node) = graph.get_node(node_id) else {
+            continue;
+        };
         if node.node_type == NodeType::Symbol {
             production_symbols.push(node.name.clone());
         }
@@ -392,7 +433,9 @@ fn compute_test_coverage(
 
     // Scan all Tests edges (efficient: 430 edges in theo-code)
     for edge in graph.all_edges() {
-        if edge.edge_type != EdgeType::Tests { continue; }
+        if edge.edge_type != EdgeType::Tests {
+            continue;
+        }
         // If the target (tested symbol) is in our community, mark it
         if member_id_set.contains(edge.target.as_str()) {
             if let Some(target_node) = graph.get_node(&edge.target) {
@@ -402,15 +445,20 @@ fn compute_test_coverage(
     }
 
     // Also count Test nodes that share the same file_path as our community files
-    let community_files: HashSet<String> = member_ids.iter()
+    let community_files: HashSet<String> = member_ids
+        .iter()
         .filter_map(|id| graph.get_node(id))
         .filter_map(|n| n.file_path.clone())
         .collect();
 
     let mut community_test_count = 0;
     for node_id in graph.node_ids() {
-        let Some(node) = graph.get_node(node_id) else { continue };
-        if node.node_type != NodeType::Test { continue; }
+        let Some(node) = graph.get_node(node_id) else {
+            continue;
+        };
+        if node.node_type != NodeType::Test {
+            continue;
+        }
         if let Some(fp) = &node.file_path {
             if community_files.contains(fp) {
                 community_test_count += 1;
@@ -472,17 +520,26 @@ pub fn extract_crate_metadata(project_dir: &std::path::Path) -> HashMap<String, 
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
-                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
-                if name == "target" || name == ".git" || name == "node_modules" { continue; }
+                let name = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("")
+                    .to_string();
+                if name == "target" || name == ".git" || name == "node_modules" {
+                    continue;
+                }
                 // Check for Cargo.toml in this directory
                 let cargo_path = path.join("Cargo.toml");
                 if cargo_path.exists() {
                     if let Some(meta) = parse_cargo_toml(&cargo_path) {
                         let key = meta.name.clone().unwrap_or_else(|| name.clone());
-                        metadata.insert(key, CrateMetadata {
-                            crate_dir: name,
-                            ..meta
-                        });
+                        metadata.insert(
+                            key,
+                            CrateMetadata {
+                                crate_dir: name,
+                                ..meta
+                            },
+                        );
                     }
                 }
             }
@@ -494,7 +551,11 @@ pub fn extract_crate_metadata(project_dir: &std::path::Path) -> HashMap<String, 
     if root_cargo.exists() {
         if let Some(meta) = parse_cargo_toml(&root_cargo) {
             let key = meta.name.clone().unwrap_or_else(|| {
-                project_dir.file_name().and_then(|n| n.to_str()).unwrap_or("project").to_string()
+                project_dir
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("project")
+                    .to_string()
             });
             if !metadata.contains_key(&key) {
                 metadata.insert(key, meta);
@@ -511,7 +572,9 @@ pub fn extract_crate_metadata(project_dir: &std::path::Path) -> HashMap<String, 
             if name.is_some() || desc.is_some() {
                 let key = name.clone().unwrap_or_else(|| "project".into());
                 metadata.entry(key).or_insert(CrateMetadata {
-                    name, description: desc, crate_dir: ".".into(),
+                    name,
+                    description: desc,
+                    crate_dir: ".".into(),
                 });
             }
         }
@@ -524,7 +587,11 @@ fn parse_cargo_toml(path: &std::path::Path) -> Option<CrateMetadata> {
     let content = std::fs::read_to_string(path).ok()?;
     let name = extract_toml_value(&content, "name");
     let description = extract_toml_value(&content, "description");
-    Some(CrateMetadata { name, description, crate_dir: String::new() })
+    Some(CrateMetadata {
+        name,
+        description,
+        crate_dir: String::new(),
+    })
 }
 
 /// Simple TOML value extraction (no full parser needed — just key = "value" lines).
@@ -558,12 +625,14 @@ pub fn extract_module_doc(project_dir: &std::path::Path, crate_dir: &str) -> Opt
         project_dir.join(crate_dir).join("src").join("lib.rs"),
         project_dir.join(crate_dir).join("src").join("main.rs"),
         project_dir.join(crate_dir).join("lib.rs"),
-        project_dir.join("src").join("lib.rs"),  // root-level project
+        project_dir.join("src").join("lib.rs"), // root-level project
         project_dir.join("src").join("main.rs"),
     ];
 
     for path in &candidates {
-        if !path.exists() { continue; }
+        if !path.exists() {
+            continue;
+        }
         let content = std::fs::read_to_string(path).ok()?;
 
         // Collect consecutive //! lines at the start
@@ -605,22 +674,30 @@ pub fn extract_readme_summary(project_dir: &std::path::Path, crate_dir: &str) ->
     ];
 
     for path in &candidates {
-        if !path.exists() { continue; }
+        if !path.exists() {
+            continue;
+        }
         let content = std::fs::read_to_string(path).ok()?;
 
         // Skip: headings, badges, empty lines, links-only lines
-        let paragraph: Vec<&str> = content.lines()
+        let paragraph: Vec<&str> = content
+            .lines()
             .skip_while(|l| {
                 let t = l.trim();
-                t.is_empty() || t.starts_with('#') || t.starts_with('[') || t.starts_with('!')
-                    || t.starts_with("[![") || t.starts_with("More information")
+                t.is_empty()
+                    || t.starts_with('#')
+                    || t.starts_with('[')
+                    || t.starts_with('!')
+                    || t.starts_with("[![")
+                    || t.starts_with("More information")
             })
             .take_while(|l| !l.trim().is_empty())
             .collect();
 
         if !paragraph.is_empty() {
             let text = paragraph.join(" ");
-            if text.len() > 10 { // skip very short fragments
+            if text.len() > 10 {
+                // skip very short fragments
                 return Some(text);
             }
         }
@@ -629,11 +706,19 @@ pub fn extract_readme_summary(project_dir: &std::path::Path, crate_dir: &str) ->
 }
 
 /// Match a WikiDoc to its crate metadata by finding which crate directory contains its files.
-fn find_crate_for_doc(doc: &super::model::WikiDoc, metadata: &HashMap<String, CrateMetadata>) -> Option<String> {
+fn find_crate_for_doc(
+    doc: &super::model::WikiDoc,
+    metadata: &HashMap<String, CrateMetadata>,
+) -> Option<String> {
     // Build sorted list of crate dirs (longest first for precise matching)
-    let mut dirs: Vec<(&String, &str)> = metadata.iter()
+    let mut dirs: Vec<(&String, &str)> = metadata
+        .iter()
         .map(|(name, meta)| {
-            let dir = if meta.crate_dir.is_empty() { name.as_str() } else { meta.crate_dir.as_str() };
+            let dir = if meta.crate_dir.is_empty() {
+                name.as_str()
+            } else {
+                meta.crate_dir.as_str()
+            };
             (name, dir)
         })
         .collect();
@@ -643,9 +728,16 @@ fn find_crate_for_doc(doc: &super::model::WikiDoc, metadata: &HashMap<String, Cr
     let mut best_match: Option<(String, usize)> = None;
     for (name, dir) in &dirs {
         let prefix = format!("{}/", dir);
-        let count = doc.files.iter().filter(|f| f.path.starts_with(&prefix)).count();
+        let count = doc
+            .files
+            .iter()
+            .filter(|f| f.path.starts_with(&prefix))
+            .count();
         if count > 0 {
-            if best_match.as_ref().map_or(true, |(_, best_count)| count > *best_count) {
+            if best_match
+                .as_ref()
+                .map_or(true, |(_, best_count)| count > *best_count)
+            {
                 best_match = Some(((*name).clone(), count));
             }
         }
@@ -682,24 +774,44 @@ fn derive_semantic_title(
             // "src/auth.rs" → keep community name
             let first_seg = segments[0];
             if first_seg == "src" || first_seg == "lib" || first_seg == "." {
-                community_name.split('(').next().unwrap_or(community_name).trim().to_string()
+                community_name
+                    .split('(')
+                    .next()
+                    .unwrap_or(community_name)
+                    .trim()
+                    .to_string()
             } else {
                 first_seg.to_string()
             }
         } else {
-            community_name.split('(').next().unwrap_or(community_name).trim().to_string()
+            community_name
+                .split('(')
+                .next()
+                .unwrap_or(community_name)
+                .trim()
+                .to_string()
         }
     } else {
-        community_name.split('(').next().unwrap_or(community_name).trim().to_string()
+        community_name
+            .split('(')
+            .next()
+            .unwrap_or(community_name)
+            .trim()
+            .to_string()
     };
 
     // Append primary concept (first trait/struct entry point)
-    let primary = entry_points.first()
+    let primary = entry_points
+        .first()
         .filter(|e| e.kind == "Trait" || e.kind == "Struct" || e.kind == "Function")
         .map(|e| format!(" — {}", e.name));
 
     let full = format!("{}{}", base, primary.unwrap_or_default());
-    if full.len() > 60 { full[..57].to_string() + "..." } else { full }
+    if full.len() > 60 {
+        full[..57].to_string() + "..."
+    } else {
+        full
+    }
 }
 
 /// Generate a one-line deterministic summary from WikiDoc fields.
@@ -708,23 +820,33 @@ fn generate_summary(doc: &super::model::WikiDoc) -> String {
     let kind_summary = {
         let has_traits = doc.public_api.iter().any(|a| a.kind == "Trait");
         let has_structs = doc.public_api.iter().any(|a| a.kind == "Struct");
-        if has_traits && has_structs { "traits and types" }
-        else if has_traits { "traits" }
-        else if has_structs { "types" }
-        else { "functions" }
+        if has_traits && has_structs {
+            "traits and types"
+        } else if has_traits {
+            "traits"
+        } else if has_structs {
+            "types"
+        } else {
+            "functions"
+        }
     };
 
     let dep_hint = if !doc.dependencies.is_empty() {
         format!(", depends on {} modules", doc.dependencies.len())
-    } else { String::new() };
+    } else {
+        String::new()
+    };
 
-    let primary = doc.entry_points.first()
+    let primary = doc
+        .entry_points
+        .first()
         .map(|e| format!(" Primary: {}.", e.name))
         .unwrap_or_default();
 
-    format!("{} {} across {} files ({} symbols{}).{}",
-        doc.primary_language, kind_summary, doc.file_count,
-        doc.symbol_count, dep_hint, primary)
+    format!(
+        "{} {} across {} files ({} symbols{}).{}",
+        doc.primary_language, kind_summary, doc.file_count, doc.symbol_count, dep_hint, primary
+    )
 }
 
 /// Auto-detect tags from file paths and symbol kinds.
@@ -732,26 +854,56 @@ fn generate_tags(doc: &super::model::WikiDoc) -> Vec<String> {
     let mut tags = vec![doc.primary_language.clone()];
 
     // From path patterns
-    let all_paths: String = doc.files.iter().map(|f| f.path.as_str()).collect::<Vec<_>>().join(" ");
+    let all_paths: String = doc
+        .files
+        .iter()
+        .map(|f| f.path.as_str())
+        .collect::<Vec<_>>()
+        .join(" ");
     let path_patterns: &[(&str, &str)] = &[
-        ("test", "testing"), ("auth", "auth"), ("route", "routing"),
-        ("router", "routing"), ("middleware", "middleware"), ("extract", "extraction"),
-        ("error", "error-handling"), ("handler", "handlers"), ("response", "response"),
-        ("request", "request"), ("body", "http-body"), ("json", "json"),
-        ("form", "forms"), ("query", "query"), ("state", "state"),
-        ("tower", "tower"), ("service", "service"), ("layer", "layer"),
-        ("header", "headers"), ("cookie", "cookies"), ("websocket", "websocket"),
-        ("sse", "sse"), ("multipart", "multipart"),
+        ("test", "testing"),
+        ("auth", "auth"),
+        ("route", "routing"),
+        ("router", "routing"),
+        ("middleware", "middleware"),
+        ("extract", "extraction"),
+        ("error", "error-handling"),
+        ("handler", "handlers"),
+        ("response", "response"),
+        ("request", "request"),
+        ("body", "http-body"),
+        ("json", "json"),
+        ("form", "forms"),
+        ("query", "query"),
+        ("state", "state"),
+        ("tower", "tower"),
+        ("service", "service"),
+        ("layer", "layer"),
+        ("header", "headers"),
+        ("cookie", "cookies"),
+        ("websocket", "websocket"),
+        ("sse", "sse"),
+        ("multipart", "multipart"),
     ];
     for (pattern, tag) in path_patterns {
-        if all_paths.contains(pattern) { tags.push(tag.to_string()); }
+        if all_paths.contains(pattern) {
+            tags.push(tag.to_string());
+        }
     }
 
     // From symbol kinds
-    if doc.public_api.iter().any(|a| a.kind == "Trait") { tags.push("traits".into()); }
-    if doc.public_api.iter().any(|a| a.kind == "Struct") { tags.push("types".into()); }
-    if doc.public_api.iter().any(|a| a.kind == "Enum") { tags.push("enums".into()); }
-    if doc.test_coverage.percentage > 80.0 { tags.push("well-tested".into()); }
+    if doc.public_api.iter().any(|a| a.kind == "Trait") {
+        tags.push("traits".into());
+    }
+    if doc.public_api.iter().any(|a| a.kind == "Struct") {
+        tags.push("types".into());
+    }
+    if doc.public_api.iter().any(|a| a.kind == "Enum") {
+        tags.push("enums".into());
+    }
+    if doc.test_coverage.percentage > 80.0 {
+        tags.push("well-tested".into());
+    }
 
     tags.sort();
     tags.dedup();
@@ -857,7 +1009,8 @@ pub fn generate_wiki_incremental(
     let file_to_community = build_file_community_map(communities, graph);
 
     // Phase 1: Compute per-community hashes, detect changed
-    let active_communities: Vec<&Community> = communities.iter()
+    let active_communities: Vec<&Community> = communities
+        .iter()
         .filter(|c| !c.node_ids.is_empty())
         .collect();
 
@@ -879,17 +1032,24 @@ pub fn generate_wiki_incremental(
     // Fast path: nothing changed
     if changed_keys.is_empty() {
         let now = chrono_now();
-        return (Wiki {
-            docs: existing_docs.to_vec(),
-            manifest: WikiManifest {
-                schema_version: WikiManifest::SCHEMA_VERSION,
-                generator_version: WikiManifest::GENERATOR_VERSION.to_string(),
-                graph_hash: compute_graph_hash(graph),
-                generated_at: now,
-                page_count: existing_docs.len(),
-                page_hashes: new_hashes,
+        return (
+            Wiki {
+                docs: existing_docs.to_vec(),
+                manifest: WikiManifest {
+                    schema_version: WikiManifest::SCHEMA_VERSION,
+                    generator_version: WikiManifest::GENERATOR_VERSION.to_string(),
+                    graph_hash: compute_graph_hash(graph),
+                    generated_at: now,
+                    page_count: existing_docs.len(),
+                    page_hashes: new_hashes,
+                },
             },
-        }, IncrementalStats { changed: 0, propagated: 0, skipped: active_communities.len() });
+            IncrementalStats {
+                changed: 0,
+                propagated: 0,
+                skipped: active_communities.len(),
+            },
+        );
     }
 
     // Threshold: if >50% changed, full regen is simpler
@@ -902,7 +1062,13 @@ pub fn generate_wiki_incremental(
             propagated: 0,
             skipped: 0,
         };
-        return (Wiki { docs: wiki.docs, manifest }, stats);
+        return (
+            Wiki {
+                docs: wiki.docs,
+                manifest,
+            },
+            stats,
+        );
     }
 
     // Phase 2: Generate changed docs
@@ -920,7 +1086,8 @@ pub fn generate_wiki_incremental(
     // Include existing docs' deps
     for doc in existing_docs {
         for dep in &doc.dependencies {
-            reverse_deps.entry(dep.target_slug.clone())
+            reverse_deps
+                .entry(dep.target_slug.clone())
                 .or_default()
                 .insert(doc.slug.clone());
         }
@@ -928,7 +1095,8 @@ pub fn generate_wiki_incremental(
     // Include new changed docs' deps
     for doc in changed_docs.values() {
         for dep in &doc.dependencies {
-            reverse_deps.entry(dep.target_slug.clone())
+            reverse_deps
+                .entry(dep.target_slug.clone())
                 .or_default()
                 .insert(doc.slug.clone());
         }
@@ -978,12 +1146,12 @@ pub fn generate_wiki_incremental(
 
     // Phase 4: Merge — changed docs override existing
     let mut final_docs: Vec<WikiDoc> = Vec::new();
-    let existing_by_slug: HashMap<String, &WikiDoc> = existing_docs.iter()
-        .map(|d| (d.slug.clone(), d))
-        .collect();
+    let existing_by_slug: HashMap<String, &WikiDoc> =
+        existing_docs.iter().map(|d| (d.slug.clone(), d)).collect();
 
     // Track which existing slugs are still valid
-    let current_slugs: HashSet<String> = active_communities.iter()
+    let current_slugs: HashSet<String> = active_communities
+        .iter()
         .map(|c| slugify(&c.name))
         .collect();
 
@@ -1005,17 +1173,20 @@ pub fn generate_wiki_incremental(
         skipped: active_communities.len() - changed_keys.len() - propagated_keys.len(),
     };
 
-    (Wiki {
-        manifest: WikiManifest {
-            schema_version: WikiManifest::SCHEMA_VERSION,
-            generator_version: WikiManifest::GENERATOR_VERSION.to_string(),
-            graph_hash: compute_graph_hash(graph),
-            generated_at: now,
-            page_count: final_docs.len(),
-            page_hashes: new_hashes,
+    (
+        Wiki {
+            manifest: WikiManifest {
+                schema_version: WikiManifest::SCHEMA_VERSION,
+                generator_version: WikiManifest::GENERATOR_VERSION.to_string(),
+                graph_hash: compute_graph_hash(graph),
+                generated_at: now,
+                page_count: final_docs.len(),
+                page_hashes: new_hashes,
+            },
+            docs: final_docs,
         },
-        docs: final_docs,
-    }, stats)
+        stats,
+    )
 }
 
 /// Stats from incremental generation.
@@ -1028,8 +1199,11 @@ pub struct IncrementalStats {
 
 impl std::fmt::Display for IncrementalStats {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "changed: {}, propagated: {}, skipped: {}",
-            self.changed, self.propagated, self.skipped)
+        write!(
+            f,
+            "changed: {}, propagated: {}, skipped: {}",
+            self.changed, self.propagated, self.skipped
+        )
     }
 }
 
@@ -1065,16 +1239,15 @@ pub struct ConceptCandidate {
 /// 2. Union-find: merge communities with >= 3 mutual cross-deps
 /// 3. Fallback to prefix-based grouping for unclustered modules
 pub fn detect_concepts(docs: &[super::model::WikiDoc]) -> Vec<ConceptCandidate> {
-    let filtered: Vec<&super::model::WikiDoc> = docs.iter()
-        .filter(|d| d.file_count >= 2)
-        .collect();
+    let filtered: Vec<&super::model::WikiDoc> = docs.iter().filter(|d| d.file_count >= 2).collect();
 
     if filtered.is_empty() {
         return Vec::new();
     }
 
     // Build slug → index map
-    let slug_to_idx: HashMap<String, usize> = filtered.iter()
+    let slug_to_idx: HashMap<String, usize> = filtered
+        .iter()
         .enumerate()
         .map(|(i, d)| (d.slug.clone(), i))
         .collect();
@@ -1128,11 +1301,12 @@ pub fn detect_concepts(docs: &[super::model::WikiDoc]) -> Vec<ConceptCandidate> 
     let mut clustered_slugs: HashSet<String> = HashSet::new();
 
     for members in clusters.values() {
-        if members.len() < 2 { continue; } // Need 2+ for a concept
+        if members.len() < 2 {
+            continue;
+        } // Need 2+ for a concept
 
-        let group_docs: Vec<&super::model::WikiDoc> = members.iter()
-            .map(|&i| filtered[i])
-            .collect();
+        let group_docs: Vec<&super::model::WikiDoc> =
+            members.iter().map(|&i| filtered[i]).collect();
 
         let related_modules: Vec<String> = group_docs.iter().map(|d| d.slug.clone()).collect();
         for slug in &related_modules {
@@ -1153,8 +1327,11 @@ pub fn detect_concepts(docs: &[super::model::WikiDoc]) -> Vec<ConceptCandidate> 
     // Fallback: prefix-based for unclustered modules
     let mut prefix_groups: HashMap<String, Vec<&super::model::WikiDoc>> = HashMap::new();
     for doc in &filtered {
-        if clustered_slugs.contains(&doc.slug) { continue; }
-        let key = doc.title
+        if clustered_slugs.contains(&doc.slug) {
+            continue;
+        }
+        let key = doc
+            .title
             .split(|c: char| c == '(' || c == ' ')
             .next()
             .unwrap_or(&doc.title)
@@ -1169,11 +1346,17 @@ pub fn detect_concepts(docs: &[super::model::WikiDoc]) -> Vec<ConceptCandidate> 
     }
 
     for (_, group_docs) in &prefix_groups {
-        if group_docs.len() < 2 { continue; }
+        if group_docs.len() < 2 {
+            continue;
+        }
         let related_modules: Vec<String> = group_docs.iter().map(|d| d.slug.clone()).collect();
         let name = derive_concept_name(group_docs);
         let description_hint = build_description_hint(group_docs);
-        concepts.push(ConceptCandidate { name, related_modules, description_hint });
+        concepts.push(ConceptCandidate {
+            name,
+            related_modules,
+            description_hint,
+        });
     }
 
     concepts.sort_by(|a, b| b.related_modules.len().cmp(&a.related_modules.len()));
@@ -1184,14 +1367,27 @@ pub fn detect_concepts(docs: &[super::model::WikiDoc]) -> Vec<ConceptCandidate> 
 /// Derive a human-readable concept name from a group of docs.
 fn derive_concept_name(docs: &[&super::model::WikiDoc]) -> String {
     // Extract common prefix key
-    let keys: Vec<String> = docs.iter().map(|d| {
-        d.title.split(|c: char| c == '(' || c == ' ')
-            .next().unwrap_or(&d.title).trim()
-            .split('-').take(2).collect::<Vec<_>>().join("-")
-    }).collect();
+    let keys: Vec<String> = docs
+        .iter()
+        .map(|d| {
+            d.title
+                .split(|c: char| c == '(' || c == ' ')
+                .next()
+                .unwrap_or(&d.title)
+                .trim()
+                .split('-')
+                .take(2)
+                .collect::<Vec<_>>()
+                .join("-")
+        })
+        .collect();
 
-    let most_common = keys.iter()
-        .fold(HashMap::new(), |mut acc, k| { *acc.entry(k.as_str()).or_insert(0) += 1; acc })
+    let most_common = keys
+        .iter()
+        .fold(HashMap::new(), |mut acc, k| {
+            *acc.entry(k.as_str()).or_insert(0) += 1;
+            acc
+        })
         .into_iter()
         .max_by_key(|(_, count)| *count)
         .map(|(k, _)| k.to_string())
@@ -1232,82 +1428,135 @@ fn build_description_hint(docs: &[&super::model::WikiDoc]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use theo_engine_graph::model::{Node, Edge};
+    use theo_engine_graph::model::{Edge, Node};
 
     fn test_graph() -> (CodeGraph, Vec<Community>) {
         let mut graph = CodeGraph::new();
 
         // File: auth.rs
         graph.add_node(Node {
-            id: "file:auth.rs".into(), name: "auth.rs".into(),
-            node_type: NodeType::File, file_path: Some("src/auth.rs".into()),
-            signature: None, doc: None, kind: None,
-            line_start: None, line_end: None, last_modified: 100.0,
+            id: "file:auth.rs".into(),
+            name: "auth.rs".into(),
+            node_type: NodeType::File,
+            file_path: Some("src/auth.rs".into()),
+            signature: None,
+            doc: None,
+            kind: None,
+            line_start: None,
+            line_end: None,
+            last_modified: 100.0,
         });
         graph.add_node(Node {
-            id: "sym:verify".into(), name: "verify_token".into(),
-            node_type: NodeType::Symbol, file_path: Some("src/auth.rs".into()),
+            id: "sym:verify".into(),
+            name: "verify_token".into(),
+            node_type: NodeType::Symbol,
+            file_path: Some("src/auth.rs".into()),
             signature: Some("pub fn verify_token(t: &str) -> bool".into()),
             doc: Some("Verify JWT token".into()),
             kind: Some(SymbolKind::Function),
-            line_start: Some(10), line_end: Some(30), last_modified: 100.0,
+            line_start: Some(10),
+            line_end: Some(30),
+            last_modified: 100.0,
         });
         graph.add_edge(Edge {
-            source: "file:auth.rs".into(), target: "sym:verify".into(),
-            edge_type: EdgeType::Contains, weight: 1.0,
+            source: "file:auth.rs".into(),
+            target: "sym:verify".into(),
+            edge_type: EdgeType::Contains,
+            weight: 1.0,
         });
 
         // File: handler.rs (different community)
         graph.add_node(Node {
-            id: "file:handler.rs".into(), name: "handler.rs".into(),
-            node_type: NodeType::File, file_path: Some("src/handler.rs".into()),
-            signature: None, doc: None, kind: None,
-            line_start: None, line_end: None, last_modified: 200.0,
+            id: "file:handler.rs".into(),
+            name: "handler.rs".into(),
+            node_type: NodeType::File,
+            file_path: Some("src/handler.rs".into()),
+            signature: None,
+            doc: None,
+            kind: None,
+            line_start: None,
+            line_end: None,
+            last_modified: 200.0,
         });
         graph.add_node(Node {
-            id: "sym:handle".into(), name: "handle_request".into(),
-            node_type: NodeType::Symbol, file_path: Some("src/handler.rs".into()),
+            id: "sym:handle".into(),
+            name: "handle_request".into(),
+            node_type: NodeType::Symbol,
+            file_path: Some("src/handler.rs".into()),
             signature: Some("pub fn handle_request(req: Request) -> Response".into()),
-            doc: None, kind: Some(SymbolKind::Function),
-            line_start: Some(5), line_end: Some(20), last_modified: 200.0,
+            doc: None,
+            kind: Some(SymbolKind::Function),
+            line_start: Some(5),
+            line_end: Some(20),
+            last_modified: 200.0,
         });
         graph.add_edge(Edge {
-            source: "file:handler.rs".into(), target: "sym:handle".into(),
-            edge_type: EdgeType::Contains, weight: 1.0,
+            source: "file:handler.rs".into(),
+            target: "sym:handle".into(),
+            edge_type: EdgeType::Contains,
+            weight: 1.0,
         });
 
         // Second file in auth community
         graph.add_node(Node {
-            id: "file:auth_utils.rs".into(), name: "auth_utils.rs".into(),
-            node_type: NodeType::File, file_path: Some("src/auth_utils.rs".into()),
-            signature: None, doc: None, kind: None,
-            line_start: None, line_end: None, last_modified: 100.0,
+            id: "file:auth_utils.rs".into(),
+            name: "auth_utils.rs".into(),
+            node_type: NodeType::File,
+            file_path: Some("src/auth_utils.rs".into()),
+            signature: None,
+            doc: None,
+            kind: None,
+            line_start: None,
+            line_end: None,
+            last_modified: 100.0,
         });
 
         // handler calls verify (cross-community)
         graph.add_edge(Edge {
-            source: "sym:handle".into(), target: "sym:verify".into(),
-            edge_type: EdgeType::Calls, weight: 1.0,
+            source: "sym:handle".into(),
+            target: "sym:verify".into(),
+            edge_type: EdgeType::Calls,
+            weight: 1.0,
         });
 
         // Second file in handler community
         graph.add_node(Node {
-            id: "file:middleware.rs".into(), name: "middleware.rs".into(),
-            node_type: NodeType::File, file_path: Some("src/middleware.rs".into()),
-            signature: None, doc: None, kind: None,
-            line_start: None, line_end: None, last_modified: 200.0,
+            id: "file:middleware.rs".into(),
+            name: "middleware.rs".into(),
+            node_type: NodeType::File,
+            file_path: Some("src/middleware.rs".into()),
+            signature: None,
+            doc: None,
+            kind: None,
+            line_start: None,
+            line_end: None,
+            last_modified: 200.0,
         });
 
         let communities = vec![
             Community {
-                id: "c1".into(), name: "auth".into(),
-                node_ids: vec!["file:auth.rs".into(), "sym:verify".into(), "file:auth_utils.rs".into()],
-                level: 0, parent_id: None, version: 0,
+                id: "c1".into(),
+                name: "auth".into(),
+                node_ids: vec![
+                    "file:auth.rs".into(),
+                    "sym:verify".into(),
+                    "file:auth_utils.rs".into(),
+                ],
+                level: 0,
+                parent_id: None,
+                version: 0,
             },
             Community {
-                id: "c2".into(), name: "handler".into(),
-                node_ids: vec!["file:handler.rs".into(), "sym:handle".into(), "file:middleware.rs".into()],
-                level: 0, parent_id: None, version: 0,
+                id: "c2".into(),
+                name: "handler".into(),
+                node_ids: vec![
+                    "file:handler.rs".into(),
+                    "sym:handle".into(),
+                    "file:middleware.rs".into(),
+                ],
+                level: 0,
+                parent_id: None,
+                version: 0,
             },
         ];
 
@@ -1369,8 +1618,12 @@ mod tests {
     fn empty_community() {
         let graph = CodeGraph::new();
         let communities = vec![Community {
-            id: "empty".into(), name: "empty".into(),
-            node_ids: vec![], level: 0, parent_id: None, version: 0,
+            id: "empty".into(),
+            name: "empty".into(),
+            node_ids: vec![],
+            level: 0,
+            parent_id: None,
+            version: 0,
         }];
         let wiki = generate_wiki(&communities, &graph, "test");
         assert_eq!(wiki.docs.len(), 0); // Empty community filtered out
@@ -1408,7 +1661,9 @@ mod tests {
         // Build page_hashes from the current state
         let mut page_hashes = HashMap::new();
         for c in &communities {
-            if c.node_ids.is_empty() { continue; }
+            if c.node_ids.is_empty() {
+                continue;
+            }
             let key = community_canonical_key(c, &graph);
             let hash = compute_community_hash(c, &graph);
             page_hashes.insert(key, hash);
@@ -1420,7 +1675,11 @@ mod tests {
         };
 
         let (_, stats) = generate_wiki_incremental(
-            &communities, &graph, "test", &manifest_with_hashes, &wiki.docs,
+            &communities,
+            &graph,
+            "test",
+            &manifest_with_hashes,
+            &wiki.docs,
         );
         assert_eq!(stats.changed, 0, "no changes should mean zero regeneration");
         assert_eq!(stats.propagated, 0);
@@ -1430,68 +1689,121 @@ mod tests {
         // Same as test_graph but auth.rs has different mtime
         let mut graph = CodeGraph::new();
         graph.add_node(Node {
-            id: "file:auth.rs".into(), name: "auth.rs".into(),
-            node_type: NodeType::File, file_path: Some("src/auth.rs".into()),
-            signature: None, doc: None, kind: None,
-            line_start: None, line_end: None, last_modified: 999.0, // CHANGED
+            id: "file:auth.rs".into(),
+            name: "auth.rs".into(),
+            node_type: NodeType::File,
+            file_path: Some("src/auth.rs".into()),
+            signature: None,
+            doc: None,
+            kind: None,
+            line_start: None,
+            line_end: None,
+            last_modified: 999.0, // CHANGED
         });
         graph.add_node(Node {
-            id: "sym:verify".into(), name: "verify_token".into(),
-            node_type: NodeType::Symbol, file_path: Some("src/auth.rs".into()),
+            id: "sym:verify".into(),
+            name: "verify_token".into(),
+            node_type: NodeType::Symbol,
+            file_path: Some("src/auth.rs".into()),
             signature: Some("pub fn verify_token(t: &str) -> bool".into()),
             doc: Some("Verify JWT token".into()),
             kind: Some(SymbolKind::Function),
-            line_start: Some(10), line_end: Some(30), last_modified: 999.0,
+            line_start: Some(10),
+            line_end: Some(30),
+            last_modified: 999.0,
         });
         graph.add_edge(Edge {
-            source: "file:auth.rs".into(), target: "sym:verify".into(),
-            edge_type: EdgeType::Contains, weight: 1.0,
+            source: "file:auth.rs".into(),
+            target: "sym:verify".into(),
+            edge_type: EdgeType::Contains,
+            weight: 1.0,
         });
         graph.add_node(Node {
-            id: "file:handler.rs".into(), name: "handler.rs".into(),
-            node_type: NodeType::File, file_path: Some("src/handler.rs".into()),
-            signature: None, doc: None, kind: None,
-            line_start: None, line_end: None, last_modified: 200.0,
+            id: "file:handler.rs".into(),
+            name: "handler.rs".into(),
+            node_type: NodeType::File,
+            file_path: Some("src/handler.rs".into()),
+            signature: None,
+            doc: None,
+            kind: None,
+            line_start: None,
+            line_end: None,
+            last_modified: 200.0,
         });
         graph.add_node(Node {
-            id: "sym:handle".into(), name: "handle_request".into(),
-            node_type: NodeType::Symbol, file_path: Some("src/handler.rs".into()),
+            id: "sym:handle".into(),
+            name: "handle_request".into(),
+            node_type: NodeType::Symbol,
+            file_path: Some("src/handler.rs".into()),
             signature: Some("pub fn handle_request(req: Request) -> Response".into()),
-            doc: None, kind: Some(SymbolKind::Function),
-            line_start: Some(5), line_end: Some(20), last_modified: 200.0,
+            doc: None,
+            kind: Some(SymbolKind::Function),
+            line_start: Some(5),
+            line_end: Some(20),
+            last_modified: 200.0,
         });
         graph.add_edge(Edge {
-            source: "file:handler.rs".into(), target: "sym:handle".into(),
-            edge_type: EdgeType::Contains, weight: 1.0,
+            source: "file:handler.rs".into(),
+            target: "sym:handle".into(),
+            edge_type: EdgeType::Contains,
+            weight: 1.0,
         });
         graph.add_edge(Edge {
-            source: "sym:handle".into(), target: "sym:verify".into(),
-            edge_type: EdgeType::Calls, weight: 1.0,
+            source: "sym:handle".into(),
+            target: "sym:verify".into(),
+            edge_type: EdgeType::Calls,
+            weight: 1.0,
         });
         // Second files (same as test_graph)
         graph.add_node(Node {
-            id: "file:auth_utils.rs".into(), name: "auth_utils.rs".into(),
-            node_type: NodeType::File, file_path: Some("src/auth_utils.rs".into()),
-            signature: None, doc: None, kind: None,
-            line_start: None, line_end: None, last_modified: 100.0,
+            id: "file:auth_utils.rs".into(),
+            name: "auth_utils.rs".into(),
+            node_type: NodeType::File,
+            file_path: Some("src/auth_utils.rs".into()),
+            signature: None,
+            doc: None,
+            kind: None,
+            line_start: None,
+            line_end: None,
+            last_modified: 100.0,
         });
         graph.add_node(Node {
-            id: "file:middleware.rs".into(), name: "middleware.rs".into(),
-            node_type: NodeType::File, file_path: Some("src/middleware.rs".into()),
-            signature: None, doc: None, kind: None,
-            line_start: None, line_end: None, last_modified: 200.0,
+            id: "file:middleware.rs".into(),
+            name: "middleware.rs".into(),
+            node_type: NodeType::File,
+            file_path: Some("src/middleware.rs".into()),
+            signature: None,
+            doc: None,
+            kind: None,
+            line_start: None,
+            line_end: None,
+            last_modified: 200.0,
         });
 
         let communities = vec![
             Community {
-                id: "c1".into(), name: "auth".into(),
-                node_ids: vec!["file:auth.rs".into(), "sym:verify".into(), "file:auth_utils.rs".into()],
-                level: 0, parent_id: None, version: 0,
+                id: "c1".into(),
+                name: "auth".into(),
+                node_ids: vec![
+                    "file:auth.rs".into(),
+                    "sym:verify".into(),
+                    "file:auth_utils.rs".into(),
+                ],
+                level: 0,
+                parent_id: None,
+                version: 0,
             },
             Community {
-                id: "c2".into(), name: "handler".into(),
-                node_ids: vec!["file:handler.rs".into(), "sym:handle".into(), "file:middleware.rs".into()],
-                level: 0, parent_id: None, version: 0,
+                id: "c2".into(),
+                name: "handler".into(),
+                node_ids: vec![
+                    "file:handler.rs".into(),
+                    "sym:handle".into(),
+                    "file:middleware.rs".into(),
+                ],
+                level: 0,
+                parent_id: None,
+                version: 0,
             },
         ];
         (graph, communities)
@@ -1505,19 +1817,23 @@ mod tests {
         // Build initial hashes
         let mut page_hashes = HashMap::new();
         for c in &communities {
-            if c.node_ids.is_empty() { continue; }
+            if c.node_ids.is_empty() {
+                continue;
+            }
             let key = community_canonical_key(c, &graph);
             let hash = compute_community_hash(c, &graph);
             page_hashes.insert(key, hash);
         }
-        let manifest = WikiManifest { page_hashes, ..wiki.manifest.clone() };
+        let manifest = WikiManifest {
+            page_hashes,
+            ..wiki.manifest.clone()
+        };
 
         // New graph where auth.rs has different mtime
         let (graph2, communities2) = test_graph_modified();
 
-        let (result, stats) = generate_wiki_incremental(
-            &communities2, &graph2, "test", &manifest, &wiki.docs,
-        );
+        let (result, stats) =
+            generate_wiki_incremental(&communities2, &graph2, "test", &manifest, &wiki.docs);
         assert!(stats.changed > 0, "should detect change in auth community");
         assert_eq!(result.docs.len(), 2, "should still have all pages");
     }
@@ -1526,54 +1842,141 @@ mod tests {
     fn topology_concept_detection_with_cross_deps() {
         // Build docs with enough cross-deps to form topology clusters
         let doc_a = WikiDoc {
-            slug: "mod-a".into(), title: "Module A".into(), community_id: "c1".into(),
-            file_count: 5, symbol_count: 10, primary_language: "rs".into(),
-            files: vec![], entry_points: vec![], public_api: vec![],
+            slug: "mod-a".into(),
+            title: "Module A".into(),
+            community_id: "c1".into(),
+            file_count: 5,
+            symbol_count: 10,
+            primary_language: "rs".into(),
+            files: vec![],
+            entry_points: vec![],
+            public_api: vec![],
             dependencies: vec![
-                DepEntry { target_slug: "mod-b".into(), target_name: "B".into(), edge_type: "Calls".into() },
-                DepEntry { target_slug: "mod-b".into(), target_name: "B".into(), edge_type: "Imports".into() },
+                DepEntry {
+                    target_slug: "mod-b".into(),
+                    target_name: "B".into(),
+                    edge_type: "Calls".into(),
+                },
+                DepEntry {
+                    target_slug: "mod-b".into(),
+                    target_name: "B".into(),
+                    edge_type: "Imports".into(),
+                },
             ],
-            call_flow: vec![], test_coverage: TestCoverage { tested: 0, total: 0, percentage: 0.0, untested: vec![] },
-            source_refs: vec![], summary: String::new(), tags: vec![], crate_description: None, module_doc: None, generated_at: "0".into(), enriched: false,
+            call_flow: vec![],
+            test_coverage: TestCoverage {
+                tested: 0,
+                total: 0,
+                percentage: 0.0,
+                untested: vec![],
+            },
+            source_refs: vec![],
+            summary: String::new(),
+            tags: vec![],
+            crate_description: None,
+            module_doc: None,
+            generated_at: "0".into(),
+            enriched: false,
         };
         let doc_b = WikiDoc {
-            slug: "mod-b".into(), title: "Module B".into(), community_id: "c2".into(),
-            file_count: 5, symbol_count: 10, primary_language: "rs".into(),
-            files: vec![], entry_points: vec![], public_api: vec![],
-            dependencies: vec![
-                DepEntry { target_slug: "mod-a".into(), target_name: "A".into(), edge_type: "Calls".into() },
-            ],
-            call_flow: vec![], test_coverage: TestCoverage { tested: 0, total: 0, percentage: 0.0, untested: vec![] },
-            source_refs: vec![], summary: String::new(), tags: vec![], crate_description: None, module_doc: None, generated_at: "0".into(), enriched: false,
+            slug: "mod-b".into(),
+            title: "Module B".into(),
+            community_id: "c2".into(),
+            file_count: 5,
+            symbol_count: 10,
+            primary_language: "rs".into(),
+            files: vec![],
+            entry_points: vec![],
+            public_api: vec![],
+            dependencies: vec![DepEntry {
+                target_slug: "mod-a".into(),
+                target_name: "A".into(),
+                edge_type: "Calls".into(),
+            }],
+            call_flow: vec![],
+            test_coverage: TestCoverage {
+                tested: 0,
+                total: 0,
+                percentage: 0.0,
+                untested: vec![],
+            },
+            source_refs: vec![],
+            summary: String::new(),
+            tags: vec![],
+            crate_description: None,
+            module_doc: None,
+            generated_at: "0".into(),
+            enriched: false,
         };
         // C and D are isolated
         let doc_c = WikiDoc {
-            slug: "other-c".into(), title: "Other C".into(), community_id: "c3".into(),
-            file_count: 3, symbol_count: 5, primary_language: "rs".into(),
-            files: vec![], entry_points: vec![], public_api: vec![],
-            dependencies: vec![], call_flow: vec![],
-            test_coverage: TestCoverage { tested: 0, total: 0, percentage: 0.0, untested: vec![] },
-            source_refs: vec![], summary: String::new(), tags: vec![], crate_description: None, module_doc: None, generated_at: "0".into(), enriched: false,
+            slug: "other-c".into(),
+            title: "Other C".into(),
+            community_id: "c3".into(),
+            file_count: 3,
+            symbol_count: 5,
+            primary_language: "rs".into(),
+            files: vec![],
+            entry_points: vec![],
+            public_api: vec![],
+            dependencies: vec![],
+            call_flow: vec![],
+            test_coverage: TestCoverage {
+                tested: 0,
+                total: 0,
+                percentage: 0.0,
+                untested: vec![],
+            },
+            source_refs: vec![],
+            summary: String::new(),
+            tags: vec![],
+            crate_description: None,
+            module_doc: None,
+            generated_at: "0".into(),
+            enriched: false,
         };
 
         let docs = vec![doc_a, doc_b, doc_c];
         let concepts = detect_concepts(&docs);
         // A and B have 3 mutual deps → should form a topology cluster
-        assert!(concepts.iter().any(|c| c.related_modules.contains(&"mod-a".to_string())
-            && c.related_modules.contains(&"mod-b".to_string())),
-            "A and B should be in same concept cluster, got: {:?}", concepts);
+        assert!(
+            concepts
+                .iter()
+                .any(|c| c.related_modules.contains(&"mod-a".to_string())
+                    && c.related_modules.contains(&"mod-b".to_string())),
+            "A and B should be in same concept cluster, got: {:?}",
+            concepts
+        );
     }
 
     #[test]
     fn no_deps_falls_back_to_prefix() {
         // Docs with same prefix but no cross-deps → prefix-based grouping
         let make_doc = |slug: &str, title: &str| WikiDoc {
-            slug: slug.into(), title: title.into(), community_id: "cx".into(),
-            file_count: 3, symbol_count: 5, primary_language: "rs".into(),
-            files: vec![], entry_points: vec![], public_api: vec![],
-            dependencies: vec![], call_flow: vec![],
-            test_coverage: TestCoverage { tested: 0, total: 0, percentage: 0.0, untested: vec![] },
-            source_refs: vec![], summary: String::new(), tags: vec![], crate_description: None, module_doc: None, generated_at: "0".into(), enriched: false,
+            slug: slug.into(),
+            title: title.into(),
+            community_id: "cx".into(),
+            file_count: 3,
+            symbol_count: 5,
+            primary_language: "rs".into(),
+            files: vec![],
+            entry_points: vec![],
+            public_api: vec![],
+            dependencies: vec![],
+            call_flow: vec![],
+            test_coverage: TestCoverage {
+                tested: 0,
+                total: 0,
+                percentage: 0.0,
+                untested: vec![],
+            },
+            source_refs: vec![],
+            summary: String::new(),
+            tags: vec![],
+            crate_description: None,
+            module_doc: None,
+            generated_at: "0".into(),
+            enriched: false,
         };
 
         let docs = vec![
@@ -1594,22 +1997,34 @@ mod tests {
         // Build initial hashes
         let mut page_hashes = HashMap::new();
         for c in &communities {
-            if c.node_ids.is_empty() { continue; }
+            if c.node_ids.is_empty() {
+                continue;
+            }
             let key = community_canonical_key(c, &graph);
             let hash = compute_community_hash(c, &graph);
             page_hashes.insert(key, hash);
         }
-        let manifest = WikiManifest { page_hashes, ..wiki.manifest.clone() };
+        let manifest = WikiManifest {
+            page_hashes,
+            ..wiki.manifest.clone()
+        };
 
         // Modified graph: auth changed
         let (graph2, communities2) = test_graph_modified();
 
-        let (_, stats) = generate_wiki_incremental(
-            &communities2, &graph2, "test", &manifest, &wiki.docs,
-        );
+        let (_, stats) =
+            generate_wiki_incremental(&communities2, &graph2, "test", &manifest, &wiki.docs);
         // auth changed + handler propagated (depends on auth)
-        assert!(stats.changed >= 1, "auth should be changed, stats: {}", stats);
+        assert!(
+            stats.changed >= 1,
+            "auth should be changed, stats: {}",
+            stats
+        );
         let total_regen = stats.changed + stats.propagated;
-        assert!(total_regen >= 1, "at least auth should be regenerated, stats: {}", stats);
+        assert!(
+            total_regen >= 1,
+            "at least auth should be regenerated, stats: {}",
+            stats
+        );
     }
 }

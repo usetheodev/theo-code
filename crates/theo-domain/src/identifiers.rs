@@ -17,7 +17,10 @@ macro_rules! define_identifier {
             /// Panics if `id` is empty.
             pub fn new(id: impl Into<String>) -> Self {
                 let id = id.into();
-                assert!(!id.is_empty(), concat!(stringify!($name), " must not be empty"));
+                assert!(
+                    !id.is_empty(),
+                    concat!(stringify!($name), " must not be empty")
+                );
                 Self(id)
             }
 
@@ -52,7 +55,10 @@ macro_rules! define_identifier {
     };
 }
 
-define_identifier!(TaskId, "Unique identifier for a task in the agent lifecycle.");
+define_identifier!(
+    TaskId,
+    "Unique identifier for a task in the agent lifecycle."
+);
 define_identifier!(CallId, "Unique identifier for a tool call.");
 define_identifier!(RunId, "Unique identifier for an agent run.");
 define_identifier!(EventId, "Unique identifier for a domain event.");

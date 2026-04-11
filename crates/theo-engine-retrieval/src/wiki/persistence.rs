@@ -21,9 +21,8 @@ pub fn write_to_disk(wiki: &Wiki, project_dir: &Path) -> std::io::Result<()> {
     std::fs::write(wiki_dir.join("index.md"), index_md)?;
 
     // Clean up orphaned pages from previous runs
-    let current_slugs: std::collections::HashSet<String> = wiki.docs.iter()
-        .map(|d| d.slug.clone())
-        .collect();
+    let current_slugs: std::collections::HashSet<String> =
+        wiki.docs.iter().map(|d| d.slug.clone()).collect();
     cleanup_orphaned_pages(&wiki_dir, &current_slugs);
 
     // Write each module page
@@ -34,8 +33,8 @@ pub fn write_to_disk(wiki: &Wiki, project_dir: &Path) -> std::io::Result<()> {
     }
 
     // Write manifest
-    let manifest_json = serde_json::to_string_pretty(&wiki.manifest)
-        .unwrap_or_else(|_| "{}".to_string());
+    let manifest_json =
+        serde_json::to_string_pretty(&wiki.manifest).unwrap_or_else(|_| "{}".to_string());
     std::fs::write(wiki_dir.join("wiki.manifest.json"), manifest_json)?;
 
     Ok(())
@@ -43,7 +42,10 @@ pub fn write_to_disk(wiki: &Wiki, project_dir: &Path) -> std::io::Result<()> {
 
 /// Check if cached wiki is still fresh (graph hasn't changed).
 pub fn is_fresh(project_dir: &Path, current_hash: u64) -> bool {
-    let manifest_path = project_dir.join(".theo").join("wiki").join("wiki.manifest.json");
+    let manifest_path = project_dir
+        .join(".theo")
+        .join("wiki")
+        .join("wiki.manifest.json");
     let Ok(content) = std::fs::read_to_string(&manifest_path) else {
         return false;
     };
@@ -120,14 +122,20 @@ pub fn write_page(doc: &WikiDoc, wiki_dir: &std::path::Path) -> std::io::Result<
 }
 
 /// Remove orphaned pages (modules on disk that are no longer in the wiki).
-pub fn cleanup_orphaned_pages(wiki_dir: &std::path::Path, current_slugs: &std::collections::HashSet<String>) -> usize {
+pub fn cleanup_orphaned_pages(
+    wiki_dir: &std::path::Path,
+    current_slugs: &std::collections::HashSet<String>,
+) -> usize {
     let modules_dir = wiki_dir.join("modules");
     let mut removed = 0;
     if let Ok(entries) = std::fs::read_dir(&modules_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) != Some("md") { continue; }
-            let slug = path.file_stem()
+            if path.extension().and_then(|e| e.to_str()) != Some("md") {
+                continue;
+            }
+            let slug = path
+                .file_stem()
                 .and_then(|s| s.to_str())
                 .unwrap_or("")
                 .to_string();
@@ -147,7 +155,9 @@ pub fn cleanup_orphaned_pages(wiki_dir: &std::path::Path, current_slugs: &std::c
 /// Returns the number of pages moved.
 pub fn mark_stale_cache(wiki_dir: &std::path::Path, current_graph_hash: u64) -> usize {
     let cache_dir = wiki_dir.join("cache");
-    if !cache_dir.exists() { return 0; }
+    if !cache_dir.exists() {
+        return 0;
+    }
 
     let stale_dir = cache_dir.join("stale");
     let mut moved = 0;
@@ -155,8 +165,12 @@ pub fn mark_stale_cache(wiki_dir: &std::path::Path, current_graph_hash: u64) -> 
     if let Ok(entries) = std::fs::read_dir(&cache_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_dir() { continue; } // Skip stale/ and cold/ subdirs
-            if path.extension().and_then(|e| e.to_str()) != Some("md") { continue; }
+            if path.is_dir() {
+                continue;
+            } // Skip stale/ and cold/ subdirs
+            if path.extension().and_then(|e| e.to_str()) != Some("md") {
+                continue;
+            }
 
             if let Ok(content) = std::fs::read_to_string(&path) {
                 let fm = super::model::parse_frontmatter(&content);
@@ -184,7 +198,9 @@ pub fn mark_stale_cache(wiki_dir: &std::path::Path, current_graph_hash: u64) -> 
 /// Returns the number of pages removed.
 pub fn gc_cold_cache(wiki_dir: &std::path::Path, max_age_secs: u64) -> usize {
     let stale_dir = wiki_dir.join("cache").join("stale");
-    if !stale_dir.exists() { return 0; }
+    if !stale_dir.exists() {
+        return 0;
+    }
 
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -195,7 +211,9 @@ pub fn gc_cold_cache(wiki_dir: &std::path::Path, max_age_secs: u64) -> usize {
     if let Ok(entries) = std::fs::read_dir(&stale_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) != Some("md") { continue; }
+            if path.extension().and_then(|e| e.to_str()) != Some("md") {
+                continue;
+            }
 
             if let Ok(content) = std::fs::read_to_string(&path) {
                 let fm = super::model::parse_frontmatter(&content);
@@ -217,7 +235,10 @@ pub fn gc_cold_cache(wiki_dir: &std::path::Path, max_age_secs: u64) -> usize {
 /// Load wiki schema from `.theo/wiki/wiki.schema.toml`.
 /// Returns default schema if file doesn't exist or is invalid.
 pub fn load_schema(project_dir: &Path, project_name: &str) -> WikiSchema {
-    let path = project_dir.join(".theo").join("wiki").join("wiki.schema.toml");
+    let path = project_dir
+        .join(".theo")
+        .join("wiki")
+        .join("wiki.schema.toml");
     match std::fs::read_to_string(&path) {
         Ok(content) => toml::from_str(&content).unwrap_or_else(|e| {
             eprintln!("[wiki] Invalid schema TOML, using defaults: {}", e);
@@ -242,7 +263,10 @@ pub fn write_schema_default(project_dir: &Path, schema: &WikiSchema) -> std::io:
 
 /// Load manifest from disk.
 pub fn load_manifest(project_dir: &Path) -> Option<WikiManifest> {
-    let path = project_dir.join(".theo").join("wiki").join("wiki.manifest.json");
+    let path = project_dir
+        .join(".theo")
+        .join("wiki")
+        .join("wiki.manifest.json");
     let content = std::fs::read_to_string(path).ok()?;
     serde_json::from_str(&content).ok()
 }
@@ -270,7 +294,10 @@ mod tests {
                 dependencies: vec![],
                 call_flow: vec![],
                 test_coverage: TestCoverage {
-                    tested: 1, total: 2, percentage: 50.0, untested: vec!["foo".into()],
+                    tested: 1,
+                    total: 2,
+                    percentage: 50.0,
+                    untested: vec!["foo".into()],
                 },
                 source_refs: vec![SourceRef::file("test.rs")],
                 summary: String::new(),
@@ -300,7 +327,11 @@ mod tests {
 
         // Check files exist
         assert!(dir.path().join(".theo/wiki/index.md").exists());
-        assert!(dir.path().join(".theo/wiki/modules/test-module.md").exists());
+        assert!(
+            dir.path()
+                .join(".theo/wiki/modules/test-module.md")
+                .exists()
+        );
         assert!(dir.path().join(".theo/wiki/wiki.manifest.json").exists());
 
         // Fresh with same hash
@@ -335,8 +366,11 @@ mod tests {
 
         let index = std::fs::read_to_string(dir.path().join(".theo/wiki/index.md")).unwrap();
         // Module should appear somewhere in the index (flat or hierarchical)
-        assert!(index.contains("test-module") || index.contains("Test Module"),
-            "index should reference the module: {}", &index[..index.len().min(500)]);
+        assert!(
+            index.contains("test-module") || index.contains("Test Module"),
+            "index should reference the module: {}",
+            &index[..index.len().min(500)]
+        );
     }
 
     #[test]
@@ -382,12 +416,21 @@ mod tests {
         std::fs::create_dir_all(&cache_dir).unwrap();
 
         // Write 3 cache pages: 2 stale (hash 111), 1 fresh (hash 999)
-        std::fs::write(cache_dir.join("stale1.md"),
-            "---\ngraph_hash: 111\ngenerated_at: \"100\"\n---\n# Stale 1\n").unwrap();
-        std::fs::write(cache_dir.join("stale2.md"),
-            "---\ngraph_hash: 111\ngenerated_at: \"100\"\n---\n# Stale 2\n").unwrap();
-        std::fs::write(cache_dir.join("fresh.md"),
-            "---\ngraph_hash: 999\ngenerated_at: \"100\"\n---\n# Fresh\n").unwrap();
+        std::fs::write(
+            cache_dir.join("stale1.md"),
+            "---\ngraph_hash: 111\ngenerated_at: \"100\"\n---\n# Stale 1\n",
+        )
+        .unwrap();
+        std::fs::write(
+            cache_dir.join("stale2.md"),
+            "---\ngraph_hash: 111\ngenerated_at: \"100\"\n---\n# Stale 2\n",
+        )
+        .unwrap();
+        std::fs::write(
+            cache_dir.join("fresh.md"),
+            "---\ngraph_hash: 999\ngenerated_at: \"100\"\n---\n# Fresh\n",
+        )
+        .unwrap();
 
         let moved = mark_stale_cache(&wiki_dir, 999);
         assert_eq!(moved, 2);
@@ -404,8 +447,11 @@ mod tests {
         std::fs::create_dir_all(&stale_dir).unwrap();
 
         // Old page (generated_at = 100, very old)
-        std::fs::write(stale_dir.join("old.md"),
-            "---\ngenerated_at: \"100\"\n---\n# Old\n").unwrap();
+        std::fs::write(
+            stale_dir.join("old.md"),
+            "---\ngenerated_at: \"100\"\n---\n# Old\n",
+        )
+        .unwrap();
 
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -413,8 +459,11 @@ mod tests {
             .as_secs();
 
         // Recent page (generated_at = now)
-        std::fs::write(stale_dir.join("recent.md"),
-            &format!("---\ngenerated_at: \"{}\"\n---\n# Recent\n", now)).unwrap();
+        std::fs::write(
+            stale_dir.join("recent.md"),
+            &format!("---\ngenerated_at: \"{}\"\n---\n# Recent\n", now),
+        )
+        .unwrap();
 
         let removed = gc_cold_cache(&wiki_dir, 604800); // 7 days
         assert_eq!(removed, 1);

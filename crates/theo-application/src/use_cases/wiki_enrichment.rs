@@ -89,7 +89,8 @@ pub async fn enrich_wiki(
             Ok(response) => {
                 if let Some(content) = response.content() {
                     // Validate: enriched content should contain key sections
-                    if content.contains("## Entry Points") || content.contains("## Public API")
+                    if content.contains("## Entry Points")
+                        || content.contains("## Public API")
                         || content.contains("## Files")
                     {
                         // Write enriched page to disk
@@ -160,10 +161,7 @@ impl std::fmt::Display for EnrichmentResult {
 // ---------------------------------------------------------------------------
 
 /// Load wiki docs from disk (reads markdown files + manifest).
-fn load_wiki_from_disk(
-    project_dir: &Path,
-    manifest: &WikiManifest,
-) -> Result<Wiki, String> {
+fn load_wiki_from_disk(project_dir: &Path, manifest: &WikiManifest) -> Result<Wiki, String> {
     let modules_dir = project_dir.join(".theo").join("wiki").join("modules");
 
     let mut docs = Vec::new();

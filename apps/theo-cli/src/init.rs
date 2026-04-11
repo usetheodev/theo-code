@@ -95,7 +95,12 @@ fn detect_project_name(project_dir: &Path, project_type: ProjectType) -> String 
                     let trimmed = line.trim().trim_start_matches('{').trim();
                     if trimmed.starts_with("\"name\"") {
                         if let Some(val) = trimmed.split(':').nth(1) {
-                            let name = val.trim().trim_end_matches('}').trim_matches(',').trim().trim_matches('"');
+                            let name = val
+                                .trim()
+                                .trim_end_matches('}')
+                                .trim_matches(',')
+                                .trim()
+                                .trim_matches('"');
                             if !name.is_empty() {
                                 return name.to_string();
                             }
@@ -144,7 +149,11 @@ fn detect_project_name(project_dir: &Path, project_type: ProjectType) -> String 
 // ---------------------------------------------------------------------------
 
 /// Render the theo.md template with project info and progressive disclosure pointers.
-pub fn render_theo_md(project_name: &str, project_type: ProjectType, project_dir: &std::path::Path) -> String {
+pub fn render_theo_md(
+    project_name: &str,
+    project_type: ProjectType,
+    project_dir: &std::path::Path,
+) -> String {
     let mut sections = format!(
         r#"# {project_name}
 
@@ -230,9 +239,7 @@ pub fn run_init(project_dir: &Path) -> Result<bool, String> {
 
     // Check if already initialized
     if theo_md_path.exists() {
-        eprintln!(
-            "  .theo/theo.md already exists — skipping (edit manually if needed)"
-        );
+        eprintln!("  .theo/theo.md already exists — skipping (edit manually if needed)");
         // Still create .gitignore if missing
         if !gitignore_path.exists() {
             std::fs::create_dir_all(&theo_dir)
@@ -252,8 +259,7 @@ pub fn run_init(project_dir: &Path) -> Result<bool, String> {
     eprintln!("  Language: {}", project_type.label());
 
     // Create .theo/ directory
-    std::fs::create_dir_all(&theo_dir)
-        .map_err(|e| format!("Failed to create .theo/: {e}"))?;
+    std::fs::create_dir_all(&theo_dir).map_err(|e| format!("Failed to create .theo/: {e}"))?;
 
     // Write theo.md
     let content = render_theo_md(&project_name, project_type, project_dir);
@@ -310,7 +316,10 @@ pub async fn run_init_with_agent(
     config: theo_agent_runtime::AgentConfig,
 ) -> Result<bool, String> {
     if !project_dir.exists() {
-        return Err(format!("Directory does not exist: {}", project_dir.display()));
+        return Err(format!(
+            "Directory does not exist: {}",
+            project_dir.display()
+        ));
     }
 
     let theo_dir = project_dir.join(".theo");
@@ -323,8 +332,7 @@ pub async fn run_init_with_agent(
     }
 
     // Create .theo/ dir and .gitignore
-    std::fs::create_dir_all(&theo_dir)
-        .map_err(|e| format!("Failed to create .theo/: {e}"))?;
+    std::fs::create_dir_all(&theo_dir).map_err(|e| format!("Failed to create .theo/: {e}"))?;
     let gitignore_path = theo_dir.join(".gitignore");
     if !gitignore_path.exists() {
         std::fs::write(&gitignore_path, theo_gitignore())
@@ -346,10 +354,6 @@ pub async fn run_init_with_agent(
     // Run agent to generate real content
     eprintln!("  Analyzing project with AI...");
 
-    #[allow(deprecated)]
-    let event_sink: std::sync::Arc<dyn theo_agent_runtime::events::EventSink> =
-        std::sync::Arc::new(theo_agent_runtime::events::PrintEventSink);
-
     let event_bus = std::sync::Arc::new(theo_agent_runtime::event_bus::EventBus::new());
     let renderer = std::sync::Arc::new(crate::renderer::CliRenderer::new());
     event_bus.subscribe(renderer);
@@ -359,15 +363,10 @@ pub async fn run_init_with_agent(
     agent_config.max_iterations = 30; // Cap for init task
     agent_config.system_prompt = "You are a project analyzer. Read the codebase and generate configuration files. Be thorough but concise. Always use tools, never guess.".to_string();
 
-    let agent = theo_agent_runtime::AgentLoop::new(agent_config, registry, event_sink);
+    let agent = theo_agent_runtime::AgentLoop::new(agent_config, registry);
 
     let result = agent
-        .run_with_history(
-            ENRICH_PROMPT,
-            project_dir,
-            Vec::new(),
-            Some(event_bus),
-        )
+        .run_with_history(ENRICH_PROMPT, project_dir, Vec::new(), Some(event_bus))
         .await;
 
     if result.success && theo_md_path.exists() {
@@ -402,7 +401,11 @@ mod tests {
     #[test]
     fn detect_rust_project() {
         let tmp = tempfile::tempdir().unwrap();
-        std::fs::write(tmp.path().join("Cargo.toml"), "[package]\nname = \"test-rs\"\nversion = \"0.1.0\"\nedition = \"2021\"").unwrap();
+        std::fs::write(
+            tmp.path().join("Cargo.toml"),
+            "[package]\nname = \"test-rs\"\nversion = \"0.1.0\"\nedition = \"2021\"",
+        )
+        .unwrap();
         assert_eq!(detect_project_type(tmp.path()), ProjectType::Rust);
     }
 
@@ -416,7 +419,11 @@ mod tests {
     #[test]
     fn detect_python_project() {
         let tmp = tempfile::tempdir().unwrap();
-        std::fs::write(tmp.path().join("pyproject.toml"), "[project]\nname = \"test-py\"").unwrap();
+        std::fs::write(
+            tmp.path().join("pyproject.toml"),
+            "[project]\nname = \"test-py\"",
+        )
+        .unwrap();
         assert_eq!(detect_project_type(tmp.path()), ProjectType::Python);
     }
 
@@ -444,7 +451,11 @@ mod tests {
     #[test]
     fn detect_name_from_cargo_toml() {
         let tmp = tempfile::tempdir().unwrap();
-        std::fs::write(tmp.path().join("Cargo.toml"), "[package]\nname = \"my-crate\"\nversion = \"0.1.0\"").unwrap();
+        std::fs::write(
+            tmp.path().join("Cargo.toml"),
+            "[package]\nname = \"my-crate\"\nversion = \"0.1.0\"",
+        )
+        .unwrap();
         let name = detect_project_name(tmp.path(), ProjectType::Rust);
         assert_eq!(name, "my-crate");
     }
@@ -452,7 +463,11 @@ mod tests {
     #[test]
     fn detect_name_from_package_json() {
         let tmp = tempfile::tempdir().unwrap();
-        std::fs::write(tmp.path().join("package.json"), r#"{"name": "@scope/my-pkg"}"#).unwrap();
+        std::fs::write(
+            tmp.path().join("package.json"),
+            r#"{"name": "@scope/my-pkg"}"#,
+        )
+        .unwrap();
         let name = detect_project_name(tmp.path(), ProjectType::Node);
         assert_eq!(name, "@scope/my-pkg");
     }
@@ -460,7 +475,11 @@ mod tests {
     #[test]
     fn detect_name_from_go_mod() {
         let tmp = tempfile::tempdir().unwrap();
-        std::fs::write(tmp.path().join("go.mod"), "module github.com/user/repo\n\ngo 1.21").unwrap();
+        std::fs::write(
+            tmp.path().join("go.mod"),
+            "module github.com/user/repo\n\ngo 1.21",
+        )
+        .unwrap();
         let name = detect_project_name(tmp.path(), ProjectType::Go);
         assert_eq!(name, "github.com/user/repo");
     }
@@ -476,7 +495,11 @@ mod tests {
     #[test]
     fn init_creates_theo_md() {
         let tmp = tempfile::tempdir().unwrap();
-        std::fs::write(tmp.path().join("Cargo.toml"), "[package]\nname = \"init-test\"\nversion = \"0.1.0\"").unwrap();
+        std::fs::write(
+            tmp.path().join("Cargo.toml"),
+            "[package]\nname = \"init-test\"\nversion = \"0.1.0\"",
+        )
+        .unwrap();
 
         let result = run_init(tmp.path());
         assert!(result.is_ok());

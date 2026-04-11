@@ -176,7 +176,8 @@ impl OpenAIAuth {
         open_browser(&url)?;
 
         // Wait for callback
-        let result = callback::wait_for_callback(CALLBACK_PORT, &state, CALLBACK_TIMEOUT_SECS).await?;
+        let result =
+            callback::wait_for_callback(CALLBACK_PORT, &state, CALLBACK_TIMEOUT_SECS).await?;
 
         // Exchange code for tokens
         let tokens = self.exchange_code(&result.code, &pkce.verifier).await?;
@@ -207,10 +208,14 @@ impl OpenAIAuth {
         let status = resp.status();
         if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
-            return Err(AuthError::OAuth(format!("token exchange failed ({status}): {body}")));
+            return Err(AuthError::OAuth(format!(
+                "token exchange failed ({status}): {body}"
+            )));
         }
 
-        let token_resp: TokenResponse = resp.json().await
+        let token_resp: TokenResponse = resp
+            .json()
+            .await
             .map_err(|e| AuthError::OAuth(format!("parse token response: {e}")))?;
 
         let account_id = token_resp
@@ -268,10 +273,14 @@ impl OpenAIAuth {
         let status = resp.status();
         if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
-            return Err(AuthError::OAuth(format!("refresh failed ({status}): {body}")));
+            return Err(AuthError::OAuth(format!(
+                "refresh failed ({status}): {body}"
+            )));
         }
 
-        let token_resp: TokenResponse = resp.json().await
+        let token_resp: TokenResponse = resp
+            .json()
+            .await
             .map_err(|e| AuthError::OAuth(format!("parse refresh response: {e}")))?;
 
         let expires_at = token_resp.expires_in.map(|secs| now_secs() + secs);
@@ -293,7 +302,9 @@ impl OpenAIAuth {
 
     /// Get valid tokens, refreshing if expired.
     pub async fn get_or_refresh_tokens(&self) -> Result<OpenAITokens, AuthError> {
-        let tokens = self.get_tokens()?.ok_or(AuthError::OAuth("not logged in".to_string()))?;
+        let tokens = self
+            .get_tokens()?
+            .ok_or(AuthError::OAuth("not logged in".to_string()))?;
 
         if tokens.is_expired() {
             self.refresh().await
@@ -310,20 +321,21 @@ impl OpenAIAuth {
         let resp = self
             .http
             .post(DEVICE_CODE_URL)
-            .form(&[
-                ("client_id", CLIENT_ID),
-                ("scope", SCOPES),
-            ])
+            .form(&[("client_id", CLIENT_ID), ("scope", SCOPES)])
             .send()
             .await?;
 
         let status = resp.status();
         if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
-            return Err(AuthError::OAuth(format!("device code request failed ({status}): {body}")));
+            return Err(AuthError::OAuth(format!(
+                "device code request failed ({status}): {body}"
+            )));
         }
 
-        let dc: DeviceCodeResponse = resp.json().await
+        let dc: DeviceCodeResponse = resp
+            .json()
+            .await
             .map_err(|e| AuthError::OAuth(format!("parse device code: {e}")))?;
 
         Ok(DeviceCode {
@@ -337,9 +349,13 @@ impl OpenAIAuth {
 
     /// Poll for device flow completion.
     /// Blocks until the user authorizes, token expires, or an error occurs.
-    pub async fn poll_device_flow(&self, device_code: &DeviceCode) -> Result<OpenAITokens, AuthError> {
+    pub async fn poll_device_flow(
+        &self,
+        device_code: &DeviceCode,
+    ) -> Result<OpenAITokens, AuthError> {
         let interval = std::time::Duration::from_secs(device_code.interval);
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(device_code.expires_in);
+        let deadline =
+            std::time::Instant::now() + std::time::Duration::from_secs(device_code.expires_in);
 
         loop {
             if std::time::Instant::now() >= deadline {
@@ -359,7 +375,9 @@ impl OpenAIAuth {
                 .send()
                 .await?;
 
-            let dt: DeviceTokenResponse = resp.json().await
+            let dt: DeviceTokenResponse = resp
+                .json()
+                .await
                 .map_err(|e| AuthError::OAuth(format!("parse device token: {e}")))?;
 
             if let Some(error) = &dt.error {
@@ -374,7 +392,8 @@ impl OpenAIAuth {
                 }
             }
 
-            let access_token = dt.access_token
+            let access_token = dt
+                .access_token
                 .ok_or_else(|| AuthError::OAuth("device flow: missing access_token".to_string()))?;
 
             let account_id = dt.id_token.as_deref().and_then(extract_account_id_from_jwt);
@@ -404,9 +423,15 @@ impl OpenAIAuth {
 
     // ─── Constants accessors ───
 
-    pub fn client_id() -> &'static str { CLIENT_ID }
-    pub fn issuer() -> &'static str { ISSUER }
-    pub fn provider_id() -> &'static str { PROVIDER_ID }
+    pub fn client_id() -> &'static str {
+        CLIENT_ID
+    }
+    pub fn issuer() -> &'static str {
+        ISSUER
+    }
+    pub fn provider_id() -> &'static str {
+        PROVIDER_ID
+    }
 }
 
 // ─── Helpers ───
@@ -428,8 +453,8 @@ fn extract_account_id_from_jwt(token: &str) -> Option<String> {
     }
 
     // Decode payload (second part)
-    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use base64::Engine;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 
     let payload = URL_SAFE_NO_PAD.decode(parts[1]).ok()?;
     let claims: serde_json::Value = serde_json::from_slice(&payload).ok()?;
@@ -467,7 +492,9 @@ fn open_browser(url: &str) -> Result<(), AuthError> {
     let result = std::process::Command::new("open").arg(url).spawn();
 
     #[cfg(target_os = "windows")]
-    let result = std::process::Command::new("cmd").args(["/c", "start", "", url]).spawn();
+    let result = std::process::Command::new("cmd")
+        .args(["/c", "start", "", url])
+        .spawn();
 
     #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
     let result: Result<std::process::Child, std::io::Error> = Err(std::io::Error::new(
@@ -504,7 +531,10 @@ mod tests {
         // Build a fake JWT with chatgpt_account_id claim
         let payload = serde_json::json!({ "chatgpt_account_id": "acc_123" });
         let token = build_fake_jwt(&payload);
-        assert_eq!(extract_account_id_from_jwt(&token), Some("acc_123".to_string()));
+        assert_eq!(
+            extract_account_id_from_jwt(&token),
+            Some("acc_123".to_string())
+        );
     }
 
     #[test]
@@ -513,7 +543,10 @@ mod tests {
             "https://api.openai.com/auth": { "chatgpt_account_id": "acc_456" }
         });
         let token = build_fake_jwt(&payload);
-        assert_eq!(extract_account_id_from_jwt(&token), Some("acc_456".to_string()));
+        assert_eq!(
+            extract_account_id_from_jwt(&token),
+            Some("acc_456".to_string())
+        );
     }
 
     #[test]
@@ -522,7 +555,10 @@ mod tests {
             "organizations": [{"id": "org_789"}]
         });
         let token = build_fake_jwt(&payload);
-        assert_eq!(extract_account_id_from_jwt(&token), Some("org_789".to_string()));
+        assert_eq!(
+            extract_account_id_from_jwt(&token),
+            Some("org_789".to_string())
+        );
     }
 
     #[test]
@@ -562,8 +598,8 @@ mod tests {
     }
 
     fn build_fake_jwt(payload: &serde_json::Value) -> String {
-        use base64::engine::general_purpose::URL_SAFE_NO_PAD;
         use base64::Engine;
+        use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 
         let header = URL_SAFE_NO_PAD.encode(b"{}");
         let body = URL_SAFE_NO_PAD.encode(payload.to_string().as_bytes());

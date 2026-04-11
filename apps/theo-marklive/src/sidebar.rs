@@ -19,10 +19,17 @@ pub fn build_sidebar(pages: &[MarkdownPage]) -> String {
         html += "<div class=\"nav-group\">\n";
         html += "  <div class=\"nav-group-label\">Overview</div>\n";
         for page in &root_pages {
-            let active = if page.slug == "index" || page.slug == "overview" { " active" } else { "" };
+            let active = if page.slug == "index" || page.slug == "overview" {
+                " active"
+            } else {
+                ""
+            };
             html += &format!(
                 "  <a class=\"nav-item{}\" onclick=\"showPage('{}')\" data-slug=\"{}\">{}</a>\n",
-                active, page.slug, page.slug, truncate_title(&page.title)
+                active,
+                page.slug,
+                page.slug,
+                truncate_title(&page.title)
             );
         }
         html += "</div>\n";
@@ -38,7 +45,9 @@ pub fn build_sidebar(pages: &[MarkdownPage]) -> String {
         for page in group_pages {
             html += &format!(
                 "  <a class=\"nav-item\" onclick=\"showPage('{}')\" data-slug=\"{}\">{}</a>\n",
-                page.slug, page.slug, truncate_title(&page.title)
+                page.slug,
+                page.slug,
+                truncate_title(&page.title)
             );
         }
 
@@ -58,13 +67,16 @@ fn truncate_title(title: &str) -> String {
 
 /// Build search index as JSON for client-side search.
 pub fn build_search_index(pages: &[MarkdownPage]) -> String {
-    let entries: Vec<serde_json::Value> = pages.iter().map(|p| {
-        serde_json::json!({
-            "slug": p.slug,
-            "title": p.title,
-            "text": p.plain_text,
+    let entries: Vec<serde_json::Value> = pages
+        .iter()
+        .map(|p| {
+            serde_json::json!({
+                "slug": p.slug,
+                "title": p.title,
+                "text": p.plain_text,
+            })
         })
-    }).collect();
+        .collect();
 
     serde_json::to_string(&entries).unwrap_or_else(|_| "[]".to_string())
 }

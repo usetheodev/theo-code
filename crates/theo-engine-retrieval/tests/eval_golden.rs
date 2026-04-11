@@ -5,10 +5,8 @@
 ///
 /// This is the CI gate: if MRR or DepCov drops below thresholds, the PR fails.
 /// Run: `cargo test -p theo-engine-retrieval --test eval_golden`
-
 use theo_engine_retrieval::metrics::{
-    mrr, recall_at_k, hit_at_k, dep_coverage,
-    RetrievalMetrics, DepEdge,
+    DepEdge, RetrievalMetrics, dep_coverage, hit_at_k, mrr, recall_at_k,
 };
 
 // ---------------------------------------------------------------------------
@@ -174,50 +172,68 @@ fn eval_per_case_mrr_computed() {
         let m = mrr(&case.returned, case.expected_files);
         eprintln!("[{}] MRR = {:.3}", case.name, m);
         // Individual MRR can be 0 for misses — we check aggregate below
-        assert!(m >= 0.0 && m <= 1.0, "[{}] MRR out of range: {}", case.name, m);
+        assert!(
+            m >= 0.0 && m <= 1.0,
+            "[{}] MRR out of range: {}",
+            case.name,
+            m
+        );
     }
 }
 
 #[test]
 fn eval_aggregate_mrr_above_floor() {
     let cases = golden_cases();
-    let mrr_values: Vec<f64> = cases.iter()
+    let mrr_values: Vec<f64> = cases
+        .iter()
         .map(|c| mrr(&c.returned, c.expected_files))
         .collect();
     let aggregate = mrr_values.iter().sum::<f64>() / mrr_values.len() as f64;
     eprintln!("Aggregate MRR = {:.3} (threshold: 0.80)", aggregate);
-    assert!(aggregate >= 0.80,
-        "Aggregate MRR must be >= 0.80, got {:.3}", aggregate);
+    assert!(
+        aggregate >= 0.80,
+        "Aggregate MRR must be >= 0.80, got {:.3}",
+        aggregate
+    );
 }
 
 #[test]
 fn eval_aggregate_recall_at_5() {
     let cases = golden_cases();
-    let values: Vec<f64> = cases.iter()
+    let values: Vec<f64> = cases
+        .iter()
         .map(|c| recall_at_k(&c.returned, c.expected_files, 5))
         .collect();
     let aggregate = values.iter().sum::<f64>() / values.len() as f64;
     eprintln!("Aggregate Recall@5 = {:.3}", aggregate);
-    assert!(aggregate >= 0.70,
-        "Aggregate Recall@5 must be >= 0.70, got {:.3}", aggregate);
+    assert!(
+        aggregate >= 0.70,
+        "Aggregate Recall@5 must be >= 0.70, got {:.3}",
+        aggregate
+    );
 }
 
 #[test]
 fn eval_aggregate_hit_rate_at_5() {
     let cases = golden_cases();
-    let values: Vec<f64> = cases.iter()
+    let values: Vec<f64> = cases
+        .iter()
         .map(|c| hit_at_k(&c.returned, c.expected_files, 5))
         .collect();
     let aggregate = values.iter().sum::<f64>() / values.len() as f64;
     eprintln!("Aggregate Hit@5 = {:.3}", aggregate);
-    assert!(aggregate >= 0.80,
-        "Aggregate Hit@5 must be >= 0.80, got {:.3}", aggregate);
+    assert!(
+        aggregate >= 0.80,
+        "Aggregate Hit@5 must be >= 0.80, got {:.3}",
+        aggregate
+    );
 }
 
 #[test]
 fn eval_aggregate_dep_coverage() {
     let cases = golden_cases();
-    let cases_with_deps: Vec<&GoldenCase> = cases.iter()
+    let cases_with_deps: Vec<&GoldenCase> = cases
+        .iter()
         .filter(|c| !c.expected_deps.is_empty())
         .collect();
 
@@ -225,19 +241,24 @@ fn eval_aggregate_dep_coverage() {
         return; // No dep expectations → skip
     }
 
-    let values: Vec<f64> = cases_with_deps.iter()
+    let values: Vec<f64> = cases_with_deps
+        .iter()
         .map(|c| dep_coverage(&c.expected_deps, &c.returned))
         .collect();
     let aggregate = values.iter().sum::<f64>() / values.len() as f64;
     eprintln!("Aggregate DepCov = {:.3} (threshold: 0.80)", aggregate);
-    assert!(aggregate >= 0.80,
-        "Aggregate DepCov must be >= 0.80, got {:.3}", aggregate);
+    assert!(
+        aggregate >= 0.80,
+        "Aggregate DepCov must be >= 0.80, got {:.3}",
+        aggregate
+    );
 }
 
 #[test]
 fn eval_full_metrics_per_case() {
     let cases = golden_cases();
-    let all_metrics: Vec<RetrievalMetrics> = cases.iter()
+    let all_metrics: Vec<RetrievalMetrics> = cases
+        .iter()
         .map(|c| RetrievalMetrics::compute(&c.returned, c.expected_files, &c.expected_deps))
         .collect();
 
@@ -253,5 +274,9 @@ fn eval_full_metrics_per_case() {
 
     // These are CI gates
     assert!(avg.mrr >= 0.80, "MRR gate failed: {:.3}", avg.mrr);
-    assert!(avg.hit_rate_at_5 >= 0.80, "Hit@5 gate failed: {:.3}", avg.hit_rate_at_5);
+    assert!(
+        avg.hit_rate_at_5 >= 0.80,
+        "Hit@5 gate failed: {:.3}",
+        avg.hit_rate_at_5
+    );
 }

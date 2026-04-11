@@ -200,12 +200,18 @@ mod tests {
 
     #[test]
     fn truncates_by_line_count() {
-        let lines: String = (0..100).map(|i| format!("line{i}")).collect::<Vec<_>>().join("\n");
-        let result = truncate_output(&lines, Some(TruncateOptions {
-            max_lines: 10,
-            max_bytes: MAX_BYTES,
-            direction: TruncateDirection::Head,
-        }));
+        let lines: String = (0..100)
+            .map(|i| format!("line{i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let result = truncate_output(
+            &lines,
+            Some(TruncateOptions {
+                max_lines: 10,
+                max_bytes: MAX_BYTES,
+                direction: TruncateDirection::Head,
+            }),
+        );
         assert!(result.truncated);
         assert!(result.content.contains("...90 lines truncated..."));
     }
@@ -213,23 +219,32 @@ mod tests {
     #[test]
     fn truncates_by_byte_count() {
         let content = "a".repeat(1000);
-        let result = truncate_output(&content, Some(TruncateOptions {
-            max_lines: MAX_LINES,
-            max_bytes: 100,
-            direction: TruncateDirection::Head,
-        }));
+        let result = truncate_output(
+            &content,
+            Some(TruncateOptions {
+                max_lines: MAX_LINES,
+                max_bytes: 100,
+                direction: TruncateDirection::Head,
+            }),
+        );
         assert!(result.truncated);
         assert!(result.content.contains("truncated..."));
     }
 
     #[test]
     fn truncates_from_head_by_default() {
-        let lines: String = (0..10).map(|i| format!("line{i}")).collect::<Vec<_>>().join("\n");
-        let result = truncate_output(&lines, Some(TruncateOptions {
-            max_lines: 3,
-            max_bytes: MAX_BYTES,
-            direction: TruncateDirection::Head,
-        }));
+        let lines: String = (0..10)
+            .map(|i| format!("line{i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let result = truncate_output(
+            &lines,
+            Some(TruncateOptions {
+                max_lines: 3,
+                max_bytes: MAX_BYTES,
+                direction: TruncateDirection::Head,
+            }),
+        );
         assert!(result.truncated);
         assert!(result.content.contains("line0"));
         assert!(result.content.contains("line1"));
@@ -239,12 +254,18 @@ mod tests {
 
     #[test]
     fn truncates_from_tail_when_direction_is_tail() {
-        let lines: String = (0..10).map(|i| format!("line{i}")).collect::<Vec<_>>().join("\n");
-        let result = truncate_output(&lines, Some(TruncateOptions {
-            max_lines: 3,
-            max_bytes: MAX_BYTES,
-            direction: TruncateDirection::Tail,
-        }));
+        let lines: String = (0..10)
+            .map(|i| format!("line{i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let result = truncate_output(
+            &lines,
+            Some(TruncateOptions {
+                max_lines: 3,
+                max_bytes: MAX_BYTES,
+                direction: TruncateDirection::Tail,
+            }),
+        );
         assert!(result.truncated);
         assert!(result.content.contains("line7"));
         assert!(result.content.contains("line8"));
@@ -264,14 +285,24 @@ mod tests {
 
     #[test]
     fn writes_full_output_to_file_when_truncated() {
-        let lines: String = (0..100).map(|i| format!("line{i}")).collect::<Vec<_>>().join("\n");
-        let result = truncate_output(&lines, Some(TruncateOptions {
-            max_lines: 10,
-            max_bytes: MAX_BYTES,
-            direction: TruncateDirection::Head,
-        }));
+        let lines: String = (0..100)
+            .map(|i| format!("line{i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let result = truncate_output(
+            &lines,
+            Some(TruncateOptions {
+                max_lines: 10,
+                max_bytes: MAX_BYTES,
+                direction: TruncateDirection::Head,
+            }),
+        );
         assert!(result.truncated);
-        assert!(result.content.contains("The tool call succeeded but the output was truncated"));
+        assert!(
+            result
+                .content
+                .contains("The tool call succeeded but the output was truncated")
+        );
         assert!(result.content.contains("Grep"));
 
         if let Some(path) = &result.output_path {

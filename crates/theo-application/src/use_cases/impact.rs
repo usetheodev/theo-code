@@ -5,7 +5,6 @@
 ///
 /// Moved from theo-governance to theo-application to respect boundary rules:
 /// governance → domain only, application → all engines.
-
 use std::collections::{HashSet, VecDeque};
 
 use theo_engine_graph::cluster::Community;
@@ -92,10 +91,7 @@ fn collect_seed_symbols(edited_file: &str, graph: &CodeGraph) -> Vec<String> {
 fn is_propagation_edge(et: &EdgeType) -> bool {
     matches!(
         et,
-        EdgeType::Calls
-            | EdgeType::Imports
-            | EdgeType::Inherits
-            | EdgeType::TypeDepends
+        EdgeType::Calls | EdgeType::Imports | EdgeType::Inherits | EdgeType::TypeDepends
     )
 }
 
@@ -182,9 +178,7 @@ fn build_risk_alerts(
 
     if tests_covering_edit.is_empty() && !seed_symbols.is_empty() {
         for sym in seed_symbols {
-            alerts.push(format!(
-                "Untested modification: {sym} has no test coverage"
-            ));
+            alerts.push(format!("Untested modification: {sym} has no test coverage"));
         }
     }
 

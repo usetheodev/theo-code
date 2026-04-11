@@ -324,7 +324,10 @@ mod tests {
     #[test]
     fn is_subagent_false_by_default() {
         let config = AgentConfig::default();
-        assert!(!config.is_subagent, "main agents must NOT be marked as sub-agents");
+        assert!(
+            !config.is_subagent,
+            "main agents must NOT be marked as sub-agents"
+        );
     }
 
     #[test]
@@ -356,11 +359,20 @@ mod tests {
         let prompt = system_prompt_for_mode(AgentMode::Plan);
         assert!(prompt.contains("MODE: PLAN"), "missing mode header");
         assert!(prompt.contains("ENTENDIMENTO"), "missing phase 1");
-        assert!(prompt.contains("WRITE THE ROADMAP FILE"), "missing write phase enforcement");
-        assert!(prompt.contains(".theo/plans/"), "missing roadmap output path");
+        assert!(
+            prompt.contains("WRITE THE ROADMAP FILE"),
+            "missing write phase enforcement"
+        );
+        assert!(
+            prompt.contains(".theo/plans/"),
+            "missing roadmap output path"
+        );
         assert!(prompt.contains("Microtasks"), "missing microtasks section");
         assert!(prompt.contains("DoD"), "missing definition of done");
-        assert!(prompt.contains("CALL THE WRITE TOOL"), "missing write enforcement");
+        assert!(
+            prompt.contains("CALL THE WRITE TOOL"),
+            "missing write enforcement"
+        );
         assert!(prompt.contains("BEGIN TEMPLATE"), "missing template");
     }
 
@@ -382,15 +394,34 @@ mod tests {
     fn default_prompt_contains_harness_engineering_clauses() {
         let prompt = default_system_prompt();
         // HE framing must appear before CRITICAL block (early attention)
-        let he_pos = prompt.find("## Harness Context").expect("missing HE section");
-        let critical_pos = prompt.find("## CRITICAL").expect("missing CRITICAL section");
-        assert!(he_pos < critical_pos, "HE framing must come before CRITICAL");
+        let he_pos = prompt
+            .find("## Harness Context")
+            .expect("missing HE section");
+        let critical_pos = prompt
+            .find("## CRITICAL")
+            .expect("missing CRITICAL section");
+        assert!(
+            he_pos < critical_pos,
+            "HE framing must come before CRITICAL"
+        );
 
         // 4 mandatory clauses
-        assert!(prompt.contains("Clean state contract"), "missing clean state clause");
-        assert!(prompt.contains("Generic tools"), "missing generic tools clause");
-        assert!(prompt.contains("Environment legibility"), "missing environment legibility clause");
-        assert!(prompt.contains("Code intelligence"), "missing code intelligence clause");
+        assert!(
+            prompt.contains("Clean state contract"),
+            "missing clean state clause"
+        );
+        assert!(
+            prompt.contains("Generic tools"),
+            "missing generic tools clause"
+        );
+        assert!(
+            prompt.contains("Environment legibility"),
+            "missing environment legibility clause"
+        );
+        assert!(
+            prompt.contains("Code intelligence"),
+            "missing code intelligence clause"
+        );
     }
 
     #[test]

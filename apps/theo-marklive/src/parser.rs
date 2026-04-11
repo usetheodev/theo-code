@@ -1,6 +1,6 @@
 //! Markdown parser: reads .md files and converts to HTML fragments.
 
-use pulldown_cmark::{html, Options, Parser};
+use pulldown_cmark::{Options, Parser, html};
 use std::path::Path;
 
 /// A parsed markdown page.
@@ -29,15 +29,18 @@ pub fn parse_directory(dir: &Path) -> Result<Vec<MarkdownPage>, String> {
     pages.sort_by(|a, b| {
         let a_idx = a.slug == "index";
         let b_idx = b.slug == "index";
-        b_idx.cmp(&a_idx).then(a.group.cmp(&b.group)).then(a.title.cmp(&b.title))
+        b_idx
+            .cmp(&a_idx)
+            .then(a.group.cmp(&b.group))
+            .then(a.title.cmp(&b.title))
     });
 
     Ok(pages)
 }
 
 fn collect_md_files(base: &Path, dir: &Path, pages: &mut Vec<MarkdownPage>) -> Result<(), String> {
-    let entries = std::fs::read_dir(dir)
-        .map_err(|e| format!("Cannot read {}: {}", dir.display(), e))?;
+    let entries =
+        std::fs::read_dir(dir).map_err(|e| format!("Cannot read {}: {}", dir.display(), e))?;
 
     for entry in entries.flatten() {
         let path = entry.path();
@@ -66,15 +69,21 @@ fn parse_file(base: &Path, path: &Path) -> Option<MarkdownPage> {
     let slug = path.file_stem()?.to_string_lossy().to_string();
 
     // Group from parent directory
-    let group = path.parent()
+    let group = path
+        .parent()
         .and_then(|p| p.strip_prefix(base).ok())
         .and_then(|p| p.to_str())
         .unwrap_or("")
         .to_string();
-    let group = if group.is_empty() { "root".to_string() } else { group };
+    let group = if group.is_empty() {
+        "root".to_string()
+    } else {
+        group
+    };
 
     // Extract title from first heading
-    let title = content.lines()
+    let title = content
+        .lines()
         .find(|l| l.starts_with("# "))
         .map(|l| l.trim_start_matches("# ").trim().to_string())
         .unwrap_or_else(|| slug.clone());
@@ -95,7 +104,12 @@ fn parse_file(base: &Path, path: &Path) -> Option<MarkdownPage> {
     // Plain text for search
     let plain_text = content
         .lines()
-        .filter(|l| !l.starts_with('#') && !l.starts_with("```") && !l.starts_with('>') && !l.starts_with('|'))
+        .filter(|l| {
+            !l.starts_with('#')
+                && !l.starts_with("```")
+                && !l.starts_with('>')
+                && !l.starts_with('|')
+        })
         .collect::<Vec<_>>()
         .join(" ")
         .chars()
@@ -232,7 +246,12 @@ fn transform_mermaid_blocks(html: &str) -> String {
                 "<div class=\"mermaid-container\"><div class=\"mermaid\">\n{}\n</div></div>",
                 decoded
             );
-            result = format!("{}{}{}", &result[..pre_start], replacement, &result[pre_end..]);
+            result = format!(
+                "{}{}{}",
+                &result[..pre_start],
+                replacement,
+                &result[pre_end..]
+            );
         } else {
             break;
         }
@@ -313,9 +332,7 @@ fn extract_paragraphs(section: &str) -> String {
         }
         if trimmed.starts_with("<p>") {
             // Strip <p> tags and keep content
-            let content = trimmed
-                .trim_start_matches("<p>")
-                .trim_end_matches("</p>");
+            let content = trimmed.trim_start_matches("<p>").trim_end_matches("</p>");
             result += content;
             result += " ";
         }
@@ -370,7 +387,9 @@ fn transform_features_section(section: &str) -> String {
     while let Some(start) = remaining.find("<li>") {
         let content_start = start + "<li>".len();
         if let Some(end) = remaining[content_start..].find("</li>") {
-            let item = remaining[content_start..content_start + end].trim().to_string();
+            let item = remaining[content_start..content_start + end]
+                .trim()
+                .to_string();
             // Split on first — or - or : for title/desc
             let (title, desc) = split_feature_item(&item);
             cards.push((icons[icon_idx % icons.len()], title, desc));
@@ -456,7 +475,9 @@ fn transform_quick_links_section(section: &str) -> String {
             let after = &search[slug_start + slug_end..];
             if let Some(title_start) = after.find('>') {
                 if let Some(title_end) = after[title_start + 1..].find('<') {
-                    let title = after[title_start + 1..title_start + 1 + title_end].trim().to_string();
+                    let title = after[title_start + 1..title_start + 1 + title_end]
+                        .trim()
+                        .to_string();
                     if !title.is_empty() {
                         links.push((slug, title));
                     }

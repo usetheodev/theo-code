@@ -1,8 +1,7 @@
-/// Tests for search.rs — BM25 + MultiSignalScorer
-
-use theo_engine_retrieval::search::{Bm25Index, MultiSignalScorer};
 use theo_engine_graph::cluster::Community;
 use theo_engine_graph::model::{CodeGraph, Edge, EdgeType, Node, NodeType, SymbolKind};
+/// Tests for search.rs — BM25 + MultiSignalScorer
+use theo_engine_retrieval::search::{Bm25Index, MultiSignalScorer};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -172,7 +171,12 @@ fn test_bm25_empty_query_all_scores_zero() {
 #[test]
 fn test_bm25_single_community_always_returned() {
     let mut graph = CodeGraph::new();
-    graph.add_node(make_symbol_node("only_node", "only_func", "fn only_func()", 100.0));
+    graph.add_node(make_symbol_node(
+        "only_node",
+        "only_func",
+        "fn only_func()",
+        100.0,
+    ));
 
     let communities = vec![Community {
         id: "comm-only".to_string(),
@@ -197,7 +201,11 @@ fn test_bm25_returns_all_communities() {
     let index = Bm25Index::build(&communities, &graph);
     let results = index.search("authentication", &communities);
 
-    assert_eq!(results.len(), communities.len(), "all communities should be returned");
+    assert_eq!(
+        results.len(),
+        communities.len(),
+        "all communities should be returned"
+    );
 }
 
 #[test]

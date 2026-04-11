@@ -17,8 +17,8 @@ use std::path::{Path, PathBuf};
 
 use crate::extractors::language_behavior::behavior_for;
 use crate::symbol_table::{self, SymbolTable};
-use crate::types::{ImportInfo, Reference, ReferenceKind, ResolutionMethod, Symbol};
 use crate::tree_sitter::SupportedLanguage;
+use crate::types::{ImportInfo, Reference, ReferenceKind, ResolutionMethod, Symbol};
 
 /// File extensions to try when resolving a relative import path.
 ///

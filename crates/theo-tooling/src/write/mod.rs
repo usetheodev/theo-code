@@ -1,11 +1,11 @@
 use async_trait::async_trait;
+use std::path::{Path, PathBuf};
 use theo_domain::error::ToolError;
 use theo_domain::permission::{PermissionRequest, PermissionType};
 use theo_domain::tool::{
     PermissionCollector, Tool, ToolCategory, ToolContext, ToolOutput, ToolParam, ToolSchema,
     require_string,
 };
-use std::path::{Path, PathBuf};
 
 pub struct WriteTool;
 

@@ -316,8 +316,14 @@ mod tests {
     #[test]
     fn display_all_variants() {
         let expected = [
-            "Initialized", "Planning", "Executing", "Evaluating",
-            "Converged", "Replanning", "Waiting", "Aborted",
+            "Initialized",
+            "Planning",
+            "Executing",
+            "Evaluating",
+            "Converged",
+            "Replanning",
+            "Waiting",
+            "Aborted",
         ];
         for (s, name) in ALL_STATES.iter().zip(expected.iter()) {
             assert_eq!(format!("{}", s), *name);

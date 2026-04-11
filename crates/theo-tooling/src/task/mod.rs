@@ -100,10 +100,22 @@ mod tests {
     #[test]
     fn description_sorts_subagents_by_name_and_is_stable() {
         let subagents = vec![
-            SubagentInfo { name: "zebra".to_string(), description: "Zebra agent".to_string() },
-            SubagentInfo { name: "alpha".to_string(), description: "Alpha agent".to_string() },
-            SubagentInfo { name: "explore".to_string(), description: "Explore agent".to_string() },
-            SubagentInfo { name: "general".to_string(), description: "General agent".to_string() },
+            SubagentInfo {
+                name: "zebra".to_string(),
+                description: "Zebra agent".to_string(),
+            },
+            SubagentInfo {
+                name: "alpha".to_string(),
+                description: "Alpha agent".to_string(),
+            },
+            SubagentInfo {
+                name: "explore".to_string(),
+                description: "Explore agent".to_string(),
+            },
+            SubagentInfo {
+                name: "general".to_string(),
+                description: "General agent".to_string(),
+            },
         ];
 
         let tool1 = TaskTool::new(subagents.clone());

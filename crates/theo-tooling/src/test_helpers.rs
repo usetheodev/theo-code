@@ -1,7 +1,7 @@
-use theo_domain::permission::{PermissionRequest, PermissionType};
-use theo_domain::tool::{PermissionCollector, ToolContext};
 use std::path::Path;
 use tempfile::TempDir;
+use theo_domain::permission::{PermissionRequest, PermissionType};
+use theo_domain::tool::{PermissionCollector, ToolContext};
 
 /// Create a temporary directory with optional git initialization
 pub struct TestDir {

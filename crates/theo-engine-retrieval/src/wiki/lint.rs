@@ -30,34 +30,68 @@ pub struct LintReport {
 
 impl std::fmt::Display for LintReport {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "Wiki Lint: {} pages scanned, {} issues found", self.total_pages, self.total_issues)?;
+        writeln!(
+            f,
+            "Wiki Lint: {} pages scanned, {} issues found",
+            self.total_pages, self.total_issues
+        )?;
         if !self.orphan_pages.is_empty() {
-            writeln!(f, "  Orphan pages (no inbound links): {}", self.orphan_pages.len())?;
-            for p in &self.orphan_pages { writeln!(f, "    - {}", p)?; }
+            writeln!(
+                f,
+                "  Orphan pages (no inbound links): {}",
+                self.orphan_pages.len()
+            )?;
+            for p in &self.orphan_pages {
+                writeln!(f, "    - {}", p)?;
+            }
         }
         if !self.broken_links.is_empty() {
             writeln!(f, "  Broken links: {}", self.broken_links.len())?;
-            for (src, tgt) in &self.broken_links { writeln!(f, "    - {} → [[{}]]", src, tgt)?; }
+            for (src, tgt) in &self.broken_links {
+                writeln!(f, "    - {} → [[{}]]", src, tgt)?;
+            }
         }
         if !self.large_pages.is_empty() {
-            writeln!(f, "  Large pages (>5000 tokens): {}", self.large_pages.len())?;
-            for (p, t) in &self.large_pages { writeln!(f, "    - {} ({} tokens)", p, t)?; }
+            writeln!(
+                f,
+                "  Large pages (>5000 tokens): {}",
+                self.large_pages.len()
+            )?;
+            for (p, t) in &self.large_pages {
+                writeln!(f, "    - {} ({} tokens)", p, t)?;
+            }
         }
         if !self.empty_sections.is_empty() {
             writeln!(f, "  Empty sections: {}", self.empty_sections.len())?;
-            for (p, s) in &self.empty_sections { writeln!(f, "    - {}::{}", p, s)?; }
+            for (p, s) in &self.empty_sections {
+                writeln!(f, "    - {}::{}", p, s)?;
+            }
         }
         if !self.stale_cache_pages.is_empty() {
             writeln!(f, "  Stale cache pages: {}", self.stale_cache_pages.len())?;
-            for p in &self.stale_cache_pages { writeln!(f, "    - {}", p)?; }
+            for p in &self.stale_cache_pages {
+                writeln!(f, "    - {}", p)?;
+            }
         }
         if !self.eviction_candidates.is_empty() {
-            writeln!(f, "  Eviction candidates: {}", self.eviction_candidates.len())?;
-            for p in &self.eviction_candidates { writeln!(f, "    - {}", p)?; }
+            writeln!(
+                f,
+                "  Eviction candidates: {}",
+                self.eviction_candidates.len()
+            )?;
+            for p in &self.eviction_candidates {
+                writeln!(f, "    - {}", p)?;
+            }
         }
         if !self.duplicate_candidates.is_empty() {
-            writeln!(f, "  Duplicate candidates: {}", self.duplicate_candidates.len())?;
-            for (a, b) in &self.duplicate_candidates { writeln!(f, "    - {} ≈ {}", a, b)?; }
+            writeln!(
+                f,
+                "  Duplicate candidates: {}",
+                self.duplicate_candidates.len()
+            )?;
+            for (a, b) in &self.duplicate_candidates {
+                writeln!(f, "    - {} ≈ {}", a, b)?;
+            }
         }
         Ok(())
     }
@@ -81,16 +115,26 @@ pub fn lint_with_threshold(wiki_dir: &Path, large_page_threshold: usize) -> Lint
     let mut pages: HashMap<String, String> = HashMap::new();
 
     for dir in [&modules_dir, &cache_dir] {
-        if !dir.exists() { continue; }
+        if !dir.exists() {
+            continue;
+        }
         let entries = match std::fs::read_dir(dir) {
             Ok(e) => e,
             Err(_) => continue,
         };
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) != Some("md") { continue; }
-            if path.to_string_lossy().contains(".enriched.") { continue; }
-            let slug = path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
+            if path.extension().and_then(|e| e.to_str()) != Some("md") {
+                continue;
+            }
+            if path.to_string_lossy().contains(".enriched.") {
+                continue;
+            }
+            let slug = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_string();
             if let Ok(content) = std::fs::read_to_string(&path) {
                 pages.insert(slug, content);
             }
@@ -126,7 +170,9 @@ pub fn lint_with_threshold(wiki_dir: &Path, large_page_threshold: usize) -> Lint
         }
     }
     for slug in &all_slugs {
-        if slug == "index" { continue; } // Index is always root
+        if slug == "index" {
+            continue;
+        } // Index is always root
         if !has_inbound.contains(slug) {
             report.orphan_pages.push(slug.clone());
         }
@@ -161,7 +207,11 @@ pub fn lint_with_threshold(wiki_dir: &Path, large_page_threshold: usize) -> Lint
                 while j < lines.len() && lines[j].trim().is_empty() {
                     j += 1;
                 }
-                if j < lines.len() && (lines[j].starts_with("## ") || lines[j].starts_with("# ") || lines[j].starts_with("---")) {
+                if j < lines.len()
+                    && (lines[j].starts_with("## ")
+                        || lines[j].starts_with("# ")
+                        || lines[j].starts_with("---"))
+                {
                     let section = lines[i].trim_start_matches("## ").trim().to_string();
                     report.empty_sections.push((slug.clone(), section));
                 }
@@ -182,8 +232,14 @@ pub fn lint_with_threshold(wiki_dir: &Path, large_page_threshold: usize) -> Lint
             if let Ok(entries) = std::fs::read_dir(&cache_dir) {
                 for entry in entries.flatten() {
                     let path = entry.path();
-                    if path.extension().and_then(|e| e.to_str()) != Some("md") { continue; }
-                    let slug = path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
+                    if path.extension().and_then(|e| e.to_str()) != Some("md") {
+                        continue;
+                    }
+                    let slug = path
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("")
+                        .to_string();
                     if let Ok(content) = std::fs::read_to_string(&path) {
                         let fm = super::model::parse_frontmatter(&content);
                         if let Some(page_hash) = fm.graph_hash {
@@ -222,16 +278,32 @@ mod tests {
         fs::create_dir_all(&modules).unwrap();
 
         // Page A links to B
-        fs::write(modules.join("page-a.md"), "# Page A\n\nSee [[page-b]] for details.\n\n## Section\n\nContent here.").unwrap();
+        fs::write(
+            modules.join("page-a.md"),
+            "# Page A\n\nSee [[page-b]] for details.\n\n## Section\n\nContent here.",
+        )
+        .unwrap();
 
         // Page B links to A (mutual)
-        fs::write(modules.join("page-b.md"), "# Page B\n\nRelated: [[page-a]]\n").unwrap();
+        fs::write(
+            modules.join("page-b.md"),
+            "# Page B\n\nRelated: [[page-a]]\n",
+        )
+        .unwrap();
 
         // Orphan page C (no inbound links)
-        fs::write(modules.join("page-c.md"), "# Page C\n\nOrphan page, nobody links here.\n").unwrap();
+        fs::write(
+            modules.join("page-c.md"),
+            "# Page C\n\nOrphan page, nobody links here.\n",
+        )
+        .unwrap();
 
         // Page D with broken link
-        fs::write(modules.join("page-d.md"), "# Page D\n\nSee [[nonexistent-page]]\n").unwrap();
+        fs::write(
+            modules.join("page-d.md"),
+            "# Page D\n\nSee [[nonexistent-page]]\n",
+        )
+        .unwrap();
 
         // Large page
         let big_content = "# Big Page\n\n".to_string() + &"x".repeat(25000);
@@ -254,7 +326,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         create_test_wiki(dir.path());
         let report = lint(dir.path());
-        assert!(report.broken_links.iter().any(|(_, t)| t == "nonexistent-page"));
+        assert!(
+            report
+                .broken_links
+                .iter()
+                .any(|(_, t)| t == "nonexistent-page")
+        );
     }
 
     #[test]
@@ -270,7 +347,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         create_test_wiki(dir.path());
         let report = lint(dir.path());
-        assert!(report.empty_sections.iter().any(|(_, s)| s == "Empty Section"));
+        assert!(
+            report
+                .empty_sections
+                .iter()
+                .any(|(_, s)| s == "Empty Section")
+        );
     }
 
     #[test]

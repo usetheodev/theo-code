@@ -266,7 +266,7 @@ impl CopilotAuth {
                     _ => {
                         return Err(AuthError::OAuth(format!(
                             "Copilot device flow error: {error}"
-                        )))
+                        )));
                     }
                 }
             }
@@ -322,19 +322,28 @@ mod tests {
     #[test]
     fn device_code_url_default() {
         let config = CopilotConfig::default();
-        assert_eq!(config.device_code_url(), "https://github.com/login/device/code");
+        assert_eq!(
+            config.device_code_url(),
+            "https://github.com/login/device/code"
+        );
     }
 
     #[test]
     fn device_code_url_enterprise() {
         let config = CopilotConfig::enterprise("corp.ghe.com");
-        assert_eq!(config.device_code_url(), "https://corp.ghe.com/login/device/code");
+        assert_eq!(
+            config.device_code_url(),
+            "https://corp.ghe.com/login/device/code"
+        );
     }
 
     #[test]
     fn access_token_url_default() {
         let config = CopilotConfig::default();
-        assert_eq!(config.access_token_url(), "https://github.com/login/oauth/access_token");
+        assert_eq!(
+            config.access_token_url(),
+            "https://github.com/login/oauth/access_token"
+        );
     }
 
     #[test]
@@ -414,7 +423,12 @@ mod tests {
     fn copilot_coexists_with_openai_in_store() {
         let (store, _dir) = temp_store();
         store
-            .set("openai", AuthEntry::ApiKey { key: "sk-openai".to_string() })
+            .set(
+                "openai",
+                AuthEntry::ApiKey {
+                    key: "sk-openai".to_string(),
+                },
+            )
             .unwrap();
         store
             .set(

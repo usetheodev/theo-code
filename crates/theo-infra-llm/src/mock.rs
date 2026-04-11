@@ -151,8 +151,7 @@ mod tests {
 
     #[tokio::test]
     async fn mock_returns_configured_text_response() {
-        let mock = MockLlmProvider::new("test-model")
-            .with_text_response("Hello from mock!");
+        let mock = MockLlmProvider::new("test-model").with_text_response("Hello from mock!");
 
         let request = ChatRequest::new("test-model", vec![Message::user("hi")]);
         let response = mock.chat(&request).await.unwrap();
@@ -166,8 +165,11 @@ mod tests {
 
     #[tokio::test]
     async fn mock_returns_tool_call_response() {
-        let mock = MockLlmProvider::new("test-model")
-            .with_tool_call("done", "call_1", r#"{"summary":"task complete"}"#);
+        let mock = MockLlmProvider::new("test-model").with_tool_call(
+            "done",
+            "call_1",
+            r#"{"summary":"task complete"}"#,
+        );
 
         let request = ChatRequest::new("test-model", vec![Message::user("do it")]);
         let response = mock.chat(&request).await.unwrap();
@@ -179,11 +181,10 @@ mod tests {
 
     #[tokio::test]
     async fn mock_returns_error() {
-        let mock = MockLlmProvider::new("test-model")
-            .with_error(LlmError::Api {
-                status: 429,
-                message: "rate limited".to_string(),
-            });
+        let mock = MockLlmProvider::new("test-model").with_error(LlmError::Api {
+            status: 429,
+            message: "rate limited".to_string(),
+        });
 
         let request = ChatRequest::new("test-model", vec![Message::user("hi")]);
         let result = mock.chat(&request).await;
@@ -213,7 +214,14 @@ mod tests {
 
         // After queue exhausted, returns default
         let r3 = mock.chat(&request).await.unwrap();
-        assert!(r3.choices[0].message.content.as_deref().unwrap().contains("no more queued"));
+        assert!(
+            r3.choices[0]
+                .message
+                .content
+                .as_deref()
+                .unwrap()
+                .contains("no more queued")
+        );
     }
 
     #[tokio::test]
@@ -226,7 +234,10 @@ mod tests {
 
         // Stream should be empty (no items)
         let next = stream.next().await;
-        assert!(next.is_none(), "Empty mock stream should return None immediately");
+        assert!(
+            next.is_none(),
+            "Empty mock stream should return None immediately"
+        );
     }
 
     #[tokio::test]

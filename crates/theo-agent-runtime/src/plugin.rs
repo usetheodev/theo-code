@@ -52,7 +52,9 @@ pub struct ToolParamSpec {
     pub required: bool,
 }
 
-fn default_string_type() -> String { "string".to_string() }
+fn default_string_type() -> String {
+    "string".to_string()
+}
 
 // ---------------------------------------------------------------------------
 // LoadedPlugin — manifest + resolved paths
@@ -82,7 +84,10 @@ pub fn load_plugins(project_dir: &Path) -> Vec<LoadedPlugin> {
 
     // Global plugins
     if let Ok(home) = std::env::var("HOME") {
-        let global_plugins = PathBuf::from(home).join(".config").join("theo").join("plugins");
+        let global_plugins = PathBuf::from(home)
+            .join(".config")
+            .join("theo")
+            .join("plugins");
         if global_plugins.exists() {
             load_plugins_from_dir(&global_plugins, &mut plugins);
         }
@@ -110,11 +115,18 @@ fn load_plugins_from_dir(plugins_dir: &Path, plugins: &mut Vec<LoadedPlugin>) {
 
         match load_single_plugin(&path) {
             Ok(plugin) => {
-                eprintln!("[theo] Plugin loaded: {} ({})", plugin.manifest.name, path.display());
+                eprintln!(
+                    "[theo] Plugin loaded: {} ({})",
+                    plugin.manifest.name,
+                    path.display()
+                );
                 plugins.push(plugin);
             }
             Err(e) => {
-                eprintln!("[theo] Warning: failed to load plugin at {}: {e}", path.display());
+                eprintln!(
+                    "[theo] Warning: failed to load plugin at {}: {e}",
+                    path.display()
+                );
             }
         }
     }
@@ -122,10 +134,10 @@ fn load_plugins_from_dir(plugins_dir: &Path, plugins: &mut Vec<LoadedPlugin>) {
 
 fn load_single_plugin(plugin_dir: &Path) -> Result<LoadedPlugin, String> {
     let manifest_path = plugin_dir.join("plugin.toml");
-    let content = std::fs::read_to_string(&manifest_path)
-        .map_err(|e| format!("read plugin.toml: {e}"))?;
-    let manifest: PluginManifest = toml::from_str(&content)
-        .map_err(|e| format!("parse plugin.toml: {e}"))?;
+    let content =
+        std::fs::read_to_string(&manifest_path).map_err(|e| format!("read plugin.toml: {e}"))?;
+    let manifest: PluginManifest =
+        toml::from_str(&content).map_err(|e| format!("parse plugin.toml: {e}"))?;
 
     // Resolve tool script paths
     let mut tool_scripts = Vec::new();
@@ -134,7 +146,10 @@ fn load_single_plugin(plugin_dir: &Path) -> Result<LoadedPlugin, String> {
         if script_path.exists() {
             tool_scripts.push((spec.clone(), script_path));
         } else {
-            eprintln!("[theo] Warning: plugin '{}' tool script not found: {}", manifest.name, spec.script);
+            eprintln!(
+                "[theo] Warning: plugin '{}' tool script not found: {}",
+                manifest.name, spec.script
+            );
         }
     }
 
@@ -207,7 +222,9 @@ required = false
         std::fs::create_dir_all(plugin_dir.join("tools")).unwrap();
         std::fs::create_dir_all(plugin_dir.join("hooks")).unwrap();
 
-        std::fs::write(plugin_dir.join("plugin.toml"), r#"
+        std::fs::write(
+            plugin_dir.join("plugin.toml"),
+            r#"
 name = "test-plugin"
 version = "0.1.0"
 description = "Test"
@@ -216,10 +233,16 @@ description = "Test"
 name = "greet"
 description = "Say hello"
 script = "tools/greet.sh"
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         std::fs::write(plugin_dir.join("tools/greet.sh"), "#!/bin/sh\necho hello\n").unwrap();
-        std::fs::write(plugin_dir.join("hooks/tool.before.sh"), "#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::write(
+            plugin_dir.join("hooks/tool.before.sh"),
+            "#!/bin/sh\nexit 0\n",
+        )
+        .unwrap();
 
         let plugin = load_single_plugin(&plugin_dir).unwrap();
         assert_eq!(plugin.manifest.name, "test-plugin");
@@ -238,10 +261,14 @@ script = "tools/greet.sh"
         let dir = tempfile::tempdir().unwrap();
         let plugins_dir = dir.path().join(".theo").join("plugins").join("demo");
         std::fs::create_dir_all(&plugins_dir).unwrap();
-        std::fs::write(plugins_dir.join("plugin.toml"), r#"
+        std::fs::write(
+            plugins_dir.join("plugin.toml"),
+            r#"
 name = "demo"
 description = "Demo plugin"
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         let plugins = load_plugins(dir.path());
         assert_eq!(plugins.len(), 1);

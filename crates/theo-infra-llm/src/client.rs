@@ -148,19 +148,22 @@ impl LlmClient {
         }
 
         // Read the full SSE stream and collect events
-        let full_body = response.text().await
+        let full_body = response
+            .text()
+            .await
             .map_err(|e| LlmError::Parse(format!("read stream: {e}")))?;
 
-        codex::from_codex_stream(&full_body)
-            .ok_or_else(|| LlmError::Parse(format!("failed to parse Codex stream response. Body start: {}", &full_body[..full_body.len().min(500)])))
+        codex::from_codex_stream(&full_body).ok_or_else(|| {
+            LlmError::Parse(format!(
+                "failed to parse Codex stream response. Body start: {}",
+                &full_body[..full_body.len().min(500)]
+            ))
+        })
     }
 
     /// Send a streaming chat completion request.
     /// Returns a stream of deltas that can be collected into a full response.
-    pub async fn chat_stream(
-        &self,
-        request: &ChatRequest,
-    ) -> Result<SseStream, LlmError> {
+    pub async fn chat_stream(&self, request: &ChatRequest) -> Result<SseStream, LlmError> {
         let url = self.url();
         let mut req = request.clone();
         req.stream = Some(true);
@@ -227,18 +230,23 @@ impl LlmClient {
 
                     if let Some(data) = line.strip_prefix("data: ") {
                         if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
-                            let event_type = json.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                            let event_type =
+                                json.get("type").and_then(|v| v.as_str()).unwrap_or("");
 
                             match event_type {
                                 // Reasoning/thinking deltas (real-time)
                                 "response.reasoning.delta" => {
-                                    if let Some(text) = json.pointer("/delta/text").and_then(|v| v.as_str()) {
+                                    if let Some(text) =
+                                        json.pointer("/delta/text").and_then(|v| v.as_str())
+                                    {
                                         on_delta(&StreamDelta::Reasoning(text.to_string()));
                                     }
                                 }
                                 // Content text deltas (real-time)
                                 "response.output_text.delta" => {
-                                    if let Some(text) = json.pointer("/delta").and_then(|v| v.as_str()) {
+                                    if let Some(text) =
+                                        json.pointer("/delta").and_then(|v| v.as_str())
+                                    {
                                         on_delta(&StreamDelta::Content(text.to_string()));
                                     }
                                 }
@@ -378,7 +386,10 @@ mod tests {
     fn test_endpoint_override() {
         let client = LlmClient::new("https://api.openai.com", None, "gpt-4o")
             .with_endpoint("https://chatgpt.com/backend-api/codex/responses");
-        assert_eq!(client.url(), "https://chatgpt.com/backend-api/codex/responses");
+        assert_eq!(
+            client.url(),
+            "https://chatgpt.com/backend-api/codex/responses"
+        );
     }
 
     #[test]

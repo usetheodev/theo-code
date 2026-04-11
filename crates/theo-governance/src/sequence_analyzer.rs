@@ -24,20 +24,13 @@ pub fn builtin_patterns() -> Vec<ToxicPattern> {
         ToxicPattern {
             name: "payload_drop".to_string(),
             description: "Create file + make executable + execute = payload drop".to_string(),
-            required_keywords: vec![
-                "echo".to_string(),
-                "chmod".to_string(),
-                "+x".to_string(),
-            ],
+            required_keywords: vec!["echo".to_string(), "chmod".to_string(), "+x".to_string()],
             min_commands: 2,
         },
         ToxicPattern {
             name: "exfil_via_file".to_string(),
             description: "Read sensitive data + send via network = data exfiltration".to_string(),
-            required_keywords: vec![
-                "cat".to_string(),
-                "curl".to_string(),
-            ],
+            required_keywords: vec!["cat".to_string(), "curl".to_string()],
             min_commands: 2,
         },
         ToxicPattern {
@@ -53,28 +46,19 @@ pub fn builtin_patterns() -> Vec<ToxicPattern> {
         ToxicPattern {
             name: "ssh_key_exfil".to_string(),
             description: "Access SSH keys + network = key exfiltration".to_string(),
-            required_keywords: vec![
-                ".ssh".to_string(),
-                "curl".to_string(),
-            ],
+            required_keywords: vec![".ssh".to_string(), "curl".to_string()],
             min_commands: 2,
         },
         ToxicPattern {
             name: "env_exfil".to_string(),
             description: "Dump environment + network = credential exfiltration".to_string(),
-            required_keywords: vec![
-                "env".to_string(),
-                "curl".to_string(),
-            ],
+            required_keywords: vec!["env".to_string(), "curl".to_string()],
             min_commands: 2,
         },
         ToxicPattern {
             name: "reverse_shell".to_string(),
             description: "Network listener + shell redirect = reverse shell".to_string(),
-            required_keywords: vec![
-                "nc".to_string(),
-                "/bin/sh".to_string(),
-            ],
+            required_keywords: vec!["nc".to_string(), "/bin/sh".to_string()],
             min_commands: 1,
         },
     ]
@@ -96,10 +80,7 @@ pub enum SequenceVerdict {
 ///
 /// Looks across all commands in the sequence for keywords that,
 /// combined, indicate a dangerous operation.
-pub fn analyze_sequence(
-    commands: &[String],
-    patterns: &[ToxicPattern],
-) -> SequenceVerdict {
+pub fn analyze_sequence(commands: &[String], patterns: &[ToxicPattern]) -> SequenceVerdict {
     if commands.is_empty() {
         return SequenceVerdict::Safe;
     }
@@ -153,10 +134,7 @@ mod tests {
 
     #[test]
     fn empty_sequence_is_safe() {
-        assert_eq!(
-            analyze_sequence(&[], &patterns()),
-            SequenceVerdict::Safe
-        );
+        assert_eq!(analyze_sequence(&[], &patterns()), SequenceVerdict::Safe);
     }
 
     #[test]

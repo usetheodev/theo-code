@@ -46,6 +46,8 @@ impl Tool for CodeSearchTool {
     ) -> Result<ToolOutput, ToolError> {
         let query = require_string(&args, "query")?;
         // TODO: Implement code search via external API
-        Err(ToolError::Execution(format!("Code search not yet implemented for query: {query}")))
+        Err(ToolError::Execution(format!(
+            "Code search not yet implemented for query: {query}"
+        )))
     }
 }

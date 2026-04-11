@@ -3,9 +3,9 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use theo_agent_runtime::AgentConfig;
 use theo_agent_runtime::event_bus::EventBus;
 use theo_agent_runtime::pilot::{PilotConfig, PilotLoop, PilotResult, load_promise};
-use theo_agent_runtime::AgentConfig;
 use theo_domain::graph_context::GraphContextProvider;
 
 use crate::renderer::CliRenderer;
@@ -25,7 +25,10 @@ pub async fn run_pilot(
         eprintln!("  Done when: \x1b[33m{}\x1b[0m", truncate(dod, 80));
     }
     eprintln!("  Project: {}", project_dir.display());
-    eprintln!("  Limits: {} max calls, {}/hour", pilot_config.max_total_calls, pilot_config.max_loops_per_hour);
+    eprintln!(
+        "  Limits: {} max calls, {}/hour",
+        pilot_config.max_total_calls, pilot_config.max_loops_per_hour
+    );
     eprintln!();
 
     // Create parent EventBus with renderer
@@ -53,7 +56,14 @@ pub async fn run_pilot(
         };
 
     // Create pilot loop
-    let mut pilot = PilotLoop::new(config, pilot_config, project_dir, promise, complete, event_bus);
+    let mut pilot = PilotLoop::new(
+        config,
+        pilot_config,
+        project_dir,
+        promise,
+        complete,
+        event_bus,
+    );
     if let Some(gc) = graph_context {
         pilot = pilot.with_graph_context(gc);
     }
@@ -72,7 +82,11 @@ pub async fn run_pilot(
         let tasks = theo_agent_runtime::roadmap::parse_roadmap(rmap).unwrap_or_default();
         let pending = tasks.iter().filter(|t| !t.completed).count();
         if pending > 0 {
-            eprintln!("  Roadmap: \x1b[36m{}\x1b[0m ({} pending tasks)", rmap.display(), pending);
+            eprintln!(
+                "  Roadmap: \x1b[36m{}\x1b[0m ({} pending tasks)",
+                rmap.display(),
+                pending
+            );
             eprintln!();
             pilot.run_from_roadmap(rmap).await
         } else {
@@ -92,7 +106,8 @@ pub async fn run_pilot(
 /// Resolve the promise from CLI args or .theo/PROMPT.md.
 pub fn resolve_promise(args: &[String], project_dir: &std::path::Path) -> Option<String> {
     // Collect non-flag args as promise
-    let promise_parts: Vec<&str> = args.iter()
+    let promise_parts: Vec<&str> = args
+        .iter()
         .filter(|a| !a.starts_with("--"))
         .map(|s| s.as_str())
         .collect();
@@ -170,11 +185,16 @@ impl EventListener for PilotRenderer {
     fn on_event(&self, event: &DomainEvent) {
         match event.event_type {
             EventType::LlmCallStart => {
-                let iteration = event.payload.get("iteration")
+                let iteration = event
+                    .payload
+                    .get("iteration")
                     .and_then(|v| v.as_u64())
                     .unwrap_or(0);
                 if iteration == 1 {
-                    let loop_num = self.loop_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                    let loop_num = self
+                        .loop_count
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                        + 1;
                     eprintln!("\n\x1b[1m── Pilot Loop {} ──\x1b[0m", loop_num);
                 }
             }
@@ -190,7 +210,10 @@ impl EventListener for PilotRenderer {
                             let iters = parts[3];
                             eprintln!(
                                 "\x1b[90m── Loop {} complete: {} files, {} tokens, {} iterations ──\x1b[0m",
-                                loop_n, files, format_tokens(tokens), iters
+                                loop_n,
+                                files,
+                                format_tokens(tokens),
+                                iters
                             );
                         }
                     }

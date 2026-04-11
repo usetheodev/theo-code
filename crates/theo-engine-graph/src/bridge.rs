@@ -267,10 +267,7 @@ pub fn build_graph(files: &[FileData]) -> (CodeGraph, BridgeStats) {
                 stats.edges_contains += 1;
 
                 symbol_index.insert(sym.qualified_name.clone(), tid.clone());
-                name_index
-                    .entry(sym.name.clone())
-                    .or_default()
-                    .push(tid);
+                name_index.entry(sym.name.clone()).or_default().push(tid);
             } else {
                 // Regular symbol node
                 let sid = symbol_node_id(&file.path, &sym.qualified_name);
@@ -298,10 +295,7 @@ pub fn build_graph(files: &[FileData]) -> (CodeGraph, BridgeStats) {
                 stats.edges_contains += 1;
 
                 symbol_index.insert(sym.qualified_name.clone(), sid.clone());
-                name_index
-                    .entry(sym.name.clone())
-                    .or_default()
-                    .push(sid);
+                name_index.entry(sym.name.clone()).or_default().push(sid);
             }
         }
 
@@ -360,10 +354,7 @@ pub fn build_graph(files: &[FileData]) -> (CodeGraph, BridgeStats) {
 
             // Register in symbol_index for inheritance resolution
             symbol_index.insert(dm.name.clone(), tid.clone());
-            name_index
-                .entry(dm.name.clone())
-                .or_default()
-                .push(tid);
+            name_index.entry(dm.name.clone()).or_default().push(tid);
         }
     }
 
@@ -379,17 +370,10 @@ pub fn build_graph(files: &[FileData]) -> (CodeGraph, BridgeStats) {
             );
 
             let target_id = match &reference.target_file {
-                Some(tf) => resolve_symbol(
-                    &reference.target_symbol,
-                    tf,
-                    &symbol_index,
-                    &name_index,
-                ),
-                None => resolve_by_name(
-                    &reference.target_symbol,
-                    &symbol_index,
-                    &name_index,
-                ),
+                Some(tf) => {
+                    resolve_symbol(&reference.target_symbol, tf, &symbol_index, &name_index)
+                }
+                None => resolve_by_name(&reference.target_symbol, &symbol_index, &name_index),
             };
 
             if let (Some(src), Some(tgt)) = (source_id, target_id) {
@@ -450,17 +434,10 @@ pub fn build_graph(files: &[FileData]) -> (CodeGraph, BridgeStats) {
                 }
 
                 let target_id = match &reference.target_file {
-                    Some(tf) => resolve_symbol(
-                        &reference.target_symbol,
-                        tf,
-                        &symbol_index,
-                        &name_index,
-                    ),
-                    None => resolve_by_name(
-                        &reference.target_symbol,
-                        &symbol_index,
-                        &name_index,
-                    ),
+                    Some(tf) => {
+                        resolve_symbol(&reference.target_symbol, tf, &symbol_index, &name_index)
+                    }
+                    None => resolve_by_name(&reference.target_symbol, &symbol_index, &name_index),
                 };
 
                 if let Some(tgt) = target_id {
@@ -488,9 +465,7 @@ pub fn build_graph(files: &[FileData]) -> (CodeGraph, BridgeStats) {
             let dm_id = type_node_id(&file.path, &dm.name);
 
             if let Some(parent) = &dm.parent_type {
-                if let Some(parent_id) =
-                    resolve_by_name(parent, &symbol_index, &name_index)
-                {
+                if let Some(parent_id) = resolve_by_name(parent, &symbol_index, &name_index) {
                     graph.add_edge(Edge {
                         source: dm_id.clone(),
                         target: parent_id,
@@ -502,9 +477,7 @@ pub fn build_graph(files: &[FileData]) -> (CodeGraph, BridgeStats) {
             }
 
             for iface in &dm.implemented_interfaces {
-                if let Some(iface_id) =
-                    resolve_by_name(iface, &symbol_index, &name_index)
-                {
+                if let Some(iface_id) = resolve_by_name(iface, &symbol_index, &name_index) {
                     graph.add_edge(Edge {
                         source: dm_id.clone(),
                         target: iface_id,
@@ -589,8 +562,16 @@ fn resolve_by_name(
 /// It only creates File nodes (no symbol extraction).
 /// Directories always excluded from graph indexing.
 const EXCLUDED_DIRS: &[&str] = &[
-    "target", "node_modules", "vendor", "dist", "build",
-    "__pycache__", ".venv", "venv", ".next", ".nuxt",
+    "target",
+    "node_modules",
+    "vendor",
+    "dist",
+    "build",
+    "__pycache__",
+    ".venv",
+    "venv",
+    ".next",
+    ".nuxt",
 ];
 
 pub fn walk_files(repo_root: &Path) -> Vec<FileData> {
@@ -608,8 +589,8 @@ pub fn walk_files(repo_root: &Path) -> Vec<FileData> {
 
     let mut files = Vec::new();
     let known_extensions = [
-        "rs", "py", "ts", "tsx", "js", "jsx", "go", "java", "kt", "cs", "rb", "php", "c",
-        "cpp", "h", "hpp", "swift", "scala",
+        "rs", "py", "ts", "tsx", "js", "jsx", "go", "java", "kt", "cs", "rb", "php", "c", "cpp",
+        "h", "hpp", "swift", "scala",
     ];
 
     for entry in walker.flatten() {
@@ -617,10 +598,7 @@ pub fn walk_files(repo_root: &Path) -> Vec<FileData> {
             continue;
         }
         let path = entry.path();
-        let ext = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("");
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
         if !known_extensions.contains(&ext) {
             continue;
         }
@@ -817,9 +795,7 @@ mod tests {
         let callee = "sym:src/auth/jwt.rs:auth::jwt::decode_header";
         let call_edges = graph.edges_between(caller, callee);
         assert!(
-            call_edges
-                .iter()
-                .any(|e| e.edge_type == EdgeType::Calls),
+            call_edges.iter().any(|e| e.edge_type == EdgeType::Calls),
             "Expected Calls edge from verify_token to decode_header"
         );
     }
@@ -834,9 +810,7 @@ mod tests {
         let target = "sym:src/auth/jwt.rs:auth::jwt::verify_token";
         let test_edges = graph.edges_between(test_id, target);
         assert!(
-            test_edges
-                .iter()
-                .any(|e| e.edge_type == EdgeType::Tests),
+            test_edges.iter().any(|e| e.edge_type == EdgeType::Tests),
             "Expected Tests edge from test to verify_token"
         );
     }

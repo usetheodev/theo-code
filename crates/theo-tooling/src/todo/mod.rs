@@ -53,14 +53,20 @@ pub struct TodoList {
 
 impl TodoList {
     pub fn new() -> Self {
-        Self { items: Mutex::new(Vec::new()) }
+        Self {
+            items: Mutex::new(Vec::new()),
+        }
     }
 
     /// Add a task. Returns the assigned ID (1-based).
     pub fn create(&self, content: String) -> usize {
         let mut items = self.items.lock().expect("todo lock poisoned");
         let id = items.len() + 1;
-        items.push(TodoItem { id, content, status: TodoStatus::Pending });
+        items.push(TodoItem {
+            id,
+            content,
+            status: TodoStatus::Pending,
+        });
         id
     }
 
@@ -71,7 +77,11 @@ impl TodoList {
             item.status = status;
             Ok(())
         } else {
-            Err(format!("task {} not found (have {} tasks)", id, items.len()))
+            Err(format!(
+                "task {} not found (have {} tasks)",
+                id,
+                items.len()
+            ))
         }
     }
 
@@ -90,20 +100,26 @@ impl TodoList {
             return String::new();
         }
         let total = items.len();
-        items.iter().map(|t| {
-            let icon = match t.status {
-                TodoStatus::Completed => "✅",
-                TodoStatus::InProgress => "🔄",
-                TodoStatus::Pending => "⬜",
-                TodoStatus::Cancelled => "❌",
-            };
-            format!("[{}/{}] {} {}", t.id, total, icon, t.content)
-        }).collect::<Vec<_>>().join("\n")
+        items
+            .iter()
+            .map(|t| {
+                let icon = match t.status {
+                    TodoStatus::Completed => "✅",
+                    TodoStatus::InProgress => "🔄",
+                    TodoStatus::Pending => "⬜",
+                    TodoStatus::Cancelled => "❌",
+                };
+                format!("[{}/{}] {} {}", t.id, total, icon, t.content)
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 }
 
 impl Default for TodoList {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -111,11 +127,17 @@ impl Default for TodoList {
 // ---------------------------------------------------------------------------
 
 pub struct TaskCreateTool;
-impl TaskCreateTool { pub fn new() -> Self { Self } }
+impl TaskCreateTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
 
 #[async_trait]
 impl Tool for TaskCreateTool {
-    fn id(&self) -> &str { "task_create" }
+    fn id(&self) -> &str {
+        "task_create"
+    }
 
     fn description(&self) -> &str {
         "Create a new task to track progress. Returns the task ID. Use for any work with 3+ steps. Create all tasks FIRST, then start working."
@@ -132,7 +154,9 @@ impl Tool for TaskCreateTool {
         }
     }
 
-    fn category(&self) -> ToolCategory { ToolCategory::Orchestration }
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Orchestration
+    }
 
     async fn execute(
         &self,
@@ -140,7 +164,9 @@ impl Tool for TaskCreateTool {
         _ctx: &ToolContext,
         _permissions: &mut PermissionCollector,
     ) -> Result<ToolOutput, ToolError> {
-        let content = args.get("content").and_then(|v| v.as_str())
+        let content = args
+            .get("content")
+            .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidArgs("Missing 'content'".into()))?;
 
         // We can't access shared state from a stateless tool, so we return
@@ -163,11 +189,17 @@ impl Tool for TaskCreateTool {
 // ---------------------------------------------------------------------------
 
 pub struct TaskUpdateTool;
-impl TaskUpdateTool { pub fn new() -> Self { Self } }
+impl TaskUpdateTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
 
 #[async_trait]
 impl Tool for TaskUpdateTool {
-    fn id(&self) -> &str { "task_update" }
+    fn id(&self) -> &str {
+        "task_update"
+    }
 
     fn description(&self) -> &str {
         "Update the status of a task by ID. Mark as 'in_progress' before starting work, 'completed' immediately after finishing. Only ONE task should be in_progress at a time."
@@ -185,14 +217,17 @@ impl Tool for TaskUpdateTool {
                 ToolParam {
                     name: "status".to_string(),
                     param_type: "string".to_string(),
-                    description: "New status: 'in_progress', 'completed', or 'cancelled'".to_string(),
+                    description: "New status: 'in_progress', 'completed', or 'cancelled'"
+                        .to_string(),
                     required: true,
                 },
             ],
         }
     }
 
-    fn category(&self) -> ToolCategory { ToolCategory::Orchestration }
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Orchestration
+    }
 
     async fn execute(
         &self,
@@ -200,10 +235,15 @@ impl Tool for TaskUpdateTool {
         _ctx: &ToolContext,
         _permissions: &mut PermissionCollector,
     ) -> Result<ToolOutput, ToolError> {
-        let id = args.get("id").and_then(|v| v.as_u64())
-            .ok_or_else(|| ToolError::InvalidArgs("Missing 'id' (integer)".into()))? as usize;
+        let id = args
+            .get("id")
+            .and_then(|v| v.as_u64())
+            .ok_or_else(|| ToolError::InvalidArgs("Missing 'id' (integer)".into()))?
+            as usize;
 
-        let status_str = args.get("status").and_then(|v| v.as_str())
+        let status_str = args
+            .get("status")
+            .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidArgs("Missing 'status'".into()))?;
 
         let status = match status_str {
@@ -211,7 +251,11 @@ impl Tool for TaskUpdateTool {
             "in_progress" => TodoStatus::InProgress,
             "completed" => TodoStatus::Completed,
             "cancelled" => TodoStatus::Cancelled,
-            other => return Err(ToolError::InvalidArgs(format!("Invalid status: '{other}'. Use: pending, in_progress, completed, cancelled"))),
+            other => {
+                return Err(ToolError::InvalidArgs(format!(
+                    "Invalid status: '{other}'. Use: pending, in_progress, completed, cancelled"
+                )));
+            }
         };
 
         let icon = match status {
@@ -241,12 +285,17 @@ impl Tool for TaskUpdateTool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
     use crate::test_helpers::*;
+    use std::sync::Arc;
 
     #[test]
     fn todo_status_serde_roundtrip() {
-        for s in &[TodoStatus::Pending, TodoStatus::InProgress, TodoStatus::Completed, TodoStatus::Cancelled] {
+        for s in &[
+            TodoStatus::Pending,
+            TodoStatus::InProgress,
+            TodoStatus::Completed,
+            TodoStatus::Cancelled,
+        ] {
             let json = serde_json::to_string(s).unwrap();
             let back: TodoStatus = serde_json::from_str(&json).unwrap();
             assert_eq!(*s, back);
@@ -308,11 +357,17 @@ mod tests {
     #[test]
     fn todo_list_thread_safe() {
         let list = Arc::new(TodoList::new());
-        let handles: Vec<_> = (0..10).map(|i| {
-            let l = list.clone();
-            std::thread::spawn(move || { l.create(format!("task {i}")); })
-        }).collect();
-        for h in handles { h.join().unwrap(); }
+        let handles: Vec<_> = (0..10)
+            .map(|i| {
+                let l = list.clone();
+                std::thread::spawn(move || {
+                    l.create(format!("task {i}"));
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap();
+        }
         assert_eq!(list.total(), 10); // All 10 created, none lost
     }
 
@@ -322,10 +377,14 @@ mod tests {
         let ctx = test_context(tmp.path());
         let mut perms = PermissionCollector::new();
         let tool = TaskCreateTool::new();
-        let result = tool.execute(
-            serde_json::json!({"content": "Read project structure"}),
-            &ctx, &mut perms,
-        ).await.unwrap();
+        let result = tool
+            .execute(
+                serde_json::json!({"content": "Read project structure"}),
+                &ctx,
+                &mut perms,
+            )
+            .await
+            .unwrap();
         assert!(result.output.contains("Read project structure"));
         assert_eq!(result.metadata["type"], "task_create");
     }
@@ -336,10 +395,14 @@ mod tests {
         let ctx = test_context(tmp.path());
         let mut perms = PermissionCollector::new();
         let tool = TaskUpdateTool::new();
-        let result = tool.execute(
-            serde_json::json!({"id": 1, "status": "completed"}),
-            &ctx, &mut perms,
-        ).await.unwrap();
+        let result = tool
+            .execute(
+                serde_json::json!({"id": 1, "status": "completed"}),
+                &ctx,
+                &mut perms,
+            )
+            .await
+            .unwrap();
         assert!(result.output.contains("completed"));
         assert_eq!(result.metadata["type"], "task_update");
     }
@@ -350,16 +413,23 @@ mod tests {
         let ctx = test_context(tmp.path());
         let mut perms = PermissionCollector::new();
         let tool = TaskUpdateTool::new();
-        let result = tool.execute(
-            serde_json::json!({"id": 1, "status": "invalid"}),
-            &ctx, &mut perms,
-        ).await;
+        let result = tool
+            .execute(
+                serde_json::json!({"id": 1, "status": "invalid"}),
+                &ctx,
+                &mut perms,
+            )
+            .await;
         assert!(result.is_err());
     }
 
     #[test]
-    fn task_create_id() { assert_eq!(TaskCreateTool::new().id(), "task_create"); }
+    fn task_create_id() {
+        assert_eq!(TaskCreateTool::new().id(), "task_create");
+    }
 
     #[test]
-    fn task_update_id() { assert_eq!(TaskUpdateTool::new().id(), "task_update"); }
+    fn task_update_id() {
+        assert_eq!(TaskUpdateTool::new().id(), "task_update");
+    }
 }

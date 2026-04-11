@@ -68,7 +68,12 @@ pub fn render(input_dir: &Path, config: Config) -> Result<String, String> {
     };
 
     // Assemble final HTML
-    Ok(template::build_html(&config.title, &sidebar_html, &pages_html, &search_index))
+    Ok(template::build_html(
+        &config.title,
+        &sidebar_html,
+        &pages_html,
+        &search_index,
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -102,8 +107,16 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         fs::write(dir.path().join("index.md"), "# Index\n\nMain page").unwrap();
         fs::create_dir(dir.path().join("modules")).unwrap();
-        fs::write(dir.path().join("modules/auth.md"), "# Auth\n\nAuthentication module").unwrap();
-        fs::write(dir.path().join("modules/search.md"), "# Search\n\nSearch engine").unwrap();
+        fs::write(
+            dir.path().join("modules/auth.md"),
+            "# Auth\n\nAuthentication module",
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("modules/search.md"),
+            "# Search\n\nSearch engine",
+        )
+        .unwrap();
 
         let html = render(dir.path(), Config::default()).unwrap();
         assert!(html.contains("Auth"));
@@ -114,7 +127,11 @@ mod tests {
     #[test]
     fn render_with_code_blocks() {
         let dir = tempfile::tempdir().unwrap();
-        fs::write(dir.path().join("index.md"), "# Code\n\n```rust\nfn main() {}\n```").unwrap();
+        fs::write(
+            dir.path().join("index.md"),
+            "# Code\n\n```rust\nfn main() {}\n```",
+        )
+        .unwrap();
         let html = render(dir.path(), Config::default()).unwrap();
         assert!(html.contains("fn main"));
         assert!(html.contains("<code"));

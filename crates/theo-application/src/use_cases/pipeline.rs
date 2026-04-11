@@ -7,14 +7,14 @@ use std::time::Instant;
 
 use std::collections::HashMap;
 
+pub use theo_domain::graph_context::ImpactReport;
+pub use theo_engine_graph::bridge::{BridgeStats, FileData};
+pub use theo_engine_graph::cluster::Community;
 use theo_engine_retrieval::assembly::{self, ContextPayload};
 use theo_engine_retrieval::budget::BudgetConfig;
 use theo_engine_retrieval::escape::ContextMembership;
 use theo_engine_retrieval::search::MultiSignalScorer;
 use theo_engine_retrieval::summary::{self, CommunitySummary, FileGitInfo};
-pub use theo_domain::graph_context::ImpactReport;
-pub use theo_engine_graph::bridge::{BridgeStats, FileData};
-pub use theo_engine_graph::cluster::Community;
 
 use super::impact;
 use theo_engine_graph::bridge;
@@ -221,7 +221,10 @@ impl Pipeline {
         // Peripheral files get incremental patch only.
         const CENTRAL_EDGE_THRESHOLD: usize = 20;
 
-        let file_edge_count = self.graph.all_edges().iter()
+        let file_edge_count = self
+            .graph
+            .all_edges()
+            .iter()
             .filter(|e| e.source == file_id || e.target == file_id)
             .count();
         let is_central = file_edge_count >= CENTRAL_EDGE_THRESHOLD;
@@ -254,9 +257,7 @@ impl Pipeline {
             for community in &mut self.communities {
                 if dirty_community_ids.contains(&community.id) {
                     // Remove old nodes that were deleted
-                    community
-                        .node_ids
-                        .retain(|nid| !removed_ids.contains(nid));
+                    community.node_ids.retain(|nid| !removed_ids.contains(nid));
 
                     // Add the new file node and its dependents to this community
                     if self.graph.get_node(&file_id).is_some() {
@@ -299,7 +300,10 @@ impl Pipeline {
     }
 
     /// Populate co-change edges from git history and extract commit messages.
-    pub fn add_git_cochanges(&mut self, repo_root: &Path) -> Result<git::CoChangeStats, git::GitError> {
+    pub fn add_git_cochanges(
+        &mut self,
+        repo_root: &Path,
+    ) -> Result<git::CoChangeStats, git::GitError> {
         // Extract commit messages for summaries (WHY context).
         if let Ok(file_commits) =
             git::extract_file_commit_messages(repo_root, self.config.max_git_commits)
@@ -428,12 +432,7 @@ impl Pipeline {
     }
 
     /// Run the full pipeline: build graph → git → cluster → search → assemble.
-    pub fn run(
-        &mut self,
-        repo_root: &Path,
-        files: &[FileData],
-        query: &str,
-    ) -> PipelineResult {
+    pub fn run(&mut self, repo_root: &Path, files: &[FileData], query: &str) -> PipelineResult {
         let total_start = Instant::now();
 
         // Stage 1: Build graph
@@ -522,7 +521,10 @@ impl Pipeline {
     }
 
     /// Load a graph from disk.
-    pub fn load_graph(&mut self, path: &str) -> Result<(), theo_engine_graph::persist::PersistError> {
+    pub fn load_graph(
+        &mut self,
+        path: &str,
+    ) -> Result<(), theo_engine_graph::persist::PersistError> {
         self.graph = persist::load(Path::new(path))?;
         Ok(())
     }
@@ -884,8 +886,7 @@ mod tests {
         }
 
         let edges_changed = edges_removed + edges_added;
-        let change_ratio =
-            edges_changed as f64 / pipeline.total_edges_at_last_cluster as f64;
+        let change_ratio = edges_changed as f64 / pipeline.total_edges_at_last_cluster as f64;
 
         // For a small graph with ~3 files, removing/re-adding 1 file with 1
         // Contains edge should yield a low change ratio relative to total edges
@@ -952,9 +953,7 @@ mod tests {
         );
 
         // Remove
-        pipeline
-            .graph
-            .remove_file_and_dependents(utils_file_id);
+        pipeline.graph.remove_file_and_dependents(utils_file_id);
 
         // No edges should touch the removed nodes anymore
         let edges_touching_utils_after = pipeline

@@ -7,8 +7,8 @@
 
 use std::path::Path;
 
-use theo_engine_retrieval::wiki::model::WikiDoc;
 use theo_engine_retrieval::wiki::generator::ConceptCandidate;
+use theo_engine_retrieval::wiki::model::WikiDoc;
 use theo_infra_llm::client::LlmClient;
 use theo_infra_llm::types::{ChatRequest, Message};
 
@@ -38,7 +38,9 @@ pub async fn generate_highlevel_pages(
 
     // 2. Architecture page
     let dep_graph = build_dependency_text(docs);
-    if let Some(page) = generate_architecture(project_name, &module_summary, &dep_graph, client).await {
+    if let Some(page) =
+        generate_architecture(project_name, &module_summary, &dep_graph, client).await
+    {
         pages.push(page);
     }
 
@@ -55,7 +57,10 @@ pub async fn generate_highlevel_pages(
         }
     }
 
-    eprintln!("[wiki-highlevel] Generated {} high-level pages", pages.len());
+    eprintln!(
+        "[wiki-highlevel] Generated {} high-level pages",
+        pages.len()
+    );
     pages
 }
 
@@ -98,7 +103,13 @@ async fn generate_overview(
         project_name, module_summary, project_name
     );
 
-    call_llm(client, &prompt, "overview", &format!("{} — Project Overview", project_name)).await
+    call_llm(
+        client,
+        &prompt,
+        "overview",
+        &format!("{} — Project Overview", project_name),
+    )
+    .await
 }
 
 async fn generate_architecture(
@@ -122,7 +133,13 @@ async fn generate_architecture(
         project_name, module_summary, dep_graph
     );
 
-    call_llm(client, &prompt, "architecture", &format!("{} — Architecture", project_name)).await
+    call_llm(
+        client,
+        &prompt,
+        "architecture",
+        &format!("{} — Architecture", project_name),
+    )
+    .await
 }
 
 async fn generate_getting_started(
@@ -150,10 +167,17 @@ async fn generate_getting_started(
         5. \"## Where to Start Reading\" — recommend 3-5 files to read first with [[wiki-links]]\n\
         6. \"## Key Entry Points\" — the main functions that start everything\n\n\
         Be concise and practical.",
-        project_name, entry_points.join("\n")
+        project_name,
+        entry_points.join("\n")
     );
 
-    call_llm(client, &prompt, "getting-started", &format!("{} — Getting Started", project_name)).await
+    call_llm(
+        client,
+        &prompt,
+        "getting-started",
+        &format!("{} — Getting Started", project_name),
+    )
+    .await
 }
 
 async fn generate_concept_page(
@@ -224,11 +248,15 @@ fn build_module_summary(docs: &[WikiDoc]) -> String {
         .filter(|d| d.file_count >= 2)
         .take(20)
         .map(|d| {
-            let top_ep = d.entry_points.first()
+            let top_ep = d
+                .entry_points
+                .first()
                 .map(|ep| ep.name.as_str())
                 .unwrap_or("(no entry point)");
-            format!("- {} ({} files, {} symbols) — entry: {}",
-                d.title, d.file_count, d.symbol_count, top_ep)
+            format!(
+                "- {} ({} files, {} symbols) — entry: {}",
+                d.title, d.file_count, d.symbol_count, top_ep
+            )
         })
         .collect::<Vec<_>>()
         .join("\n")
@@ -238,18 +266,25 @@ fn build_dependency_text(docs: &[WikiDoc]) -> String {
     let mut deps = Vec::new();
     for doc in docs.iter().filter(|d| !d.dependencies.is_empty()).take(15) {
         for dep in doc.dependencies.iter().take(3) {
-            deps.push(format!("{} → {} ({})", doc.title, dep.target_name, dep.edge_type));
+            deps.push(format!(
+                "{} → {} ({})",
+                doc.title, dep.target_name, dep.edge_type
+            ));
         }
     }
     deps.join("\n")
 }
 
 fn build_concept_context(concept: &ConceptCandidate, docs: &[WikiDoc]) -> String {
-    let related: Vec<String> = docs.iter()
+    let related: Vec<String> = docs
+        .iter()
         .filter(|d| concept.related_modules.contains(&d.slug))
         .take(5)
         .map(|d| {
-            let apis = d.public_api.iter().take(3)
+            let apis = d
+                .public_api
+                .iter()
+                .take(3)
                 .map(|a| a.signature.clone())
                 .collect::<Vec<_>>()
                 .join("; ");

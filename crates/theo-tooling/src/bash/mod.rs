@@ -1,17 +1,17 @@
 use async_trait::async_trait;
+use std::path::{Path, PathBuf};
+use std::process::Stdio;
 use theo_domain::error::ToolError;
 use theo_domain::permission::{PermissionRequest, PermissionType};
 use theo_domain::tool::{
     PermissionCollector, Tool, ToolCategory, ToolContext, ToolOutput, ToolParam, ToolSchema,
     optional_string, optional_u64, require_string,
 };
-use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use tokio::process::Command;
 
 use crate::sandbox::executor::SandboxExecutor;
-use theo_domain::sandbox::SandboxConfig;
 use std::sync::Arc;
+use theo_domain::sandbox::SandboxConfig;
 
 pub struct BashTool {
     sandbox_executor: Option<Arc<dyn SandboxExecutor>>,
@@ -27,10 +27,7 @@ impl BashTool {
     }
 
     /// Create a BashTool with sandbox enabled.
-    pub fn with_sandbox(
-        executor: Arc<dyn SandboxExecutor>,
-        config: SandboxConfig,
-    ) -> Self {
+    pub fn with_sandbox(executor: Arc<dyn SandboxExecutor>, config: SandboxConfig) -> Self {
         Self {
             sandbox_executor: Some(executor),
             sandbox_config: Some(config),
@@ -249,8 +246,7 @@ impl Tool for BashTool {
         };
 
         // Truncate output
-        let truncated_result =
-            theo_domain::truncate::truncate_output(&combined, None);
+        let truncated_result = theo_domain::truncate::truncate_output(&combined, None);
 
         Ok(ToolOutput {
             title: description,
@@ -321,7 +317,12 @@ mod tests {
             .iter()
             .find(|r| r.permission == PermissionType::Bash);
         assert!(bash_req.is_some());
-        assert!(bash_req.unwrap().patterns.contains(&"echo hello".to_string()));
+        assert!(
+            bash_req
+                .unwrap()
+                .patterns
+                .contains(&"echo hello".to_string())
+        );
     }
 
     #[tokio::test]
@@ -527,7 +528,11 @@ mod tests {
             .iter()
             .find(|r| r.permission == PermissionType::Bash)
             .unwrap();
-        assert!(bash_req.patterns.contains(&"cat > /tmp/output.txt".to_string()));
+        assert!(
+            bash_req
+                .patterns
+                .contains(&"cat > /tmp/output.txt".to_string())
+        );
     }
 
     #[tokio::test]
@@ -577,7 +582,11 @@ mod tests {
 
         assert_eq!(result.metadata["truncated"], true);
         assert!(result.output.contains("truncated"));
-        assert!(result.output.contains("The tool call succeeded but the output was truncated"));
+        assert!(
+            result
+                .output
+                .contains("The tool call succeeded but the output was truncated")
+        );
     }
 
     #[tokio::test]

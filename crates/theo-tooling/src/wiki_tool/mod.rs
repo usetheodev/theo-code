@@ -3,12 +3,12 @@
 //! These tools let the agent query the code wiki and ingest runtime insights.
 //! They depend ONLY on theo-domain::WikiBackend trait, not on theo-engine-retrieval.
 
-use std::sync::Arc;
 use async_trait::async_trait;
+use std::sync::Arc;
 use theo_domain::error::ToolError;
 use theo_domain::tool::{
     PermissionCollector, Tool, ToolCategory, ToolContext, ToolOutput, ToolParam, ToolSchema,
-    require_string, optional_string,
+    optional_string, require_string,
 };
 use theo_domain::wiki_backend::{WikiBackend, WikiInsightInput};
 
@@ -66,7 +66,8 @@ impl Tool for WikiQueryTool {
         _permissions: &mut PermissionCollector,
     ) -> Result<ToolOutput, ToolError> {
         let query = require_string(&args, "query")?;
-        let max_results = args.get("max_results")
+        let max_results = args
+            .get("max_results")
             .and_then(|v| v.as_u64())
             .unwrap_or(3) as usize;
 
@@ -83,8 +84,13 @@ impl Tool for WikiQueryTool {
 
         let mut output = format!("Found {} wiki pages for \"{}\":\n\n", results.len(), query);
         for (i, r) in results.iter().enumerate() {
-            output += &format!("## {}. {} [T:{}{}]\n", i + 1, r.title, r.authority_tier,
-                if r.is_stale { " STALE" } else { "" });
+            output += &format!(
+                "## {}. {} [T:{}{}]\n",
+                i + 1,
+                r.title,
+                r.authority_tier,
+                if r.is_stale { " STALE" } else { "" }
+            );
             if !r.summary.is_empty() {
                 output += &format!("**Summary**: {}\n", r.summary);
             }
@@ -143,7 +149,8 @@ impl Tool for WikiIngestTool {
                 ToolParam {
                     name: "command".to_string(),
                     param_type: "string".to_string(),
-                    description: "The command that was executed (e.g., 'cargo test -p auth')".to_string(),
+                    description: "The command that was executed (e.g., 'cargo test -p auth')"
+                        .to_string(),
                     required: true,
                 },
                 ToolParam {
@@ -185,9 +192,7 @@ impl Tool for WikiIngestTool {
         _permissions: &mut PermissionCollector,
     ) -> Result<ToolOutput, ToolError> {
         let command = require_string(&args, "command")?;
-        let exit_code = args.get("exit_code")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0) as i32;
+        let exit_code = args.get("exit_code").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
         let stdout = optional_string(&args, "stdout").unwrap_or_default();
         let stderr = optional_string(&args, "stderr").unwrap_or_default();
         let source = optional_string(&args, "source").unwrap_or_else(|| "agent".to_string());
@@ -204,13 +209,20 @@ impl Tool for WikiIngestTool {
 
         match self.backend.ingest(input).await {
             Ok(result) => {
-                let status = if result.ingested { "recorded" } else { "skipped" };
+                let status = if result.ingested {
+                    "recorded"
+                } else {
+                    "skipped"
+                };
                 Ok(ToolOutput {
                     title: format!("Wiki Ingest: {}", command),
                     output: format!(
                         "Runtime insight {}: {} (exit {})\nAffected: {} files, {} symbols\nTotal insights: {}",
-                        status, command, exit_code,
-                        result.affected_files.len(), result.affected_symbols.len(),
+                        status,
+                        command,
+                        exit_code,
+                        result.affected_files.len(),
+                        result.affected_symbols.len(),
                         result.total_insights
                     ),
                     metadata: serde_json::json!({
@@ -267,13 +279,20 @@ impl Tool for WikiGenerateTool {
     ) -> Result<ToolOutput, ToolError> {
         match self.backend.generate().await {
             Ok(result) => {
-                let mode = if result.is_incremental { "incremental update" } else { "full generation" };
+                let mode = if result.is_incremental {
+                    "incremental update"
+                } else {
+                    "full generation"
+                };
                 Ok(ToolOutput {
                     title: "Wiki Generated".to_string(),
                     output: format!(
                         "Wiki {} complete in {}ms:\n- {} pages generated\n- {} pages updated\n- {} pages skipped\n\nWiki at: {}",
-                        mode, result.duration_ms,
-                        result.pages_generated, result.pages_updated, result.pages_skipped,
+                        mode,
+                        result.duration_ms,
+                        result.pages_generated,
+                        result.pages_updated,
+                        result.pages_skipped,
                         result.wiki_dir
                     ),
                     metadata: serde_json::json!({
@@ -287,7 +306,10 @@ impl Tool for WikiGenerateTool {
                     attachments: None,
                 })
             }
-            Err(e) => Err(ToolError::Execution(format!("Wiki generation failed: {}", e))),
+            Err(e) => Err(ToolError::Execution(format!(
+                "Wiki generation failed: {}",
+                e
+            ))),
         }
     }
 }

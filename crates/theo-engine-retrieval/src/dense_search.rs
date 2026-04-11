@@ -17,10 +17,7 @@ mod inner {
     pub struct FileDenseSearch;
 
     /// Cosine scan helper: embed query, scan cache, return sorted scores.
-    fn cosine_scan(
-        query_vec: &[f64],
-        cache: &EmbeddingCache,
-    ) -> Vec<(String, f64)> {
+    fn cosine_scan(query_vec: &[f64], cache: &EmbeddingCache) -> Vec<(String, f64)> {
         let query_norm: f64 = query_vec.iter().map(|x| x * x).sum::<f64>().sqrt();
         if query_norm < 1e-10 {
             return Vec::new();
@@ -29,7 +26,9 @@ mod inner {
         let mut scores: Vec<(String, f64)> = Vec::new();
         for (file_path, embedding) in cache.iter() {
             let emb_norm: f64 = embedding.iter().map(|x| x * x).sum::<f64>().sqrt();
-            if emb_norm < 1e-10 { continue; }
+            if emb_norm < 1e-10 {
+                continue;
+            }
 
             let mut sim = NeuralEmbedder::cosine_similarity(query_vec, embedding);
 
@@ -80,7 +79,8 @@ mod inner {
                 let top_path = &initial[0].0;
 
                 if let Some(top_emb) = cache.get(top_path) {
-                    let expanded: Vec<f64> = query_vec.iter()
+                    let expanded: Vec<f64> = query_vec
+                        .iter()
                         .zip(top_emb.iter())
                         .map(|(q, d)| 0.7 * q + 0.3 * d)
                         .collect();
@@ -95,14 +95,20 @@ mod inner {
                     }
 
                     let mut result: Vec<_> = merged.into_iter().collect();
-                    result.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+                    result
+                        .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
                     result.truncate(top_k);
                     return result.into_iter().collect();
                 }
             }
 
             // No PRF: return initial results
-            initial.into_iter().take(top_k).collect::<Vec<_>>().into_iter().collect()
+            initial
+                .into_iter()
+                .take(top_k)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .collect()
         }
     }
 }
@@ -255,7 +261,12 @@ mod tests {
             Err(_) => return,
         };
         let cache = EmbeddingCache::build(&graph, &embedder);
-        let results = FileDenseSearch::search(&embedder, &cache, "JWT authentication token verification", 10);
+        let results = FileDenseSearch::search(
+            &embedder,
+            &cache,
+            "JWT authentication token verification",
+            10,
+        );
 
         assert!(!results.is_empty(), "expected results for auth query");
 

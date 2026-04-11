@@ -31,7 +31,9 @@ impl BwrapExecutor {
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .output()
-            .map_err(|e| SandboxError::Unavailable(format!("bwrap not found at {BWRAP_PATH}: {e}")))?;
+            .map_err(|e| {
+                SandboxError::Unavailable(format!("bwrap not found at {BWRAP_PATH}: {e}"))
+            })?;
 
         if !output.status.success() {
             return Err(SandboxError::Unavailable(
@@ -78,9 +80,7 @@ impl BwrapExecutor {
         cmd.arg("--tmpfs").arg("/tmp");
 
         // Writable project directory
-        cmd.arg("--bind")
-            .arg(working_dir)
-            .arg(working_dir);
+        cmd.arg("--bind").arg(working_dir).arg(working_dir);
         cmd.arg("--chdir").arg(working_dir);
 
         // Additional allowed read paths from config
@@ -221,9 +221,20 @@ impl SandboxExecutor for BwrapExecutor {
         });
 
         if output.status.success() {
-            Ok(SandboxResult::success(exit_code, stdout, stderr, audit_entries))
+            Ok(SandboxResult::success(
+                exit_code,
+                stdout,
+                stderr,
+                audit_entries,
+            ))
         } else {
-            Ok(SandboxResult::failed(exit_code, stdout, stderr, vec![], audit_entries))
+            Ok(SandboxResult::failed(
+                exit_code,
+                stdout,
+                stderr,
+                vec![],
+                audit_entries,
+            ))
         }
     }
 }
@@ -267,7 +278,11 @@ mod tests {
         let result = executor
             .execute_sandboxed("echo bwrap_sandboxed", Path::new("/tmp"), &default_config())
             .unwrap();
-        assert!(result.success, "echo should succeed in sandbox. stderr: {}", result.stderr);
+        assert!(
+            result.success,
+            "echo should succeed in sandbox. stderr: {}",
+            result.stderr
+        );
         assert!(
             result.stdout.contains("bwrap_sandboxed"),
             "stdout should contain output. Got: {}",
@@ -290,7 +305,9 @@ mod tests {
             .unwrap();
         let output = format!("{}{}", result.stdout, result.stderr);
         assert!(
-            output.contains("Read-only") || output.contains("Permission denied") || output.contains("exit=1"),
+            output.contains("Read-only")
+                || output.contains("Permission denied")
+                || output.contains("exit=1"),
             "Writing to /usr should fail in sandbox. Got: {output}"
         );
     }
@@ -308,7 +325,11 @@ mod tests {
                 &default_config(),
             )
             .unwrap();
-        assert!(result.success, "Writing to /tmp should succeed. stderr: {}", result.stderr);
+        assert!(
+            result.success,
+            "Writing to /tmp should succeed. stderr: {}",
+            result.stderr
+        );
         assert!(result.stdout.contains("test"));
     }
 
@@ -335,9 +356,12 @@ mod tests {
         let output = format!("{}{}", result.stdout, result.stderr);
         // curl should fail — no network in sandbox
         assert!(
-            output.contains("exit=7") || output.contains("exit=28")
-                || output.contains("Couldn't connect") || output.contains("Connection refused")
-                || output.contains("Network is unreachable") || !result.success,
+            output.contains("exit=7")
+                || output.contains("exit=28")
+                || output.contains("Couldn't connect")
+                || output.contains("Connection refused")
+                || output.contains("Network is unreachable")
+                || !result.success,
             "Network should be blocked. Got: {output}"
         );
     }
@@ -349,7 +373,11 @@ mod tests {
         }
         let executor = BwrapExecutor::new().unwrap();
         let result = executor
-            .execute_sandboxed("ps aux 2>/dev/null | wc -l", Path::new("/tmp"), &default_config())
+            .execute_sandboxed(
+                "ps aux 2>/dev/null | wc -l",
+                Path::new("/tmp"),
+                &default_config(),
+            )
             .unwrap();
         if result.success {
             let line_count: usize = result.stdout.trim().parse().unwrap_or(999);
@@ -386,7 +414,10 @@ mod tests {
         let result = executor
             .execute_sandboxed("echo audit_test", Path::new("/tmp"), &default_config())
             .unwrap();
-        assert!(!result.audit_entries.is_empty(), "Should have audit entries");
+        assert!(
+            !result.audit_entries.is_empty(),
+            "Should have audit entries"
+        );
         let has_init = result
             .audit_entries
             .iter()

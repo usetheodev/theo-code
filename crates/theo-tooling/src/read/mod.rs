@@ -1,17 +1,16 @@
 use async_trait::async_trait;
+use std::path::{Path, PathBuf};
 use theo_domain::error::ToolError;
 use theo_domain::permission::{PermissionRequest, PermissionType};
 use theo_domain::tool::{
     FileAttachment, PermissionCollector, Tool, ToolCategory, ToolContext, ToolOutput, ToolParam,
     ToolSchema, optional_u64, require_string,
 };
-use std::path::{Path, PathBuf};
 
 /// Known binary file extensions that should not be read as text
 const BINARY_EXTENSIONS: &[&str] = &[
-    "wasm", "exe", "dll", "so", "dylib", "o", "a", "lib", "bin", "dat", "db", "sqlite",
-    "sqlite3", "zip", "tar", "gz", "bz2", "xz", "7z", "rar", "jar", "war", "ear", "class",
-    "pyc", "pyo",
+    "wasm", "exe", "dll", "so", "dylib", "o", "a", "lib", "bin", "dat", "db", "sqlite", "sqlite3",
+    "zip", "tar", "gz", "bz2", "xz", "7z", "rar", "jar", "war", "ear", "class", "pyc", "pyo",
 ];
 
 /// Image extensions that should be returned as attachments
@@ -86,7 +85,10 @@ impl ReadTool {
             .map(|(i, line)| {
                 let line_num = offset + i;
                 let truncated_line = if line.len() > MAX_LINE_CHARS {
-                    format!("{} (line truncated to {MAX_LINE_CHARS} chars)", &line[..MAX_LINE_CHARS])
+                    format!(
+                        "{} (line truncated to {MAX_LINE_CHARS} chars)",
+                        &line[..MAX_LINE_CHARS]
+                    )
                 } else {
                     line.to_string()
                 };
@@ -226,8 +228,8 @@ impl Tool for ReadTool {
             )));
         }
 
-        let content =
-            String::from_utf8(bytes).map_err(|_| ToolError::Execution("File is not valid UTF-8".to_string()))?;
+        let content = String::from_utf8(bytes)
+            .map_err(|_| ToolError::Execution("File is not valid UTF-8".to_string()))?;
 
         let all_lines: Vec<&str> = content.lines().collect();
         let total_lines = all_lines.len();
@@ -275,7 +277,9 @@ impl Tool for ReadTool {
                 start + shown,
             ));
         } else if truncated {
-            output.push_str(&format!("\n\nOutput capped at {MAX_FILE_BYTES} bytes. Use offset= to read more."));
+            output.push_str(&format!(
+                "\n\nOutput capped at {MAX_FILE_BYTES} bytes. Use offset= to read more."
+            ));
         } else {
             output.push_str(&format!("\nEnd of file - total {total_lines} lines"));
         }
@@ -301,9 +305,11 @@ impl ReadTool {
             .await
             .map_err(|e| ToolError::Execution(format!("Failed to read directory: {e}")))?;
 
-        while let Some(entry) = dir.next_entry().await.map_err(|e| {
-            ToolError::Execution(format!("Failed to read directory entry: {e}"))
-        })? {
+        while let Some(entry) = dir
+            .next_entry()
+            .await
+            .map_err(|e| ToolError::Execution(format!("Failed to read directory entry: {e}")))?
+        {
             let name = entry.file_name().to_string_lossy().to_string();
             let metadata = entry.metadata().await.ok();
             let suffix = if metadata.as_ref().map(|m| m.is_dir()).unwrap_or(false) {
@@ -371,7 +377,8 @@ impl<'a> Base64Encoder<'a> {
             3 => {
                 self.buf.push(CHARS[(b[0] >> 2) as usize]);
                 self.buf.push(CHARS[((b[0] & 3) << 4 | b[1] >> 4) as usize]);
-                self.buf.push(CHARS[((b[1] & 0xf) << 2 | b[2] >> 6) as usize]);
+                self.buf
+                    .push(CHARS[((b[1] & 0xf) << 2 | b[2] >> 6) as usize]);
                 self.buf.push(CHARS[(b[2] & 0x3f) as usize]);
             }
             2 => {
@@ -577,7 +584,10 @@ mod tests {
     #[tokio::test]
     async fn truncates_by_line_count_when_limit_specified() {
         let tmp = TestDir::new();
-        let lines: String = (0..100).map(|i| format!("line{i}")).collect::<Vec<_>>().join("\n");
+        let lines: String = (0..100)
+            .map(|i| format!("line{i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
         tmp.write_file("many-lines.txt", &lines);
         let ctx = test_context(tmp.path());
         let mut perms = PermissionCollector::new();
@@ -625,7 +635,10 @@ mod tests {
     #[tokio::test]
     async fn respects_offset_parameter() {
         let tmp = TestDir::new();
-        let lines: String = (1..=20).map(|i| format!("line{i}")).collect::<Vec<_>>().join("\n");
+        let lines: String = (1..=20)
+            .map(|i| format!("line{i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
         tmp.write_file("offset.txt", &lines);
         let ctx = test_context(tmp.path());
         let mut perms = PermissionCollector::new();
@@ -651,7 +664,10 @@ mod tests {
     #[tokio::test]
     async fn throws_when_offset_beyond_end_of_file() {
         let tmp = TestDir::new();
-        let lines: String = (1..=3).map(|i| format!("line{i}")).collect::<Vec<_>>().join("\n");
+        let lines: String = (1..=3)
+            .map(|i| format!("line{i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
         tmp.write_file("short.txt", &lines);
         let ctx = test_context(tmp.path());
         let mut perms = PermissionCollector::new();
@@ -712,7 +728,12 @@ mod tests {
             .await;
 
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Offset 2 is out of range"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Offset 2 is out of range")
+        );
     }
 
     #[tokio::test]
@@ -743,10 +764,9 @@ mod tests {
         let tmp = TestDir::new();
         // 1x1 red PNG
         let png_bytes: &[u8] = &[
-            137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0,
-            1, 8, 2, 0, 0, 0, 144, 119, 83, 222, 0, 0, 0, 12, 73, 68, 65, 84, 120, 156, 99, 248,
-            207, 192, 0, 0, 0, 3, 0, 1, 24, 216, 141, 164, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66,
-            96, 130,
+            137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1,
+            8, 2, 0, 0, 0, 144, 119, 83, 222, 0, 0, 0, 12, 73, 68, 65, 84, 120, 156, 99, 248, 207,
+            192, 0, 0, 0, 3, 0, 1, 24, 216, 141, 164, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
         ];
         let png_path = tmp.path().join("image.png");
         std::fs::write(&png_path, png_bytes).unwrap();
@@ -774,7 +794,9 @@ mod tests {
     #[tokio::test]
     async fn rejects_text_extension_files_with_null_bytes() {
         let tmp = TestDir::new();
-        let bytes: &[u8] = &[0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x00, 0x77, 0x6f, 0x72, 0x6c, 0x64];
+        let bytes: &[u8] = &[
+            0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x00, 0x77, 0x6f, 0x72, 0x6c, 0x64,
+        ];
         let path = tmp.path().join("null-byte.txt");
         std::fs::write(&path, bytes).unwrap();
 
@@ -790,7 +812,12 @@ mod tests {
             .await;
 
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Cannot read binary file"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Cannot read binary file")
+        );
     }
 
     #[tokio::test]
@@ -809,7 +836,12 @@ mod tests {
             .await;
 
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Cannot read binary file"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Cannot read binary file")
+        );
     }
 
     #[tokio::test]

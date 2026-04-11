@@ -10,12 +10,25 @@ pub struct EnvInfoTool;
 
 #[async_trait]
 impl Tool for EnvInfoTool {
-    fn id(&self) -> &str { "env_info" }
-    fn description(&self) -> &str { "Show system environment info: OS, architecture, Rust version, project dir, available tools." }
-    fn category(&self) -> ToolCategory { ToolCategory::Utility }
-    fn schema(&self) -> ToolSchema { ToolSchema { params: vec![] } }
+    fn id(&self) -> &str {
+        "env_info"
+    }
+    fn description(&self) -> &str {
+        "Show system environment info: OS, architecture, Rust version, project dir, available tools."
+    }
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Utility
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema { params: vec![] }
+    }
 
-    async fn execute(&self, _args: serde_json::Value, ctx: &ToolContext, _p: &mut PermissionCollector) -> Result<ToolOutput, ToolError> {
+    async fn execute(
+        &self,
+        _args: serde_json::Value,
+        ctx: &ToolContext,
+        _p: &mut PermissionCollector,
+    ) -> Result<ToolOutput, ToolError> {
         let mut info = String::new();
 
         info.push_str(&format!("OS: {}\n", std::env::consts::OS));
@@ -31,13 +44,24 @@ impl Tool for EnvInfoTool {
                 .await
                 .map(|o| o.status.success())
                 .unwrap_or(false);
-            info.push_str(&format!("{}: {}\n", tool, if available { "available" } else { "not found" }));
+            info.push_str(&format!(
+                "{}: {}\n",
+                tool,
+                if available { "available" } else { "not found" }
+            ));
         }
 
         // Rust version if available
-        if let Ok(output) = tokio::process::Command::new("rustc").arg("--version").output().await {
+        if let Ok(output) = tokio::process::Command::new("rustc")
+            .arg("--version")
+            .output()
+            .await
+        {
             if output.status.success() {
-                info.push_str(&format!("Rust: {}", String::from_utf8_lossy(&output.stdout).trim()));
+                info.push_str(&format!(
+                    "Rust: {}",
+                    String::from_utf8_lossy(&output.stdout).trim()
+                ));
             }
         }
 
@@ -63,7 +87,9 @@ mod tests {
     async fn env_info_returns_os_info() {
         let ctx = ToolContext::test_context(std::path::PathBuf::from("/tmp"));
         let mut perms = PermissionCollector::new();
-        let result = EnvInfoTool.execute(serde_json::json!({}), &ctx, &mut perms).await;
+        let result = EnvInfoTool
+            .execute(serde_json::json!({}), &ctx, &mut perms)
+            .await;
         assert!(result.is_ok());
         let output = result.unwrap().output;
         assert!(output.contains("OS:"));

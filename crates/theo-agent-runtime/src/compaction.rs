@@ -114,10 +114,7 @@ pub fn compact_if_needed_with_context(
 
     // Identify boundary: everything before this index is a candidate for compaction.
     // We preserve: all system messages (any position) + last PRESERVE_TAIL non-system messages.
-    let non_system_count = messages
-        .iter()
-        .filter(|m| m.role != Role::System)
-        .count();
+    let non_system_count = messages.iter().filter(|m| m.role != Role::System).count();
 
     if non_system_count <= PRESERVE_TAIL {
         // Not enough messages to compact — everything is in the "preserve" zone.
@@ -181,14 +178,15 @@ pub fn compact_if_needed_with_context(
                                 || word.ends_with(".js")
                                 || word.ends_with(".go"))
                         {
-                            let clean = word.trim_matches(|c: char| !c.is_alphanumeric() && c != '/' && c != '.' && c != '_' && c != '-');
+                            let clean = word.trim_matches(|c: char| {
+                                !c.is_alphanumeric() && c != '/' && c != '.' && c != '_' && c != '-'
+                            });
                             if !files_mentioned.contains(&clean.to_string()) {
                                 files_mentioned.push(clean.to_string());
                             }
                         }
                     }
-                    messages[i].content =
-                        Some(truncate_utf8(content, TRUNCATE_TOOL_RESULT_CHARS));
+                    messages[i].content = Some(truncate_utf8(content, TRUNCATE_TOOL_RESULT_CHARS));
                     compacted = true;
                 }
             }
@@ -258,11 +256,21 @@ pub fn compact_if_needed_with_context(
             parts.push(format!(" Phase: {}.", ctx.current_phase));
         }
         if !ctx.target_files.is_empty() {
-            let targets: Vec<&str> = ctx.target_files.iter().take(5).map(|s| s.as_str()).collect();
+            let targets: Vec<&str> = ctx
+                .target_files
+                .iter()
+                .take(5)
+                .map(|s| s.as_str())
+                .collect();
             parts.push(format!(" Targets: {}.", targets.join(", ")));
         }
         if !ctx.recent_errors.is_empty() {
-            let errs: Vec<String> = ctx.recent_errors.iter().take(2).map(|e| truncate_utf8(e, 80)).collect();
+            let errs: Vec<String> = ctx
+                .recent_errors
+                .iter()
+                .take(2)
+                .map(|e| truncate_utf8(e, 80))
+                .collect();
             parts.push(format!(" Errors: {}.", errs.join("; ")));
         }
         parts.join("")
@@ -349,7 +357,6 @@ mod tests {
     fn compaction_truncates_old_tool_results() {
         // 20 turns with 2000-char tool results → should exceed any reasonable threshold.
         let mut msgs = make_messages(20, 2000);
-        let original_len = msgs.len();
 
         compact_if_needed(&mut msgs, 1_000); // Very small window to force compaction.
 
@@ -380,7 +387,11 @@ mod tests {
         // Add enough messages to trigger compaction.
         for i in 0..20 {
             msgs.push(Message::user(&format!("task {i}")));
-            msgs.push(Message::tool_result(format!("c{i}"), "read", &"x".repeat(2000)));
+            msgs.push(Message::tool_result(
+                format!("c{i}"),
+                "read",
+                &"x".repeat(2000),
+            ));
         }
 
         compact_if_needed(&mut msgs, 1_000);
@@ -422,12 +433,14 @@ mod tests {
     #[test]
     fn utf8_safe_truncation() {
         let emoji_content = "🎉".repeat(300); // 4 bytes per emoji.
-        let mut msgs = vec![
-            Message::system("s"),
-        ];
+        let mut msgs = vec![Message::system("s")];
         for i in 0..10 {
             msgs.push(Message::user(&format!("task {i}")));
-            msgs.push(Message::tool_result(format!("c{i}"), "read", &emoji_content));
+            msgs.push(Message::tool_result(
+                format!("c{i}"),
+                "read",
+                &emoji_content,
+            ));
         }
 
         // Should not panic on UTF-8 boundary.
@@ -459,7 +472,10 @@ mod tests {
             .count();
 
         assert_eq!(summary_count_1, 1);
-        assert_eq!(summary_count_2, 1, "Compaction should not duplicate summaries");
+        assert_eq!(
+            summary_count_2, 1,
+            "Compaction should not duplicate summaries"
+        );
     }
 
     #[test]
@@ -515,10 +531,22 @@ mod tests {
             .expect("Expected compaction summary");
 
         let content = summary.content.as_deref().unwrap();
-        assert!(content.contains("Fix authentication bug"), "Summary should contain task objective");
-        assert!(content.contains("Phase: EDIT"), "Summary should contain phase");
-        assert!(content.contains("src/auth.rs"), "Summary should contain target files");
-        assert!(content.contains("unresolved import"), "Summary should contain recent errors");
+        assert!(
+            content.contains("Fix authentication bug"),
+            "Summary should contain task objective"
+        );
+        assert!(
+            content.contains("Phase: EDIT"),
+            "Summary should contain phase"
+        );
+        assert!(
+            content.contains("src/auth.rs"),
+            "Summary should contain target files"
+        );
+        assert!(
+            content.contains("unresolved import"),
+            "Summary should contain recent errors"
+        );
     }
 
     #[test]
@@ -530,8 +558,16 @@ mod tests {
         compact_if_needed_with_context(&mut msgs_with, 1_000, None);
 
         // Both should produce the same summary
-        let summary_with = msgs_with.iter().find(|m| m.content.as_deref().is_some_and(|c| c.starts_with(COMPACTED_PREFIX)));
-        let summary_without = msgs_without.iter().find(|m| m.content.as_deref().is_some_and(|c| c.starts_with(COMPACTED_PREFIX)));
+        let summary_with = msgs_with.iter().find(|m| {
+            m.content
+                .as_deref()
+                .is_some_and(|c| c.starts_with(COMPACTED_PREFIX))
+        });
+        let summary_without = msgs_without.iter().find(|m| {
+            m.content
+                .as_deref()
+                .is_some_and(|c| c.starts_with(COMPACTED_PREFIX))
+        });
 
         assert_eq!(
             summary_with.and_then(|m| m.content.as_deref()),

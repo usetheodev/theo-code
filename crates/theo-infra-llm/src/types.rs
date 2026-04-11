@@ -60,10 +60,7 @@ impl Message {
         }
     }
 
-    pub fn assistant_with_tool_calls(
-        content: Option<String>,
-        tool_calls: Vec<ToolCall>,
-    ) -> Self {
+    pub fn assistant_with_tool_calls(content: Option<String>, tool_calls: Vec<ToolCall>) -> Self {
         Self {
             role: Role::Assistant,
             content,
@@ -105,7 +102,11 @@ pub struct FunctionCall {
 }
 
 impl ToolCall {
-    pub fn new(id: impl Into<String>, name: impl Into<String>, arguments: impl Into<String>) -> Self {
+    pub fn new(
+        id: impl Into<String>,
+        name: impl Into<String>,
+        arguments: impl Into<String>,
+    ) -> Self {
         Self {
             id: id.into(),
             call_type: "function".to_string(),

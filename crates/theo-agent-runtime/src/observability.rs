@@ -48,7 +48,7 @@ impl EventListener for StructuredLogListener {
 mod tests {
     use super::*;
     use std::sync::Arc;
-    use theo_domain::event::{EventType, ALL_EVENT_TYPES};
+    use theo_domain::event::{ALL_EVENT_TYPES, EventType};
 
     fn make_event(event_type: EventType) -> DomainEvent {
         DomainEvent::new(event_type, "test-entity", serde_json::Value::Null)

@@ -240,14 +240,19 @@ fn generate_one(
     let member_set: HashSet<&str> = community.node_ids.iter().map(String::as_str).collect();
 
     // Top functions: symbols with highest in-degree (most called)
-    let mut top_functions: Vec<(String, usize)> = symbols.iter()
+    let mut top_functions: Vec<(String, usize)> = symbols
+        .iter()
         .map(|s| {
             let in_degree = graph.reverse_neighbors(&s.id).len();
             (s.name.clone(), in_degree)
         })
         .collect();
     top_functions.sort_by(|a, b| b.1.cmp(&a.1));
-    let top_functions: Vec<String> = top_functions.into_iter().take(5).map(|(name, _)| name).collect();
+    let top_functions: Vec<String> = top_functions
+        .into_iter()
+        .take(5)
+        .map(|(name, _)| name)
+        .collect();
 
     // Edge types present within this community
     let mut edge_types: HashSet<String> = HashSet::new();
@@ -278,7 +283,8 @@ fn generate_one(
             *ext_counts.entry(ext.to_string()).or_default() += 1;
         }
     }
-    let primary_language = ext_counts.into_iter()
+    let primary_language = ext_counts
+        .into_iter()
         .max_by_key(|(_, count)| *count)
         .map(|(ext, _)| ext)
         .unwrap_or_default();
@@ -327,9 +333,10 @@ fn build_call_flow(symbols: &[SymbolInfo], graph: &CodeGraph) -> String {
             && sym_ids.contains(edge.source.as_str())
             && sym_ids.contains(edge.target.as_str())
         {
-            if let (Some(src), Some(tgt)) =
-                (id_to_name.get(edge.source.as_str()), id_to_name.get(edge.target.as_str()))
-            {
+            if let (Some(src), Some(tgt)) = (
+                id_to_name.get(edge.source.as_str()),
+                id_to_name.get(edge.target.as_str()),
+            ) {
                 calls.push((src, tgt));
             }
         }

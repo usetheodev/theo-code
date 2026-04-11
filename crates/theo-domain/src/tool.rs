@@ -83,8 +83,14 @@ impl ToolSchema {
 
         for param in &self.params {
             let mut prop = serde_json::Map::new();
-            prop.insert("type".to_string(), serde_json::Value::String(param.param_type.clone()));
-            prop.insert("description".to_string(), serde_json::Value::String(param.description.clone()));
+            prop.insert(
+                "type".to_string(),
+                serde_json::Value::String(param.param_type.clone()),
+            );
+            prop.insert(
+                "description".to_string(),
+                serde_json::Value::String(param.description.clone()),
+            );
             // Arrays require "items" schema for OpenAI API compatibility
             if param.param_type == "array" {
                 prop.insert("items".to_string(), serde_json::json!({"type": "object"}));
@@ -96,8 +102,14 @@ impl ToolSchema {
         }
 
         let mut schema = serde_json::Map::new();
-        schema.insert("type".to_string(), serde_json::Value::String("object".to_string()));
-        schema.insert("properties".to_string(), serde_json::Value::Object(properties));
+        schema.insert(
+            "type".to_string(),
+            serde_json::Value::String("object".to_string()),
+        );
+        schema.insert(
+            "properties".to_string(),
+            serde_json::Value::Object(properties),
+        );
         if !required.is_empty() {
             schema.insert("required".to_string(), serde_json::Value::Array(required));
         }
@@ -110,13 +122,21 @@ impl ToolSchema {
         for param in &self.params {
             match param.param_type.as_str() {
                 "string" | "integer" | "number" | "boolean" | "array" | "object" => {}
-                other => return Err(format!("Invalid param type '{}' for '{}'", other, param.name)),
+                other => {
+                    return Err(format!(
+                        "Invalid param type '{}' for '{}'",
+                        other, param.name
+                    ));
+                }
             }
             if param.name.is_empty() {
                 return Err("Parameter name cannot be empty".to_string());
             }
             if param.description.is_empty() {
-                return Err(format!("Parameter '{}' must have a description", param.name));
+                return Err(format!(
+                    "Parameter '{}' must have a description",
+                    param.name
+                ));
             }
         }
         Ok(())
@@ -254,7 +274,9 @@ pub fn require_string(args: &serde_json::Value, field: &str) -> Result<String, T
 
 /// Validate that a JSON value has an optional string field
 pub fn optional_string(args: &serde_json::Value, field: &str) -> Option<String> {
-    args.get(field).and_then(|v| v.as_str()).map(|s| s.to_string())
+    args.get(field)
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
 }
 
 /// Validate that a JSON value has an optional integer field

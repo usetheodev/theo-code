@@ -72,7 +72,9 @@ impl EmbeddingCache {
         let mut documents: Vec<String> = Vec::new();
 
         for node_id in graph.node_ids() {
-            let Some(node) = graph.get_node(node_id) else { continue };
+            let Some(node) = graph.get_node(node_id) else {
+                continue;
+            };
             if node.node_type != NodeType::File {
                 continue;
             }
@@ -113,9 +115,7 @@ impl EmbeddingCache {
         let data: CacheData = bincode::deserialize(&bytes).ok()?;
 
         // Validate header (version + graph hash, model-flexible for fallback)
-        if data.header.version != CACHE_VERSION
-            || data.header.graph_hash != expected_graph_hash
-        {
+        if data.header.version != CACHE_VERSION || data.header.graph_hash != expected_graph_hash {
             return None; // Stale or incompatible cache
         }
 

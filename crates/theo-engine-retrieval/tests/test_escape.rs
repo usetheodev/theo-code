@@ -1,8 +1,7 @@
-/// Tests for escape.rs — Escape Hatch / Context Miss Detection
-
-use theo_engine_retrieval::escape::ContextMembership;
 use theo_engine_graph::cluster::Community;
 use theo_engine_graph::model::{CodeGraph, Edge, EdgeType, Node, NodeType, SymbolKind};
+/// Tests for escape.rs — Escape Hatch / Context Miss Detection
+use theo_engine_retrieval::escape::ContextMembership;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -142,7 +141,10 @@ fn test_detect_miss_returns_none_for_unknown_file() {
 
     // Unknown file — not in any community
     let miss = membership.detect_miss("src/totally/unknown.rs", &graph, &communities);
-    assert!(miss.is_none(), "unknown file not in any community should return None");
+    assert!(
+        miss.is_none(),
+        "unknown file not in any community should return None"
+    );
 }
 
 #[test]
