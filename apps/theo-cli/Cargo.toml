@@ -11,15 +11,38 @@ theo-tooling.workspace = true
 theo-infra-auth = { path = "../../crates/theo-infra-auth" }
 theo-infra-llm = { path = "../../crates/theo-infra-llm" }
 tokio.workspace = true
+async-trait.workspace = true
 clap.workspace = true
 rustyline.workspace = true
+crossterm.workspace = true
+pulldown-cmark.workspace = true
+syntect.workspace = true
+indicatif.workspace = true
+console.workspace = true
+dialoguer.workspace = true
+textwrap.workspace = true
+comfy-table.workspace = true
+dirs.workspace = true
+toml.workspace = true
+thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+
+[dev-dependencies]
+insta.workspace = true
+proptest.workspace = true
+tempfile.workspace = true
+criterion.workspace = true
+
+[[bench]]
+name = "streaming_markdown"
+harness = false
+
+[[bench]]
+name = "syntect_load"
+harness = false
 
 [features]
 default = ["tantivy-backend"]
 tantivy-backend = ["theo-application/tantivy-backend"]
 dense-retrieval = ["theo-application/dense-retrieval"]
-
-[dev-dependencies]
-tempfile.workspace = true

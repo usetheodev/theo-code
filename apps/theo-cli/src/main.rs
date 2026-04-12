@@ -1,8 +1,14 @@
 mod commands;
+mod config;
 mod init;
+mod input;
+mod permission;
 mod pilot;
+mod render;
 mod renderer;
 mod repl;
+mod status_line;
+mod tty;
 
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -176,19 +182,22 @@ fn main() {
 
 fn cmd_init(repo: PathBuf) {
     let project_dir = resolve_dir(repo);
+    let caps = tty::TtyCaps::detect().style_caps();
+    use render::style::{bold, error, success, warn};
 
-    eprintln!("\x1b[1mtheo init\x1b[0m — initializing project");
+    eprintln!("{} — initializing project", bold("theo init", caps));
 
     let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
     rt.block_on(async {
         let (config, _provider) = resolve_agent_config(None, None, None).await;
         match init::run_init_with_agent(&project_dir, config).await {
             Ok(true) => eprintln!(
-                "\n\x1b[32m✓ Project initialized.\x1b[0m Review .theo/theo.md and edit if needed."
+                "\n{} Review .theo/theo.md and edit if needed.",
+                success("✓ Project initialized.", caps)
             ),
-            Ok(false) => eprintln!("\n\x1b[33m⚠ Already initialized.\x1b[0m"),
+            Ok(false) => eprintln!("\n{}", warn("⚠ Already initialized.", caps)),
             Err(e) => {
-                eprintln!("\n\x1b[31m✗ Error:\x1b[0m {e}");
+                eprintln!("\n{} {e}", error("✗ Error:", caps));
                 std::process::exit(1);
             }
         }

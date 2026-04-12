@@ -17,7 +17,7 @@ name = "theo-marklive"
 path = "src/main.rs"
 
 [dependencies]
-pulldown-cmark = "0.12"
+pulldown-cmark.workspace = true
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
