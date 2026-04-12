@@ -15,8 +15,15 @@ use theo_domain::graph_context::GraphContextProvider;
 use theo_infra_llm::types::Message;
 use theo_tooling::registry::create_default_registry;
 
-use crate::commands::handle_command;
+use crate::commands::{CommandContext, CommandOutcome, CommandRegistry, build_registry};
+use crate::render::style::{StyleCaps, accent, bold, dim, error, success};
 use crate::renderer::CliRenderer;
+use crate::tty::TtyCaps;
+
+/// Resolve current style caps from the terminal.
+fn caps() -> StyleCaps {
+    TtyCaps::detect().style_caps()
+}
 
 /// Maximum number of messages to keep in session history.
 /// Prevents unbounded memory growth. Oldest messages are dropped.
@@ -33,6 +40,8 @@ pub struct Repl {
     session_messages: Vec<Message>,
     /// GRAPHCTX — initialized once, shared across all turns (read-only after init).
     graph_context: Option<Arc<dyn GraphContextProvider>>,
+    /// Slash command registry built once at startup.
+    commands: CommandRegistry,
 }
 
 impl Repl {
@@ -54,6 +63,7 @@ impl Repl {
             mode: AgentMode::default(),
             session_messages,
             graph_context: None,
+            commands: build_registry(),
         }
     }
 
@@ -67,7 +77,7 @@ impl Repl {
     pub fn set_mode(&mut self, mode: AgentMode) {
         self.mode = mode;
         self.config.system_prompt = system_prompt_for_mode(mode);
-        eprintln!("  Mode: \x1b[36m{}\x1b[0m", mode);
+        eprintln!("  Mode: {}", accent(format!("{mode}"), caps()));
     }
 
     /// Initialize GRAPHCTX once for the session (fire-and-forget background build).
@@ -100,7 +110,8 @@ impl Repl {
         self.ensure_graph_context().await;
 
         loop {
-            match self.editor.readline("\x1b[36mtheo>\x1b[0m ") {
+            let prompt = format!("{} ", accent("theo>", caps()));
+            match self.editor.readline(&prompt) {
                 Ok(line) => {
                     let line = line.trim().to_string();
                     if line.is_empty() {
@@ -110,35 +121,52 @@ impl Repl {
                     let _ = self.editor.add_history_entry(&line);
 
                     if line.starts_with('/') {
-                        // Handle /mode locally (needs mutable self)
-                        if line.starts_with("/mode") {
-                            let parts: Vec<&str> = line.splitn(2, ' ').collect();
-                            if let Some(mode_str) = parts.get(1) {
-                                if let Some(mode) = AgentMode::from_str(mode_str.trim()) {
-                                    self.set_mode(mode);
+                        // /exit|quit|q and /mode are handled inline (need mutable self)
+                        let first = line.split_whitespace().next().unwrap_or("");
+                        match first {
+                            "/exit" | "/quit" | "/q" => {
+                                save_session(&self.project_dir, &self.session_messages);
+                                eprintln!("Goodbye.");
+                                break;
+                            }
+                            "/mode" => {
+                                let parts: Vec<&str> = line.splitn(2, ' ').collect();
+                                if let Some(mode_str) = parts.get(1) {
+                                    if let Some(mode) = AgentMode::from_str(mode_str.trim()) {
+                                        self.set_mode(mode);
+                                    } else {
+                                        eprintln!(
+                                            "  Unknown mode: {}. Use: agent, plan, ask",
+                                            mode_str
+                                        );
+                                    }
                                 } else {
                                     eprintln!(
-                                        "  Unknown mode: {}. Use: agent, plan, ask",
-                                        mode_str
+                                        "  Current mode: {}",
+                                        accent(format!("{}", self.mode), caps())
                                     );
+                                    eprintln!("  Usage: /mode <agent|plan|ask>");
                                 }
-                            } else {
-                                eprintln!("  Current mode: \x1b[36m{}\x1b[0m", self.mode);
-                                eprintln!("  Usage: /mode <agent|plan|ask>");
+                                continue;
                             }
-                            continue;
+                            _ => {}
                         }
-
-                        let should_exit = handle_command(
-                            &line,
-                            &self.config,
-                            &self.project_dir,
-                            &self.provider_name,
-                        )
-                        .await;
-                        if should_exit {
-                            save_session(&self.project_dir, &self.session_messages);
-                            break;
+                        let ctx = CommandContext {
+                            config: &self.config,
+                            project_dir: &self.project_dir,
+                            provider_name: &self.provider_name,
+                        };
+                        let outcome = self.commands.dispatch(&line, &ctx).await;
+                        match outcome {
+                            CommandOutcome::Exit => {
+                                save_session(&self.project_dir, &self.session_messages);
+                                break;
+                            }
+                            CommandOutcome::Unknown => {
+                                eprintln!("  Unknown command: {first}");
+                                eprintln!("  Type /help for available commands.");
+                            }
+                            CommandOutcome::Continue => {}
                         }
                     } else {
                         self.execute_task(&line).await;
@@ -214,18 +242,17 @@ impl Repl {
         }
 
         // Result status with token usage
+        let c = caps();
         let token_str = if result.tokens_used > 0 {
-            format!(
-                ", \x1b[90m{} tokens\x1b[0m",
-                format_tokens(result.tokens_used)
-            )
+            format!(", {}", dim(format!("{} tokens", format_tokens(result.tokens_used)), c))
         } else {
             String::new()
         };
 
         if result.success && !result.files_edited.is_empty() {
             eprintln!(
-                "\x1b[32m✓ Done\x1b[0m — {} iterations, {} files: {}{}",
+                "{} — {} iterations, {} files: {}{}",
+                success("✓ Done", c),
                 result.iterations_used,
                 result.files_edited.len(),
                 result.files_edited.join(", "),
@@ -234,24 +261,29 @@ impl Repl {
             eprintln!();
         } else if !result.success {
             eprintln!(
-                "\x1b[31m✗ Failed\x1b[0m — {} iterations{}",
-                result.iterations_used, token_str,
+                "{} — {} iterations{}",
+                error("✗ Failed", c),
+                result.iterations_used,
+                token_str,
             );
             eprintln!();
         } else if result.tokens_used > 0 {
             eprintln!(
-                "\x1b[90m{} tokens\x1b[0m",
-                format_tokens(result.tokens_used)
+                "{}",
+                dim(format!("{} tokens", format_tokens(result.tokens_used)), c)
             );
             eprintln!();
         }
     }
 
     fn print_banner(&self) {
-        eprintln!("\x1b[1mtheo v0.1.0\x1b[0m — type /help for commands");
+        let c = caps();
+        eprintln!("{} — type /help for commands", bold("theo v0.1.0", c));
         eprintln!(
-            "Provider: {} | Model: {} | Mode: \x1b[36m{}\x1b[0m",
-            self.provider_name, self.config.model, self.mode
+            "Provider: {} | Model: {} | Mode: {}",
+            self.provider_name,
+            self.config.model,
+            accent(format!("{}", self.mode), c),
         );
         eprintln!("Project: {}", self.project_dir.display());
         eprintln!();
@@ -279,14 +311,10 @@ fn project_hash(project_dir: &std::path::Path) -> String {
     format!("{:016x}", hasher.finish())
 }
 
-/// Path to the session file for a given project.
+/// Path to the session file for a given project. Honors XDG via
+/// `TheoPaths` (see ADR-003).
 fn session_path(project_dir: &std::path::Path) -> PathBuf {
-    let base = std::env::var("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("/tmp"))
-        .join(".config")
-        .join("theo")
-        .join("sessions");
+    let base = crate::config::TheoPaths::resolve().sessions();
     base.join(format!("{}.json", project_hash(project_dir)))
 }
 

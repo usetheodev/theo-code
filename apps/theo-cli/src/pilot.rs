@@ -8,7 +8,13 @@ use theo_agent_runtime::event_bus::EventBus;
 use theo_agent_runtime::pilot::{PilotConfig, PilotLoop, PilotResult, load_promise};
 use theo_domain::graph_context::GraphContextProvider;
 
+use crate::render::style::{StyleCaps, accent, bold, dim, error, success, warn};
 use crate::renderer::CliRenderer;
+use crate::tty::TtyCaps;
+
+fn caps() -> StyleCaps {
+    TtyCaps::detect().style_caps()
+}
 
 /// Run the pilot loop with CLI rendering.
 pub async fn run_pilot(
@@ -19,10 +25,11 @@ pub async fn run_pilot(
     complete: Option<String>,
 ) -> PilotResult {
     // Print banner
-    eprintln!("\x1b[1m✈  Theo Pilot\x1b[0m — autonomous mode");
-    eprintln!("  Promise: \x1b[36m{}\x1b[0m", truncate(&promise, 80));
+    let c = caps();
+    eprintln!("{} — autonomous mode", bold("✈  Theo Pilot", c));
+    eprintln!("  Promise: {}", accent(truncate(&promise, 80), c));
     if let Some(ref dod) = complete {
-        eprintln!("  Done when: \x1b[33m{}\x1b[0m", truncate(dod, 80));
+        eprintln!("  Done when: {}", warn(truncate(dod, 80), c));
     }
     eprintln!("  Project: {}", project_dir.display());
     eprintln!(
@@ -73,7 +80,10 @@ pub async fn run_pilot(
     tokio::spawn(async move {
         if tokio::signal::ctrl_c().await.is_ok() {
             interrupt.store(true, std::sync::atomic::Ordering::Release);
-            eprintln!("\n\x1b[33m⚠  Ctrl+C — finishing current loop then stopping...\x1b[0m");
+            eprintln!(
+                "\n{}",
+                warn("⚠  Ctrl+C — finishing current loop then stopping...", caps())
+            );
         }
     });
 
@@ -83,8 +93,8 @@ pub async fn run_pilot(
         let pending = tasks.iter().filter(|t| !t.completed).count();
         if pending > 0 {
             eprintln!(
-                "  Roadmap: \x1b[36m{}\x1b[0m ({} pending tasks)",
-                rmap.display(),
+                "  Roadmap: {} ({} pending tasks)",
+                accent(rmap.display().to_string(), caps()),
                 pending
             );
             eprintln!();
@@ -120,10 +130,11 @@ pub fn resolve_promise(args: &[String], project_dir: &std::path::Path) -> Option
 }
 
 fn print_pilot_summary(result: &PilotResult) {
+    let c = caps();
     let status = if result.success {
-        "\x1b[32m✓ Pilot Complete\x1b[0m"
+        success("✓ Pilot Complete", c).to_string()
     } else {
-        "\x1b[31m✗ Pilot Stopped\x1b[0m"
+        error("✗ Pilot Stopped", c).to_string()
     };
 
     eprintln!("{} — {}", status, result.reason);
@@ -195,7 +206,10 @@ impl EventListener for PilotRenderer {
                         .loop_count
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
                         + 1;
-                    eprintln!("\n\x1b[1m── Pilot Loop {} ──\x1b[0m", loop_num);
+                    eprintln!(
+                        "\n{}",
+                        bold(format!("── Pilot Loop {loop_num} ──"), caps())
+                    );
                 }
             }
             EventType::RunStateChanged => {
@@ -209,11 +223,17 @@ impl EventListener for PilotRenderer {
                             let tokens = parts[2].parse::<u64>().unwrap_or(0);
                             let iters = parts[3];
                             eprintln!(
-                                "\x1b[90m── Loop {} complete: {} files, {} tokens, {} iterations ──\x1b[0m",
-                                loop_n,
-                                files,
-                                format_tokens(tokens),
-                                iters
+                                "{}",
+                                dim(
+                                    format!(
+                                        "── Loop {} complete: {} files, {} tokens, {} iterations ──",
+                                        loop_n,
+                                        files,
+                                        format_tokens(tokens),
+                                        iters
+                                    ),
+                                    caps()
+                                )
                             );
                         }
                     }

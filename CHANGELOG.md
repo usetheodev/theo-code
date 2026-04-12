@@ -3,6 +3,27 @@
 ## [Unreleased]
 
 ### Added
+- CLI Professionalization — complete plan execution (`docs/roadmap/cli-professionalization.md`):
+  - **Fase 0**: `render/style` primitives, `tty/` detection + SIGWINCH listener, `config/` with `TheoConfig` serde + `TheoPaths` XDG (80 tests)
+  - **Fase 1**: `render/` subsystem with `markdown`, `code_block` (syntect, 12+ langs), `streaming` (state machine with 6 proptests), `diff`, `table`, `progress`, `tool_result`, `banner`, `errors` (146 tests)
+  - **Fase 2**: `commands/` registry with `SlashCommand` trait + dispatcher; new commands `/model`, `/cost`, `/doctor`; rewritten `/help`, `/status`, `/clear`, `/memory`, `/skills`; `input/` with `completer` (`/cmd` and `@file`), `hinter`, `highlighter`, `mention` (64KB cap, 10/turn), `multiline` (triple-backtick) (117 tests)
+  - **Fase 3**: `permission/` with `PermissionSession` ACL and `dialoguer`-based `PermissionPrompt` (y/n/always/deny-always, `THEO_AUTO_ACCEPT=1` bypass); `status_line/format.rs`; `render/banner.rs` (39 tests)
+  - **Fase 4**: `render/errors.rs` structured `CliError`/`CliWarning` with hint/docs fields; session path migrated to `TheoPaths::sessions()` (10 tests + XDG test)
+  - 4 ADRs: ADR-001 Streaming Markdown State Machine, ADR-002 Reject Ratatui, ADR-003 XDG Paths, ADR-004 CLI Infra Exception
+  - **Test count**: 23 → 375 (+352); source files 6 → 41; LOC 2378 → 8899
+  - **Raw ANSI in production code outside `render/`**: 64 → 0
+  - **Release binary size**: 72 MB → 78 MB (+6 MB, within +8 MB budget)
+  - `docs/current/cli-baseline.md` with full execution log and post-plan metrics
+- Workspace dependencies: `syntect 5`, `indicatif 0.17`, `console 0.15`, `dialoguer 0.11`, `textwrap 0.16`, `comfy-table 7`, `dirs 5`, `insta 1`, `proptest 1`, `async-trait` for theo-cli
+
+### Changed
+- `renderer.rs` migrated from 35+ raw ANSI escape sequences to `render/style` primitives; tool-result rendering delegated to pure functions in `render/tool_result`
+- `repl.rs`, `commands.rs`, `pilot.rs`, `main.rs` migrated to `render::style` — total 64 raw ANSI sequences eliminated from `apps/theo-cli/src/` outside `render/`
+- `CliRenderer::on_event` now buffers `ContentDelta` events through `StreamingMarkdownRenderer` for real-time formatted markdown output
+- `rustyline` bumped 14 → 15
+- `pulldown-cmark` 0.12 → 0.13, promoted to workspace dependency (shared between `theo-cli` and `theo-marklive`)
+- Release binary size: 72 MB → 78 MB (+6 MB, within +8 MB budget)
+
 - Agent Runtime formal com 3 state machines, 8 invariantes, 310 testes:
   - Fase 01: Core Types & State Machines — TaskState (9 estados), ToolCallState (7 estados), RunState (8 estados) com transições exaustivas sem wildcards, newtypes TaskId/CallId/RunId/EventId, contratos Task/ToolCallRecord/ToolResultRecord/AgentRun, trait StateMachine + transition() atômico
   - Fase 02: Event System — DomainEvent + EventType (11 variants), EventBus sync com in-memory log bounded (max 10k), EventListener trait, catch_unwind para listeners, PrintEventListener/NullEventListener. AgentEvent/EventSink marcados #[deprecated]
