@@ -28,6 +28,9 @@ pub enum LlmError {
 
     #[error("service unavailable")]
     ServiceUnavailable,
+
+    #[error("context overflow from {provider}: {message}")]
+    ContextOverflow { provider: String, message: String },
 }
 
 impl LlmError {
@@ -50,8 +53,20 @@ impl LlmError {
         }
     }
 
+    /// Whether this error is a context overflow (prompt too long for model).
+    pub fn is_context_overflow(&self) -> bool {
+        matches!(self, LlmError::ContextOverflow { .. })
+    }
+
     /// Create from HTTP status code.
     pub fn from_status(status: u16, message: String) -> Self {
+        // Check for context overflow before generic classification
+        if crate::overflow::is_context_overflow(&message) {
+            return LlmError::ContextOverflow {
+                provider: String::new(),
+                message,
+            };
+        }
         match status {
             401 | 403 => LlmError::AuthFailed(message),
             429 => LlmError::RateLimited { retry_after: None },
@@ -116,5 +131,32 @@ mod tests {
         };
         assert_eq!(e.retry_after_secs(), Some(30));
         assert_eq!(LlmError::Timeout.retry_after_secs(), None);
+    }
+
+    #[test]
+    fn context_overflow_is_not_retryable() {
+        let e = LlmError::ContextOverflow {
+            provider: "openai".into(),
+            message: "prompt is too long".into(),
+        };
+        assert!(!e.is_retryable());
+        assert!(e.is_context_overflow());
+    }
+
+    #[test]
+    fn from_status_detects_context_overflow() {
+        let e = LlmError::from_status(
+            400,
+            "This model's maximum context length is 128000 tokens. \
+             Please reduce the length of the messages."
+                .into(),
+        );
+        assert!(e.is_context_overflow());
+    }
+
+    #[test]
+    fn from_status_does_not_false_positive_overflow() {
+        let e = LlmError::from_status(500, "internal server error".into());
+        assert!(!e.is_context_overflow());
     }
 }

@@ -17,6 +17,17 @@ pub struct ToolOutput {
     pub attachments: Option<Vec<FileAttachment>>,
 }
 
+/// Partial result emitted during tool execution.
+/// Enables real-time display of long-running operations via callbacks.
+/// Pi-mono ref: `packages/agent/src/types.ts:288-289`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PartialToolResult {
+    /// Partial content to display.
+    pub content: String,
+    /// Optional progress indicator (0.0 to 1.0).
+    pub progress: Option<f32>,
+}
+
 /// File attachment from tool output (images, PDFs, etc.)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileAttachment {
@@ -255,6 +266,23 @@ pub trait Tool: Send + Sync {
         }
     }
 
+    /// Prepare (normalize/migrate) raw arguments before schema validation.
+    ///
+    /// Override this to accept legacy parameter names or apply argument
+    /// transformations.  The default implementation returns args unchanged.
+    ///
+    /// **Pi-mono ref:** `packages/agent/src/types.ts:298-299` (prepareArguments)
+    fn prepare_arguments(&self, args: serde_json::Value) -> serde_json::Value {
+        args
+    }
+
+    /// Whether this tool supports streaming partial results during execution.
+    /// Tools that return true may emit `PartialToolResult` via the runtime callback.
+    /// The default returns false (no streaming support).
+    fn supports_streaming(&self) -> bool {
+        false
+    }
+
     /// Execute the tool with given arguments and context
     async fn execute(
         &self,
@@ -427,6 +455,119 @@ mod tests {
     fn tool_category_serializes_to_snake_case() {
         let json = serde_json::to_string(&ToolCategory::FileOps).unwrap();
         assert_eq!(json, "\"file_ops\"");
+    }
+
+    // ── prepare_arguments tests ──────────────────────────────────
+
+    struct IdentityTool;
+
+    #[async_trait]
+    impl Tool for IdentityTool {
+        fn id(&self) -> &str {
+            "identity"
+        }
+        fn description(&self) -> &str {
+            "tool with default prepare_arguments"
+        }
+        async fn execute(
+            &self,
+            _args: serde_json::Value,
+            _ctx: &ToolContext,
+            _perm: &mut PermissionCollector,
+        ) -> Result<ToolOutput, ToolError> {
+            unreachable!()
+        }
+    }
+
+    struct MigratingTool;
+
+    #[async_trait]
+    impl Tool for MigratingTool {
+        fn id(&self) -> &str {
+            "migrating"
+        }
+        fn description(&self) -> &str {
+            "tool that normalizes legacy arg names"
+        }
+        fn prepare_arguments(&self, mut args: serde_json::Value) -> serde_json::Value {
+            // Accept legacy "filePath" as alias for "file_path"
+            if let Some(v) = args.get("filePath").cloned() {
+                if args.get("file_path").is_none() {
+                    args["file_path"] = v;
+                }
+                if let Some(obj) = args.as_object_mut() {
+                    obj.remove("filePath");
+                }
+            }
+            args
+        }
+        async fn execute(
+            &self,
+            _args: serde_json::Value,
+            _ctx: &ToolContext,
+            _perm: &mut PermissionCollector,
+        ) -> Result<ToolOutput, ToolError> {
+            unreachable!()
+        }
+    }
+
+    #[test]
+    fn prepare_arguments_default_is_identity() {
+        let tool = IdentityTool;
+        let args = serde_json::json!({"file_path": "/tmp/a.rs", "content": "hello"});
+        let prepared = tool.prepare_arguments(args.clone());
+        assert_eq!(prepared, args);
+    }
+
+    #[test]
+    fn prepare_arguments_migrates_legacy_field_name() {
+        let tool = MigratingTool;
+        let args = serde_json::json!({"filePath": "/tmp/a.rs"});
+        let prepared = tool.prepare_arguments(args);
+        assert_eq!(prepared["file_path"], "/tmp/a.rs");
+        assert!(prepared.get("filePath").is_none());
+    }
+
+    #[test]
+    fn prepare_arguments_preserves_canonical_field_over_legacy() {
+        let tool = MigratingTool;
+        let args = serde_json::json!({"filePath": "/old", "file_path": "/new"});
+        let prepared = tool.prepare_arguments(args);
+        assert_eq!(prepared["file_path"], "/new");
+    }
+
+    // ── PartialToolResult tests ──────────────────────────────────
+
+    #[test]
+    fn partial_tool_result_serde_roundtrip_with_progress() {
+        let partial = PartialToolResult {
+            content: "Processing file 3/10...".to_string(),
+            progress: Some(0.3),
+        };
+        let json = serde_json::to_string(&partial).unwrap();
+        let back: PartialToolResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.content, "Processing file 3/10...");
+        assert_eq!(back.progress, Some(0.3));
+    }
+
+    #[test]
+    fn partial_tool_result_serde_roundtrip_without_progress() {
+        let partial = PartialToolResult {
+            content: "Searching...".to_string(),
+            progress: None,
+        };
+        let json = serde_json::to_string(&partial).unwrap();
+        let back: PartialToolResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.content, "Searching...");
+        assert!(back.progress.is_none());
+    }
+
+    // ── supports_streaming tests ────────────────────────────────
+
+    #[test]
+    fn supports_streaming_default_returns_false() {
+        let tool = IdentityTool;
+        assert!(!tool.supports_streaming());
     }
 
     #[test]

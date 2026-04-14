@@ -15,6 +15,9 @@ pub struct RuntimeMetrics {
     pub total_dlq_entries: u64,
     pub converged_runs: u64,
 
+    /// Accumulated dollar cost across all LLM calls in this session.
+    pub total_cost_usd: f64,
+
     // Timing accumulators (for computing averages)
     total_iteration_ms: u64,
     iteration_count: u64,
@@ -122,6 +125,12 @@ impl MetricsCollector {
         if converged {
             m.converged_runs += 1;
         }
+    }
+
+    /// Accumulate dollar cost from an LLM call.
+    pub fn record_cost(&self, cost_usd: f64) {
+        let mut m = self.metrics.write().expect("metrics write lock poisoned");
+        m.total_cost_usd += cost_usd;
     }
 
     pub fn record_iteration(&self, duration_ms: u64) {
@@ -254,6 +263,27 @@ mod tests {
         let m = collector.snapshot();
         assert_eq!(m.total_llm_calls, 1000);
         assert_eq!(m.total_tool_calls, 1000);
+    }
+
+    #[test]
+    fn record_cost_accumulates_usd() {
+        // Arrange
+        let collector = MetricsCollector::new();
+
+        // Act
+        collector.record_cost(0.003);
+        collector.record_cost(0.015);
+
+        // Assert
+        let m = collector.snapshot();
+        assert!((m.total_cost_usd - 0.018).abs() < 1e-9);
+    }
+
+    #[test]
+    fn new_collector_has_zero_cost() {
+        let collector = MetricsCollector::new();
+        let m = collector.snapshot();
+        assert_eq!(m.total_cost_usd, 0.0);
     }
 
     #[test]

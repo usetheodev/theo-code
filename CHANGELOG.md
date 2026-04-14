@@ -3,6 +3,12 @@
 ## [Unreleased]
 
 ### Added
+- Event-based extension system (`theo-agent-runtime::extension`) — `Extension` trait with lifecycle hooks (before_agent_start, on_tool_call, on_tool_result, on_context_transform, on_input), `ExtensionRegistry` with first-block-wins and pipeline semantics (7 tests)
+- Model selector infrastructure (`theo-cli::input::model_selector`) — `ModelSelector` with next/prev cycling and wrap-around for Ctrl+P model switching (5 tests)
+- Session management commands (`theo-cli::commands::session_commands`) — `SessionCommand` enum with parse() for /sessions, /tree, /fork, /compact slash commands (9 tests)
+- Enhanced keyboard protocol (`theo-cli::input::keyboard`) — Kitty CSI-u parser with xterm fallback, modifier decoding, full key event parsing (20 tests)
+- Verified T12 (Compaction Preserves History) and T13 (Branch Summarization) already implemented in `session_tree.rs`
+
 - CLI Professionalization — complete plan execution (`docs/roadmap/cli-professionalization.md`):
   - **Fase 0**: `render/style` primitives, `tty/` detection + SIGWINCH listener, `config/` with `TheoConfig` serde + `TheoPaths` XDG (80 tests)
   - **Fase 1**: `render/` subsystem with `markdown`, `code_block` (syntect, 12+ langs), `streaming` (state machine with 6 proptests), `diff`, `table`, `progress`, `tool_result`, `banner`, `errors` (146 tests)

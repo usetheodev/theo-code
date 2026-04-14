@@ -292,6 +292,51 @@ pub fn compact_if_needed_with_context(
     messages.insert(insert_pos, Message::user(summary));
 }
 
+/// Emergency compaction to a specific token target.
+///
+/// Called by the runtime when the LLM reports a context overflow error.
+/// Aggressively removes older messages until the total is below `target_tokens`.
+///
+/// **Pi-mono ref:** reactive overflow recovery in `packages/coding-agent/src/core/agent-session.ts`
+pub fn compact_messages_to_target(
+    messages: &mut Vec<Message>,
+    target_tokens: usize,
+    task_objective: &str,
+) {
+    if messages.is_empty() || target_tokens == 0 {
+        return;
+    }
+
+    // First try normal compaction (truncates tool results in-place).
+    let ctx = if task_objective.is_empty() {
+        None
+    } else {
+        Some(CompactionContext {
+            task_objective: task_objective.to_string(),
+            ..Default::default()
+        })
+    };
+    compact_if_needed_with_context(messages, target_tokens, ctx.as_ref());
+
+    // If still over target, drop oldest non-system messages one by one.
+    while estimate_total_tokens(messages) > target_tokens {
+        // Find the first non-system, non-compaction-summary message.
+        let drop_idx = messages.iter().position(|m| {
+            m.role != Role::System
+                && !m
+                    .content
+                    .as_deref()
+                    .is_some_and(|c| c.starts_with(COMPACTED_PREFIX))
+        });
+        match drop_idx {
+            Some(idx) => {
+                messages.remove(idx);
+            }
+            None => break, // Only system messages left.
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------

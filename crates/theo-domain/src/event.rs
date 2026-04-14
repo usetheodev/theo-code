@@ -14,6 +14,8 @@ pub enum EventType {
     ToolCallQueued,
     ToolCallDispatched,
     ToolCallCompleted,
+    /// Partial progress emitted during tool execution (streaming tool output).
+    ToolCallProgress,
 
     // Agent run lifecycle
     RunInitialized,
@@ -31,6 +33,10 @@ pub enum EventType {
 
     // Task management
     TodoUpdated,
+
+    // Context management
+    /// Context overflow detected; emergency compaction triggered.
+    ContextOverflowRecovery,
 
     // Cognitive events — agent reasoning state
     /// Agent formed a hypothesis. Payload MUST contain "hypothesis" and "rationale".
@@ -165,6 +171,7 @@ impl std::fmt::Display for EventType {
             EventType::ToolCallQueued => write!(f, "ToolCallQueued"),
             EventType::ToolCallDispatched => write!(f, "ToolCallDispatched"),
             EventType::ToolCallCompleted => write!(f, "ToolCallCompleted"),
+            EventType::ToolCallProgress => write!(f, "ToolCallProgress"),
             EventType::RunInitialized => write!(f, "RunInitialized"),
             EventType::RunStateChanged => write!(f, "RunStateChanged"),
             EventType::LlmCallStart => write!(f, "LlmCallStart"),
@@ -173,6 +180,7 @@ impl std::fmt::Display for EventType {
             EventType::Error => write!(f, "Error"),
             EventType::ReasoningDelta => write!(f, "ReasoningDelta"),
             EventType::ContentDelta => write!(f, "ContentDelta"),
+            EventType::ContextOverflowRecovery => write!(f, "ContextOverflowRecovery"),
             EventType::TodoUpdated => write!(f, "TodoUpdated"),
             EventType::HypothesisFormed => write!(f, "HypothesisFormed"),
             EventType::HypothesisInvalidated => write!(f, "HypothesisInvalidated"),
@@ -183,12 +191,13 @@ impl std::fmt::Display for EventType {
 }
 
 /// All EventType variants for iteration in tests.
-pub const ALL_EVENT_TYPES: [EventType; 18] = [
+pub const ALL_EVENT_TYPES: [EventType; 20] = [
     EventType::TaskCreated,
     EventType::TaskStateChanged,
     EventType::ToolCallQueued,
     EventType::ToolCallDispatched,
     EventType::ToolCallCompleted,
+    EventType::ToolCallProgress,
     EventType::RunInitialized,
     EventType::RunStateChanged,
     EventType::LlmCallStart,
@@ -197,6 +206,7 @@ pub const ALL_EVENT_TYPES: [EventType; 18] = [
     EventType::Error,
     EventType::ReasoningDelta,
     EventType::ContentDelta,
+    EventType::ContextOverflowRecovery,
     EventType::TodoUpdated,
     EventType::HypothesisFormed,
     EventType::HypothesisInvalidated,
@@ -283,6 +293,7 @@ mod tests {
             "ToolCallQueued",
             "ToolCallDispatched",
             "ToolCallCompleted",
+            "ToolCallProgress",
             "RunInitialized",
             "RunStateChanged",
             "LlmCallStart",
@@ -469,12 +480,22 @@ mod tests {
     }
 
     #[test]
+    fn tool_call_progress_in_all_event_types() {
+        assert!(ALL_EVENT_TYPES.contains(&EventType::ToolCallProgress));
+    }
+
+    #[test]
+    fn tool_call_progress_display() {
+        assert_eq!(format!("{}", EventType::ToolCallProgress), "ToolCallProgress");
+    }
+
+    #[test]
     fn cognitive_event_types_in_all_event_types() {
         assert!(ALL_EVENT_TYPES.contains(&EventType::HypothesisFormed));
         assert!(ALL_EVENT_TYPES.contains(&EventType::HypothesisInvalidated));
         assert!(ALL_EVENT_TYPES.contains(&EventType::DecisionMade));
         assert!(ALL_EVENT_TYPES.contains(&EventType::ConstraintLearned));
-        assert_eq!(ALL_EVENT_TYPES.len(), 18);
+        assert_eq!(ALL_EVENT_TYPES.len(), 20);
     }
 
     // --- P-1 BF2: Contextual validation tests ---
