@@ -1,4 +1,5 @@
 pub mod agent_loop;
+pub mod agent_message;
 pub mod budget_enforcer;
 pub mod capability_gate;
 pub mod compaction;
@@ -9,6 +10,7 @@ pub mod convergence;
 pub mod correction;
 pub mod dlq;
 pub mod event_bus;
+pub mod extension;
 pub mod failure_tracker;
 pub mod hooks;
 pub mod loop_state;
@@ -25,6 +27,7 @@ pub mod roadmap;
 pub mod run_engine;
 #[doc(hidden)] // Dead code: exported but never instantiated externally
 pub mod scheduler;
+pub mod session_tree;
 pub mod session_bootstrap;
 pub mod skill;
 pub mod snapshot;
@@ -34,6 +37,6 @@ pub mod tool_bridge;
 pub mod tool_call_manager;
 
 pub use agent_loop::{AgentLoop, AgentResult};
-pub use config::AgentConfig;
+pub use config::{AgentConfig, MessageQueues, ToolExecutionMode};
 pub use event_bus::{EventBus, EventListener};
 pub use run_engine::AgentRunEngine;

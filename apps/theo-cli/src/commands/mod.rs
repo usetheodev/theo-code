@@ -16,6 +16,7 @@ mod doctor;
 mod help;
 mod memory;
 mod model;
+pub mod session_commands;
 mod skills;
 mod status;
 

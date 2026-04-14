@@ -15,7 +15,7 @@ use theo_tooling::registry::ToolRegistry;
 
 use crate::agent_loop::AgentResult;
 use crate::budget_enforcer::BudgetEnforcer;
-use crate::config::AgentConfig;
+use crate::config::{AgentConfig, MessageQueues};
 use crate::context_metrics::ContextMetrics;
 use crate::convergence::{
     ConvergenceContext, ConvergenceEvaluator, ConvergenceMode, EditSuccessConvergence,
@@ -57,6 +57,9 @@ pub struct AgentRunEngine {
     working_set: theo_domain::working_set::WorkingSet,
     /// Context breakdown metrics — measures context usage patterns.
     context_metrics: ContextMetrics,
+    /// Steering and follow-up message queues for mid-run injection.
+    /// Pi-mono ref: `packages/agent/src/agent-loop.ts:165-229`
+    message_queues: MessageQueues,
 }
 
 impl AgentRunEngine {
@@ -130,7 +133,14 @@ impl AgentRunEngine {
             context_loop_state,
             working_set: theo_domain::working_set::WorkingSet::new(),
             context_metrics: ContextMetrics::new(),
+            message_queues: MessageQueues::default(),
         }
+    }
+
+    /// Sets the message queues for steering and follow-up injection.
+    pub fn with_message_queues(mut self, queues: MessageQueues) -> Self {
+        self.message_queues = queues;
+        self
     }
 
     /// Sets the graph context provider for code intelligence injection.
@@ -641,6 +651,39 @@ impl AgentRunEngine {
                         .record_llm_call_detailed(llm_duration, input_tok, output_tok);
                     resp
                 }
+                Err(e) if e.is_context_overflow() => {
+                    // Reactive context overflow recovery: emergency compact at 50%
+                    // and retry once. Pi-mono ref: packages/ai/src/utils/overflow.ts
+                    self.event_bus.publish(DomainEvent::new(
+                        EventType::ContextOverflowRecovery,
+                        self.run.run_id.as_str(),
+                        serde_json::json!({
+                            "error": e.to_string(),
+                            "action": "emergency_compaction",
+                            "target_ratio": 0.5,
+                        }),
+                    ));
+
+                    // Emergency compaction: keep only 50% of context
+                    let model_ctx = self.config.context_window_tokens;
+                    let target = model_ctx / 2;
+                    let before_len = messages.len();
+                    crate::compaction::compact_messages_to_target(
+                        &mut messages,
+                        target,
+                        "", // No task objective available at this level
+                    );
+                    eprintln!(
+                        "[theo] Context overflow recovery: compacted {} → {} messages (target {})",
+                        before_len,
+                        messages.len(),
+                        target
+                    );
+
+                    // Do NOT retry inline — the next loop iteration will re-call LLM
+                    // with the compacted context.
+                    continue;
+                }
                 Err(e) => {
                     self.transition_run(RunState::Aborted);
                     let _ = self
@@ -666,9 +709,26 @@ impl AgentRunEngine {
             // LLM decided to respond with text, not use tools.
             // This handles conversational messages ("hello"), informational queries,
             // and any response where the agent chose not to invoke tools.
-            // Always converge — re-iterating produces duplicate output.
+            //
+            // Before converging, check follow-up queue: if the user typed something
+            // while the agent was working, inject it and continue.
+            // Pi-mono ref: `packages/agent/src/agent-loop.ts:220-228`
             if tool_calls.is_empty() {
                 let content = response.content().unwrap_or("").to_string();
+
+                // Check follow-up queue before converging
+                if let Some(ref follow_up_fn) = self.message_queues.follow_up {
+                    let follow_ups = follow_up_fn().await;
+                    if !follow_ups.is_empty() {
+                        // Inject assistant response + follow-ups, continue loop
+                        messages.push(Message::assistant(&content));
+                        for fu_msg in follow_ups {
+                            messages.push(fu_msg);
+                        }
+                        continue;
+                    }
+                }
+
                 self.transition_run(RunState::Converged);
                 let _ = self
                     .task_manager
@@ -1373,6 +1433,13 @@ impl AgentRunEngine {
                         continue;
                     }
                 };
+                // Apply tool's prepare_arguments hook (normalizes/migrates args
+                // before schema validation). Pi-mono ref: prepareArguments hook.
+                let tool_args = if let Some(tool) = self.registry.get(name) {
+                    tool.prepare_arguments(tool_args)
+                } else {
+                    tool_args
+                };
                 let tool_call_id =
                     self.tool_call_manager
                         .enqueue(self.task_id.clone(), name.clone(), tool_args);
@@ -1573,6 +1640,17 @@ impl AgentRunEngine {
 
             if let Some(result) = should_return {
                 return result;
+            }
+
+            // ── Steering queue check ──
+            // After tool execution, check if the user injected messages mid-run.
+            // These are inserted as user messages before the next LLM call.
+            // Pi-mono ref: `packages/agent/src/agent-loop.ts:216`
+            if let Some(ref steering_fn) = self.message_queues.steering {
+                let steering_msgs = steering_fn().await;
+                for msg in steering_msgs {
+                    messages.push(msg);
+                }
             }
 
             // ── EVALUATING phase ──

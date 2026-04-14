@@ -2,6 +2,7 @@ mod commands;
 mod config;
 mod init;
 mod input;
+mod json_output;
 mod permission;
 mod pilot;
 mod render;
