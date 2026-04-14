@@ -480,6 +480,8 @@ impl AgentRunEngine {
                     iterations_used: iteration,
                     was_streamed: false,
                     tokens_used: self.metrics.snapshot().total_tokens_used,
+                    input_tokens: self.metrics.snapshot().total_input_tokens,
+                    output_tokens: self.metrics.snapshot().total_output_tokens,
                 };
             }
 
@@ -623,13 +625,20 @@ impl AgentRunEngine {
             let response = match llm_result.unwrap() {
                 Ok(resp) => {
                     let llm_duration = llm_start.elapsed().as_millis() as u64;
-                    let tokens = resp
+                    let input_tok = resp
                         .usage
                         .as_ref()
-                        .map(|u| u.total_tokens as u64)
+                        .map(|u| u.prompt_tokens as u64)
                         .unwrap_or(0);
-                    self.budget_enforcer.record_tokens(tokens);
-                    self.metrics.record_llm_call(llm_duration, tokens);
+                    let output_tok = resp
+                        .usage
+                        .as_ref()
+                        .map(|u| u.completion_tokens as u64)
+                        .unwrap_or(0);
+                    let total_tok = input_tok + output_tok;
+                    self.budget_enforcer.record_tokens(total_tok);
+                    self.metrics
+                        .record_llm_call_detailed(llm_duration, input_tok, output_tok);
                     resp
                 }
                 Err(e) => {
@@ -645,6 +654,8 @@ impl AgentRunEngine {
                         iterations_used: iteration,
                         was_streamed: false,
                         tokens_used: self.metrics.snapshot().total_tokens_used,
+                    input_tokens: self.metrics.snapshot().total_input_tokens,
+                    output_tokens: self.metrics.snapshot().total_output_tokens,
                     };
                 }
             };
@@ -653,30 +664,26 @@ impl AgentRunEngine {
 
             // No tool calls → text-only response (OpenCode pattern)
             // LLM decided to respond with text, not use tools.
-            // This handles conversational messages ("hello") and informational queries.
+            // This handles conversational messages ("hello"), informational queries,
+            // and any response where the agent chose not to invoke tools.
+            // Always converge — re-iterating produces duplicate output.
             if tool_calls.is_empty() {
                 let content = response.content().unwrap_or("").to_string();
-                if !content.is_empty() {
-                    // Text-only response → return as result (like OpenCode finish_reason="stop")
-                    // was_streamed=true: this content was already displayed via ContentDelta
-                    // during chat_streaming(). The REPL must NOT re-print it.
-                    self.transition_run(RunState::Converged);
-                    let _ = self
-                        .task_manager
-                        .transition(&self.task_id, TaskState::Completed);
-                    self.metrics.record_run_complete(true);
-                    return AgentResult {
-                        success: true,
-                        summary: content,
-                        files_edited: self.context_loop_state.edits_files.clone(),
-                        iterations_used: iteration,
-                        was_streamed: true,
-                        tokens_used: self.metrics.snapshot().total_tokens_used,
-                    };
-                }
-                // Empty content → LLM gave nothing, continue to next iteration
-                messages.push(Message::assistant(content));
-                continue;
+                self.transition_run(RunState::Converged);
+                let _ = self
+                    .task_manager
+                    .transition(&self.task_id, TaskState::Completed);
+                self.metrics.record_run_complete(true);
+                return AgentResult {
+                    success: true,
+                    summary: content,
+                    files_edited: self.context_loop_state.edits_files.clone(),
+                    iterations_used: iteration,
+                    was_streamed: true,
+                    tokens_used: self.metrics.snapshot().total_tokens_used,
+                    input_tokens: self.metrics.snapshot().total_input_tokens,
+                    output_tokens: self.metrics.snapshot().total_output_tokens,
+                };
             }
 
             // ── EXECUTING phase ──
@@ -732,6 +739,8 @@ impl AgentRunEngine {
                             iterations_used: iteration,
                             was_streamed: false,
                             tokens_used: self.metrics.snapshot().total_tokens_used,
+                    input_tokens: self.metrics.snapshot().total_input_tokens,
+                    output_tokens: self.metrics.snapshot().total_output_tokens,
                         });
                         break;
                     }
@@ -901,6 +910,8 @@ impl AgentRunEngine {
                         iterations_used: iteration,
                         was_streamed: false,
                         tokens_used: self.metrics.snapshot().total_tokens_used,
+                    input_tokens: self.metrics.snapshot().total_input_tokens,
+                    output_tokens: self.metrics.snapshot().total_output_tokens,
                     });
                     break;
                 }
@@ -1437,6 +1448,8 @@ impl AgentRunEngine {
                                 iterations_used: iteration,
                                 was_streamed: false,
                                 tokens_used: self.metrics.snapshot().total_tokens_used,
+                    input_tokens: self.metrics.snapshot().total_input_tokens,
+                    output_tokens: self.metrics.snapshot().total_output_tokens,
                             };
                         }
                     }
@@ -2052,6 +2065,8 @@ mod tests {
             iterations_used: 5,
             was_streamed: false,
             tokens_used: 0,
+            input_tokens: 0,
+            output_tokens: 0,
         };
         assert!(result.success);
         assert_eq!(result.summary, "done");

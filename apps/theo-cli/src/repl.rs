@@ -241,10 +241,19 @@ impl Repl {
             eprintln!();
         }
 
-        // Result status with token usage
+        // Result status with token usage (input/output breakdown)
         let c = caps();
         let token_str = if result.tokens_used > 0 {
-            format!(", {}", dim(format!("{} tokens", format_tokens(result.tokens_used)), c))
+            let breakdown = if result.input_tokens > 0 || result.output_tokens > 0 {
+                format!(
+                    "{} in / {} out",
+                    format_tokens(result.input_tokens),
+                    format_tokens(result.output_tokens),
+                )
+            } else {
+                format!("{} tokens", format_tokens(result.tokens_used))
+            };
+            format!(", {}", dim(breakdown, c))
         } else {
             String::new()
         };
@@ -268,10 +277,16 @@ impl Repl {
             );
             eprintln!();
         } else if result.tokens_used > 0 {
-            eprintln!(
-                "{}",
-                dim(format!("{} tokens", format_tokens(result.tokens_used)), c)
-            );
+            let detail = if result.input_tokens > 0 || result.output_tokens > 0 {
+                format!(
+                    "{} in / {} out",
+                    format_tokens(result.input_tokens),
+                    format_tokens(result.output_tokens),
+                )
+            } else {
+                format!("{} tokens", format_tokens(result.tokens_used))
+            };
+            eprintln!("{}", dim(detail, c));
             eprintln!();
         }
     }

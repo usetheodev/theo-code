@@ -9,6 +9,8 @@ pub struct RuntimeMetrics {
     pub successful_tool_calls: u64,
     pub total_llm_calls: u64,
     pub total_tokens_used: u64,
+    pub total_input_tokens: u64,
+    pub total_output_tokens: u64,
     pub total_retries: u64,
     pub total_dlq_entries: u64,
     pub converged_runs: u64,
@@ -65,6 +67,23 @@ impl MetricsCollector {
         let mut m = self.metrics.write().expect("metrics write lock poisoned");
         m.total_llm_calls += 1;
         m.total_tokens_used += tokens;
+        m.total_llm_call_ms += duration_ms;
+        m.llm_call_count += 1;
+    }
+
+    /// Record an LLM call with input/output token breakdown.
+    pub fn record_llm_call_detailed(
+        &self,
+        duration_ms: u64,
+        input_tokens: u64,
+        output_tokens: u64,
+    ) {
+        let total = input_tokens + output_tokens;
+        let mut m = self.metrics.write().expect("metrics write lock poisoned");
+        m.total_llm_calls += 1;
+        m.total_tokens_used += total;
+        m.total_input_tokens += input_tokens;
+        m.total_output_tokens += output_tokens;
         m.total_llm_call_ms += duration_ms;
         m.llm_call_count += 1;
     }

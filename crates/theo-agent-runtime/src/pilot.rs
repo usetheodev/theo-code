@@ -836,6 +836,8 @@ exit_signal_threshold = 3
             iterations_used: 1,
             was_streamed: false,
             tokens_used: 0,
+            input_tokens: 0,
+            output_tokens: 0,
         };
 
         for _ in 0..3 {
@@ -858,6 +860,8 @@ exit_signal_threshold = 3
             iterations_used: 1,
             was_streamed: false,
             tokens_used: 0,
+            input_tokens: 0,
+            output_tokens: 0,
         };
 
         for _ in 0..5 {
@@ -882,6 +886,8 @@ exit_signal_threshold = 3
             iterations_used: 1,
             was_streamed: false,
             tokens_used: 100,
+            input_tokens: 0,
+            output_tokens: 0,
         };
 
         pilot.update_counters(&ok_result, &progress);
@@ -904,6 +910,8 @@ exit_signal_threshold = 3
             iterations_used: 1,
             was_streamed: false,
             tokens_used: 0,
+            input_tokens: 0,
+            output_tokens: 0,
         };
 
         pilot.update_counters(&fail_result, &no_progress);
@@ -926,6 +934,8 @@ exit_signal_threshold = 3
             iterations_used: 1,
             was_streamed: false,
             tokens_used: 100,
+            input_tokens: 0,
+            output_tokens: 0,
         };
 
         // First signal — not enough
@@ -952,6 +962,8 @@ exit_signal_threshold = 3
             iterations_used: 1,
             was_streamed: false,
             tokens_used: 0,
+            input_tokens: 0,
+            output_tokens: 0,
         };
 
         // done() without files_edited does NOT count as completion signal
@@ -1049,6 +1061,8 @@ exit_signal_threshold = 3
             iterations_used: 1,
             was_streamed: false,
             tokens_used: 0,
+            input_tokens: 0,
+            output_tokens: 0,
         };
 
         pilot.update_counters(&empty_files_done, &no_progress);
@@ -1079,6 +1093,8 @@ exit_signal_threshold = 3
             iterations_used: 1,
             was_streamed: false,
             tokens_used: 100,
+            input_tokens: 0,
+            output_tokens: 0,
         };
 
         pilot.update_counters(&mixed_files, &no_progress);
