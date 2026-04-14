@@ -191,6 +191,8 @@ impl SubAgentManager {
                     iterations_used: 0,
                     was_streamed: false,
                     tokens_used: 0,
+                    input_tokens: 0,
+                    output_tokens: 0,
                 };
             }
 
@@ -250,6 +252,8 @@ impl SubAgentManager {
                     iterations_used: 0,
                     was_streamed: false,
                     tokens_used: 0,
+                    input_tokens: 0,
+                    output_tokens: 0,
                 },
             }
         }) // close Box::pin(async move {
@@ -286,6 +290,8 @@ impl SubAgentManager {
                     iterations_used: 0,
                     was_streamed: false,
                     tokens_used: 0,
+                    input_tokens: 0,
+                    output_tokens: 0,
                 }),
             }
         }

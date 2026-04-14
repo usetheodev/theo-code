@@ -27,6 +27,10 @@ pub struct AgentResult {
     /// Total tokens consumed during this run (LLM input + output).
     /// Collected by MetricsCollector, surfaced for display.
     pub tokens_used: u64,
+    /// Input (prompt) tokens consumed during this run.
+    pub input_tokens: u64,
+    /// Output (completion) tokens consumed during this run.
+    pub output_tokens: u64,
 }
 
 /// The main agent loop that orchestrates LLM ↔ tool execution.
@@ -285,6 +289,8 @@ mod tests {
             iterations_used: 0,
             was_streamed: false,
             tokens_used: 0,
+            input_tokens: 0,
+            output_tokens: 0,
         };
         assert!(!result.success);
     }
