@@ -159,34 +159,44 @@ def generate_mutation(smoke_analysis: dict, swe_analysis: dict | None, iteration
                 "action": "swe_prompt_faster",
             })
 
-    # Pattern 4: high iteration on specific scenarios
-    for sid, iters in smoke_analysis.get("high_iteration_scenarios", []):
-        if iters > 15:
-            mutations.append({
-                "type": "scenario_specific",
-                "target": "system_prompt",
-                "description": f"Scenario {sid} took {iters} iterations — investigate",
-            })
+    # Mutation bank: ordered by expected impact. Each must have find/replace.
+    mutation_bank = [
+        {
+            "type": "batch_usage",
+            "description": "Encourage batch tool calls to reduce iterations",
+            "find": "Use `batch` to read multiple files in one call.",
+            "replace": "ALWAYS use `batch` when reading 2+ files or doing 2+ searches. This halves your iteration count. Example: batch(calls: [{tool: \"read\", args: {filePath: \"a.rs\"}}, {tool: \"grep\", args: {pattern: \"TODO\"}}]).",
+        },
+        {
+            "type": "verify_done_combo",
+            "description": "Reinforce verify+done in same turn",
+            "find": "VERIFY+DONE — after making changes, verify the result AND call `done` in the SAME response.",
+            "replace": "VERIFY+DONE — after making changes, call read on the edited file AND `done` in the SAME response. NEVER use a separate iteration just to verify. Combine: read(verify) + done(summary) in one turn.",
+        },
+        {
+            "type": "think_skip",
+            "description": "Skip think for simple tasks to save iterations",
+            "find": "Skip for trivial tasks (typo fix, single-line change).",
+            "replace": "Skip for ANY task where the user tells you exactly what to change (typo, rename, one-line fix). Just read the file and edit it.",
+        },
+        {
+            "type": "codebase_context_skip",
+            "description": "Don't require codebase_context for small repos",
+            "find": "call `codebase_context` first to understand the project structure before editing.",
+            "replace": "call `codebase_context` for repos with 50+ files. For small repos (< 20 files), use grep/glob instead — faster.",
+        },
+        {
+            "type": "done_without_test",
+            "description": "Don't run tests when not required",
+            "find": "Only call `done` when the project compiles and tests pass.",
+            "replace": "Call `done` when your change is correct. If the project has no test suite or build system, call `done` after verifying the edit visually.",
+        },
+    ]
 
-    # If no specific mutations, try a generic improvement
+    # Pick the mutation for this iteration (round-robin through bank)
     if not mutations:
-        generic = [
-            {
-                "type": "batch_usage",
-                "target": "system_prompt",
-                "description": "Encourage batch tool calls to reduce iterations",
-                "find": "Use `batch` to read multiple files in one call.",
-                "replace": "ALWAYS use `batch` when you need multiple reads or searches. Example: batch(calls: [{tool: \"read\", args: {filePath: \"a.rs\"}}, {tool: \"read\", args: {filePath: \"b.rs\"}}]). This saves iterations.",
-            },
-            {
-                "type": "verify_done_combo",
-                "target": "system_prompt",
-                "description": "Reinforce verify+done in same turn",
-                "find": "VERIFY+DONE — after making changes",
-                "replace": "VERIFY+DONE — after making changes, call read to verify AND done in the SAME response. Never waste a whole iteration just to verify",
-            },
-        ]
-        mutations.append(generic[iteration % len(generic)])
+        idx = iteration % len(mutation_bank)
+        mutations.append(mutation_bank[idx])
 
     return mutations[0] if mutations else {"type": "none", "description": "no mutation needed"}
 
