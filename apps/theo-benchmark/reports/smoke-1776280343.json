@@ -1,0 +1,430 @@
+{
+  "schema": "theo.smoke.v1",
+  "scenarios_total": 10,
+  "scenarios_passed": 9,
+  "pass_rate": 0.9,
+  "totals": {
+    "input_tokens": 263250,
+    "output_tokens": 12223,
+    "iterations": 69,
+    "tool_calls": 66,
+    "llm_calls": 69,
+    "retries": 0,
+    "duration_ms": 469502
+  },
+  "by_category": {
+    "read": {
+      "total": 1,
+      "passed": 1
+    },
+    "search": {
+      "total": 1,
+      "passed": 0
+    },
+    "fix-bug": {
+      "total": 3,
+      "passed": 3
+    },
+    "add-feature": {
+      "total": 1,
+      "passed": 1
+    },
+    "refactor": {
+      "total": 1,
+      "passed": 1
+    },
+    "explore": {
+      "total": 1,
+      "passed": 1
+    },
+    "multi-file": {
+      "total": 1,
+      "passed": 1
+    },
+    "plan": {
+      "total": 1,
+      "passed": 1
+    }
+  },
+  "results": [
+    {
+      "id": "01-read-answer",
+      "category": "read",
+      "mode": "agent",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 5.27,
+      "check_passed": true,
+      "check_stderr": "rc=0 stdout='' stderr=''",
+      "headless": {
+        "duration_ms": 4944,
+        "files_edited": [],
+        "iterations": 2,
+        "llm": {
+          "calls": 2,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.3-codex",
+        "provider": "ChatGPT Codex (OAuth)",
+        "schema": "theo.headless.v1",
+        "success": true,
+        "summary": "7",
+        "tokens": {
+          "input": 5697,
+          "output": 96,
+          "total": 5793
+        },
+        "tools": {
+          "success": 1,
+          "total": 1
+        }
+      },
+      "stderr_tail": "[theo] Auto-initialized .theo/theo.md \u2014 run `theo init` for detailed context\n",
+      "workdir": null
+    },
+    {
+      "id": "02-grep-pattern",
+      "category": "search",
+      "mode": "agent",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 161.95,
+      "check_passed": false,
+      "check_stderr": "rc=1 stdout='' stderr=''",
+      "headless": {
+        "duration_ms": 161628,
+        "files_edited": [],
+        "iterations": 5,
+        "llm": {
+          "calls": 5,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.3-codex",
+        "provider": "ChatGPT Codex (OAuth)",
+        "schema": "theo.headless.v1",
+        "success": true,
+        "summary": "apps/theo-benchmark/scenarios/smoke/02-grep-pattern.toml",
+        "tokens": {
+          "input": 14928,
+          "output": 411,
+          "total": 15339
+        },
+        "tools": {
+          "success": 3,
+          "total": 4
+        }
+      },
+      "stderr_tail": "[theo] Auto-initialized .theo/theo.md \u2014 run `theo init` for detailed context\n",
+      "workdir": null
+    },
+    {
+      "id": "03-fix-typo",
+      "category": "fix-bug",
+      "mode": "agent",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 25.5,
+      "check_passed": true,
+      "check_stderr": "rc=0 stdout='' stderr=''",
+      "headless": {
+        "duration_ms": 25192,
+        "files_edited": [
+          "src/messages.rs"
+        ],
+        "iterations": 7,
+        "llm": {
+          "calls": 7,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.3-codex",
+        "provider": "ChatGPT Codex (OAuth)",
+        "schema": "theo.headless.v1",
+        "success": true,
+        "summary": "Fixed the typo in `src/messages.rs` by changing `\"Request recieved successfully\"` to `\"Request received successfully\"`.\n\nVerification performed:\n- Re-read `src/messages.rs` to confirm the corrected text.\n- Attempted to run tests with `cargo test`, but this repository does not contain a `Cargo.toml`, so no Cargo-based test/build command is available in the current project layout.",
+        "tokens": {
+          "input": 22025,
+          "output": 740,
+          "total": 22765
+        },
+        "tools": {
+          "success": 6,
+          "total": 6
+        }
+      },
+      "stderr_tail": "[theo] Auto-initialized .theo/theo.md \u2014 run `theo init` for detailed context\n",
+      "workdir": null
+    },
+    {
+      "id": "04-fix-return",
+      "category": "fix-bug",
+      "mode": "agent",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 29.84,
+      "check_passed": true,
+      "check_stderr": "rc=0 stdout='' stderr=''",
+      "headless": {
+        "duration_ms": 29523,
+        "files_edited": [
+          "src/math.rs"
+        ],
+        "iterations": 9,
+        "llm": {
+          "calls": 9,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.3-codex",
+        "provider": "ChatGPT Codex (OAuth)",
+        "schema": "theo.headless.v1",
+        "success": true,
+        "summary": "Fixed the bug in `src/math.rs`: `double` now correctly returns `n * 2` instead of `n + 2`. Verified the file contents after editing. I also attempted to run `cargo test`, but this repository does not contain a `Cargo.toml`, so cargo-based test/build verification is not applicable in the current project layout.",
+        "tokens": {
+          "input": 30761,
+          "output": 1038,
+          "total": 31799
+        },
+        "tools": {
+          "success": 8,
+          "total": 8
+        }
+      },
+      "stderr_tail": "[theo] Auto-initialized .theo/theo.md \u2014 run `theo init` for detailed context\n",
+      "workdir": null
+    },
+    {
+      "id": "05-add-function",
+      "category": "add-feature",
+      "mode": "agent",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 27.65,
+      "check_passed": true,
+      "check_stderr": "rc=0 stdout='' stderr=''",
+      "headless": {
+        "duration_ms": 27337,
+        "files_edited": [
+          "src/math.rs"
+        ],
+        "iterations": 8,
+        "llm": {
+          "calls": 8,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.3-codex",
+        "provider": "ChatGPT Codex (OAuth)",
+        "schema": "theo.headless.v1",
+        "success": true,
+        "summary": "Implemented \u2705 `src/math.rs` now includes:\n\n```rust\npub fn square(n: i32) -> i32 {\n    n * n\n}\n```\n\nExisting functions (`double`, `triple`) were left untouched.\n\nNote: I also attempted to run tests, but this repository does not contain a `Cargo.toml`, so `cargo test` cannot run in this environment.",
+        "tokens": {
+          "input": 26643,
+          "output": 934,
+          "total": 27577
+        },
+        "tools": {
+          "success": 7,
+          "total": 7
+        }
+      },
+      "stderr_tail": "[theo] Auto-initialized .theo/theo.md \u2014 run `theo init` for detailed context\n",
+      "workdir": null
+    },
+    {
+      "id": "06-rename-var",
+      "category": "refactor",
+      "mode": "agent",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 21.01,
+      "check_passed": true,
+      "check_stderr": "rc=0 stdout='' stderr=''",
+      "headless": {
+        "duration_ms": 20637,
+        "files_edited": [
+          "src/parse.rs"
+        ],
+        "iterations": 5,
+        "llm": {
+          "calls": 5,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.3-codex",
+        "provider": "ChatGPT Codex (OAuth)",
+        "schema": "theo.headless.v1",
+        "success": true,
+        "summary": "Updated only `src/parse.rs` by renaming the local variable inside `parse_int` from `x` to `value` and updated its corresponding `Some(...)` usage. No other files were changed.",
+        "tokens": {
+          "input": 15725,
+          "output": 775,
+          "total": 16500
+        },
+        "tools": {
+          "success": 4,
+          "total": 4
+        }
+      },
+      "stderr_tail": "[theo] Auto-initialized .theo/theo.md \u2014 run `theo init` for detailed context\n",
+      "workdir": null
+    },
+    {
+      "id": "07-count-files",
+      "category": "explore",
+      "mode": "agent",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 5.27,
+      "check_passed": true,
+      "check_stderr": "rc=0 stdout='' stderr=''",
+      "headless": {
+        "duration_ms": 4691,
+        "files_edited": [],
+        "iterations": 2,
+        "llm": {
+          "calls": 2,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.3-codex",
+        "provider": "ChatGPT Codex (OAuth)",
+        "schema": "theo.headless.v1",
+        "success": true,
+        "summary": "3",
+        "tokens": {
+          "input": 5673,
+          "output": 108,
+          "total": 5781
+        },
+        "tools": {
+          "success": 1,
+          "total": 1
+        }
+      },
+      "stderr_tail": "[theo] Auto-initialized .theo/theo.md \u2014 run `theo init` for detailed context\n",
+      "workdir": null
+    },
+    {
+      "id": "08-multi-file-edit",
+      "category": "multi-file",
+      "mode": "agent",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 26.3,
+      "check_passed": true,
+      "check_stderr": "rc=0 stdout='' stderr=''",
+      "headless": {
+        "duration_ms": 25926,
+        "files_edited": [
+          "src/config.rs",
+          "src/server.rs"
+        ],
+        "iterations": 9,
+        "llm": {
+          "calls": 9,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.3-codex",
+        "provider": "ChatGPT Codex (OAuth)",
+        "schema": "theo.headless.v1",
+        "success": true,
+        "summary": "Done \u2014 both requested updates have been made:\n\n- In `src/config.rs`, `DEFAULT_PORT` changed from `8080` to `9090`.\n- In `src/server.rs`, the comment was updated from `listens on 8080` to `listens on 9090`.\n\nDiff verified:\n```diff\n-pub const DEFAULT_PORT: u16 = 8080;\n+pub const DEFAULT_PORT: u16 = 9090;\n```\n\n```diff\n-// listens on 8080 by default\n+// listens on 9090 by default\n```",
+        "tokens": {
+          "input": 30699,
+          "output": 976,
+          "total": 31675
+        },
+        "tools": {
+          "success": 11,
+          "total": 14
+        }
+      },
+      "stderr_tail": "[theo] Auto-initialized .theo/theo.md \u2014 run `theo init` for detailed context\n",
+      "workdir": null
+    },
+    {
+      "id": "09-plan-mode",
+      "category": "plan",
+      "mode": "plan",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 146.05,
+      "check_passed": true,
+      "check_stderr": "rc=0 stdout='' stderr=''",
+      "headless": {
+        "duration_ms": 145690,
+        "files_edited": [
+          ".theo/plans/02-mean.md",
+          ".theo/plans/02-mean.md",
+          ".theo/plans/02-mean.md"
+        ],
+        "iterations": 13,
+        "llm": {
+          "calls": 13,
+          "retries": 0
+        },
+        "mode": "plan",
+        "model": "gpt-5.3-codex",
+        "provider": "ChatGPT Codex (OAuth)",
+        "schema": "theo.headless.v1",
+        "success": true,
+        "summary": "Plan is complete and persisted to:\n\n- `.theo/plans/02-mean.md`\n\nIt now explicitly includes a **Constraints** section reinforcing that `src/stats.rs` must not be modified in this planning step.Plan created and saved to **`.theo/plans/02-mean.md`** as requested, with no modifications to `src/stats.rs`.",
+        "tokens": {
+          "input": 75167,
+          "output": 6351,
+          "total": 81518
+        },
+        "tools": {
+          "success": 10,
+          "total": 11
+        }
+      },
+      "stderr_tail": "[theo] Auto-initialized .theo/theo.md \u2014 run `theo init` for detailed context\n",
+      "workdir": null
+    },
+    {
+      "id": "10-logic-bug",
+      "category": "fix-bug",
+      "mode": "agent",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 24.27,
+      "check_passed": true,
+      "check_stderr": "rc=0 stdout='' stderr=''",
+      "headless": {
+        "duration_ms": 23934,
+        "files_edited": [
+          "src/seq.rs"
+        ],
+        "iterations": 9,
+        "llm": {
+          "calls": 9,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.3-codex",
+        "provider": "ChatGPT Codex (OAuth)",
+        "schema": "theo.headless.v1",
+        "success": true,
+        "summary": "Fixed the bug in `src/seq.rs` by correcting `nth_even` to return `n * 2` instead of `n * 2 + 2`.\n\n### Change made\n- **Before:** `nth_even(0)` returned `2`\n- **After:** `nth_even(0)` returns `0`, `nth_even(1)` returns `2`, etc.\n\nI also verified the file contents after editing. I attempted to run tests, but this repository does not contain a `Cargo.toml`, so `cargo test` cannot be executed in the current project root.",
+        "tokens": {
+          "input": 35932,
+          "output": 794,
+          "total": 36726
+        },
+        "tools": {
+          "success": 7,
+          "total": 10
+        }
+      },
+      "stderr_tail": "[theo] Auto-initialized .theo/theo.md \u2014 run `theo init` for detailed context\n",
+      "workdir": null
+    }
+  ],
+  "timestamp": 1776280343,
+  "theo_bin": "/home/paulo/theo-code/target/release/theo"
+}
