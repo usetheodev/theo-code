@@ -218,10 +218,23 @@ pub async fn run(
                                             ));
                                             terminal.draw(|frame| view::draw(frame, &state))?;
 
+                                            // Open browser silently (redirect output to /dev/null)
                                             #[cfg(target_os = "linux")]
-                                            { let _ = std::process::Command::new("xdg-open").arg(&code.verification_uri).spawn(); }
+                                            {
+                                                let _ = std::process::Command::new("xdg-open")
+                                                    .arg(&code.verification_uri)
+                                                    .stdout(std::process::Stdio::null())
+                                                    .stderr(std::process::Stdio::null())
+                                                    .spawn();
+                                            }
                                             #[cfg(target_os = "macos")]
-                                            { let _ = std::process::Command::new("open").arg(&code.verification_uri).spawn(); }
+                                            {
+                                                let _ = std::process::Command::new("open")
+                                                    .arg(&code.verification_uri)
+                                                    .stdout(std::process::Stdio::null())
+                                                    .stderr(std::process::Stdio::null())
+                                                    .spawn();
+                                            }
 
                                             let poll_tx = msg_tx.clone();
                                             tokio::spawn(async move {
