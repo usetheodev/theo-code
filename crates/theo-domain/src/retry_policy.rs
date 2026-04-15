@@ -20,7 +20,11 @@ impl RetryPolicy {
     ///
     /// The delay never exceeds max_delay_ms.
     pub fn delay_for_attempt(&self, attempt: u32) -> std::time::Duration {
-        let shift = if attempt >= 64 { u64::MAX } else { 1u64 << attempt };
+        let shift = if attempt >= 64 {
+            u64::MAX
+        } else {
+            1u64 << attempt
+        };
         let exponential = self.base_delay_ms.saturating_mul(shift);
         let capped = exponential.min(self.max_delay_ms);
 
@@ -159,7 +163,11 @@ mod tests {
         for _ in 0..1000 {
             let delay = policy.delay_for_attempt(1);
             // base * 2^1 = 2000, jitter in [0, 2000]
-            assert!(delay.as_millis() <= 2000, "jitter exceeded bound: {}", delay.as_millis());
+            assert!(
+                delay.as_millis() <= 2000,
+                "jitter exceeded bound: {}",
+                delay.as_millis()
+            );
         }
     }
 

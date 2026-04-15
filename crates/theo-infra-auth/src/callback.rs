@@ -52,18 +52,15 @@ pub async fn wait_for_callback(
     // Spawn blocking TCP listener in a background thread
     let handle = tokio::task::spawn_blocking(move || {
         let addr = format!("127.0.0.1:{port}");
-        let listener = TcpListener::bind(&addr).map_err(|e| {
-            AuthError::OAuth(format!("failed to bind {addr}: {e}"))
-        })?;
+        let listener = TcpListener::bind(&addr)
+            .map_err(|e| AuthError::OAuth(format!("failed to bind {addr}: {e}")))?;
         listener
             .set_nonblocking(false)
             .map_err(|e| AuthError::OAuth(format!("set_nonblocking: {e}")))?;
 
         // Set a socket timeout so we don't block forever
         let timeout = Duration::from_secs(timeout_secs);
-        listener
-            .set_nonblocking(false)
-            .ok();
+        listener.set_nonblocking(false).ok();
 
         // Accept one connection with timeout via polling
         let start = std::time::Instant::now();
@@ -110,13 +107,10 @@ pub async fn wait_for_callback(
     });
 
     // Wait for the callback result with timeout
-    let result = tokio::time::timeout(
-        Duration::from_secs(timeout_secs + 5),
-        rx,
-    )
-    .await
-    .map_err(|_| AuthError::CallbackTimeout(timeout_secs))?
-    .map_err(|_| AuthError::OAuth("callback channel closed".to_string()))?;
+    let result = tokio::time::timeout(Duration::from_secs(timeout_secs + 5), rx)
+        .await
+        .map_err(|_| AuthError::CallbackTimeout(timeout_secs))?
+        .map_err(|_| AuthError::OAuth("callback channel closed".to_string()))?;
 
     let _ = handle.await;
     result
@@ -138,10 +132,8 @@ fn parse_callback_request(
         .map(|(_, q)| q)
         .ok_or_else(|| AuthError::OAuth("no query parameters".to_string()))?;
 
-    let params: std::collections::HashMap<&str, &str> = query
-        .split('&')
-        .filter_map(|p| p.split_once('='))
-        .collect();
+    let params: std::collections::HashMap<&str, &str> =
+        query.split('&').filter_map(|p| p.split_once('=')).collect();
 
     // Check for error response
     if let Some(error) = params.get("error") {

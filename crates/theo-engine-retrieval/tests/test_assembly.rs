@@ -1,9 +1,8 @@
-/// Tests for assembly.rs — Greedy Knapsack Context Assembly
-
-use theo_engine_retrieval::assembly::assemble_greedy;
-use theo_engine_retrieval::search::ScoredCommunity;
 use theo_engine_graph::cluster::Community;
 use theo_engine_graph::model::{CodeGraph, Node, NodeType, SymbolKind};
+/// Tests for assembly.rs — Greedy Knapsack Context Assembly
+use theo_engine_retrieval::assembly::assemble_greedy;
+use theo_engine_retrieval::search::ScoredCommunity;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -121,7 +120,10 @@ fn test_huge_budget_includes_all_non_singleton_communities() {
 
     // Singletons (communities with <2 members) are filtered from output.
     // Fixture has: auth (2 members), db (2 members), api (1 member — filtered).
-    let non_singleton_count = scored.iter().filter(|s| s.community.node_ids.len() >= 2).count();
+    let non_singleton_count = scored
+        .iter()
+        .filter(|s| s.community.node_ids.len() >= 2)
+        .count();
     assert_eq!(
         payload.items.len(),
         non_singleton_count,

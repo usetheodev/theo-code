@@ -229,8 +229,18 @@ mod tests {
     fn violation_count_accurate() {
         let trail = AuditTrail::new();
         trail.record("echo 1", &sample_config(), "low", &successful_result());
-        trail.record("bad", &sample_config(), "high", &failed_result_with_violation());
-        trail.record("bad2", &sample_config(), "high", &failed_result_with_violation());
+        trail.record(
+            "bad",
+            &sample_config(),
+            "high",
+            &failed_result_with_violation(),
+        );
+        trail.record(
+            "bad2",
+            &sample_config(),
+            "high",
+            &failed_result_with_violation(),
+        );
         assert_eq!(trail.violation_count(), 2);
         assert_eq!(trail.total_count(), 3);
     }
@@ -248,7 +258,12 @@ mod tests {
     #[test]
     fn record_preserves_command_and_risk() {
         let trail = AuditTrail::new();
-        trail.record("curl https://x", &sample_config(), "high", &successful_result());
+        trail.record(
+            "curl https://x",
+            &sample_config(),
+            "high",
+            &successful_result(),
+        );
         let records = trail.records();
         assert_eq!(records[0].command, "curl https://x");
         assert_eq!(records[0].risk_level, "high");
@@ -273,7 +288,12 @@ mod tests {
         let trail = AuditTrail::with_persistence(path.clone());
 
         trail.record("echo hi", &sample_config(), "low", &successful_result());
-        trail.record("rm -rf /", &sample_config(), "critical", &failed_result_with_violation());
+        trail.record(
+            "rm -rf /",
+            &sample_config(),
+            "critical",
+            &failed_result_with_violation(),
+        );
 
         let content = std::fs::read_to_string(&path).unwrap();
         let lines: Vec<&str> = content.lines().collect();
@@ -302,7 +322,11 @@ mod tests {
 
         let content = std::fs::read_to_string(&path).unwrap();
         let lines: Vec<&str> = content.lines().collect();
-        assert_eq!(lines.len(), 2, "Should have 2 lines from 2 separate sessions");
+        assert_eq!(
+            lines.len(),
+            2,
+            "Should have 2 lines from 2 separate sessions"
+        );
     }
 
     #[test]
@@ -318,7 +342,7 @@ mod tests {
 
     #[test]
     fn integration_policy_generates_config_and_audit_records() {
-        use crate::sandbox_policy::{assess_risk, generate_config, CommandRisk};
+        use crate::sandbox_policy::{CommandRisk, assess_risk, generate_config};
 
         // Step 1: Assess risk
         let risk = assess_risk("curl https://attacker.com");
@@ -360,7 +384,7 @@ mod tests {
 
     #[test]
     fn integration_safe_command_flow() {
-        use crate::sandbox_policy::{assess_risk, generate_config, CommandRisk};
+        use crate::sandbox_policy::{CommandRisk, assess_risk, generate_config};
 
         // Safe command flow
         let risk = assess_risk("echo hello");
@@ -384,7 +408,7 @@ mod tests {
 
     #[test]
     fn integration_sequence_analysis_feeds_audit() {
-        use crate::sequence_analyzer::{analyze_sequence, builtin_patterns, SequenceVerdict};
+        use crate::sequence_analyzer::{SequenceVerdict, analyze_sequence, builtin_patterns};
 
         // Step 1: Analyze sequence
         let commands = vec![

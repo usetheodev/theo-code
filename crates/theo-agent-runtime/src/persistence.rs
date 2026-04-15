@@ -147,8 +147,14 @@ mod tests {
             completed_at: None,
         };
         RunSnapshot::new(
-            run, task, vec![], vec![], vec![],
-            BudgetUsage::default(), vec![], vec![],
+            run,
+            task,
+            vec![],
+            vec![],
+            vec![],
+            BudgetUsage::default(),
+            vec![],
+            vec![],
         )
     }
 
@@ -160,7 +166,11 @@ mod tests {
         let snapshot = make_snapshot("test-run-1");
 
         store.save(&run_id, &snapshot).await.unwrap();
-        let loaded = store.load(&run_id).await.unwrap().expect("should find snapshot");
+        let loaded = store
+            .load(&run_id)
+            .await
+            .unwrap()
+            .expect("should find snapshot");
 
         assert_eq!(loaded.run.run_id, snapshot.run.run_id);
         assert_eq!(loaded.task.objective, "test");
@@ -187,7 +197,10 @@ mod tests {
             .unwrap();
 
         let result = store.load(&run_id).await;
-        assert!(matches!(result, Err(PersistenceError::ChecksumMismatch { .. })));
+        assert!(matches!(
+            result,
+            Err(PersistenceError::ChecksumMismatch { .. })
+        ));
     }
 
     #[tokio::test]
@@ -203,9 +216,18 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = FileSnapshotStore::new(dir.path());
 
-        store.save(&RunId::new("run-a"), &make_snapshot("run-a")).await.unwrap();
-        store.save(&RunId::new("run-b"), &make_snapshot("run-b")).await.unwrap();
-        store.save(&RunId::new("run-c"), &make_snapshot("run-c")).await.unwrap();
+        store
+            .save(&RunId::new("run-a"), &make_snapshot("run-a"))
+            .await
+            .unwrap();
+        store
+            .save(&RunId::new("run-b"), &make_snapshot("run-b"))
+            .await
+            .unwrap();
+        store
+            .save(&RunId::new("run-c"), &make_snapshot("run-c"))
+            .await
+            .unwrap();
 
         let runs = store.list_runs().await.unwrap();
         assert_eq!(runs.len(), 3);
@@ -217,7 +239,10 @@ mod tests {
         let store = FileSnapshotStore::new(dir.path());
         let run_id = RunId::new("delete-me");
 
-        store.save(&run_id, &make_snapshot("delete-me")).await.unwrap();
+        store
+            .save(&run_id, &make_snapshot("delete-me"))
+            .await
+            .unwrap();
         assert!(store.load(&run_id).await.unwrap().is_some());
 
         store.delete(&run_id).await.unwrap();
@@ -230,7 +255,10 @@ mod tests {
         let nested = dir.path().join("deep").join("nested").join("snapshots");
         let store = FileSnapshotStore::new(&nested);
 
-        store.save(&RunId::new("r-1"), &make_snapshot("r-1")).await.unwrap();
+        store
+            .save(&RunId::new("r-1"), &make_snapshot("r-1"))
+            .await
+            .unwrap();
         assert!(nested.exists());
         assert!(store.load(&RunId::new("r-1")).await.unwrap().is_some());
     }
@@ -240,8 +268,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = FileSnapshotStore::new(dir.path());
 
-        store.save(&RunId::new("run-a"), &make_snapshot("run-a")).await.unwrap();
-        store.save(&RunId::new("run-b"), &make_snapshot("run-b")).await.unwrap();
+        store
+            .save(&RunId::new("run-a"), &make_snapshot("run-a"))
+            .await
+            .unwrap();
+        store
+            .save(&RunId::new("run-b"), &make_snapshot("run-b"))
+            .await
+            .unwrap();
 
         let a = store.load(&RunId::new("run-a")).await.unwrap().unwrap();
         let b = store.load(&RunId::new("run-b")).await.unwrap().unwrap();

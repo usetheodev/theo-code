@@ -1,12 +1,12 @@
 use async_trait::async_trait;
+use std::path::PathBuf;
+use std::process::Stdio;
 use theo_domain::error::ToolError;
 use theo_domain::permission::{PermissionRequest, PermissionType};
 use theo_domain::tool::{
     PermissionCollector, Tool, ToolCategory, ToolContext, ToolOutput, ToolParam, ToolSchema,
     optional_string, require_string,
 };
-use std::path::PathBuf;
-use std::process::Stdio;
 use tokio::process::Command;
 
 const MAX_MATCHES: usize = 100;
@@ -149,7 +149,10 @@ impl Tool for GrepTool {
 
 // Workaround: use regex split for cross-platform line ending handling
 fn split_lines(s: &str) -> Vec<&str> {
-    s.trim().split('\n').map(|l| l.trim_end_matches('\r')).collect()
+    s.trim()
+        .split('\n')
+        .map(|l| l.trim_end_matches('\r'))
+        .collect()
 }
 
 #[cfg(test)]
@@ -242,8 +245,7 @@ mod tests {
 
     #[test]
     fn regex_correctly_splits_windows_crlf_line_endings() {
-        let windows_output =
-            "file1.txt|1|content1\r\nfile2.txt|2|content2\r\nfile3.txt|3|content3";
+        let windows_output = "file1.txt|1|content1\r\nfile2.txt|2|content2\r\nfile3.txt|3|content3";
         let lines = split_lines(windows_output);
         assert_eq!(lines.len(), 3);
         assert_eq!(lines[0], "file1.txt|1|content1");

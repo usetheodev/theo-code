@@ -7,13 +7,11 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use theo_domain::capability::CapabilitySet;
-use theo_infra_llm::types::Message;
 use crate::agent_loop::{AgentLoop, AgentResult};
 use crate::config::AgentConfig;
 use crate::event_bus::EventBus;
-#[allow(deprecated)]
-use crate::events::NullEventSink;
+use theo_domain::capability::CapabilitySet;
+use theo_infra_llm::types::Message;
 
 // ---------------------------------------------------------------------------
 // SubAgentRole — specialized roles with restricted capabilities
@@ -152,7 +150,12 @@ pub struct SubAgentManager {
 
 impl SubAgentManager {
     pub fn new(config: AgentConfig, event_bus: Arc<EventBus>, project_dir: PathBuf) -> Self {
-        Self { config, event_bus, project_dir, depth: 0 }
+        Self {
+            config,
+            event_bus,
+            project_dir,
+            depth: 0,
+        }
     }
 
     /// Spawn a sub-agent with a specific role and objective.
@@ -178,83 +181,81 @@ impl SubAgentManager {
         let context = context;
 
         Box::pin(async move {
-        // Enforce max_depth
-        if self.depth >= MAX_DEPTH {
-            return AgentResult {
-                success: false,
-                summary: "Sub-agent depth limit reached. Sub-agents cannot spawn sub-agents.".to_string(),
-                files_edited: vec![],
-                iterations_used: 0,
-                was_streamed: false,
-                tokens_used: 0,
-            };
-        }
+            // Enforce max_depth
+            if self.depth >= MAX_DEPTH {
+                return AgentResult {
+                    success: false,
+                    summary: "Sub-agent depth limit reached. Sub-agents cannot spawn sub-agents."
+                        .to_string(),
+                    files_edited: vec![],
+                    iterations_used: 0,
+                    was_streamed: false,
+                    tokens_used: 0,
+                    input_tokens: 0,
+                    output_tokens: 0,
+                };
+            }
 
-        // Build sub-agent config
-        let mut sub_config = self.config.clone();
-        sub_config.system_prompt = role.system_prompt();
-        sub_config.max_iterations = role.max_iterations();
-        // Mark as sub-agent: prevents receiving delegation tools and skills.
-        // This is the primary defense against recursive spawning.
-        sub_config.is_subagent = true;
-        // Set capability restrictions based on role.
-        // This activates CapabilityGate in the sub-agent's ToolCallManager.
-        sub_config.capability_set = Some(role.capability_set());
+            // Build sub-agent config
+            let mut sub_config = self.config.clone();
+            sub_config.system_prompt = role.system_prompt();
+            sub_config.max_iterations = role.max_iterations();
+            // Mark as sub-agent: prevents receiving delegation tools and skills.
+            // This is the primary defense against recursive spawning.
+            sub_config.is_subagent = true;
+            // Set capability restrictions based on role.
+            // This activates CapabilityGate in the sub-agent's ToolCallManager.
+            sub_config.capability_set = Some(role.capability_set());
 
-        // Create sub-agent EventBus with prefixed listener
-        let sub_bus = Arc::new(crate::event_bus::EventBus::new());
-        let prefixed = Arc::new(PrefixedEventForwarder {
-            role_name: role.display_name().to_string(),
-            parent_bus: self.event_bus.clone(),
-        });
-        sub_bus.subscribe(prefixed);
+            // Create sub-agent EventBus with prefixed listener
+            let sub_bus = Arc::new(crate::event_bus::EventBus::new());
+            let prefixed = Arc::new(PrefixedEventForwarder {
+                role_name: role.display_name().to_string(),
+                parent_bus: self.event_bus.clone(),
+            });
+            sub_bus.subscribe(prefixed);
 
-        // Add role identifier + project_dir restriction to system prompt
-        sub_config.system_prompt = format!(
-            "[{}] {}\n\nIMPORTANT: You MUST only operate within the project directory: {}. \
+            // Add role identifier + project_dir restriction to system prompt
+            sub_config.system_prompt = format!(
+                "[{}] {}\n\nIMPORTANT: You MUST only operate within the project directory: {}. \
              Do NOT search, read, or access files outside this directory.",
-            role.display_name(),
-            sub_config.system_prompt,
-            self.project_dir.display()
-        );
+                role.display_name(),
+                sub_config.system_prompt,
+                self.project_dir.display()
+            );
 
-        // Create agent with default registry (CapabilityGate handles restrictions)
-        #[allow(deprecated)]
-        let event_sink = Arc::new(NullEventSink);
-        let registry = theo_tooling::registry::create_default_registry();
-        let agent = AgentLoop::new(sub_config, registry, event_sink);
+            // Create agent with default registry (CapabilityGate handles restrictions)
+            let registry = theo_tooling::registry::create_default_registry();
+            let agent = AgentLoop::new(sub_config, registry);
 
-        // Execute with role-specific timeout
-        let history = context.unwrap_or_default();
-        let timeout_secs = timeout_for_role(&role);
-        let timeout = std::time::Duration::from_secs(timeout_secs);
+            // Execute with role-specific timeout
+            let history = context.unwrap_or_default();
+            let timeout_secs = timeout_for_role(&role);
+            let timeout = std::time::Duration::from_secs(timeout_secs);
 
-        match tokio::time::timeout(
-            timeout,
-            agent.run_with_history(
-                &objective,
-                &self.project_dir,
-                history,
-                Some(sub_bus),
-            ),
-        )
-        .await
-        {
-            Ok(result) => result,
-            Err(_) => AgentResult {
-                success: false,
-                summary: format!(
-                    "Sub-agent ({}) timed out after {}s. Objective: {}",
-                    role.display_name(),
-                    timeout_secs,
-                    objective
-                ),
-                files_edited: vec![],
-                iterations_used: 0,
-                was_streamed: false,
-                tokens_used: 0,
-            },
-        }
+            match tokio::time::timeout(
+                timeout,
+                agent.run_with_history(&objective, &self.project_dir, history, Some(sub_bus)),
+            )
+            .await
+            {
+                Ok(result) => result,
+                Err(_) => AgentResult {
+                    success: false,
+                    summary: format!(
+                        "Sub-agent ({}) timed out after {}s. Objective: {}",
+                        role.display_name(),
+                        timeout_secs,
+                        objective
+                    ),
+                    files_edited: vec![],
+                    iterations_used: 0,
+                    was_streamed: false,
+                    tokens_used: 0,
+                    input_tokens: 0,
+                    output_tokens: 0,
+                },
+            }
         }) // close Box::pin(async move {
     }
     /// Spawn multiple sub-agents in parallel.
@@ -262,10 +263,7 @@ impl SubAgentManager {
     /// All sub-agents execute concurrently via tokio::spawn.
     /// Returns when ALL sub-agents complete (or timeout individually).
     /// Results are returned in the same order as the input tasks.
-    pub async fn spawn_parallel(
-        &self,
-        tasks: Vec<(SubAgentRole, String)>,
-    ) -> Vec<AgentResult> {
+    pub async fn spawn_parallel(&self, tasks: Vec<(SubAgentRole, String)>) -> Vec<AgentResult> {
         use tokio::task::JoinSet;
 
         let mut join_set = JoinSet::new();
@@ -292,6 +290,8 @@ impl SubAgentManager {
                     iterations_used: 0,
                     was_streamed: false,
                     tokens_used: 0,
+                    input_tokens: 0,
+                    output_tokens: 0,
                 }),
             }
         }
@@ -351,7 +351,10 @@ mod tests {
             SubAgentRole::Implementer,
             SubAgentRole::Verifier,
             SubAgentRole::Reviewer,
-        ].iter().map(|r| r.system_prompt()).collect();
+        ]
+        .iter()
+        .map(|r| r.system_prompt())
+        .collect();
 
         for i in 0..prompts.len() {
             for j in (i + 1)..prompts.len() {
@@ -392,10 +395,22 @@ mod tests {
 
     #[test]
     fn from_str_parses_roles() {
-        assert_eq!(SubAgentRole::from_str("explorer"), Some(SubAgentRole::Explorer));
-        assert_eq!(SubAgentRole::from_str("implement"), Some(SubAgentRole::Implementer));
-        assert_eq!(SubAgentRole::from_str("VERIFIER"), Some(SubAgentRole::Verifier));
-        assert_eq!(SubAgentRole::from_str("review"), Some(SubAgentRole::Reviewer));
+        assert_eq!(
+            SubAgentRole::from_str("explorer"),
+            Some(SubAgentRole::Explorer)
+        );
+        assert_eq!(
+            SubAgentRole::from_str("implement"),
+            Some(SubAgentRole::Implementer)
+        );
+        assert_eq!(
+            SubAgentRole::from_str("VERIFIER"),
+            Some(SubAgentRole::Verifier)
+        );
+        assert_eq!(
+            SubAgentRole::from_str("review"),
+            Some(SubAgentRole::Reviewer)
+        );
         assert_eq!(SubAgentRole::from_str("unknown"), None);
     }
 
@@ -445,7 +460,8 @@ mod tests {
         };
 
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let result = rt.block_on(async { manager.spawn(SubAgentRole::Explorer, "test", None).await });
+        let result =
+            rt.block_on(async { manager.spawn(SubAgentRole::Explorer, "test", None).await });
         assert!(!result.success);
         assert!(result.summary.contains("depth limit"));
     }

@@ -10,7 +10,7 @@ use theo_domain::sandbox::{
     AuditEntry, AuditEventType, SandboxConfig, SandboxError, SandboxResult,
 };
 
-use super::command_validator::{self, ValidatorConfig, ValidationResult};
+use super::command_validator::{self, ValidationResult, ValidatorConfig};
 use super::probe;
 
 /// Trait for sandbox execution — enables DIP (BashTool depends on trait, not concrete).
@@ -53,7 +53,13 @@ impl SandboxExecutor for NoopExecutor {
         if output.status.success() {
             Ok(SandboxResult::success(exit_code, stdout, stderr, vec![]))
         } else {
-            Ok(SandboxResult::failed(exit_code, stdout, stderr, vec![], vec![]))
+            Ok(SandboxResult::failed(
+                exit_code,
+                stdout,
+                stderr,
+                vec![],
+                vec![],
+            ))
         }
     }
 }
@@ -120,7 +126,10 @@ impl SandboxExecutor for LandlockExecutor {
         audit_entries.push(AuditEntry {
             timestamp: now_iso8601(),
             event_type: AuditEventType::SandboxInit,
-            detail: format!("initializing landlock sandbox (ABI v{})", self.capabilities.landlock_abi_version),
+            detail: format!(
+                "initializing landlock sandbox (ABI v{})",
+                self.capabilities.landlock_abi_version
+            ),
             metadata: serde_json::json!({"abi_version": self.capabilities.landlock_abi_version}),
         });
 
@@ -153,7 +162,10 @@ impl SandboxExecutor for LandlockExecutor {
         audit_entries.push(AuditEntry {
             timestamp: now_iso8601(),
             event_type: AuditEventType::EnvVarStripped,
-            detail: format!("env sanitized: {} vars allowed", config.process.allowed_env_vars.len()),
+            detail: format!(
+                "env sanitized: {} vars allowed",
+                config.process.allowed_env_vars.len()
+            ),
             metadata: serde_json::json!({"allowed_count": config.process.allowed_env_vars.len()}),
         });
 
@@ -224,9 +236,20 @@ impl SandboxExecutor for LandlockExecutor {
         });
 
         if output.status.success() {
-            Ok(SandboxResult::success(exit_code, stdout, stderr, audit_entries))
+            Ok(SandboxResult::success(
+                exit_code,
+                stdout,
+                stderr,
+                audit_entries,
+            ))
         } else {
-            Ok(SandboxResult::failed(exit_code, stdout, stderr, vec![], audit_entries))
+            Ok(SandboxResult::failed(
+                exit_code,
+                stdout,
+                stderr,
+                vec![],
+                audit_entries,
+            ))
         }
     }
 }
@@ -246,13 +269,13 @@ fn apply_landlock_in_child(
     allowed_write: &[String],
 ) -> std::io::Result<()> {
     use landlock::{
-        Access, AccessFs, PathBeneath, PathFd, Ruleset, RulesetAttr,
-        RulesetCreatedAttr, ABI,
+        ABI, Access, AccessFs, PathBeneath, PathFd, Ruleset, RulesetAttr, RulesetCreatedAttr,
     };
 
     let abi = ABI::V1; // Use V1 for maximum compatibility (kernel 5.13+)
     let all_access = AccessFs::from_all(abi);
-    let to_io = |e: std::fmt::Arguments<'_>| std::io::Error::new(std::io::ErrorKind::Other, e.to_string());
+    let to_io =
+        |e: std::fmt::Arguments<'_>| std::io::Error::new(std::io::ErrorKind::Other, e.to_string());
 
     let ruleset = Ruleset::default()
         .handle_access(all_access)
@@ -271,7 +294,9 @@ fn apply_landlock_in_child(
     }
 
     // Allow read access to standard paths needed for shell execution
-    for path in &["/usr", "/lib", "/lib64", "/bin", "/sbin", "/etc", "/proc", "/dev"] {
+    for path in &[
+        "/usr", "/lib", "/lib64", "/bin", "/sbin", "/etc", "/proc", "/dev",
+    ] {
         if let Ok(fd) = PathFd::new(path) {
             created = created
                 .add_rule(PathBeneath::new(fd, all_access))
@@ -375,7 +400,10 @@ mod tests {
     #[test]
     fn noop_executor_runs_echo() {
         let executor = NoopExecutor;
-        let config = SandboxConfig { enabled: false, ..SandboxConfig::default() };
+        let config = SandboxConfig {
+            enabled: false,
+            ..SandboxConfig::default()
+        };
         let result = executor
             .execute_sandboxed("echo hello", Path::new("/tmp"), &config)
             .unwrap();
@@ -387,7 +415,10 @@ mod tests {
     #[test]
     fn noop_executor_captures_stderr() {
         let executor = NoopExecutor;
-        let config = SandboxConfig { enabled: false, ..SandboxConfig::default() };
+        let config = SandboxConfig {
+            enabled: false,
+            ..SandboxConfig::default()
+        };
         let result = executor
             .execute_sandboxed("echo error >&2", Path::new("/tmp"), &config)
             .unwrap();
@@ -397,7 +428,10 @@ mod tests {
     #[test]
     fn noop_executor_reports_nonzero_exit() {
         let executor = NoopExecutor;
-        let config = SandboxConfig { enabled: false, ..SandboxConfig::default() };
+        let config = SandboxConfig {
+            enabled: false,
+            ..SandboxConfig::default()
+        };
         let result = executor
             .execute_sandboxed("exit 42", Path::new("/tmp"), &config)
             .unwrap();

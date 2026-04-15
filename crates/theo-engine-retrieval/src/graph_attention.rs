@@ -14,7 +14,6 @@
 ///    `a_{k+1}(node) = damping * a_k(node) + (1 - damping) * max(a_k(neighbor) * edge_weight)`
 /// 3. Aggregate per community: `attention(community) = max(a_K(node) for node in community)`.
 /// 4. Normalize scores to [0, 1].
-
 use std::collections::HashMap;
 
 use theo_engine_graph::cluster::Community;
@@ -48,10 +47,7 @@ pub fn propagate_attention(
         .collect();
 
     if community_node_ids.is_empty() {
-        return communities
-            .iter()
-            .map(|c| (c.id.clone(), 0.0))
-            .collect();
+        return communities.iter().map(|c| (c.id.clone(), 0.0)).collect();
     }
 
     // Initialize attention from query_scores (nodes not in the map get 0.0).
@@ -101,10 +97,7 @@ pub fn propagate_attention(
             }
         }
 
-        neighbor_weights.insert(
-            nid.clone(),
-            nw.into_iter().collect(),
-        );
+        neighbor_weights.insert(nid.clone(), nw.into_iter().collect());
     }
 
     // Propagation with double-buffering.
@@ -121,16 +114,14 @@ pub fn propagate_attention(
                     neighbors
                         .iter()
                         .map(|(neighbor_id, edge_w)| {
-                            let neighbor_score =
-                                current.get(neighbor_id).copied().unwrap_or(0.0);
+                            let neighbor_score = current.get(neighbor_id).copied().unwrap_or(0.0);
                             neighbor_score * edge_w
                         })
                         .fold(0.0_f64, f64::max)
                 })
                 .unwrap_or(0.0);
 
-            let new_score =
-                damping * self_score + (1.0 - damping) * max_neighbor_contribution;
+            let new_score = damping * self_score + (1.0 - damping) * max_neighbor_contribution;
             next.insert(nid.clone(), new_score);
         }
 

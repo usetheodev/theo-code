@@ -68,7 +68,7 @@ pub struct OpenAIAuth {
 
 #[derive(Deserialize)]
 struct TokenResponse {
-    access_token: Option<String>,
+    access_token: String,
     refresh_token: Option<String>,
     expires_in: Option<u64>,
     id_token: Option<String>,
@@ -79,83 +79,19 @@ struct TokenResponse {
 #[derive(Deserialize)]
 struct DeviceCodeResponse {
     user_code: String,
-    #[serde(default)]
-    verification_uri: Option<String>,
-    /// OpenAI returns `device_auth_id` instead of RFC 8628 `device_code`
-    #[serde(alias = "device_code")]
-    device_auth_id: Option<String>,
-    #[serde(default)]
-    device_code: Option<String>,
-    /// Can be string or number depending on API version
-    #[serde(deserialize_with = "deserialize_interval")]
+    verification_uri: String,
+    device_code: String,
     interval: Option<u64>,
-    #[serde(default)]
     expires_in: Option<u64>,
-    #[serde(default)]
-    expires_at: Option<String>,
 }
 
-fn deserialize_interval<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    use serde::Deserialize;
-    let v = Option::<serde_json::Value>::deserialize(deserializer)?;
-    match v {
-        Some(serde_json::Value::Number(n)) => Ok(n.as_u64()),
-        Some(serde_json::Value::String(s)) => Ok(s.parse().ok()),
-        _ => Ok(None),
-    }
-}
-
-/// Token response from the device auth token endpoint.
-/// OpenAI returns either:
-/// - Pending: {"error": {"code": "deviceauth_authorization_unknown"}}
-/// - Success: {"status": "success", "authorization_code": "ac_...", "code_verifier": "..."}
-/// Note: OpenAI does NOT return access_token directly — returns authorization_code
-/// that must be exchanged via /oauth/token (PKCE flow).
 #[derive(Deserialize)]
 struct DeviceTokenResponse {
-    // Standard OAuth fields (used by some servers)
     access_token: Option<String>,
     refresh_token: Option<String>,
     expires_in: Option<u64>,
     id_token: Option<String>,
-    // OpenAI-specific fields (device flow returns auth code, not token)
-    #[serde(default)]
-    status: Option<String>,
-    #[serde(default)]
-    authorization_code: Option<String>,
-    #[serde(default)]
-    code_verifier: Option<String>,
-    /// Old format: "authorization_pending" / New format: {"message":"...", "code":"..."}
-    #[serde(default, deserialize_with = "deserialize_error_field")]
     error: Option<String>,
-}
-
-fn deserialize_error_field<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    use serde::Deserialize;
-    let v = Option::<serde_json::Value>::deserialize(deserializer)?;
-    match v {
-        None => Ok(None),
-        Some(serde_json::Value::String(s)) => Ok(Some(s)),
-        Some(serde_json::Value::Object(obj)) => {
-            // New API: {"message": "...", "code": "deviceauth_authorization_pending"}
-            let code = obj.get("code").and_then(|v| v.as_str()).unwrap_or("");
-            let msg = obj.get("message").and_then(|v| v.as_str()).unwrap_or("");
-            if !code.is_empty() {
-                Ok(Some(code.to_string()))
-            } else if !msg.is_empty() {
-                Ok(Some(msg.to_string()))
-            } else {
-                Ok(Some("unknown_error".to_string()))
-            }
-        }
-        Some(other) => Ok(Some(other.to_string())),
-    }
 }
 
 impl OpenAIAuth {
@@ -240,7 +176,8 @@ impl OpenAIAuth {
         open_browser(&url)?;
 
         // Wait for callback
-        let result = callback::wait_for_callback(CALLBACK_PORT, &state, CALLBACK_TIMEOUT_SECS).await?;
+        let result =
+            callback::wait_for_callback(CALLBACK_PORT, &state, CALLBACK_TIMEOUT_SECS).await?;
 
         // Exchange code for tokens
         let tokens = self.exchange_code(&result.code, &pkce.verifier).await?;
@@ -271,10 +208,14 @@ impl OpenAIAuth {
         let status = resp.status();
         if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
-            return Err(AuthError::OAuth(format!("token exchange failed ({status}): {body}")));
+            return Err(AuthError::OAuth(format!(
+                "token exchange failed ({status}): {body}"
+            )));
         }
 
-        let token_resp: TokenResponse = resp.json().await
+        let token_resp: TokenResponse = resp
+            .json()
+            .await
             .map_err(|e| AuthError::OAuth(format!("parse token response: {e}")))?;
 
         let account_id = token_resp
@@ -284,11 +225,8 @@ impl OpenAIAuth {
 
         let expires_at = token_resp.expires_in.map(|secs| now_secs() + secs);
 
-        let access_token = token_resp.access_token.clone()
-            .ok_or_else(|| AuthError::OAuth("missing access_token in token response".to_string()))?;
-
         let tokens = OpenAITokens {
-            access_token: access_token.clone(),
+            access_token: token_resp.access_token.clone(),
             refresh_token: token_resp.refresh_token.clone(),
             expires_at,
             account_id: account_id.clone(),
@@ -298,7 +236,7 @@ impl OpenAIAuth {
         self.store.set(
             PROVIDER_ID,
             AuthEntry::OAuth {
-                access_token,
+                access_token: token_resp.access_token,
                 refresh_token: token_resp.refresh_token,
                 expires_at,
                 account_id,
@@ -335,26 +273,27 @@ impl OpenAIAuth {
         let status = resp.status();
         if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
-            return Err(AuthError::OAuth(format!("refresh failed ({status}): {body}")));
+            return Err(AuthError::OAuth(format!(
+                "refresh failed ({status}): {body}"
+            )));
         }
 
-        let token_resp: TokenResponse = resp.json().await
+        let token_resp: TokenResponse = resp
+            .json()
+            .await
             .map_err(|e| AuthError::OAuth(format!("parse refresh response: {e}")))?;
 
         let expires_at = token_resp.expires_in.map(|secs| now_secs() + secs);
 
-        let access_token = token_resp.access_token
-            .ok_or_else(|| AuthError::OAuth("missing access_token in refresh response".to_string()))?;
-
         self.store.update_tokens(
             PROVIDER_ID,
-            access_token.clone(),
+            token_resp.access_token.clone(),
             token_resp.refresh_token.clone(),
             expires_at,
         )?;
 
         Ok(OpenAITokens {
-            access_token,
+            access_token: token_resp.access_token,
             refresh_token: token_resp.refresh_token,
             expires_at,
             account_id: current.account_id,
@@ -363,7 +302,9 @@ impl OpenAIAuth {
 
     /// Get valid tokens, refreshing if expired.
     pub async fn get_or_refresh_tokens(&self) -> Result<OpenAITokens, AuthError> {
-        let tokens = self.get_tokens()?.ok_or(AuthError::OAuth("not logged in".to_string()))?;
+        let tokens = self
+            .get_tokens()?
+            .ok_or(AuthError::OAuth("not logged in".to_string()))?;
 
         if tokens.is_expired() {
             self.refresh().await
@@ -380,51 +321,41 @@ impl OpenAIAuth {
         let resp = self
             .http
             .post(DEVICE_CODE_URL)
-            .json(&serde_json::json!({
-                "client_id": CLIENT_ID,
-                "scope": SCOPES,
-            }))
+            .form(&[("client_id", CLIENT_ID), ("scope", SCOPES)])
             .send()
             .await?;
 
         let status = resp.status();
         if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
-            return Err(AuthError::OAuth(format!("device code request failed ({status}): {body}")));
+            return Err(AuthError::OAuth(format!(
+                "device code request failed ({status}): {body}"
+            )));
         }
 
-        let dc: DeviceCodeResponse = resp.json().await
+        let dc: DeviceCodeResponse = resp
+            .json()
+            .await
             .map_err(|e| AuthError::OAuth(format!("parse device code: {e}")))?;
-
-        // OpenAI returns device_auth_id instead of device_code
-        let device_code = dc.device_code
-            .or(dc.device_auth_id)
-            .unwrap_or_default();
-
-        // Verification URI may not be in response — use hardcoded OpenAI URL
-        let verification_uri = dc.verification_uri
-            .unwrap_or_else(|| "https://auth.openai.com/codex/device".to_string());
-
-        // expires_in from expires_at if needed
-        let expires_in = dc.expires_in.unwrap_or_else(|| {
-            // Parse expires_at if available, default to 600s
-            600
-        });
 
         Ok(DeviceCode {
             user_code: dc.user_code,
-            verification_uri,
-            device_code,
+            verification_uri: dc.verification_uri,
+            device_code: dc.device_code,
             interval: dc.interval.unwrap_or(5),
-            expires_in,
+            expires_in: dc.expires_in.unwrap_or(600),
         })
     }
 
     /// Poll for device flow completion.
     /// Blocks until the user authorizes, token expires, or an error occurs.
-    pub async fn poll_device_flow(&self, device_code: &DeviceCode) -> Result<OpenAITokens, AuthError> {
+    pub async fn poll_device_flow(
+        &self,
+        device_code: &DeviceCode,
+    ) -> Result<OpenAITokens, AuthError> {
         let interval = std::time::Duration::from_secs(device_code.interval);
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(device_code.expires_in);
+        let deadline =
+            std::time::Instant::now() + std::time::Duration::from_secs(device_code.expires_in);
 
         loop {
             if std::time::Instant::now() >= deadline {
@@ -436,88 +367,34 @@ impl OpenAIAuth {
             let resp = self
                 .http
                 .post(DEVICE_TOKEN_URL)
-                .json(&serde_json::json!({
-                    "device_auth_id": &device_code.device_code,
-                    "user_code": &device_code.user_code,
-                    "client_id": CLIENT_ID,
-                }))
+                .form(&[
+                    ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
+                    ("device_code", &device_code.device_code),
+                    ("client_id", CLIENT_ID),
+                ])
                 .send()
                 .await?;
 
-            // Try to parse as token response; on failure check if error response
-            let body = resp.text().await
-                .map_err(|e| AuthError::OAuth(format!("read response: {e}")))?;
-
-            let dt: DeviceTokenResponse = match serde_json::from_str(&body) {
-                Ok(dt) => dt,
-                Err(_) => {
-                    // May be an error-only response with different shape
-                    if let Ok(err_obj) = serde_json::from_str::<serde_json::Value>(&body) {
-                        let code = err_obj.get("error")
-                            .and_then(|e| e.get("code"))
-                            .and_then(|c| c.as_str())
-                            .unwrap_or("");
-                        match code {
-                            "deviceauth_authorization_pending"
-                            | "deviceauth_authorization_unknown"
-                            | "authorization_pending" => continue,
-                            "deviceauth_user_code_expired"
-                            | "expired_token" => return Err(AuthError::DeviceExpired),
-                            _ => {
-                                let msg = err_obj.get("error")
-                                    .and_then(|e| e.get("message"))
-                                    .and_then(|m| m.as_str())
-                                    .unwrap_or(&body);
-                                return Err(AuthError::OAuth(format!("device token error: {msg}")));
-                            }
-                        }
-                    }
-                    return Err(AuthError::OAuth(format!("unexpected response: {body}")));
-                }
-            };
+            let dt: DeviceTokenResponse = resp
+                .json()
+                .await
+                .map_err(|e| AuthError::OAuth(format!("parse device token: {e}")))?;
 
             if let Some(error) = &dt.error {
                 match error.as_str() {
-                    "authorization_pending"
-                    | "deviceauth_authorization_pending"
-                    | "deviceauth_authorization_unknown" => continue,
+                    "authorization_pending" => continue,
                     "slow_down" => {
                         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                         continue;
                     }
-                    "expired_token" | "deviceauth_user_code_expired" => return Err(AuthError::DeviceExpired),
+                    "expired_token" => return Err(AuthError::DeviceExpired),
                     _ => return Err(AuthError::OAuth(format!("device flow error: {error}"))),
                 }
             }
 
-            // OpenAI returns authorization_code instead of access_token
-            // Need to exchange it via /oauth/token (PKCE)
-            let access_token = if let Some(token) = dt.access_token {
-                token
-            } else if let (Some(auth_code), Some(code_verifier)) = (dt.authorization_code, dt.code_verifier) {
-                // Exchange authorization_code for access_token
-                let token_resp = self.http
-                    .post(TOKEN_URL)
-                    .json(&serde_json::json!({
-                        "grant_type": "authorization_code",
-                        "code": auth_code,
-                        "code_verifier": code_verifier,
-                        "client_id": CLIENT_ID,
-                        "redirect_uri": "https://auth.openai.com/deviceauth/callback",
-                    }))
-                    .send()
-                    .await?;
-
-                let token_body = token_resp.text().await
-                    .map_err(|e| AuthError::OAuth(format!("read token exchange response: {e}")))?;
-
-                let tr: TokenResponse = serde_json::from_str(&token_body)
-                    .map_err(|e| AuthError::OAuth(format!("parse token exchange: {e} body: {token_body}")))?;
-
-                tr.access_token.ok_or_else(|| AuthError::OAuth(format!("token exchange: missing access_token: {token_body}")))?
-            } else {
-                return Err(AuthError::OAuth(format!("device flow: no access_token or authorization_code in response: {body}")));
-            };
+            let access_token = dt
+                .access_token
+                .ok_or_else(|| AuthError::OAuth("device flow: missing access_token".to_string()))?;
 
             let account_id = dt.id_token.as_deref().and_then(extract_account_id_from_jwt);
             let expires_at = dt.expires_in.map(|secs| now_secs() + secs);
@@ -546,9 +423,15 @@ impl OpenAIAuth {
 
     // ─── Constants accessors ───
 
-    pub fn client_id() -> &'static str { CLIENT_ID }
-    pub fn issuer() -> &'static str { ISSUER }
-    pub fn provider_id() -> &'static str { PROVIDER_ID }
+    pub fn client_id() -> &'static str {
+        CLIENT_ID
+    }
+    pub fn issuer() -> &'static str {
+        ISSUER
+    }
+    pub fn provider_id() -> &'static str {
+        PROVIDER_ID
+    }
 }
 
 // ─── Helpers ───
@@ -570,8 +453,8 @@ fn extract_account_id_from_jwt(token: &str) -> Option<String> {
     }
 
     // Decode payload (second part)
-    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use base64::Engine;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 
     let payload = URL_SAFE_NO_PAD.decode(parts[1]).ok()?;
     let claims: serde_json::Value = serde_json::from_slice(&payload).ok()?;
@@ -609,7 +492,9 @@ fn open_browser(url: &str) -> Result<(), AuthError> {
     let result = std::process::Command::new("open").arg(url).spawn();
 
     #[cfg(target_os = "windows")]
-    let result = std::process::Command::new("cmd").args(["/c", "start", "", url]).spawn();
+    let result = std::process::Command::new("cmd")
+        .args(["/c", "start", "", url])
+        .spawn();
 
     #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
     let result: Result<std::process::Child, std::io::Error> = Err(std::io::Error::new(
@@ -646,7 +531,10 @@ mod tests {
         // Build a fake JWT with chatgpt_account_id claim
         let payload = serde_json::json!({ "chatgpt_account_id": "acc_123" });
         let token = build_fake_jwt(&payload);
-        assert_eq!(extract_account_id_from_jwt(&token), Some("acc_123".to_string()));
+        assert_eq!(
+            extract_account_id_from_jwt(&token),
+            Some("acc_123".to_string())
+        );
     }
 
     #[test]
@@ -655,7 +543,10 @@ mod tests {
             "https://api.openai.com/auth": { "chatgpt_account_id": "acc_456" }
         });
         let token = build_fake_jwt(&payload);
-        assert_eq!(extract_account_id_from_jwt(&token), Some("acc_456".to_string()));
+        assert_eq!(
+            extract_account_id_from_jwt(&token),
+            Some("acc_456".to_string())
+        );
     }
 
     #[test]
@@ -664,7 +555,10 @@ mod tests {
             "organizations": [{"id": "org_789"}]
         });
         let token = build_fake_jwt(&payload);
-        assert_eq!(extract_account_id_from_jwt(&token), Some("org_789".to_string()));
+        assert_eq!(
+            extract_account_id_from_jwt(&token),
+            Some("org_789".to_string())
+        );
     }
 
     #[test]
@@ -704,8 +598,8 @@ mod tests {
     }
 
     fn build_fake_jwt(payload: &serde_json::Value) -> String {
-        use base64::engine::general_purpose::URL_SAFE_NO_PAD;
         use base64::Engine;
+        use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 
         let header = URL_SAFE_NO_PAD.encode(b"{}");
         let body = URL_SAFE_NO_PAD.encode(payload.to_string().as_bytes());

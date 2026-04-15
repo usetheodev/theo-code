@@ -41,7 +41,9 @@ const ANTHROPIC_MODELS: &[&str] = &[
 ];
 
 #[tauri::command]
-pub async fn copilot_start_device_flow(enterprise_url: Option<String>) -> Result<serde_json::Value, String> {
+pub async fn copilot_start_device_flow(
+    enterprise_url: Option<String>,
+) -> Result<serde_json::Value, String> {
     let auth = make_auth(enterprise_url);
     let dc = auth.start_device_flow().await.map_err(|e| e.to_string())?;
     Ok(serde_json::json!({
@@ -108,7 +110,10 @@ pub async fn copilot_logout() -> Result<(), String> {
 /// Uses `api.githubcopilot.com` — GitHub routes to OpenAI/Anthropic/Google
 /// based on the model field in the request body.
 #[tauri::command]
-pub async fn copilot_apply_to_config(state: State<'_, AppState>, model: Option<String>) -> Result<bool, String> {
+pub async fn copilot_apply_to_config(
+    state: State<'_, AppState>,
+    model: Option<String>,
+) -> Result<bool, String> {
     let auth = CopilotAuth::with_default_store();
 
     let tokens = match auth.get_tokens() {

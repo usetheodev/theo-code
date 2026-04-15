@@ -66,9 +66,7 @@ pub fn merge_scip_edges(graph: &mut CodeGraph, scip: &ScipIndex) {
 
             // Check if this edge already exists (avoid duplicates)
             let already_exists = graph.all_edges().iter().any(|e| {
-                e.source == source_file_id
-                    && e.target == target_file_id
-                    && e.edge_type == edge_type
+                e.source == source_file_id && e.target == target_file_id && e.edge_type == edge_type
             });
 
             if !already_exists {
@@ -103,16 +101,24 @@ mod tests {
             node_type: NodeType::File,
             name: "src/a.rs".to_string(),
             file_path: Some("src/a.rs".to_string()),
-            signature: None, kind: None, line_start: None, line_end: None,
-            last_modified: 0.0, doc: None,
+            signature: None,
+            kind: None,
+            line_start: None,
+            line_end: None,
+            last_modified: 0.0,
+            doc: None,
         });
         graph.add_node(Node {
             id: "file:src/b.rs".to_string(),
             node_type: NodeType::File,
             name: "src/b.rs".to_string(),
             file_path: Some("src/b.rs".to_string()),
-            signature: None, kind: None, line_start: None, line_end: None,
-            last_modified: 0.0, doc: None,
+            signature: None,
+            kind: None,
+            line_start: None,
+            line_end: None,
+            last_modified: 0.0,
+            doc: None,
         });
 
         let edges_before = graph.edge_count();
@@ -127,7 +133,8 @@ mod tests {
         };
 
         // b.rs defines foo, a.rs imports foo
-        scip.symbol_definitions.insert("sym:foo".into(), "src/b.rs".into());
+        scip.symbol_definitions
+            .insert("sym:foo".into(), "src/b.rs".into());
         scip.file_symbols.insert(
             "src/a.rs".into(),
             vec![("sym:foo".into(), 5, "import".into())],

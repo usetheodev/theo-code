@@ -66,6 +66,8 @@ impl Tool for LspTool {
         _ctx: &ToolContext,
         _permissions: &mut PermissionCollector,
     ) -> Result<ToolOutput, ToolError> {
-        Err(ToolError::Execution("LSP tool not yet implemented".to_string()))
+        Err(ToolError::Execution(
+            "LSP tool not yet implemented".to_string(),
+        ))
     }
 }

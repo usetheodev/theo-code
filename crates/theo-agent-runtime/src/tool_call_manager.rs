@@ -56,12 +56,7 @@ impl ToolCallManager {
     /// Enqueues a new tool call with a unique CallId (Invariant 2).
     ///
     /// Publishes `DomainEvent::ToolCallQueued`.
-    pub fn enqueue(
-        &self,
-        task_id: TaskId,
-        tool_name: String,
-        input: serde_json::Value,
-    ) -> CallId {
+    pub fn enqueue(&self, task_id: TaskId, tool_name: String, input: serde_json::Value) -> CallId {
         let call_id = CallId::generate();
         let now = now_millis();
 
@@ -110,7 +105,8 @@ impl ToolCallManager {
             if let Some(record) = records.get(call_id) {
                 if let Some(gate) = &self.capability_gate {
                     // Determine category from registry, default to Utility
-                    let category = registry.get(&record.tool_name)
+                    let category = registry
+                        .get(&record.tool_name)
                         .map(|t| t.category())
                         .unwrap_or(ToolCategory::Utility);
                     gate.check_tool(&record.tool_name, category)?;
@@ -272,13 +268,18 @@ impl ToolCallManager {
 
         // 7. Publish completion event (enriched with tool details)
         let tool_name = {
-            self.records.lock().expect("records lock poisoned")
+            self.records
+                .lock()
+                .expect("records lock poisoned")
                 .get(call_id)
                 .map(|r| r.tool_name.clone())
                 .unwrap_or_default()
         };
         let input_args = {
-            let raw = self.records.lock().expect("records lock poisoned")
+            let raw = self
+                .records
+                .lock()
+                .expect("records lock poisoned")
                 .get(call_id)
                 .map(|r| r.input.clone())
                 .unwrap_or(serde_json::Value::Null);
@@ -419,7 +420,11 @@ mod tests {
     #[test]
     fn enqueue_creates_record_in_queued_state() {
         let (manager, _, _) = setup();
-        let id = manager.enqueue(TaskId::new("t-1"), "read".into(), serde_json::json!({"filePath": "/tmp/test"}));
+        let id = manager.enqueue(
+            TaskId::new("t-1"),
+            "read".into(),
+            serde_json::json!({"filePath": "/tmp/test"}),
+        );
         let record = manager.get_record(&id).expect("record must exist");
         assert_eq!(record.state, ToolCallState::Queued);
         assert_eq!(record.tool_name, "read");
@@ -452,7 +457,10 @@ mod tests {
             serde_json::json!({"filePath": "/tmp/nonexistent_test_file"}),
         );
         let ctx = ToolContext::test_context(std::path::PathBuf::from("/tmp"));
-        let result = manager.dispatch_and_execute(&call_id, &registry, &ctx).await.unwrap();
+        let result = manager
+            .dispatch_and_execute(&call_id, &registry, &ctx)
+            .await
+            .unwrap();
         assert_eq!(result.call_id, call_id); // Invariant 3
     }
 
@@ -470,7 +478,9 @@ mod tests {
             serde_json::json!({"filePath": "/tmp/nonexistent"}),
         );
         let ctx = ToolContext::test_context(std::path::PathBuf::from("/tmp"));
-        let _ = manager.dispatch_and_execute(&call_id, &registry, &ctx).await;
+        let _ = manager
+            .dispatch_and_execute(&call_id, &registry, &ctx)
+            .await;
 
         let events = listener.captured();
         // ToolCallQueued (from enqueue) + ToolCallDispatched + ToolCallCompleted
@@ -490,12 +500,19 @@ mod tests {
             serde_json::json!({"filePath": "/nonexistent/path/that/does/not/exist"}),
         );
         let ctx = ToolContext::test_context(std::path::PathBuf::from("/tmp"));
-        let result = manager.dispatch_and_execute(&call_id, &registry, &ctx).await.unwrap();
+        let result = manager
+            .dispatch_and_execute(&call_id, &registry, &ctx)
+            .await
+            .unwrap();
 
         assert_eq!(result.status, ToolCallState::Failed);
         assert!(result.error.is_some());
         // Verify duration was actually recorded (completed_at - started_at)
-        assert!(result.duration_ms < 5_000, "dispatch took unexpectedly long: {}ms", result.duration_ms);
+        assert!(
+            result.duration_ms < 5_000,
+            "dispatch took unexpectedly long: {}ms",
+            result.duration_ms
+        );
 
         let record = manager.get_record(&call_id).unwrap();
         assert_eq!(record.state, ToolCallState::Failed);
@@ -512,7 +529,9 @@ mod tests {
             serde_json::json!({"filePath": "/tmp/nonexistent"}),
         );
         let ctx = ToolContext::test_context(std::path::PathBuf::from("/tmp"));
-        let _ = manager.dispatch_and_execute(&call_id, &registry, &ctx).await;
+        let _ = manager
+            .dispatch_and_execute(&call_id, &registry, &ctx)
+            .await;
 
         let events = listener.captured();
         let completion = &events[2];
@@ -579,7 +598,11 @@ mod tests {
             .map(|i| {
                 let m = manager.clone();
                 std::thread::spawn(move || {
-                    m.enqueue(TaskId::new("t-1"), format!("tool-{}", i), serde_json::json!({}))
+                    m.enqueue(
+                        TaskId::new("t-1"),
+                        format!("tool-{}", i),
+                        serde_json::json!({}),
+                    )
                 })
             })
             .collect();

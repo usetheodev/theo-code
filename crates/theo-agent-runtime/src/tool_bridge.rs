@@ -186,53 +186,46 @@ pub fn registry_to_definitions_for_subagent(registry: &ToolRegistry) -> Vec<Tool
 }
 
 /// Execute a tool call and return a Message with the result.
-/// Execute a tool call and return (message, success, metadata).
-///
-/// The metadata field preserves `ToolOutput.metadata` from the tool execution,
-/// enabling the ToolCallManager to publish events like `TodoUpdated` based on
-/// tool-specific metadata (e.g., task_create returns `{"type": "task_create", ...}`).
 pub async fn execute_tool_call(
     registry: &ToolRegistry,
     call: &ToolCall,
     ctx: &ToolContext,
-) -> (Message, bool, Option<serde_json::Value>) {
+) -> (Message, bool) {
     let name = &call.function.name;
 
     let args = match call.parse_arguments() {
         Ok(args) => args,
         Err(e) => {
             let error_msg = format!("Failed to parse arguments: {e}");
-            return (
-                Message::tool_result(&call.id, name, &error_msg),
-                false,
-                None,
-            );
+            return (Message::tool_result(&call.id, name, &error_msg), false);
         }
     };
 
     let Some(tool) = registry.get(name) else {
-        let error_msg = format!("Unknown tool: {name}. Available tools: {}", registry.ids().join(", "));
-        return (
-            Message::tool_result(&call.id, name, &error_msg),
-            false,
-            None,
+        let error_msg = format!(
+            "Unknown tool: {name}. Available tools: {}",
+            registry.ids().join(", ")
         );
+        return (Message::tool_result(&call.id, name, &error_msg), false);
     };
 
     let mut permissions = PermissionCollector::new();
     match tool.execute(args, ctx, &mut permissions).await {
         Ok(output) => {
-            let metadata = Some(output.metadata.clone());
             let result = if output.output.len() > 8000 {
-                format!("{}...\n[truncated, {} chars total]", &output.output[..8000], output.output.len())
+                format!(
+                    "{}...\n[truncated, {} chars total]",
+                    &output.output[..8000],
+                    output.output.len()
+                )
             } else {
                 output.output
             };
-            (Message::tool_result(&call.id, name, result), true, metadata)
+            (Message::tool_result(&call.id, name, result), true)
         }
         Err(e) => {
             let error_msg = format!("Tool error: {e}");
-            (Message::tool_result(&call.id, name, error_msg), false, None)
+            (Message::tool_result(&call.id, name, error_msg), false)
         }
     }
 }
@@ -264,9 +257,18 @@ mod tests {
         let names: Vec<&str> = defs.iter().map(|d| d.function.name.as_str()).collect();
 
         // Must NOT contain delegation meta-tools
-        assert!(!names.contains(&"subagent"), "sub-agents must not see 'subagent' tool");
-        assert!(!names.contains(&"subagent_parallel"), "sub-agents must not see 'subagent_parallel' tool");
-        assert!(!names.contains(&"skill"), "sub-agents must not see 'skill' tool");
+        assert!(
+            !names.contains(&"subagent"),
+            "sub-agents must not see 'subagent' tool"
+        );
+        assert!(
+            !names.contains(&"subagent_parallel"),
+            "sub-agents must not see 'subagent_parallel' tool"
+        );
+        assert!(
+            !names.contains(&"skill"),
+            "sub-agents must not see 'skill' tool"
+        );
     }
 
     #[test]
@@ -285,7 +287,11 @@ mod tests {
         let defs = registry_to_definitions_for_subagent(&registry);
 
         // Sub-agents get registry tools + done + batch (+2)
-        assert_eq!(defs.len(), registry.len() + 2, "sub-agent defs = registry + done + batch");
+        assert_eq!(
+            defs.len(),
+            registry.len() + 2,
+            "sub-agent defs = registry + done + batch"
+        );
     }
 
     #[test]
@@ -309,7 +315,10 @@ mod tests {
             let schema = tool.schema();
             let json = schema.to_json_schema();
             assert_eq!(json["type"], "object", "Tool {id} schema missing 'type'");
-            assert!(json.get("properties").is_some(), "Tool {id} schema missing 'properties'");
+            assert!(
+                json.get("properties").is_some(),
+                "Tool {id} schema missing 'properties'"
+            );
         }
     }
 
@@ -323,16 +332,22 @@ mod tests {
         let read = registry.get("read").unwrap();
         let schema = read.schema().to_json_schema();
         let required: Vec<String> = schema["required"]
-            .as_array().unwrap()
-            .iter().map(|v| v.as_str().unwrap().to_string()).collect();
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect();
         assert!(required.contains(&"filePath".to_string()));
 
         // edit: requires filePath, oldString, newString (NOT oldText/newText)
         let edit = registry.get("edit").unwrap();
         let schema = edit.schema().to_json_schema();
         let required: Vec<String> = schema["required"]
-            .as_array().unwrap()
-            .iter().map(|v| v.as_str().unwrap().to_string()).collect();
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect();
         assert!(required.contains(&"filePath".to_string()));
         assert!(required.contains(&"oldString".to_string()));
         assert!(required.contains(&"newString".to_string()));
@@ -344,8 +359,11 @@ mod tests {
         let patch = registry.get("apply_patch").unwrap();
         let schema = patch.schema().to_json_schema();
         let required: Vec<String> = schema["required"]
-            .as_array().unwrap()
-            .iter().map(|v| v.as_str().unwrap().to_string()).collect();
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect();
         assert!(required.contains(&"patchText".to_string()));
         assert!(!required.contains(&"patch".to_string()));
     }
@@ -355,9 +373,8 @@ mod tests {
         let registry = create_default_registry();
         let call = ToolCall::new("call_1", "nonexistent_tool", "{}");
         let ctx = ToolContext::test_context(std::path::PathBuf::from("/tmp"));
-        let (msg, success, meta) = execute_tool_call(&registry, &call, &ctx).await;
+        let (msg, success) = execute_tool_call(&registry, &call, &ctx).await;
         assert!(!success);
-        assert!(meta.is_none());
         assert!(msg.content.unwrap().contains("Unknown tool"));
     }
 
@@ -366,9 +383,8 @@ mod tests {
         let registry = create_default_registry();
         let call = ToolCall::new("call_1", "read", "not valid json");
         let ctx = ToolContext::test_context(std::path::PathBuf::from("/tmp"));
-        let (msg, success, meta) = execute_tool_call(&registry, &call, &ctx).await;
+        let (msg, success) = execute_tool_call(&registry, &call, &ctx).await;
         assert!(!success);
-        assert!(meta.is_none());
         assert!(msg.content.unwrap().contains("Failed to parse"));
     }
 }

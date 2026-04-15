@@ -113,7 +113,11 @@ impl GoogleVertexAuth {
     pub fn get_tokens(&self) -> Result<Option<VertexTokens>, AuthError> {
         let entry = self.store.get(PROVIDER_ID)?;
         match entry {
-            Some(AuthEntry::OAuth { access_token, expires_at, .. }) => {
+            Some(AuthEntry::OAuth {
+                access_token,
+                expires_at,
+                ..
+            }) => {
                 // Check if expired
                 if let Some(exp) = expires_at {
                     if exp <= now_secs() {
@@ -138,8 +142,12 @@ impl GoogleVertexAuth {
         self.store.remove(PROVIDER_ID)
     }
 
-    pub fn config(&self) -> &VertexConfig { &self.config }
-    pub fn provider_id() -> &'static str { PROVIDER_ID }
+    pub fn config(&self) -> &VertexConfig {
+        &self.config
+    }
+    pub fn provider_id() -> &'static str {
+        PROVIDER_ID
+    }
 }
 
 fn now_secs() -> u64 {
@@ -165,7 +173,10 @@ mod tests {
             project: "test".to_string(),
             location: "us-central1".to_string(),
         };
-        assert_eq!(config.endpoint(), "https://us-central1-aiplatform.googleapis.com");
+        assert_eq!(
+            config.endpoint(),
+            "https://us-central1-aiplatform.googleapis.com"
+        );
     }
 
     #[test]
@@ -180,15 +191,23 @@ mod tests {
     #[test]
     fn vertex_store_and_retrieve() {
         let (store, _dir) = temp_store();
-        store.set(PROVIDER_ID, AuthEntry::OAuth {
-            access_token: "ya29.test".to_string(),
-            refresh_token: None,
-            expires_at: Some(9999999999),
-            account_id: None,
-            scopes: None,
-        }).unwrap();
+        store
+            .set(
+                PROVIDER_ID,
+                AuthEntry::OAuth {
+                    access_token: "ya29.test".to_string(),
+                    refresh_token: None,
+                    expires_at: Some(9999999999),
+                    account_id: None,
+                    scopes: None,
+                },
+            )
+            .unwrap();
 
-        let config = VertexConfig { project: "my-project".to_string(), location: "us-east1".to_string() };
+        let config = VertexConfig {
+            project: "my-project".to_string(),
+            location: "us-east1".to_string(),
+        };
         let auth = GoogleVertexAuth::with_config(store, config);
         let tokens = auth.get_tokens().unwrap().unwrap();
         assert_eq!(tokens.access_token, "ya29.test");
@@ -198,13 +217,18 @@ mod tests {
     #[test]
     fn vertex_expired_token_returns_none() {
         let (store, _dir) = temp_store();
-        store.set(PROVIDER_ID, AuthEntry::OAuth {
-            access_token: "expired".to_string(),
-            refresh_token: None,
-            expires_at: Some(1),
-            account_id: None,
-            scopes: None,
-        }).unwrap();
+        store
+            .set(
+                PROVIDER_ID,
+                AuthEntry::OAuth {
+                    access_token: "expired".to_string(),
+                    refresh_token: None,
+                    expires_at: Some(1),
+                    account_id: None,
+                    scopes: None,
+                },
+            )
+            .unwrap();
 
         let auth = GoogleVertexAuth::new(store);
         assert!(auth.get_tokens().unwrap().is_none());
@@ -213,13 +237,18 @@ mod tests {
     #[test]
     fn vertex_logout() {
         let (store, _dir) = temp_store();
-        store.set(PROVIDER_ID, AuthEntry::OAuth {
-            access_token: "test".to_string(),
-            refresh_token: None,
-            expires_at: Some(9999999999),
-            account_id: None,
-            scopes: None,
-        }).unwrap();
+        store
+            .set(
+                PROVIDER_ID,
+                AuthEntry::OAuth {
+                    access_token: "test".to_string(),
+                    refresh_token: None,
+                    expires_at: Some(9999999999),
+                    account_id: None,
+                    scopes: None,
+                },
+            )
+            .unwrap();
 
         let auth = GoogleVertexAuth::new(store);
         assert!(auth.has_valid_tokens());

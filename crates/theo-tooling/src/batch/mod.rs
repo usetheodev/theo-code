@@ -55,7 +55,8 @@ impl Tool for BatchTool {
         // Meta-tool: execution handled by RunEngine intercept, not here.
         // If we reach here, the RunEngine didn't intercept — return error.
         Err(ToolError::Execution(
-            "batch is a meta-tool handled by the RunEngine. This should not be called directly.".to_string(),
+            "batch is a meta-tool handled by the RunEngine. This should not be called directly."
+                .to_string(),
         ))
     }
 }

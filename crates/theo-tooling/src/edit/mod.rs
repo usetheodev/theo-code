@@ -1,11 +1,11 @@
 use async_trait::async_trait;
+use std::path::{Path, PathBuf};
 use theo_domain::error::ToolError;
 use theo_domain::permission::{PermissionRequest, PermissionType};
 use theo_domain::tool::{
     PermissionCollector, Tool, ToolCategory, ToolContext, ToolOutput, ToolParam, ToolSchema,
     optional_bool, require_string,
 };
-use std::path::{Path, PathBuf};
 
 pub struct EditTool;
 
@@ -27,11 +27,7 @@ impl EditTool {
     fn detect_line_ending(content: &str) -> &'static str {
         let crlf_count = content.matches("\r\n").count();
         let lf_count = content.matches('\n').count() - crlf_count;
-        if crlf_count > lf_count {
-            "\r\n"
-        } else {
-            "\n"
-        }
+        if crlf_count > lf_count { "\r\n" } else { "\n" }
     }
 
     /// Normalize line endings to \n for comparison, then restore original
@@ -115,7 +111,8 @@ impl Tool for EditTool {
                 ToolParam {
                     name: "oldString".to_string(),
                     param_type: "string".to_string(),
-                    description: "Exact text to find and replace (must be unique in the file)".to_string(),
+                    description: "Exact text to find and replace (must be unique in the file)"
+                        .to_string(),
                     required: true,
                 },
                 ToolParam {
@@ -161,9 +158,9 @@ impl Tool for EditTool {
         // Creating new file when old_string is empty
         if old_string.is_empty() {
             if let Some(parent) = resolved.parent() {
-                tokio::fs::create_dir_all(parent)
-                    .await
-                    .map_err(|e| ToolError::Execution(format!("Failed to create directories: {e}")))?;
+                tokio::fs::create_dir_all(parent).await.map_err(|e| {
+                    ToolError::Execution(format!("Failed to create directories: {e}"))
+                })?;
             }
 
             tokio::fs::write(&resolved, &new_string)
@@ -275,7 +272,12 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(result.metadata["diff"].as_str().unwrap().contains("new content"));
+        assert!(
+            result.metadata["diff"]
+                .as_str()
+                .unwrap()
+                .contains("new content")
+        );
         let content = std::fs::read_to_string(&filepath).unwrap();
         assert_eq!(content, "new content");
     }

@@ -145,7 +145,10 @@ impl CodeGraph {
 
     /// Lookup node IDs by symbol name. Returns empty if not found.
     pub fn nodes_by_name(&self, name: &str) -> &[String] {
-        self.name_index.get(name).map(|v| v.as_slice()).unwrap_or(&[])
+        self.name_index
+            .get(name)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
     }
 
     /// Append an edge. Both endpoints need not exist in the node map (the
@@ -155,8 +158,14 @@ impl CodeGraph {
         let src = edge.source.clone();
         let tgt = edge.target.clone();
 
-        self.adjacency.entry(src.clone()).or_default().push(tgt.clone());
-        self.reverse_adjacency.entry(tgt.clone()).or_default().push(src.clone());
+        self.adjacency
+            .entry(src.clone())
+            .or_default()
+            .push(tgt.clone());
+        self.reverse_adjacency
+            .entry(tgt.clone())
+            .or_default()
+            .push(src.clone());
 
         // Maintain the contains-children index for O(1) child lookups.
         if edge.edge_type == EdgeType::Contains {
@@ -329,15 +338,16 @@ impl CodeGraph {
 
         // 1. Collect dependent node IDs: targets of Contains edges from file_id
         //    Use the contains_children_index for O(1) lookup when available.
-        let dependents: Vec<String> = if let Some(children) = self.contains_children_index.get(file_id) {
-            children.clone()
-        } else {
-            self.edges
-                .iter()
-                .filter(|e| e.source == file_id && e.edge_type == EdgeType::Contains)
-                .map(|e| e.target.clone())
-                .collect()
-        };
+        let dependents: Vec<String> =
+            if let Some(children) = self.contains_children_index.get(file_id) {
+                children.clone()
+            } else {
+                self.edges
+                    .iter()
+                    .filter(|e| e.source == file_id && e.edge_type == EdgeType::Contains)
+                    .map(|e| e.target.clone())
+                    .collect()
+            };
 
         // 2. Build the full set of IDs to remove (file + dependents)
         let mut removed_set: std::collections::HashSet<String> =
@@ -384,7 +394,9 @@ impl CodeGraph {
 
             // Ensure both endpoints exist in both maps
             self.adjacency.entry(edge.target.clone()).or_default();
-            self.reverse_adjacency.entry(edge.source.clone()).or_default();
+            self.reverse_adjacency
+                .entry(edge.source.clone())
+                .or_default();
         }
 
         // 6. Return the list of removed IDs
@@ -413,5 +425,139 @@ impl CodeGraph {
         for children in self.contains_children_index.values_mut() {
             children.retain(|c| c != node_id);
         }
+    }
+
+    // --- Symbol-level hashing (S3-T1) ------------------------------------
+
+    /// Compute a content hash for a single symbol node.
+    ///
+    /// Hash is based on: name + signature + doc (semantic content, not metadata).
+    /// Used for fine-grained invalidation — if the hash hasn't changed, the
+    /// symbol's wiki content doesn't need regeneration.
+    pub fn symbol_content_hash(node: &Node) -> String {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(node.name.as_bytes());
+        if let Some(ref sig) = node.signature {
+            hasher.update(sig.as_bytes());
+        }
+        if let Some(ref doc) = node.doc {
+            hasher.update(doc.as_bytes());
+        }
+        hasher.finalize().to_hex()[..16].to_string()
+    }
+
+    /// Compute content hashes for all symbol nodes in the graph.
+    ///
+    /// Returns a map: node_id → content_hash.
+    /// Use this to detect which symbols changed between graph builds.
+    pub fn compute_symbol_hashes(&self) -> HashMap<String, String> {
+        self.nodes
+            .iter()
+            .filter(|(_, node)| matches!(node.node_type, NodeType::Symbol))
+            .map(|(id, node)| (id.clone(), Self::symbol_content_hash(node)))
+            .collect()
+    }
+
+    /// Compute a content hash for a community (aggregate of member symbol hashes).
+    ///
+    /// If the community hash hasn't changed, its wiki page doesn't need regeneration.
+    /// Returns None if the community has no symbol nodes.
+    pub fn community_content_hash(&self, node_ids: &[String]) -> Option<String> {
+        let mut member_hashes: Vec<String> = node_ids
+            .iter()
+            .filter_map(|id| self.nodes.get(id))
+            .filter(|node| matches!(node.node_type, NodeType::Symbol))
+            .map(|node| Self::symbol_content_hash(node))
+            .collect();
+
+        if member_hashes.is_empty() {
+            return None;
+        }
+
+        // Sort for determinism (node order in community may vary)
+        member_hashes.sort();
+
+        let mut hasher = blake3::Hasher::new();
+        for h in &member_hashes {
+            hasher.update(h.as_bytes());
+        }
+        Some(hasher.finalize().to_hex()[..16].to_string())
+    }
+
+    // --- File-level graph traversal (File Retriever support) ---
+
+    /// Find neighboring files reachable from a file via specific edge types.
+    ///
+    /// Follows: file → symbols (Contains) → neighbors (edge_types) → parent file.
+    /// Returns file paths (not node IDs), excluding the seed file.
+    /// Limited to `max` results to prevent explosion in dense graphs.
+    pub fn file_neighbors(
+        &self,
+        file_id: &str,
+        edge_types: &[EdgeType],
+        max: usize,
+    ) -> Vec<String> {
+        let mut result_files: Vec<String> = Vec::new();
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        // Get symbols contained in this file
+        for child_id in self.contains_children(file_id) {
+            // Follow specified edge types from each symbol
+            for neighbor_id in self.neighbors(child_id) {
+                if let Some(neighbor) = self.get_node(neighbor_id) {
+                    // Check if the edge type matches
+                    let has_matching_edge = self.all_edges().iter().any(|e| {
+                        (e.source == *child_id && e.target == *neighbor_id
+                            || e.source == *neighbor_id && e.target == *child_id)
+                            && edge_types.contains(&e.edge_type)
+                    });
+
+                    if !has_matching_edge {
+                        continue;
+                    }
+
+                    // Find the file that contains this neighbor
+                    let target_file = if let Some(ref fp) = neighbor.file_path {
+                        fp.clone()
+                    } else {
+                        continue;
+                    };
+
+                    let target_file_id = format!("file:{}", target_file);
+                    if target_file_id != file_id && seen.insert(target_file.clone()) {
+                        result_files.push(target_file);
+                        if result_files.len() >= max {
+                            return result_files;
+                        }
+                    }
+                }
+            }
+        }
+
+        result_files
+    }
+
+    /// Find test files that test symbols in the given file.
+    ///
+    /// Follows reverse Tests edges: file → symbols ← test nodes → test file.
+    pub fn test_files_for(&self, file_id: &str) -> Vec<String> {
+        let mut tests: Vec<String> = Vec::new();
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        for child_id in self.contains_children(file_id) {
+            // Reverse: who tests this symbol?
+            for src_id in self.reverse_neighbors(child_id) {
+                if let Some(src_node) = self.get_node(src_id) {
+                    if src_node.node_type == NodeType::Test {
+                        if let Some(ref fp) = src_node.file_path {
+                            if seen.insert(fp.clone()) {
+                                tests.push(fp.clone());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        tests
     }
 }

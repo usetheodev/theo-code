@@ -18,6 +18,10 @@
 provider
 ralph-loop.local.md
 review-output
+wiki/
+wiki-site/
+referencias
+!crates/theo-infra-llm/src/provider
 
 # Cargo lock — keep for binaries, ignore for libraries
 # (we keep it: this is a binary workspace)
@@ -212,6 +216,8 @@ embeddings/
 !.claude/agents/
 !.claude/hooks/
 !.claude/skills/
+!.claude/meetings/
+!.claude/settings.json
 
 # ----------------------------------------------------------------------------
 # Docker

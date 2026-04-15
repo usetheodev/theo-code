@@ -9,9 +9,14 @@ pub struct RuntimeMetrics {
     pub successful_tool_calls: u64,
     pub total_llm_calls: u64,
     pub total_tokens_used: u64,
+    pub total_input_tokens: u64,
+    pub total_output_tokens: u64,
     pub total_retries: u64,
     pub total_dlq_entries: u64,
     pub converged_runs: u64,
+
+    /// Accumulated dollar cost across all LLM calls in this session.
+    pub total_cost_usd: f64,
 
     // Timing accumulators (for computing averages)
     total_iteration_ms: u64,
@@ -36,7 +41,10 @@ impl RuntimeMetrics {
     }
 
     pub fn tool_success_rate(&self) -> f64 {
-        safe_div(self.successful_tool_calls as f64, self.total_tool_calls as f64)
+        safe_div(
+            self.successful_tool_calls as f64,
+            self.total_tool_calls as f64,
+        )
     }
 
     pub fn convergence_rate(&self) -> f64 {
@@ -62,6 +70,23 @@ impl MetricsCollector {
         let mut m = self.metrics.write().expect("metrics write lock poisoned");
         m.total_llm_calls += 1;
         m.total_tokens_used += tokens;
+        m.total_llm_call_ms += duration_ms;
+        m.llm_call_count += 1;
+    }
+
+    /// Record an LLM call with input/output token breakdown.
+    pub fn record_llm_call_detailed(
+        &self,
+        duration_ms: u64,
+        input_tokens: u64,
+        output_tokens: u64,
+    ) {
+        let total = input_tokens + output_tokens;
+        let mut m = self.metrics.write().expect("metrics write lock poisoned");
+        m.total_llm_calls += 1;
+        m.total_tokens_used += total;
+        m.total_input_tokens += input_tokens;
+        m.total_output_tokens += output_tokens;
         m.total_llm_call_ms += duration_ms;
         m.llm_call_count += 1;
     }
@@ -102,6 +127,12 @@ impl MetricsCollector {
         }
     }
 
+    /// Accumulate dollar cost from an LLM call.
+    pub fn record_cost(&self, cost_usd: f64) {
+        let mut m = self.metrics.write().expect("metrics write lock poisoned");
+        m.total_cost_usd += cost_usd;
+    }
+
     pub fn record_iteration(&self, duration_ms: u64) {
         let mut m = self.metrics.write().expect("metrics write lock poisoned");
         m.total_iteration_ms += duration_ms;
@@ -110,7 +141,10 @@ impl MetricsCollector {
 
     /// Returns a snapshot of current metrics (clone, does not consume).
     pub fn snapshot(&self) -> RuntimeMetrics {
-        self.metrics.read().expect("metrics read lock poisoned").clone()
+        self.metrics
+            .read()
+            .expect("metrics read lock poisoned")
+            .clone()
     }
 }
 
@@ -232,6 +266,27 @@ mod tests {
     }
 
     #[test]
+    fn record_cost_accumulates_usd() {
+        // Arrange
+        let collector = MetricsCollector::new();
+
+        // Act
+        collector.record_cost(0.003);
+        collector.record_cost(0.015);
+
+        // Assert
+        let m = collector.snapshot();
+        assert!((m.total_cost_usd - 0.018).abs() < 1e-9);
+    }
+
+    #[test]
+    fn new_collector_has_zero_cost() {
+        let collector = MetricsCollector::new();
+        let m = collector.snapshot();
+        assert_eq!(m.total_cost_usd, 0.0);
+    }
+
+    #[test]
     fn record_delegated_tokens_adds_tokens_without_incrementing_calls() {
         let collector = MetricsCollector::new();
         collector.record_llm_call(100, 1000); // parent call
@@ -239,7 +294,13 @@ mod tests {
         collector.record_delegated_tokens(300); // another sub-agent
 
         let m = collector.snapshot();
-        assert_eq!(m.total_tokens_used, 1800, "tokens should include parent + delegated");
-        assert_eq!(m.total_llm_calls, 1, "delegated tokens should NOT increment llm_calls");
+        assert_eq!(
+            m.total_tokens_used, 1800,
+            "tokens should include parent + delegated"
+        );
+        assert_eq!(
+            m.total_llm_calls, 1,
+            "delegated tokens should NOT increment llm_calls"
+        );
     }
 }

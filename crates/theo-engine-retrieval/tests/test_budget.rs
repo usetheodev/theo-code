@@ -1,5 +1,4 @@
 /// Tests for budget.rs — Token Budget Allocation
-
 use theo_engine_retrieval::budget::{BudgetAllocation, BudgetConfig};
 
 // ---------------------------------------------------------------------------
@@ -9,9 +8,11 @@ use theo_engine_retrieval::budget::{BudgetAllocation, BudgetConfig};
 #[test]
 fn test_default_config_sums_to_100_percent() {
     let config = BudgetConfig::default_16k();
-    let total =
-        config.repo_map_pct + config.module_cards_pct + config.real_code_pct
-        + config.task_history_pct + config.reserve_pct;
+    let total = config.repo_map_pct
+        + config.module_cards_pct
+        + config.real_code_pct
+        + config.task_history_pct
+        + config.reserve_pct;
 
     assert!(
         (total - 1.0).abs() < 1e-9,
@@ -39,8 +40,11 @@ fn test_allocation_sums_to_at_most_total_budget() {
 
     for total in [100, 1000, 4096, 8192, 16000, 32768] {
         let alloc = config.allocate(total);
-        let sum = alloc.repo_map + alloc.module_cards + alloc.real_code
-            + alloc.task_history + alloc.reserve;
+        let sum = alloc.repo_map
+            + alloc.module_cards
+            + alloc.real_code
+            + alloc.task_history
+            + alloc.reserve;
 
         assert!(
             sum <= total,
@@ -74,8 +78,8 @@ fn test_allocation_small_budget_no_token_leakage() {
     assert!(alloc.task_history <= total);
     assert!(alloc.reserve <= total);
 
-    let sum = alloc.repo_map + alloc.module_cards + alloc.real_code
-        + alloc.task_history + alloc.reserve;
+    let sum =
+        alloc.repo_map + alloc.module_cards + alloc.real_code + alloc.task_history + alloc.reserve;
     assert!(sum <= total, "sum {sum} > total {total}");
 }
 
@@ -108,5 +112,8 @@ fn test_budget_allocation_is_public_struct() {
         task_history: 4,
         reserve: 5,
     };
-    assert_eq!(alloc.repo_map + alloc.module_cards + alloc.real_code + alloc.task_history + alloc.reserve, 15);
+    assert_eq!(
+        alloc.repo_map + alloc.module_cards + alloc.real_code + alloc.task_history + alloc.reserve,
+        15
+    );
 }

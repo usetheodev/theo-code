@@ -12,8 +12,8 @@
 
 use tree_sitter::Node;
 
-use crate::types::Visibility;
 use crate::tree_sitter::SupportedLanguage;
+use crate::types::Visibility;
 
 // ---------------------------------------------------------------------------
 // Trait definition
@@ -71,11 +71,7 @@ pub trait LanguageBehavior: Send + Sync {
 
         let sig = truncated.as_deref().unwrap_or(node_text).trim().to_string();
 
-        if sig.is_empty() {
-            None
-        } else {
-            Some(sig)
-        }
+        if sig.is_empty() { None } else { Some(sig) }
     }
 
     /// Extract a doc comment above the given node.

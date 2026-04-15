@@ -1,9 +1,15 @@
-mod init;
 mod commands;
+mod config;
+mod init;
+mod input;
+mod json_output;
+mod permission;
 mod pilot;
+mod render;
 mod renderer;
 mod repl;
-mod tui;
+mod status_line;
+mod tty;
 
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -48,10 +54,6 @@ struct Cli {
     /// Agent mode
     #[arg(long, global = true, value_parser = ["agent", "plan", "ask"])]
     mode: Option<String>,
-
-    /// Use legacy REPL mode instead of TUI
-    #[arg(long, global = true)]
-    legacy: bool,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -127,10 +129,30 @@ fn main() {
     match cli.command {
         Some(Commands::Init) => cmd_init(cli.repo),
         Some(Commands::Agent { prompt }) => {
-            cmd_agent(prompt, cli.repo, cli.provider, cli.model, cli.max_iter, cli.mode, !cli.legacy);
+            cmd_agent(
+                prompt,
+                cli.repo,
+                cli.provider,
+                cli.model,
+                cli.max_iter,
+                cli.mode,
+            );
         }
-        Some(Commands::Pilot { calls, rate, complete, promise }) => {
-            cmd_pilot(promise, cli.repo, cli.provider, cli.model, calls, rate, complete);
+        Some(Commands::Pilot {
+            calls,
+            rate,
+            complete,
+            promise,
+        }) => {
+            cmd_pilot(
+                promise,
+                cli.repo,
+                cli.provider,
+                cli.model,
+                calls,
+                rate,
+                complete,
+            );
         }
         Some(Commands::Context { repo_path, query }) => {
             cmd_context(&repo_path, &query.join(" "));
@@ -143,7 +165,14 @@ fn main() {
         }
         None => {
             // Default: agent mode. REPL if no prompt, single-shot if prompt given.
-            cmd_agent(cli.prompt, cli.repo, cli.provider, cli.model, cli.max_iter, cli.mode, !cli.legacy);
+            cmd_agent(
+                cli.prompt,
+                cli.repo,
+                cli.provider,
+                cli.model,
+                cli.max_iter,
+                cli.mode,
+            );
         }
     }
 }
@@ -154,17 +183,22 @@ fn main() {
 
 fn cmd_init(repo: PathBuf) {
     let project_dir = resolve_dir(repo);
+    let caps = tty::TtyCaps::detect().style_caps();
+    use render::style::{bold, error, success, warn};
 
-    eprintln!("\x1b[1mtheo init\x1b[0m — initializing project");
+    eprintln!("{} — initializing project", bold("theo init", caps));
 
     let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
     rt.block_on(async {
         let (config, _provider) = resolve_agent_config(None, None, None).await;
         match init::run_init_with_agent(&project_dir, config).await {
-            Ok(true) => eprintln!("\n\x1b[32m✓ Project initialized.\x1b[0m Review .theo/theo.md and edit if needed."),
-            Ok(false) => eprintln!("\n\x1b[33m⚠ Already initialized.\x1b[0m"),
+            Ok(true) => eprintln!(
+                "\n{} Review .theo/theo.md and edit if needed.",
+                success("✓ Project initialized.", caps)
+            ),
+            Ok(false) => eprintln!("\n{}", warn("⚠ Already initialized.", caps)),
             Err(e) => {
-                eprintln!("\n\x1b[31m✗ Error:\x1b[0m {e}");
+                eprintln!("\n{} {e}", error("✗ Error:", caps));
                 std::process::exit(1);
             }
         }
@@ -178,7 +212,6 @@ fn cmd_agent(
     model: Option<String>,
     max_iter: Option<usize>,
     mode: Option<String>,
-    use_tui: bool,
 ) {
     let project_dir = resolve_dir(repo);
 
@@ -190,19 +223,8 @@ fn cmd_agent(
 
     let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
     rt.block_on(async {
-        let (config, provider_name) = resolve_agent_config(
-            provider_id.as_deref(),
-            model.as_deref(),
-            max_iter,
-        ).await;
-
-        if use_tui {
-            if let Err(e) = tui::run(config, project_dir, provider_name, inline_prompt).await {
-                eprintln!("\x1b[31mTUI error:\x1b[0m {e}");
-                std::process::exit(1);
-            }
-            return;
-        }
+        let (config, provider_name) =
+            resolve_agent_config(provider_id.as_deref(), model.as_deref(), max_iter).await;
 
         let mut repl = repl::Repl::new(config, project_dir, provider_name);
         if let Some(ref mode_str) = mode {
@@ -235,11 +257,8 @@ fn cmd_pilot(
 
     let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
     rt.block_on(async {
-        let (config, _provider_name) = resolve_agent_config(
-            provider_id.as_deref(),
-            model.as_deref(),
-            None,
-        ).await;
+        let (config, _provider_name) =
+            resolve_agent_config(provider_id.as_deref(), model.as_deref(), None).await;
 
         let mut pilot_config = theo_agent_runtime::pilot::PilotConfig::load(&project_dir);
         if let Some(calls) = max_calls {
@@ -300,7 +319,10 @@ fn cmd_context(repo_path: &Path, query: &str) {
                     Ok(()) => {
                         communities = pipeline.communities().to_vec();
                         cluster_ms = t2.elapsed().as_millis();
-                        eprintln!("[cache] Loaded graph + clusters from {}", cache_dir.display());
+                        eprintln!(
+                            "[cache] Loaded graph + clusters from {}",
+                            cache_dir.display()
+                        );
                     }
                     Err(e) => {
                         eprintln!("[cache] Cluster load failed ({}), re-clustering...", e);
@@ -312,13 +334,20 @@ fn cmd_context(repo_path: &Path, query: &str) {
             }
             Err(e) => {
                 eprintln!("[cache] Failed to load ({}), rebuilding...", e);
-                let (g, gi, cl, co) = build_fresh(&mut pipeline, repo_path, &cache_dir, &cache_path);
-                graph_ms = g; git_ms = gi; cluster_ms = cl; communities = co;
+                let (g, gi, cl, co) =
+                    build_fresh(&mut pipeline, repo_path, &cache_dir, &cache_path);
+                graph_ms = g;
+                git_ms = gi;
+                cluster_ms = cl;
+                communities = co;
             }
         }
     } else {
         let (g, gi, cl, co) = build_fresh(&mut pipeline, repo_path, &cache_dir, &cache_path);
-        graph_ms = g; git_ms = gi; cluster_ms = cl; communities = co;
+        graph_ms = g;
+        git_ms = gi;
+        cluster_ms = cl;
+        communities = co;
     };
 
     let t = Instant::now();
@@ -330,7 +359,14 @@ fn cmd_context(repo_path: &Path, query: &str) {
     println!();
     println!("Query: {}", query);
     println!("Repo:  {}", repo_path.display());
-    println!("Cache: {}", if cache_exists { "HIT" } else { "MISS (built fresh)" });
+    println!(
+        "Cache: {}",
+        if cache_exists {
+            "HIT"
+        } else {
+            "MISS (built fresh)"
+        }
+    );
     println!();
     println!("--- Graph ---");
     let graph = pipeline.graph();
@@ -343,10 +379,20 @@ fn cmd_context(repo_path: &Path, query: &str) {
         println!("  [{:2}] {} ({} members)", i, c.name, c.node_ids.len());
     }
     println!();
-    println!("--- Context ({}/{} tokens, {} items) ---", context.total_tokens, context.budget_tokens, context.items.len());
+    println!(
+        "--- Context ({}/{} tokens, {} items) ---",
+        context.total_tokens,
+        context.budget_tokens,
+        context.items.len()
+    );
     println!();
     for (i, item) in context.items.iter().take(5).enumerate() {
-        println!("--- Item {} [{} tok, score={:.3}] ---", i + 1, item.token_count, item.score);
+        println!(
+            "--- Item {} [{} tok, score={:.3}] ---",
+            i + 1,
+            item.token_count,
+            item.score
+        );
         println!("{}", item.content);
         println!();
     }
@@ -376,17 +422,34 @@ fn cmd_impact(repo_path: &Path, file_path: &str) {
     println!("File: {}", report.edited_file);
     println!("BFS depth: {}", report.bfs_depth);
     println!();
-    println!("Affected communities ({}):", report.affected_communities.len());
-    for c in &report.affected_communities { println!("  - {}", c); }
+    println!(
+        "Affected communities ({}):",
+        report.affected_communities.len()
+    );
+    for c in &report.affected_communities {
+        println!("  - {}", c);
+    }
     println!();
-    println!("Tests covering edit ({}):", report.tests_covering_edit.len());
-    for t in &report.tests_covering_edit { println!("  - {}", t); }
+    println!(
+        "Tests covering edit ({}):",
+        report.tests_covering_edit.len()
+    );
+    for t in &report.tests_covering_edit {
+        println!("  - {}", t);
+    }
     println!();
-    println!("Co-change candidates ({}):", report.co_change_candidates.len());
-    for c in &report.co_change_candidates { println!("  - {}", c); }
+    println!(
+        "Co-change candidates ({}):",
+        report.co_change_candidates.len()
+    );
+    for c in &report.co_change_candidates {
+        println!("  - {}", c);
+    }
     println!();
     println!("Risk alerts ({}):", report.risk_alerts.len());
-    for a in &report.risk_alerts { println!("  ⚠ {}", a); }
+    for a in &report.risk_alerts {
+        println!("  ⚠ {}", a);
+    }
 }
 
 fn cmd_stats(repo_path: &Path) {
@@ -404,7 +467,10 @@ fn cmd_stats(repo_path: &Path) {
     // Try loading from cache first
     if cache_path.exists() && cluster_cache.exists() {
         if pipeline.load_graph(&cache_path.to_string_lossy()).is_ok() {
-            if pipeline.load_clusters(&cluster_cache.to_string_lossy()).is_ok() {
+            if pipeline
+                .load_clusters(&cluster_cache.to_string_lossy())
+                .is_ok()
+            {
                 // Cache hit — stats from cached graph
                 let graph = pipeline.graph();
                 let ms = t.elapsed().as_millis();
@@ -436,7 +502,10 @@ fn cmd_stats(repo_path: &Path) {
     println!("=== GRAPHCTX Stats ===");
     println!();
     println!("Repo:        {}", repo_path.display());
-    println!("Files parsed: {}/{}", ext_stats.files_parsed, ext_stats.files_found);
+    println!(
+        "Files parsed: {}/{}",
+        ext_stats.files_parsed, ext_stats.files_found
+    );
     println!("Symbols:     {}", ext_stats.symbols_extracted);
     println!("References:  {}", ext_stats.references_extracted);
     println!("Graph nodes: {}", stats.total_nodes());
@@ -463,7 +532,12 @@ fn build_fresh(
     repo_path: &Path,
     cache_dir: &Path,
     cache_path: &Path,
-) -> (u128, u128, u128, Vec<theo_application::use_cases::pipeline::Community>) {
+) -> (
+    u128,
+    u128,
+    u128,
+    Vec<theo_application::use_cases::pipeline::Community>,
+) {
     let t = Instant::now();
     let (files, _) = theo_application::use_cases::extraction::extract_repo(repo_path);
     pipeline.build_graph(&files);
@@ -492,14 +566,17 @@ fn build_fresh(
         if let Err(e) = pipeline.save_summaries(&summaries_cache.to_string_lossy()) {
             eprintln!("[cache] Cannot save summaries: {}", e);
         } else {
-            eprintln!("[cache] Saved graph + clusters + summaries to {}", cache_dir.display());
+            eprintln!(
+                "[cache] Saved graph + clusters + summaries to {}",
+                cache_dir.display()
+            );
         }
     }
 
     (graph_ms, git_ms, cluster_ms, communities)
 }
 
-pub async fn resolve_agent_config(
+async fn resolve_agent_config(
     provider_id: Option<&str>,
     model: Option<&str>,
     max_iter: Option<usize>,
@@ -529,7 +606,8 @@ pub async fn resolve_agent_config(
             config.base_url = spec.base_url.to_string();
             config.endpoint_override = Some(spec.endpoint_url());
             config.api_key = api_key.or_else(|| {
-                spec.api_key_env_var().and_then(|var| std::env::var(var).ok())
+                spec.api_key_env_var()
+                    .and_then(|var| std::env::var(var).ok())
             });
             provider_name = spec.display_name.to_string();
         } else {
@@ -546,10 +624,9 @@ pub async fn resolve_agent_config(
             let auth = theo_infra_auth::OpenAIAuth::with_default_store();
             if let Ok(Some(tokens)) = auth.get_tokens() {
                 if let Some(ref account_id) = tokens.account_id {
-                    config.extra_headers.insert(
-                        "ChatGPT-Account-Id".to_string(),
-                        account_id.clone(),
-                    );
+                    config
+                        .extra_headers
+                        .insert("ChatGPT-Account-Id".to_string(), account_id.clone());
                 }
             }
         }

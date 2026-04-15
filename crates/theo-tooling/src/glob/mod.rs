@@ -1,11 +1,11 @@
 use async_trait::async_trait;
+use std::path::PathBuf;
 use theo_domain::error::ToolError;
 use theo_domain::permission::{PermissionRequest, PermissionType};
 use theo_domain::tool::{
     PermissionCollector, Tool, ToolCategory, ToolContext, ToolOutput, ToolParam, ToolSchema,
     optional_string, require_string,
 };
-use std::path::PathBuf;
 
 const MAX_RESULTS: usize = 100;
 

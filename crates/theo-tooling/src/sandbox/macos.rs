@@ -42,7 +42,7 @@ impl SandboxExecutor for MacOsSandboxExecutor {
 
         // Reduced sandbox: only command validation + env sanitization
         // (no kernel-level filesystem or network isolation)
-        use super::command_validator::{self, ValidatorConfig, ValidationResult};
+        use super::command_validator::{self, ValidationResult, ValidatorConfig};
         use super::env_sanitizer;
         use std::process::Stdio;
 
@@ -75,7 +75,13 @@ impl SandboxExecutor for MacOsSandboxExecutor {
         if output.status.success() {
             Ok(SandboxResult::success(exit_code, stdout, stderr, vec![]))
         } else {
-            Ok(SandboxResult::failed(exit_code, stdout, stderr, vec![], vec![]))
+            Ok(SandboxResult::failed(
+                exit_code,
+                stdout,
+                stderr,
+                vec![],
+                vec![],
+            ))
         }
     }
 }

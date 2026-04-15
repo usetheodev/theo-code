@@ -8,8 +8,8 @@
 use std::time::Instant;
 
 use theo_engine_graph::{
-    cluster::{detect_communities, hierarchical_cluster, ClusterAlgorithm},
-    cochange::{temporal_decay, update_cochanges, DEFAULT_LAMBDA},
+    cluster::{ClusterAlgorithm, detect_communities, hierarchical_cluster},
+    cochange::{DEFAULT_LAMBDA, temporal_decay, update_cochanges},
     model::{CodeGraph, Edge, EdgeType, Node, NodeType, SymbolKind},
 };
 
@@ -89,7 +89,9 @@ fn generate_synthetic_graph(num_symbols: usize, calls_per_node: usize) -> CodeGr
     let calls_per_node = calls_per_node.min(num_symbols.saturating_sub(1));
     let mut lcg_state: u64 = 42;
     let lcg_next = |s: &mut u64| -> usize {
-        *s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        *s = s
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         (*s >> 33) as usize
     };
 
@@ -158,7 +160,9 @@ fn bench_graph_construction() {
         let mem_kb = estimate_memory_kb(&graph);
         println!(
             "  N={n:<6}: time_ms(mean={:.3}, min={:.3}, max={:.3})  nodes={}  edges={}  memory_kb={}",
-            mean, min, max,
+            mean,
+            min,
+            max,
             graph.node_count(),
             graph.edge_count(),
             mem_kb,
@@ -171,9 +175,7 @@ fn bench_graph_construction() {
 // ---------------------------------------------------------------------------
 
 fn bench_louvain() {
-    println!(
-        "\nBENCHMARK: louvain_clustering"
-    );
+    println!("\nBENCHMARK: louvain_clustering");
     println!("  NOTE: current implementation is O(n^3) — capped at N=200");
     for &n in CLUSTER_SIZES {
         let graph = generate_synthetic_graph(n, 2);
@@ -183,7 +185,9 @@ fn bench_louvain() {
         let result = detect_communities(&graph);
         println!(
             "  N={n:<4}: time_ms(mean={:.3}, min={:.3}, max={:.3})  communities={}  modularity={:.4}",
-            mean, min, max,
+            mean,
+            min,
+            max,
             result.communities.len(),
             result.modularity,
         );

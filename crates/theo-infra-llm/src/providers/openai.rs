@@ -5,7 +5,9 @@ use serde_json::Value;
 pub fn from_request(body: &Value) -> CommonRequest {
     let mut messages = Vec::new();
 
-    let input = body.get("input").and_then(|i| i.as_array())
+    let input = body
+        .get("input")
+        .and_then(|i| i.as_array())
         .or_else(|| body.get("messages").and_then(|m| m.as_array()))
         .cloned()
         .unwrap_or_default();
@@ -17,9 +19,16 @@ pub fn from_request(body: &Value) -> CommonRequest {
                 match item_type {
                     "function_call" => {
                         let name = m.get("name").and_then(|n| n.as_str()).unwrap_or_default();
-                        let args = m.get("arguments").map(|a| {
-                            if let Some(s) = a.as_str() { s.to_string() } else { a.to_string() }
-                        }).unwrap_or_else(|| "{}".to_string());
+                        let args = m
+                            .get("arguments")
+                            .map(|a| {
+                                if let Some(s) = a.as_str() {
+                                    s.to_string()
+                                } else {
+                                    a.to_string()
+                                }
+                            })
+                            .unwrap_or_else(|| "{}".to_string());
                         let id = m.get("id").and_then(|i| i.as_str()).unwrap_or_default();
                         messages.push(CommonMessage {
                             role: Role::Assistant,
@@ -28,16 +37,29 @@ pub fn from_request(body: &Value) -> CommonRequest {
                             tool_calls: Some(vec![CommonToolCall {
                                 id: id.to_string(),
                                 call_type: "function".to_string(),
-                                function: CommonFunctionCall { name: name.to_string(), arguments: args },
+                                function: CommonFunctionCall {
+                                    name: name.to_string(),
+                                    arguments: args,
+                                },
                             }]),
                             name: None,
                         });
                     }
                     "function_call_output" => {
-                        let call_id = m.get("call_id").and_then(|i| i.as_str()).unwrap_or_default();
-                        let output = m.get("output").map(|o| {
-                            if let Some(s) = o.as_str() { s.to_string() } else { o.to_string() }
-                        }).unwrap_or_default();
+                        let call_id = m
+                            .get("call_id")
+                            .and_then(|i| i.as_str())
+                            .unwrap_or_default();
+                        let output = m
+                            .get("output")
+                            .map(|o| {
+                                if let Some(s) = o.as_str() {
+                                    s.to_string()
+                                } else {
+                                    o.to_string()
+                                }
+                            })
+                            .unwrap_or_default();
                         messages.push(CommonMessage {
                             role: Role::Tool,
                             content: Some(Content::Text(output)),
@@ -52,7 +74,9 @@ pub fn from_request(body: &Value) -> CommonRequest {
             }
         }
 
-        let Some(role) = m.get("role").and_then(|r| r.as_str()) else { continue };
+        let Some(role) = m.get("role").and_then(|r| r.as_str()) else {
+            continue;
+        };
 
         match role {
             "system" | "developer" => {
@@ -60,15 +84,19 @@ pub fn from_request(body: &Value) -> CommonRequest {
                 let text = if let Some(s) = content.and_then(|c| c.as_str()) {
                     Some(s.to_string())
                 } else if let Some(arr) = content.and_then(|c| c.as_array()) {
-                    arr.iter().find_map(|p| p.get("text").and_then(|t| t.as_str()).map(String::from))
+                    arr.iter()
+                        .find_map(|p| p.get("text").and_then(|t| t.as_str()).map(String::from))
                 } else {
                     None
                 };
                 if let Some(text) = text {
                     if !text.is_empty() {
                         messages.push(CommonMessage {
-                            role: Role::System, content: Some(Content::Text(text)),
-                            tool_call_id: None, tool_calls: None, name: None,
+                            role: Role::System,
+                            content: Some(Content::Text(text)),
+                            tool_call_id: None,
+                            tool_calls: None,
+                            name: None,
                         });
                     }
                 }
@@ -77,38 +105,59 @@ pub fn from_request(body: &Value) -> CommonRequest {
                 let content = m.get("content");
                 if let Some(s) = content.and_then(|c| c.as_str()) {
                     messages.push(CommonMessage {
-                        role: Role::User, content: Some(Content::Text(s.to_string())),
-                        tool_call_id: None, tool_calls: None, name: None,
+                        role: Role::User,
+                        content: Some(Content::Text(s.to_string())),
+                        tool_call_id: None,
+                        tool_calls: None,
+                        name: None,
                     });
                 } else if let Some(arr) = content.and_then(|c| c.as_array()) {
-                    let parts: Vec<ContentPart> = arr.iter().filter_map(|p| {
-                        let ptype = p.get("type").and_then(|t| t.as_str())?;
-                        match ptype {
-                            "text" | "input_text" => {
-                                let text = p.get("text").and_then(|t| t.as_str())?;
-                                Some(ContentPart::Text { text: text.to_string() })
+                    let parts: Vec<ContentPart> = arr
+                        .iter()
+                        .filter_map(|p| {
+                            let ptype = p.get("type").and_then(|t| t.as_str())?;
+                            match ptype {
+                                "text" | "input_text" => {
+                                    let text = p.get("text").and_then(|t| t.as_str())?;
+                                    Some(ContentPart::Text {
+                                        text: text.to_string(),
+                                    })
+                                }
+                                "image_url" | "input_image" => {
+                                    let url = p
+                                        .get("image_url")
+                                        .and_then(|i| i.get("url"))
+                                        .and_then(|u| u.as_str())?;
+                                    Some(ContentPart::ImageUrl {
+                                        image_url: ImageUrl {
+                                            url: url.to_string(),
+                                        },
+                                    })
+                                }
+                                _ => None,
                             }
-                            "image_url" | "input_image" => {
-                                let url = p.get("image_url").and_then(|i| i.get("url")).and_then(|u| u.as_str())?;
-                                Some(ContentPart::ImageUrl { image_url: ImageUrl { url: url.to_string() } })
-                            }
-                            _ => None,
-                        }
-                    }).collect();
+                        })
+                        .collect();
 
                     if parts.len() == 1 {
                         if let ContentPart::Text { text } = &parts[0] {
                             messages.push(CommonMessage {
-                                role: Role::User, content: Some(Content::Text(text.clone())),
-                                tool_call_id: None, tool_calls: None, name: None,
+                                role: Role::User,
+                                content: Some(Content::Text(text.clone())),
+                                tool_call_id: None,
+                                tool_calls: None,
+                                name: None,
                             });
                             continue;
                         }
                     }
                     if !parts.is_empty() {
                         messages.push(CommonMessage {
-                            role: Role::User, content: Some(Content::Parts(parts)),
-                            tool_call_id: None, tool_calls: None, name: None,
+                            role: Role::User,
+                            content: Some(Content::Parts(parts)),
+                            tool_call_id: None,
+                            tool_calls: None,
+                            name: None,
                         });
                     }
                 }
@@ -116,33 +165,48 @@ pub fn from_request(body: &Value) -> CommonRequest {
             "assistant" => {
                 let content = m.get("content").and_then(|c| c.as_str()).map(String::from);
                 let tool_calls = m.get("tool_calls").and_then(|tc| tc.as_array()).map(|arr| {
-                    arr.iter().filter_map(|tc| {
-                        let func = tc.get("function")?;
-                        Some(CommonToolCall {
-                            id: tc.get("id").and_then(|i| i.as_str())?.to_string(),
-                            call_type: "function".to_string(),
-                            function: CommonFunctionCall {
-                                name: func.get("name").and_then(|n| n.as_str())?.to_string(),
-                                arguments: func.get("arguments").and_then(|a| a.as_str())?.to_string(),
-                            },
+                    arr.iter()
+                        .filter_map(|tc| {
+                            let func = tc.get("function")?;
+                            Some(CommonToolCall {
+                                id: tc.get("id").and_then(|i| i.as_str())?.to_string(),
+                                call_type: "function".to_string(),
+                                function: CommonFunctionCall {
+                                    name: func.get("name").and_then(|n| n.as_str())?.to_string(),
+                                    arguments: func
+                                        .get("arguments")
+                                        .and_then(|a| a.as_str())?
+                                        .to_string(),
+                                },
+                            })
                         })
-                    }).collect()
+                        .collect()
                 });
                 messages.push(CommonMessage {
                     role: Role::Assistant,
                     content: content.filter(|s| !s.is_empty()).map(Content::Text),
-                    tool_call_id: None, tool_calls, name: None,
+                    tool_call_id: None,
+                    tool_calls,
+                    name: None,
                 });
             }
             "tool" => {
                 let content = m.get("content").map(|c| {
-                    if let Some(s) = c.as_str() { s.to_string() } else { c.to_string() }
+                    if let Some(s) = c.as_str() {
+                        s.to_string()
+                    } else {
+                        c.to_string()
+                    }
                 });
                 messages.push(CommonMessage {
                     role: Role::Tool,
                     content: content.map(Content::Text),
-                    tool_call_id: m.get("tool_call_id").and_then(|i| i.as_str()).map(String::from),
-                    tool_calls: None, name: None,
+                    tool_call_id: m
+                        .get("tool_call_id")
+                        .and_then(|i| i.as_str())
+                        .map(String::from),
+                    tool_calls: None,
+                    name: None,
                 });
             }
             _ => {}
@@ -150,50 +214,95 @@ pub fn from_request(body: &Value) -> CommonRequest {
     }
 
     let tool_choice = body.get("tool_choice").and_then(|tc| {
-        if let Some(s) = tc.as_str() { return Some(ToolChoice::Mode(s.to_string())); }
+        if let Some(s) = tc.as_str() {
+            return Some(ToolChoice::Mode(s.to_string()));
+        }
         let tc_type = tc.get("type").and_then(|t| t.as_str())?;
         if tc_type == "function" {
-            let name = tc.get("function").and_then(|f| f.get("name")).and_then(|n| n.as_str())?;
+            let name = tc
+                .get("function")
+                .and_then(|f| f.get("name"))
+                .and_then(|n| n.as_str())?;
             return Some(ToolChoice::Function {
                 choice_type: "function".to_string(),
-                function: ToolChoiceFunction { name: name.to_string() },
+                function: ToolChoiceFunction {
+                    name: name.to_string(),
+                },
             });
         }
         None
     });
 
-    let stop = body.get("stop_sequences").or(body.get("stop")).and_then(|v| {
-        if let Some(arr) = v.as_array() {
-            let strs: Vec<String> = arr.iter().filter_map(|s| s.as_str().map(String::from)).collect();
-            if strs.len() == 1 { Some(StopSequence::Single(strs.into_iter().next().unwrap())) }
-            else if !strs.is_empty() { Some(StopSequence::Multiple(strs)) }
-            else { None }
-        } else { v.as_str().map(|s| StopSequence::Single(s.to_string())) }
-    });
+    let stop = body
+        .get("stop_sequences")
+        .or(body.get("stop"))
+        .and_then(|v| {
+            if let Some(arr) = v.as_array() {
+                let strs: Vec<String> = arr
+                    .iter()
+                    .filter_map(|s| s.as_str().map(String::from))
+                    .collect();
+                if strs.len() == 1 {
+                    Some(StopSequence::Single(strs.into_iter().next().unwrap()))
+                } else if !strs.is_empty() {
+                    Some(StopSequence::Multiple(strs))
+                } else {
+                    None
+                }
+            } else {
+                v.as_str().map(|s| StopSequence::Single(s.to_string()))
+            }
+        });
 
     CommonRequest {
-        model: body.get("model").and_then(|m| m.as_str()).unwrap_or_default().to_string(),
-        max_tokens: body.get("max_output_tokens").or(body.get("max_tokens")).and_then(|m| m.as_u64()).map(|v| v as u32),
-        temperature: body.get("temperature").and_then(|t| t.as_f64()).map(|v| v as f32),
+        model: body
+            .get("model")
+            .and_then(|m| m.as_str())
+            .unwrap_or_default()
+            .to_string(),
+        max_tokens: body
+            .get("max_output_tokens")
+            .or(body.get("max_tokens"))
+            .and_then(|m| m.as_u64())
+            .map(|v| v as u32),
+        temperature: body
+            .get("temperature")
+            .and_then(|t| t.as_f64())
+            .map(|v| v as f32),
         top_p: body.get("top_p").and_then(|t| t.as_f64()).map(|v| v as f32),
         stop,
         messages,
         stream: body.get("stream").and_then(|s| s.as_bool()),
         tools: body.get("tools").and_then(|t| t.as_array()).map(|arr| {
-            arr.iter().filter_map(|t| {
-                if t.get("type").and_then(|tt| tt.as_str()) == Some("function") {
-                    Some(CommonTool {
-                        tool_type: "function".to_string(),
-                        function: CommonFunctionDef {
-                            name: t.get("name").or_else(|| t.get("function").and_then(|f| f.get("name")))
-                                .and_then(|n| n.as_str())?.to_string(),
-                            description: t.get("description").or_else(|| t.get("function").and_then(|f| f.get("description")))
-                                .and_then(|d| d.as_str()).map(String::from),
-                            parameters: t.get("parameters").or_else(|| t.get("function").and_then(|f| f.get("parameters"))).cloned(),
-                        },
-                    })
-                } else { None }
-            }).collect()
+            arr.iter()
+                .filter_map(|t| {
+                    if t.get("type").and_then(|tt| tt.as_str()) == Some("function") {
+                        Some(CommonTool {
+                            tool_type: "function".to_string(),
+                            function: CommonFunctionDef {
+                                name: t
+                                    .get("name")
+                                    .or_else(|| t.get("function").and_then(|f| f.get("name")))
+                                    .and_then(|n| n.as_str())?
+                                    .to_string(),
+                                description: t
+                                    .get("description")
+                                    .or_else(|| {
+                                        t.get("function").and_then(|f| f.get("description"))
+                                    })
+                                    .and_then(|d| d.as_str())
+                                    .map(String::from),
+                                parameters: t
+                                    .get("parameters")
+                                    .or_else(|| t.get("function").and_then(|f| f.get("parameters")))
+                                    .cloned(),
+                            },
+                        })
+                    } else {
+                        None
+                    }
+                })
+                .collect()
         }),
         tool_choice,
     }
@@ -255,14 +364,18 @@ pub fn to_request(body: &CommonRequest) -> Value {
     }
 
     let tools: Option<Vec<Value>> = body.tools.as_ref().map(|tools| {
-        tools.iter().filter(|t| t.tool_type == "function").map(|t| {
-            serde_json::json!({
-                "type": "function",
-                "name": t.function.name,
-                "description": t.function.description,
-                "parameters": t.function.parameters,
+        tools
+            .iter()
+            .filter(|t| t.tool_type == "function")
+            .map(|t| {
+                serde_json::json!({
+                    "type": "function",
+                    "name": t.function.name,
+                    "description": t.function.description,
+                    "parameters": t.function.parameters,
+                })
             })
-        }).collect()
+            .collect()
     });
 
     let mut result = serde_json::json!({
@@ -271,19 +384,27 @@ pub fn to_request(body: &CommonRequest) -> Value {
         "stream": body.stream.unwrap_or(false),
     });
 
-    if let Some(max_tokens) = body.max_tokens { result["max_output_tokens"] = serde_json::json!(max_tokens); }
-    if let Some(top_p) = body.top_p { result["top_p"] = serde_json::json!(top_p); }
+    if let Some(max_tokens) = body.max_tokens {
+        result["max_output_tokens"] = serde_json::json!(max_tokens);
+    }
+    if let Some(top_p) = body.top_p {
+        result["top_p"] = serde_json::json!(top_p);
+    }
     if let Some(stop) = &body.stop {
         result["stop_sequences"] = match stop {
             StopSequence::Single(s) => serde_json::json!([s]),
             StopSequence::Multiple(v) => serde_json::json!(v),
         };
     }
-    if let Some(tools) = tools { result["tools"] = Value::Array(tools); }
+    if let Some(tools) = tools {
+        result["tools"] = Value::Array(tools);
+    }
     if let Some(tc) = &body.tool_choice {
         result["tool_choice"] = match tc {
             ToolChoice::Mode(m) => Value::String(m.clone()),
-            ToolChoice::Function { function, .. } => serde_json::json!({"type": "function", "function": {"name": function.name}}),
+            ToolChoice::Function { function, .. } => {
+                serde_json::json!({"type": "function", "function": {"name": function.name}})
+            }
         };
     }
 
@@ -298,15 +419,26 @@ pub fn from_response(resp: &Value) -> CommonResponse {
     }
 
     let r = resp.get("response").unwrap_or(resp);
-    let id = r.get("id").and_then(|i| i.as_str())
+    let id = r
+        .get("id")
+        .and_then(|i| i.as_str())
         .map(|i| i.replace("resp_", "chatcmpl_"))
         .unwrap_or_default();
-    let model = r.get("model").or_else(|| resp.get("model"))
-        .and_then(|m| m.as_str()).unwrap_or_default().to_string();
+    let model = r
+        .get("model")
+        .or_else(|| resp.get("model"))
+        .and_then(|m| m.as_str())
+        .unwrap_or_default()
+        .to_string();
 
-    let output = r.get("output").and_then(|o| o.as_array()).cloned().unwrap_or_default();
+    let output = r
+        .get("output")
+        .and_then(|o| o.as_array())
+        .cloned()
+        .unwrap_or_default();
 
-    let text: String = output.iter()
+    let text: String = output
+        .iter()
         .filter(|o| o.get("type").and_then(|t| t.as_str()) == Some("message"))
         .filter_map(|o| o.get("content").and_then(|c| c.as_array()))
         .flatten()
@@ -315,39 +447,76 @@ pub fn from_response(resp: &Value) -> CommonResponse {
         .collect::<Vec<_>>()
         .join("");
 
-    let tool_calls: Vec<CommonToolCall> = output.iter()
+    let tool_calls: Vec<CommonToolCall> = output
+        .iter()
         .filter(|o| o.get("type").and_then(|t| t.as_str()) == Some("function_call"))
         .map(|o| {
-            let name = o.get("name").and_then(|n| n.as_str()).unwrap_or_default().to_string();
-            let args = o.get("arguments").map(|a| {
-                if let Some(s) = a.as_str() { s.to_string() } else { a.to_string() }
-            }).unwrap_or_else(|| "{}".to_string());
-            let id = o.get("id").and_then(|i| i.as_str()).unwrap_or_default().to_string();
+            let name = o
+                .get("name")
+                .and_then(|n| n.as_str())
+                .unwrap_or_default()
+                .to_string();
+            let args = o
+                .get("arguments")
+                .map(|a| {
+                    if let Some(s) = a.as_str() {
+                        s.to_string()
+                    } else {
+                        a.to_string()
+                    }
+                })
+                .unwrap_or_else(|| "{}".to_string());
+            let id = o
+                .get("id")
+                .and_then(|i| i.as_str())
+                .unwrap_or_default()
+                .to_string();
             CommonToolCall {
                 id,
                 call_type: "function".to_string(),
-                function: CommonFunctionCall { name, arguments: args },
+                function: CommonFunctionCall {
+                    name,
+                    arguments: args,
+                },
             }
         })
         .collect();
 
-    let finish_reason = r.get("stop_reason").and_then(|r| r.as_str()).map(|r| match r {
-        "stop" => "stop",
-        "tool_call" | "tool_calls" => "tool_calls",
-        "length" | "max_output_tokens" => "length",
-        other => other,
-    }.to_string());
+    let finish_reason = r.get("stop_reason").and_then(|r| r.as_str()).map(|r| {
+        match r {
+            "stop" => "stop",
+            "tool_call" | "tool_calls" => "tool_calls",
+            "length" | "max_output_tokens" => "length",
+            other => other,
+        }
+        .to_string()
+    });
 
     let usage_val = r.get("usage").or_else(|| resp.get("usage"));
     let usage = usage_val.map(|u| {
-        let pt = u.get("input_tokens").and_then(|v| v.as_u64()).map(|v| v as u32);
-        let ct = u.get("output_tokens").and_then(|v| v.as_u64()).map(|v| v as u32);
-        let cached = u.get("input_tokens_details").and_then(|d| d.get("cached_tokens")).and_then(|c| c.as_u64()).map(|v| v as u32);
+        let pt = u
+            .get("input_tokens")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32);
+        let ct = u
+            .get("output_tokens")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as u32);
+        let cached = u
+            .get("input_tokens_details")
+            .and_then(|d| d.get("cached_tokens"))
+            .and_then(|c| c.as_u64())
+            .map(|v| v as u32);
         CommonUsage {
             prompt_tokens: pt,
             completion_tokens: ct,
-            total_tokens: match (pt, ct) { (Some(p), Some(c)) => Some(p + c), _ => None },
-            prompt_tokens_details: cached.map(|c| PromptTokensDetails { cached_tokens: Some(c) }),
+            total_tokens: match (pt, ct) {
+                (Some(p), Some(c)) => Some(p + c),
+                _ => None,
+            },
+            prompt_tokens_details: cached.map(|c| PromptTokensDetails {
+                cached_tokens: Some(c),
+            }),
         }
     });
 
@@ -361,7 +530,11 @@ pub fn from_response(resp: &Value) -> CommonResponse {
             message: CommonChoiceMessage {
                 role: "assistant".to_string(),
                 content: if text.is_empty() { None } else { Some(text) },
-                tool_calls: if tool_calls.is_empty() { None } else { Some(tool_calls) },
+                tool_calls: if tool_calls.is_empty() {
+                    None
+                } else {
+                    Some(tool_calls)
+                },
             },
             finish_reason,
         }],
@@ -398,12 +571,14 @@ pub fn to_response(resp: &CommonResponse) -> Value {
         }
     }
 
-    let stop_reason = choice.and_then(|c| c.finish_reason.as_deref()).map(|r| match r {
-        "stop" => "stop",
-        "tool_calls" => "tool_call",
-        "length" => "max_output_tokens",
-        other => other,
-    });
+    let stop_reason = choice
+        .and_then(|c| c.finish_reason.as_deref())
+        .map(|r| match r {
+            "stop" => "stop",
+            "tool_calls" => "tool_call",
+            "length" => "max_output_tokens",
+            other => other,
+        });
 
     let usage = resp.usage.as_ref().map(|u| {
         let mut usage = serde_json::json!({
@@ -427,7 +602,9 @@ pub fn to_response(resp: &CommonResponse) -> Value {
         "stop_reason": stop_reason,
     });
 
-    if let Some(u) = usage { result["usage"] = u; }
+    if let Some(u) = usage {
+        result["usage"] = u;
+    }
 
     result
 }
@@ -436,39 +613,75 @@ pub fn to_response(resp: &CommonResponse) -> Value {
 pub fn from_chunk(chunk: &str) -> Result<CommonChunk, String> {
     let lines: Vec<&str> = chunk.lines().collect();
     let event_line = lines.first().ok_or_else(|| chunk.to_string())?;
-    let data_line = lines.iter().find(|l| l.starts_with("data: ")).ok_or_else(|| chunk.to_string())?;
+    let data_line = lines
+        .iter()
+        .find(|l| l.starts_with("data: "))
+        .ok_or_else(|| chunk.to_string())?;
 
     let json: Value = serde_json::from_str(&data_line[6..]).map_err(|_| chunk.to_string())?;
-    let resp_obj = json.get("response").cloned().unwrap_or_else(|| serde_json::json!({}));
+    let resp_obj = json
+        .get("response")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
 
-    let event = event_line.strip_prefix("event: ").unwrap_or_default().trim();
+    let event = event_line
+        .strip_prefix("event: ")
+        .unwrap_or_default()
+        .trim();
 
     let mut out = CommonChunk {
-        id: resp_obj.get("id").or_else(|| json.get("id")).and_then(|i| i.as_str()).unwrap_or_default().to_string(),
+        id: resp_obj
+            .get("id")
+            .or_else(|| json.get("id"))
+            .and_then(|i| i.as_str())
+            .unwrap_or_default()
+            .to_string(),
         object: "chat.completion.chunk".to_string(),
         created: now_unix(),
-        model: resp_obj.get("model").or_else(|| json.get("model")).and_then(|m| m.as_str()).unwrap_or_default().to_string(),
+        model: resp_obj
+            .get("model")
+            .or_else(|| json.get("model"))
+            .and_then(|m| m.as_str())
+            .unwrap_or_default()
+            .to_string(),
         choices: Vec::new(),
         usage: None,
     };
 
     match event {
         "response.output_text.delta" => {
-            let delta = json.get("delta").or_else(|| json.get("text")).and_then(|d| d.as_str());
+            let delta = json
+                .get("delta")
+                .or_else(|| json.get("text"))
+                .and_then(|d| d.as_str());
             if let Some(d) = delta {
                 if !d.is_empty() {
                     out.choices.push(CommonChunkChoice {
                         index: 0,
-                        delta: ChunkDelta { content: Some(d.to_string()), ..Default::default() },
+                        delta: ChunkDelta {
+                            content: Some(d.to_string()),
+                            ..Default::default()
+                        },
                         finish_reason: None,
                     });
                 }
             }
         }
         "response.output_item.added" => {
-            if json.get("item").and_then(|i| i.get("type")).and_then(|t| t.as_str()) == Some("function_call") {
-                let name = json.get("item").and_then(|i| i.get("name")).and_then(|n| n.as_str());
-                let id = json.get("item").and_then(|i| i.get("id")).and_then(|i| i.as_str());
+            if json
+                .get("item")
+                .and_then(|i| i.get("type"))
+                .and_then(|t| t.as_str())
+                == Some("function_call")
+            {
+                let name = json
+                    .get("item")
+                    .and_then(|i| i.get("name"))
+                    .and_then(|n| n.as_str());
+                let id = json
+                    .get("item")
+                    .and_then(|i| i.get("id"))
+                    .and_then(|i| i.as_str());
                 if let Some(name) = name {
                     out.choices.push(CommonChunkChoice {
                         index: 0,
@@ -490,15 +703,23 @@ pub fn from_chunk(chunk: &str) -> Result<CommonChunk, String> {
             }
         }
         "response.function_call_arguments.delta" => {
-            let args = json.get("delta").or_else(|| json.get("arguments_delta")).and_then(|a| a.as_str());
+            let args = json
+                .get("delta")
+                .or_else(|| json.get("arguments_delta"))
+                .and_then(|a| a.as_str());
             if let Some(a) = args {
                 if !a.is_empty() {
                     out.choices.push(CommonChunkChoice {
                         index: 0,
                         delta: ChunkDelta {
                             tool_calls: Some(vec![ChunkToolCall {
-                                index: 0, id: None, call_type: None,
-                                function: Some(ChunkFunction { name: None, arguments: Some(a.to_string()) }),
+                                index: 0,
+                                id: None,
+                                call_type: None,
+                                function: Some(ChunkFunction {
+                                    name: None,
+                                    arguments: Some(a.to_string()),
+                                }),
                             }]),
                             ..Default::default()
                         },
@@ -508,26 +729,52 @@ pub fn from_chunk(chunk: &str) -> Result<CommonChunk, String> {
             }
         }
         "response.completed" => {
-            let sr = resp_obj.get("stop_reason").or_else(|| json.get("stop_reason")).and_then(|r| r.as_str());
-            let finish = sr.map(|r| match r {
-                "stop" => "stop",
-                "tool_call" | "tool_calls" => "tool_calls",
-                "length" | "max_output_tokens" => "length",
-                other => other,
-            }.to_string());
+            let sr = resp_obj
+                .get("stop_reason")
+                .or_else(|| json.get("stop_reason"))
+                .and_then(|r| r.as_str());
+            let finish = sr.map(|r| {
+                match r {
+                    "stop" => "stop",
+                    "tool_call" | "tool_calls" => "tool_calls",
+                    "length" | "max_output_tokens" => "length",
+                    other => other,
+                }
+                .to_string()
+            });
             out.choices.push(CommonChunkChoice {
-                index: 0, delta: ChunkDelta::default(), finish_reason: finish,
+                index: 0,
+                delta: ChunkDelta::default(),
+                finish_reason: finish,
             });
 
-            let u = resp_obj.get("usage").or_else(|| json.get("response").and_then(|r| r.get("usage")));
+            let u = resp_obj
+                .get("usage")
+                .or_else(|| json.get("response").and_then(|r| r.get("usage")));
             if let Some(u) = u {
-                let pt = u.get("input_tokens").and_then(|v| v.as_u64()).map(|v| v as u32);
-                let ct = u.get("output_tokens").and_then(|v| v.as_u64()).map(|v| v as u32);
-                let cached = u.get("input_tokens_details").and_then(|d| d.get("cached_tokens")).and_then(|c| c.as_u64()).map(|v| v as u32);
+                let pt = u
+                    .get("input_tokens")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as u32);
+                let ct = u
+                    .get("output_tokens")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as u32);
+                let cached = u
+                    .get("input_tokens_details")
+                    .and_then(|d| d.get("cached_tokens"))
+                    .and_then(|c| c.as_u64())
+                    .map(|v| v as u32);
                 out.usage = Some(CommonUsage {
-                    prompt_tokens: pt, completion_tokens: ct,
-                    total_tokens: match (pt, ct) { (Some(p), Some(c)) => Some(p + c), _ => None },
-                    prompt_tokens_details: cached.map(|c| PromptTokensDetails { cached_tokens: Some(c) }),
+                    prompt_tokens: pt,
+                    completion_tokens: ct,
+                    total_tokens: match (pt, ct) {
+                        (Some(p), Some(c)) => Some(p + c),
+                        _ => None,
+                    },
+                    prompt_tokens_details: cached.map(|c| PromptTokensDetails {
+                        cached_tokens: Some(c),
+                    }),
                 });
             }
         }
@@ -604,13 +851,21 @@ pub fn to_chunk(chunk: &CommonChunk) -> String {
 
 /// Normalize OpenAI Responses API usage into UsageInfo.
 pub fn normalize_usage(usage: &Value) -> UsageInfo {
-    let input = usage.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-    let output = usage.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-    let reasoning = usage.get("output_tokens_details")
+    let input = usage
+        .get("input_tokens")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as u32;
+    let output = usage
+        .get("output_tokens")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as u32;
+    let reasoning = usage
+        .get("output_tokens_details")
         .and_then(|d| d.get("reasoning_tokens"))
         .and_then(|v| v.as_u64())
         .map(|v| v as u32);
-    let cache_read = usage.get("input_tokens_details")
+    let cache_read = usage
+        .get("input_tokens_details")
         .and_then(|d| d.get("cached_tokens"))
         .and_then(|v| v.as_u64())
         .map(|v| v as u32);
@@ -627,9 +882,12 @@ pub fn normalize_usage(usage: &Value) -> UsageInfo {
 
 fn empty_response() -> CommonResponse {
     CommonResponse {
-        id: String::new(), object: "chat.completion".to_string(),
-        created: now_unix(), model: String::new(),
-        choices: Vec::new(), usage: None,
+        id: String::new(),
+        object: "chat.completion".to_string(),
+        created: now_unix(),
+        model: String::new(),
+        choices: Vec::new(),
+        usage: None,
     }
 }
 
@@ -677,8 +935,14 @@ mod tests {
         let common = from_response(&resp);
         assert_eq!(common.id, "chatcmpl_123");
         assert_eq!(common.choices[0].message.content.as_deref(), Some("Hello!"));
-        assert_eq!(common.choices[0].finish_reason.as_deref(), Some("tool_calls"));
-        assert_eq!(common.choices[0].message.tool_calls.as_ref().unwrap().len(), 1);
+        assert_eq!(
+            common.choices[0].finish_reason.as_deref(),
+            Some("tool_calls")
+        );
+        assert_eq!(
+            common.choices[0].message.tool_calls.as_ref().unwrap().len(),
+            1
+        );
     }
 
     #[test]
@@ -693,6 +957,9 @@ mod tests {
         let chunk = "event: response.output_item.added\ndata: {\"item\":{\"id\":\"fc_1\",\"type\":\"function_call\",\"name\":\"read\"}}";
         let result = from_chunk(chunk).unwrap();
         let tc = result.choices[0].delta.tool_calls.as_ref().unwrap();
-        assert_eq!(tc[0].function.as_ref().unwrap().name.as_deref(), Some("read"));
+        assert_eq!(
+            tc[0].function.as_ref().unwrap().name.as_deref(),
+            Some("read")
+        );
     }
 }

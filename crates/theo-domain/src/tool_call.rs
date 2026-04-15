@@ -292,8 +292,13 @@ mod tests {
     #[test]
     fn display_all_variants() {
         let expected = [
-            "Queued", "Dispatched", "Running", "Succeeded",
-            "Failed", "Timeout", "Cancelled",
+            "Queued",
+            "Dispatched",
+            "Running",
+            "Succeeded",
+            "Failed",
+            "Timeout",
+            "Cancelled",
         ];
         for (s, name) in ALL_STATES.iter().zip(expected.iter()) {
             assert_eq!(format!("{}", s), *name);

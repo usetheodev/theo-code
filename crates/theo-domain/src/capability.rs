@@ -92,7 +92,9 @@ impl CapabilitySet {
         if self.allowed_paths.is_empty() {
             return true;
         }
-        self.allowed_paths.iter().any(|prefix| path.starts_with(prefix))
+        self.allowed_paths
+            .iter()
+            .any(|prefix| path.starts_with(prefix))
     }
 }
 
@@ -105,7 +107,11 @@ pub struct CapabilityDenied {
 
 impl std::fmt::Display for CapabilityDenied {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "capability denied for '{}': {}", self.tool_name, self.reason)
+        write!(
+            f,
+            "capability denied for '{}': {}",
+            self.tool_name, self.reason
+        )
     }
 }
 
