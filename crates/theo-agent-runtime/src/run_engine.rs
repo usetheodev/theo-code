@@ -1653,17 +1653,6 @@ impl AgentRunEngine {
                     }
                     "grep" | "glob" => self.context_loop_state.record_search(),
                     "edit" | "write" | "apply_patch" => {
-                        // RPI sensor: warn if editing without prior research.
-                        // Research = codebase_context, grep, glob, or read calls.
-                        if self.context_loop_state.searches_done == 0
-                            && self.context_loop_state.files_read.is_empty()
-                            && self.context_loop_state.edit_attempts == 0
-                        {
-                            messages.push(Message::user(
-                                "⚠️ You are editing files without prior research (no grep, glob, read, or codebase_context calls). \
-                                 Consider researching the codebase first to understand the affected area and avoid misdiagnosis."
-                            ));
-                        }
                         let file = call
                             .parse_arguments()
                             .ok()
