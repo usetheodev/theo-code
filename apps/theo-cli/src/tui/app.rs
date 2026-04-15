@@ -190,6 +190,8 @@ pub enum Msg {
     RestoreLastPrompt,
     ShowToast(String, ToastLevel),
     DismissExpiredToasts,
+    CopyToClipboard(String),
+    InterruptAgent,
 }
 
 // ---------------------------------------------------------------------------
@@ -369,6 +371,101 @@ pub fn update(state: &mut TuiState, msg: Msg) {
         Msg::DismissExpiredToasts => {
             state.toasts.retain(|t| t.created.elapsed().as_secs() < 5);
         }
+        Msg::CopyToClipboard(text) => {
+            // OSC52 clipboard escape sequence (works in most modern terminals + tmux + SSH)
+            eprint!("\x1b]52;c;{}\x07", base64_encode(&text));
+            state.toasts.push(Toast {
+                message: "Copied to clipboard".to_string(),
+                level: ToastLevel::Info,
+                created: Instant::now(),
+            });
+        }
+        Msg::InterruptAgent => {
+            if state.agent_running {
+                state.agent_running = false;
+                state.streaming_assistant = false;
+                state.transcript.push(TranscriptEntry::SystemMessage(
+                    "⏸ Agent interrupted. Enter a new prompt to continue.".to_string(),
+                ));
+                state.toasts.push(Toast {
+                    message: "Agent interrupted".to_string(),
+                    level: ToastLevel::Warning,
+                    created: Instant::now(),
+                });
+            } else {
+                // If agent is not running, Ctrl+C quits
+                state.should_quit = true;
+            }
+        }
+    }
+}
+
+/// Simple base64 encoding for OSC52 clipboard
+fn base64_encode(input: &str) -> String {
+    use std::io::Write;
+    let mut buf = Vec::new();
+    {
+        let mut encoder = Base64Encoder::new(&mut buf);
+        encoder.write_all(input.as_bytes()).ok();
+    }
+    String::from_utf8(buf).unwrap_or_default()
+}
+
+struct Base64Encoder<'a> {
+    out: &'a mut Vec<u8>,
+    buf: [u8; 3],
+    len: usize,
+}
+
+const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+impl<'a> Base64Encoder<'a> {
+    fn new(out: &'a mut Vec<u8>) -> Self {
+        Self { out, buf: [0; 3], len: 0 }
+    }
+
+    fn flush_block(&mut self) {
+        let b = &self.buf;
+        self.out.push(B64[(b[0] >> 2) as usize]);
+        self.out.push(B64[((b[0] & 0x03) << 4 | b[1] >> 4) as usize]);
+        if self.len > 1 {
+            self.out.push(B64[((b[1] & 0x0f) << 2 | b[2] >> 6) as usize]);
+        } else {
+            self.out.push(b'=');
+        }
+        if self.len > 2 {
+            self.out.push(B64[(b[2] & 0x3f) as usize]);
+        } else {
+            self.out.push(b'=');
+        }
+        self.buf = [0; 3];
+        self.len = 0;
+    }
+}
+
+impl std::io::Write for Base64Encoder<'_> {
+    fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+        for &byte in data {
+            self.buf[self.len] = byte;
+            self.len += 1;
+            if self.len == 3 {
+                self.flush_block();
+            }
+        }
+        Ok(data.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        if self.len > 0 {
+            self.flush_block();
+        }
+        Ok(())
+    }
+}
+
+impl Drop for Base64Encoder<'_> {
+    fn drop(&mut self) {
+        let _ = std::io::Write::flush(self);
     }
 }
 
