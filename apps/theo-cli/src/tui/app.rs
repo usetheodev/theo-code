@@ -285,7 +285,8 @@ pub enum Msg {
     ApproveDecision,
     RejectDecision,
     // Auth
-    LoginStart(String), // provider name (empty = auto-detect)
+    LoginStart(String), // "device" for device flow
+    LoginWithKey(String), // direct API key
     LoginComplete(String), // success message
     LoginFailed(String), // error message
     LogoutRequest,
@@ -665,7 +666,24 @@ pub fn update(state: &mut TuiState, msg: Msg) {
         // Auth — actual login/logout happens in mod.rs; these are UI state updates
         Msg::LoginStart(_provider) => {
             state.transcript.push(TranscriptEntry::SystemMessage(
-                "🔐 Starting authentication...".to_string(),
+                "🔐 Starting device flow authentication...".to_string(),
+            ));
+        }
+        Msg::LoginWithKey(key) => {
+            // Store API key directly — works via SSH, no browser needed
+            // Safety: single-threaded access at this point in the render loop
+            unsafe { std::env::set_var("OPENAI_API_KEY", &key); }
+            let masked = if key.len() > 8 {
+                format!("{}...{}", &key[..6], &key[key.len()-4..])
+            } else {
+                "***".to_string()
+            };
+            state.status.provider = "OpenAI".to_string();
+            state.transcript.push(TranscriptEntry::SystemMessage(
+                format!("✓ API key set: {masked}"),
+            ));
+            state.transcript.push(TranscriptEntry::SystemMessage(
+                "Provider ready. You can now send tasks to the agent.".to_string(),
             ));
         }
         Msg::LoginComplete(msg) => {
