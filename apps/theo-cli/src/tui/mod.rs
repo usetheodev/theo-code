@@ -8,6 +8,7 @@
 mod app;
 mod autocomplete;
 mod commands;
+pub mod config;
 mod events;
 mod input;
 mod markdown;

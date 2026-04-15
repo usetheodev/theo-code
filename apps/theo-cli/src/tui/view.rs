@@ -119,6 +119,11 @@ pub fn draw(frame: &mut Frame, state: &TuiState) {
         frame.render_widget(dropdown, dropdown_area);
     }
 
+    // Timeline overlay (F4-T04)
+    if state.show_timeline && !state.tool_chain.is_empty() {
+        render_timeline(frame, state);
+    }
+
     // Help overlay (on top of everything)
     if state.show_help {
         render_help_overlay(frame);
@@ -133,13 +138,40 @@ fn render_header(frame: &mut Frame, area: Rect, state: &TuiState) {
         format!("{total_tokens} tok")
     };
 
+    // Budget bar (if tokens used)
+    let budget_pct = if state.budget_tokens_limit > 0 {
+        (state.budget_tokens_used as f64 / state.budget_tokens_limit as f64 * 100.0) as u8
+    } else {
+        0
+    };
+    let budget_str = if budget_pct > 0 {
+        format!(" {budget_pct}%")
+    } else {
+        String::new()
+    };
+
+    // Tab indicators
+    let tabs_str = if state.tabs.len() > 1 {
+        let tabs: Vec<String> = state.tabs.iter().enumerate().map(|(i, t)| {
+            if i == state.active_tab {
+                format!("[{}]", t.name)
+            } else {
+                format!(" {} ", t.name)
+            }
+        }).collect();
+        format!(" {} │", tabs.join(""))
+    } else {
+        String::new()
+    };
+
     let left = format!(
-        " theo · {} · {} ",
+        " theo · {} · {}{}",
         state.status.mode.to_lowercase(),
         state.status.model,
+        tabs_str,
     );
 
-    let right = format!(" {} ", tokens_display);
+    let right = format!(" {}{} ", tokens_display, budget_str);
 
     let header_width = area.width as usize;
     let fill_len = header_width.saturating_sub(left.len() + right.len());
@@ -521,4 +553,56 @@ fn render_session_picker(frame: &mut Frame, picker: &SessionPickerState) {
             .title(" Sessions "));
 
     frame.render_widget(picker_widget, picker_area);
+}
+
+fn render_timeline(frame: &mut Frame, state: &TuiState) {
+    let area = frame.area();
+    let width = 50u16.min(area.width.saturating_sub(4));
+    let height = (state.tool_chain.len() as u16 + 4).min(area.height.saturating_sub(4));
+    let x = (area.width.saturating_sub(width)) / 2;
+    let y = (area.height.saturating_sub(height)) / 2;
+    let timeline_area = Rect::new(x, y, width, height);
+
+    let clear = Block::default().style(Style::default().bg(Color::Black));
+    frame.render_widget(clear, timeline_area);
+
+    let mut lines = vec![
+        Line::from(Span::styled(
+            " Tool Chain (causality)",
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+    ];
+
+    for (i, entry) in state.tool_chain.iter().enumerate() {
+        let (icon, color) = match entry.status {
+            super::app::ToolCardStatus::Succeeded => ("✓", Color::Green),
+            super::app::ToolCardStatus::Failed => ("✗", Color::Red),
+            super::app::ToolCardStatus::Running => ("⠋", Color::Yellow),
+        };
+        let duration = entry.duration_ms
+            .map(|ms| format!(" ({ms}ms)"))
+            .unwrap_or_default();
+        let arrow = if i > 0 { " → " } else { "   " };
+        lines.push(Line::from(vec![
+            Span::styled(arrow, Style::default().fg(Color::DarkGray)),
+            Span::styled(format!("{icon} "), Style::default().fg(color)),
+            Span::styled(entry.tool_name.clone(), Style::default().fg(Color::White)),
+            Span::styled(duration, Style::default().fg(Color::DarkGray)),
+        ]));
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        " Press t to close",
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    let timeline = Paragraph::new(lines)
+        .block(Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Cyan))
+            .title(" Timeline "));
+
+    frame.render_widget(timeline, timeline_area);
 }
