@@ -473,7 +473,7 @@ impl OpenAIAuth {
             }
 
             let access_token = dt.access_token
-                .ok_or_else(|| AuthError::OAuth("device flow: missing access_token".to_string()))?;
+                .ok_or_else(|| AuthError::OAuth(format!("device flow: missing access_token in response: {body}")))?;
 
             let account_id = dt.id_token.as_deref().and_then(extract_account_id_from_jwt);
             let expires_at = dt.expires_in.map(|secs| now_secs() + secs);
