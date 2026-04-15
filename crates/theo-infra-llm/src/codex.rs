@@ -264,12 +264,15 @@ pub fn from_codex_stream(stream_body: &str) -> Option<ChatResponse> {
         }
     }
 
-    // Fallback: accumulate text and tool call deltas
+    // Fallback: accumulate text and tool call deltas.
+    // Also extract usage from response.completed even though output was empty.
     let mut text = String::new();
     let mut tool_calls: Vec<ToolCall> = Vec::new();
     let mut current_tc_name: Option<String> = None;
     let mut current_tc_id: Option<String> = None;
     let mut current_tc_args = String::new();
+    let mut usage: Option<Usage> = None;
+    let mut response_id: Option<String> = None;
 
     for chunk in stream_body.split("\n\n") {
         let lines: Vec<&str> = chunk.lines().collect();
@@ -296,7 +299,6 @@ pub fn from_codex_stream(stream_body: &str) -> Option<ChatResponse> {
                 }
             }
             "response.output_item.added" => {
-                // Flush previous tool call if any
                 if let Some(name) = current_tc_name.take() {
                     tool_calls.push(ToolCall::new(
                         current_tc_id.take().unwrap_or_default(),
@@ -319,6 +321,19 @@ pub fn from_codex_stream(stream_body: &str) -> Option<ChatResponse> {
                     current_tc_args.push_str(d);
                 }
             }
+            "response.completed" => {
+                let resp = json.get("response").unwrap_or(&json);
+                if let Some(u) = resp.get("usage") {
+                    let inp = u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                    let out = u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                    usage = Some(Usage {
+                        prompt_tokens: inp,
+                        completion_tokens: out,
+                        total_tokens: inp + out,
+                    });
+                }
+                response_id = resp.get("id").and_then(|i| i.as_str()).map(String::from);
+            }
             _ => {}
         }
     }
@@ -338,7 +353,7 @@ pub fn from_codex_stream(stream_body: &str) -> Option<ChatResponse> {
 
     let has_tool_calls = !tool_calls.is_empty();
     Some(ChatResponse {
-        id: None,
+        id: response_id,
         choices: vec![Choice {
             index: 0,
             message: ChoiceMessage {
@@ -352,7 +367,7 @@ pub fn from_codex_stream(stream_body: &str) -> Option<ChatResponse> {
             },
             finish_reason: Some(if has_tool_calls { "tool_calls" } else { "stop" }.to_string()),
         }],
-        usage: None,
+        usage,
     })
 }
 
