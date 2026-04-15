@@ -295,12 +295,7 @@ mod tests {
         let result = AgentResult {
             success: false,
             summary: "test".to_string(),
-            files_edited: vec![],
-            iterations_used: 0,
-            was_streamed: false,
-            tokens_used: 0,
-            input_tokens: 0,
-            output_tokens: 0,
+            ..Default::default()
         };
         assert!(!result.success);
     }
