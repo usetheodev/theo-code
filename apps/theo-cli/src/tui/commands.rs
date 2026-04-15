@@ -1,6 +1,7 @@
 //! Slash command processing for TUI mode.
 //!
-//! Handles /help, /clear, /status, /export, /mode commands inline.
+//! Full command set: /help /status /clear /export /mode /quit /login /logout
+//! /memory /skills /timeline /theme /tab /history /model /sidebar
 
 use super::app::{Msg, TuiState, TranscriptEntry, ToastLevel};
 
@@ -14,18 +15,24 @@ pub fn process_command(input: &str, state: &TuiState) -> Option<Vec<Msg>> {
 
     let parts: Vec<&str> = trimmed.splitn(2, ' ').collect();
     let cmd = parts[0].to_lowercase();
-    let _arg = parts.get(1).copied().unwrap_or("");
+    let arg = parts.get(1).copied().unwrap_or("");
 
     match cmd.as_str() {
+        // --- Core ---
         "/help" | "/h" | "/?" => {
             Some(vec![Msg::ToggleHelp])
         }
-        "/clear" => {
+        "/quit" | "/exit" | "/q" => {
+            Some(vec![Msg::Quit])
+        }
+        "/clear" | "/cls" => {
             Some(vec![Msg::ClearTranscript])
         }
+
+        // --- Status & info ---
         "/status" | "/s" => {
             let status_text = format!(
-                "Provider: {} | Model: {} | Mode: {} | Phase: {} | Iteration: {}/{} | Tokens: {}in/{}out",
+                "Provider: {} | Model: {} | Mode: {} | Phase: {} | Iter: {}/{} | Tokens: {}in/{}out",
                 state.status.provider,
                 state.status.model,
                 state.status.mode,
@@ -37,26 +44,65 @@ pub fn process_command(input: &str, state: &TuiState) -> Option<Vec<Msg>> {
             );
             Some(vec![Msg::ShowToast(status_text, ToastLevel::Info)])
         }
+
+        // --- Auth ---
+        "/login" => {
+            Some(vec![Msg::LoginStart(arg.to_string())])
+        }
+        "/logout" => {
+            Some(vec![Msg::LogoutRequest])
+        }
+
+        // --- Mode & model ---
+        "/mode" => {
+            if arg.is_empty() {
+                Some(vec![Msg::CycleMode])
+            } else {
+                Some(vec![Msg::SetMode(arg.to_string())])
+            }
+        }
+        "/model" => {
+            Some(vec![Msg::ToggleModelPicker])
+        }
+
+        // --- Session ---
         "/export" => {
             Some(vec![Msg::ExportSession])
-        }
-        "/mode" => {
-            Some(vec![Msg::CycleMode])
-        }
-        "/quit" | "/exit" | "/q" => {
-            Some(vec![Msg::Quit])
-        }
-        "/timeline" | "/chain" => {
-            Some(vec![Msg::ToggleTimeline])
-        }
-        "/theme" => {
-            Some(vec![Msg::ToggleThemePicker])
         }
         "/tab" | "/new" => {
             Some(vec![Msg::NewTab])
         }
+        "/close" => {
+            Some(vec![Msg::CloseTab])
+        }
+
+        // --- Memory ---
+        "/memory" | "/mem" => {
+            Some(vec![Msg::MemoryCommand(arg.to_string())])
+        }
+
+        // --- Skills ---
+        "/skills" => {
+            Some(vec![Msg::SkillsCommand])
+        }
+
+        // --- Visual ---
+        "/timeline" | "/chain" => {
+            Some(vec![Msg::ToggleTimeline])
+        }
+        "/theme" => {
+            if arg.is_empty() {
+                Some(vec![Msg::ToggleThemePicker])
+            } else {
+                Some(vec![Msg::SetTheme(arg.to_string())])
+            }
+        }
+        "/sidebar" | "/panel" => {
+            Some(vec![Msg::ToggleSidebar])
+        }
+
+        // --- Search ---
         "/history" => {
-            // Search across all saved sessions
             let sessions_dir = std::path::PathBuf::from(
                 std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string())
             ).join(".config/theo/sessions");
@@ -68,7 +114,7 @@ pub fn process_command(input: &str, state: &TuiState) -> Option<Vec<Msg>> {
                             if let Ok(msgs) = serde_json::from_str::<Vec<serde_json::Value>>(&data) {
                                 for msg in &msgs {
                                     if let Some(content) = msg.get("content").and_then(|v| v.as_str()) {
-                                        if !_arg.is_empty() && content.to_lowercase().contains(&_arg.to_lowercase()) {
+                                        if !arg.is_empty() && content.to_lowercase().contains(&arg.to_lowercase()) {
                                             found.push(format!("  {}", &content[..content.len().min(80)]));
                                         }
                                     }
@@ -80,7 +126,7 @@ pub fn process_command(input: &str, state: &TuiState) -> Option<Vec<Msg>> {
             }
             if found.is_empty() {
                 Some(vec![Msg::ShowToast(
-                    if _arg.is_empty() { "Usage: /history <query>".into() } else { "No matches found".into() },
+                    if arg.is_empty() { "Usage: /history <query>".into() } else { "No matches found".into() },
                     ToastLevel::Info,
                 )])
             } else {
@@ -88,6 +134,11 @@ pub fn process_command(input: &str, state: &TuiState) -> Option<Vec<Msg>> {
                 Some(vec![Msg::ShowToast(summary, ToastLevel::Info)])
             }
         }
+        "/search" | "/find" => {
+            Some(vec![Msg::SearchStart])
+        }
+
+        // --- Unknown ---
         _ => {
             Some(vec![Msg::ShowToast(
                 format!("Unknown command: {cmd}. Try /help"),

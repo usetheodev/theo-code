@@ -64,6 +64,14 @@ pub fn slash_commands() -> Vec<Candidate> {
         Candidate { text: "/theme".into(), description: "Change color theme".into(), kind: CandidateKind::SlashCommand },
         Candidate { text: "/tab".into(), description: "Open new session tab".into(), kind: CandidateKind::SlashCommand },
         Candidate { text: "/history".into(), description: "Search across all sessions".into(), kind: CandidateKind::SlashCommand },
+        Candidate { text: "/login".into(), description: "Authenticate with LLM provider".into(), kind: CandidateKind::SlashCommand },
+        Candidate { text: "/logout".into(), description: "Clear stored auth tokens".into(), kind: CandidateKind::SlashCommand },
+        Candidate { text: "/memory".into(), description: "Manage project memories (list/search/delete)".into(), kind: CandidateKind::SlashCommand },
+        Candidate { text: "/skills".into(), description: "List available skills".into(), kind: CandidateKind::SlashCommand },
+        Candidate { text: "/model".into(), description: "Switch LLM model".into(), kind: CandidateKind::SlashCommand },
+        Candidate { text: "/sidebar".into(), description: "Toggle sidebar panel".into(), kind: CandidateKind::SlashCommand },
+        Candidate { text: "/search".into(), description: "Search in transcript (Ctrl+F)".into(), kind: CandidateKind::SlashCommand },
+        Candidate { text: "/close".into(), description: "Close current tab".into(), kind: CandidateKind::SlashCommand },
     ]
 }
 

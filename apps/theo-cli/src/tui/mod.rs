@@ -202,6 +202,99 @@ pub async fn run(
                     other => other,
                 }
             };
+            // Handle IO-bound commands before update
+            match &msg {
+                Msg::LoginStart(provider) => {
+                    let tx = msg_tx.clone();
+                    let provider = provider.clone();
+                    tokio::spawn(async move {
+                        let auth = theo_infra_auth::OpenAIAuth::with_default_store();
+                        match auth.start_device_flow().await {
+                            Ok(code) => {
+                                let _ = tx.send(Msg::ShowToast(
+                                    format!("Go to {} and enter: {}", code.verification_uri, code.user_code),
+                                    app::ToastLevel::Info,
+                                )).await;
+                                match auth.poll_device_flow(&code).await {
+                                    Ok(_tokens) => {
+                                        let _ = tx.send(Msg::LoginComplete("Logged in via OpenAI".into())).await;
+                                    }
+                                    Err(e) => {
+                                        let _ = tx.send(Msg::LoginFailed(e.to_string())).await;
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                let _ = tx.send(Msg::LoginFailed(e.to_string())).await;
+                            }
+                        }
+                    });
+                }
+                Msg::MemoryCommand(arg) => {
+                    let tx = msg_tx.clone();
+                    let project_dir = project_dir.clone();
+                    let arg = arg.clone();
+                    tokio::spawn(async move {
+                        let memory_root = dirs_path().join("memory");
+                        let store = theo_tooling::memory::FileMemoryStore::for_project(&memory_root, &project_dir);
+                        let result = if arg.is_empty() || arg == "list" {
+                            match store.list().await {
+                                Ok(memories) if memories.is_empty() => "No memories for this project.".to_string(),
+                                Ok(memories) => {
+                                    memories.iter()
+                                        .map(|m| format!("  {}: {}", m.key, m.value))
+                                        .collect::<Vec<_>>()
+                                        .join("\n")
+                                }
+                                Err(e) => format!("Error: {e}"),
+                            }
+                        } else if arg.starts_with("search ") {
+                            let query = arg.strip_prefix("search ").unwrap_or("");
+                            match store.search(query).await {
+                                Ok(results) if results.is_empty() => format!("No memories matching '{query}'"),
+                                Ok(results) => results.iter()
+                                    .map(|m| format!("  {}: {}", m.key, m.value))
+                                    .collect::<Vec<_>>()
+                                    .join("\n"),
+                                Err(e) => format!("Error: {e}"),
+                            }
+                        } else if arg.starts_with("delete ") {
+                            let key = arg.strip_prefix("delete ").unwrap_or("");
+                            match store.delete(key).await {
+                                Ok(true) => format!("Deleted: {key}"),
+                                Ok(false) => format!("Not found: {key}"),
+                                Err(e) => format!("Error: {e}"),
+                            }
+                        } else {
+                            "Usage: /memory [list|search <q>|delete <key>]".to_string()
+                        };
+                        let _ = tx.send(Msg::ShowToast(result, app::ToastLevel::Info)).await;
+                    });
+                }
+                Msg::SkillsCommand => {
+                    let project_dir = project_dir.clone();
+                    let mut registry = theo_agent_runtime::skill::SkillRegistry::new();
+                    registry.load_bundled();
+                    let skills_dir = project_dir.join(".theo").join("skills");
+                    if skills_dir.exists() {
+                        registry.load_from_dir(&skills_dir);
+                    }
+                    let skills = registry.list();
+                    if skills.is_empty() {
+                        app::update(&mut state, Msg::ShowToast("No skills available.".into(), app::ToastLevel::Info));
+                    } else {
+                        let list: Vec<String> = skills.iter()
+                            .map(|s| format!("  {} — {}", s.name, s.trigger))
+                            .collect();
+                        app::update(&mut state, Msg::ShowToast(
+                            format!("{} skills:\n{}", skills.len(), list.join("\n")),
+                            app::ToastLevel::Info,
+                        ));
+                    }
+                }
+                _ => {}
+            }
+
             app::update(&mut state, msg);
 
             // Trigger autocomplete update after any input change
