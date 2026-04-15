@@ -358,6 +358,9 @@ fn cmd_headless(
             config.system_prompt = lean;
         }
 
+        // Headless mode: use aggressive retry to survive rate limits
+        config.aggressive_retry = true;
+
         let registry = theo_tooling::registry::create_default_registry();
         let agent = theo_agent_runtime::AgentLoop::new(config, registry);
 

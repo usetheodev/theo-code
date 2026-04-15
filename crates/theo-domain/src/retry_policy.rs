@@ -49,6 +49,17 @@ impl RetryPolicy {
         }
     }
 
+    /// Aggressive retry policy for benchmark/headless mode.
+    /// 5 retries, 10s base, 120s max — survives short rate limit windows.
+    pub fn benchmark() -> Self {
+        Self {
+            max_retries: 5,
+            base_delay_ms: 10_000,
+            max_delay_ms: 120_000,
+            jitter: true,
+        }
+    }
+
     /// Default retry policy for tool execution.
     /// 2 retries, 200ms base, 5000ms max, jitter enabled.
     pub fn default_tool() -> Self {

@@ -585,7 +585,11 @@ impl AgentRunEngine {
             let run_id_for_stream = self.run.run_id.as_str().to_string();
 
             // LLM call with retry for retryable errors (429, 503, 504, network)
-            let retry_policy = theo_domain::retry_policy::RetryPolicy::default_llm();
+            let retry_policy = if self.config.aggressive_retry {
+                theo_domain::retry_policy::RetryPolicy::benchmark()
+            } else {
+                theo_domain::retry_policy::RetryPolicy::default_llm()
+            };
             let max_retries = retry_policy.max_retries;
             let mut llm_result = None;
 
