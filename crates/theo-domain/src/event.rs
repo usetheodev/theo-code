@@ -28,6 +28,9 @@ pub enum EventType {
     ReasoningDelta,
     ContentDelta,
 
+    // Streaming — tool call stdout/stderr lines (for live TUI display)
+    ToolCallStdoutDelta,
+
     // Task management
     TodoUpdated,
 }
@@ -48,13 +51,14 @@ impl std::fmt::Display for EventType {
             EventType::Error => write!(f, "Error"),
             EventType::ReasoningDelta => write!(f, "ReasoningDelta"),
             EventType::ContentDelta => write!(f, "ContentDelta"),
+            EventType::ToolCallStdoutDelta => write!(f, "ToolCallStdoutDelta"),
             EventType::TodoUpdated => write!(f, "TodoUpdated"),
         }
     }
 }
 
 /// All EventType variants for iteration in tests.
-pub const ALL_EVENT_TYPES: [EventType; 14] = [
+pub const ALL_EVENT_TYPES: [EventType; 15] = [
     EventType::TaskCreated,
     EventType::TaskStateChanged,
     EventType::ToolCallQueued,
@@ -68,6 +72,7 @@ pub const ALL_EVENT_TYPES: [EventType; 14] = [
     EventType::Error,
     EventType::ReasoningDelta,
     EventType::ContentDelta,
+    EventType::ToolCallStdoutDelta,
     EventType::TodoUpdated,
 ];
 
@@ -128,7 +133,9 @@ mod tests {
             "ToolCallQueued", "ToolCallDispatched", "ToolCallCompleted",
             "RunInitialized", "RunStateChanged",
             "LlmCallStart", "LlmCallEnd", "BudgetExceeded", "Error",
+            "ReasoningDelta", "ContentDelta", "ToolCallStdoutDelta", "TodoUpdated",
         ];
+        assert_eq!(ALL_EVENT_TYPES.len(), expected.len(), "ALL_EVENT_TYPES and expected must have same length");
         for (et, name) in ALL_EVENT_TYPES.iter().zip(expected.iter()) {
             assert_eq!(format!("{}", et), *name);
         }

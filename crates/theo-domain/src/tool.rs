@@ -151,6 +151,11 @@ pub struct ToolContext {
     pub project_dir: PathBuf,
     /// Code intelligence provider (injected by RunEngine if available).
     pub graph_context: Option<Arc<dyn GraphContextProvider>>,
+    /// Optional channel for streaming stdout lines during tool execution.
+    /// If Some, tools that support streaming (e.g., BashTool) send lines here
+    /// for live display in the TUI. If None, tools execute normally.
+    /// The Tool trait signature is NOT affected — this is a lateral channel.
+    pub stdout_tx: Option<tokio::sync::mpsc::Sender<String>>,
 }
 
 impl std::fmt::Debug for ToolContext {
@@ -160,6 +165,7 @@ impl std::fmt::Debug for ToolContext {
             .field("call_id", &self.call_id)
             .field("project_dir", &self.project_dir)
             .field("graph_context", &self.graph_context.as_ref().map(|_| "..."))
+            .field("stdout_tx", &self.stdout_tx.as_ref().map(|_| "Some(...)"))
             .finish()
     }
 }
@@ -175,6 +181,7 @@ impl ToolContext {
             abort: rx,
             project_dir,
             graph_context: None,
+            stdout_tx: None,
         }
     }
 }

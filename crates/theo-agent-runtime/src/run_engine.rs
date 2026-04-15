@@ -550,6 +550,22 @@ impl AgentRunEngine {
                     let tokens = resp.usage.as_ref().map(|u| u.total_tokens as u64).unwrap_or(0);
                     self.budget_enforcer.record_tokens(tokens);
                     self.metrics.record_llm_call(llm_duration, tokens);
+
+                    // Publish LlmCallEnd so TUI can update token counts in StatusLine
+                    let (tokens_in, tokens_out) = resp.usage.as_ref()
+                        .map(|u| (u.prompt_tokens as u64, u.completion_tokens as u64))
+                        .unwrap_or((0, 0));
+                    self.event_bus.publish(DomainEvent::new(
+                        EventType::LlmCallEnd,
+                        self.run.run_id.as_str(),
+                        serde_json::json!({
+                            "iteration": iteration,
+                            "tokens_in": tokens_in,
+                            "tokens_out": tokens_out,
+                            "duration_ms": llm_duration,
+                        }),
+                    ));
+
                     resp
                 }
                 Err(e) => {
@@ -1039,6 +1055,7 @@ impl AgentRunEngine {
                                 abort: abort_rx.clone(),
                                 project_dir: self.project_dir.clone(),
                                 graph_context: self.graph_context.clone(),
+                                stdout_tx: None,
                             };
 
                             futures.push(async move {
@@ -1196,6 +1213,7 @@ impl AgentRunEngine {
                     abort: abort_rx.clone(),
                     project_dir: self.project_dir.clone(),
                     graph_context: self.graph_context.clone(),
+                    stdout_tx: None, // TODO(F1-T04): inject broadcast tx here
                 };
 
                 let tool_result = self.tool_call_manager
@@ -1384,6 +1402,7 @@ impl AgentRunEngine {
                 serde_json::json!({
                     "from": format!("{:?}", from),
                     "to": format!("{:?}", target),
+                    "max_iterations": self.config.max_iterations,
                 }),
             ));
         }
@@ -1695,6 +1714,23 @@ mod tests {
             .collect();
         // Initialized→Planning, Planning→Executing, Executing→Evaluating, Evaluating→Converged
         assert_eq!(state_events.len(), 4);
+    }
+
+    #[test]
+    fn run_state_changed_has_max_iterations() {
+        let setup = TestSetup::new();
+        let mut engine = setup.create_engine("test");
+
+        engine.transition_run(RunState::Planning);
+
+        let events = setup.listener.captured();
+        let state_changed = events.iter()
+            .find(|e| e.event_type == EventType::RunStateChanged)
+            .expect("RunStateChanged event must be published");
+        assert!(
+            state_changed.payload.get("max_iterations").is_some(),
+            "RunStateChanged must include max_iterations"
+        );
     }
 
     // -----------------------------------------------------------------------
