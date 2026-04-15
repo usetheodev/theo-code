@@ -168,6 +168,7 @@ pub enum Msg {
     SearchNext,
     SearchPrev,
     SearchClose,
+    AgentComplete(String, bool), // (summary, success)
 }
 
 // ---------------------------------------------------------------------------
@@ -317,6 +318,16 @@ pub fn update(state: &mut TuiState, msg: Msg) {
             state.search_mode = false;
             state.search_query.clear();
             state.search_results.clear();
+        }
+        Msg::AgentComplete(summary, success) => {
+            state.agent_running = false;
+            state.streaming_assistant = false;
+            if !summary.is_empty() {
+                let icon = if success { "✓" } else { "✗" };
+                state.transcript.push(TranscriptEntry::SystemMessage(
+                    format!("{icon} {summary}"),
+                ));
+            }
         }
     }
 }
