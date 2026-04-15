@@ -65,6 +65,9 @@ pub async fn input_loop(tx: mpsc::Sender<Msg>) {
                     // Model picker
                     (KeyCode::Char('m'), m) if m.contains(KeyModifiers::CONTROL) => Some(Msg::ToggleModelPicker),
 
+                    // Copy mode (toggle native mouse selection)
+                    (KeyCode::Char('y'), m) if m.contains(KeyModifiers::CONTROL) => Some(Msg::ToggleCopyMode),
+
                     // Timeline toggle (only when input is empty)
                     // Note: 't' with no modifier goes to InputChar normally,
                     // timeline toggles via /timeline command or sidebar

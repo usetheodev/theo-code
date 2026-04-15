@@ -335,6 +335,7 @@ fn render_status_line(frame: &mut Frame, area: Rect, state: &TuiState) {
     };
 
     let ctrl_c_hint = if state.agent_running { "Ctrl+C interrupt" } else { "Ctrl+C sair" };
+    let copy_indicator = if state.copy_mode { " │ 📋 SELECT" } else { "" };
 
     let status_line = Line::from(vec![
         Span::styled(format!(" {} ", state.status.mode), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
@@ -342,7 +343,7 @@ fn render_status_line(frame: &mut Frame, area: Rect, state: &TuiState) {
         Span::styled(phase.as_str(), Style::default().fg(phase_color)),
         Span::styled(format!(" │ {}/{} iter", state.status.iteration, state.status.max_iterations), Style::default().fg(Color::DarkGray)),
         Span::styled(&tools_str, Style::default().fg(Color::Yellow)),
-        Span::styled(format!(" │ Esc ajuda  {ctrl_c_hint}"), Style::default().fg(Color::DarkGray)),
+        Span::styled(format!("{copy_indicator} │ Esc ajuda  {ctrl_c_hint}"), Style::default().fg(Color::DarkGray)),
     ]);
 
     let status = Paragraph::new(status_line)
@@ -378,6 +379,7 @@ fn render_help_overlay(frame: &mut Frame) {
         Line::from(vec![Span::styled(" Ctrl+T     ", Style::default().fg(Color::Yellow)), Span::raw("New session tab")]),
         Line::from(vec![Span::styled(" Ctrl+W     ", Style::default().fg(Color::Yellow)), Span::raw("Close tab")]),
         Line::from(vec![Span::styled(" Ctrl+Up    ", Style::default().fg(Color::Yellow)), Span::raw("Restore last prompt")]),
+        Line::from(vec![Span::styled(" Ctrl+Y     ", Style::default().fg(Color::Yellow)), Span::raw("Toggle copy/select mode")]),
         Line::from(vec![Span::styled(" PgUp/PgDn  ", Style::default().fg(Color::Yellow)), Span::raw("Scroll transcript")]),
         Line::from(""),
         Line::from(Span::styled(" Commands", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))),
@@ -393,6 +395,9 @@ fn render_help_overlay(frame: &mut Frame) {
         Line::from(vec![Span::styled(" /theme     ", Style::default().fg(Color::Yellow)), Span::raw("Change color theme")]),
         Line::from(vec![Span::styled(" /timeline  ", Style::default().fg(Color::Yellow)), Span::raw("Show tool chain causality")]),
         Line::from(vec![Span::styled(" /history   ", Style::default().fg(Color::Yellow)), Span::raw("Search across all sessions")]),
+        Line::from(vec![Span::styled(" /copy      ", Style::default().fg(Color::Yellow)), Span::raw("Copy last response to clipboard")]),
+        Line::from(vec![Span::styled(" /copy code ", Style::default().fg(Color::Yellow)), Span::raw("Copy last code block")]),
+        Line::from(vec![Span::styled(" /select    ", Style::default().fg(Color::Yellow)), Span::raw("Toggle mouse selection mode")]),
         Line::from(vec![Span::styled(" /clear     ", Style::default().fg(Color::Yellow)), Span::raw("Clear transcript")]),
         Line::from(vec![Span::styled(" /quit      ", Style::default().fg(Color::Yellow)), Span::raw("Exit")]),
         Line::from(""),
