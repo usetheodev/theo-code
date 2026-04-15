@@ -29,6 +29,25 @@ pub fn draw(frame: &mut Frame, state: &TuiState) {
     render_input(frame, chunks[2], state);
     render_status_line(frame, chunks[3], state);
 
+    // Search bar overlay (above input)
+    if state.search_mode {
+        let search_area = Rect::new(
+            chunks[2].x,
+            chunks[2].y.saturating_sub(1),
+            chunks[2].width,
+            1,
+        );
+        let results_info = if state.search_results.is_empty() {
+            if state.search_query.is_empty() { String::new() } else { " (no matches)".to_string() }
+        } else {
+            format!(" ({}/{})", state.search_current + 1, state.search_results.len())
+        };
+        let search_text = format!("/{}{}", state.search_query, results_info);
+        let search = Paragraph::new(search_text)
+            .style(Style::default().fg(Color::Yellow).bg(Color::Black));
+        frame.render_widget(search, search_area);
+    }
+
     // Help overlay (on top of everything)
     if state.show_help {
         render_help_overlay(frame);

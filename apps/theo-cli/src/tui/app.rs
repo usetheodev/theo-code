@@ -74,6 +74,25 @@ pub struct TuiState {
     pub scroll_locked_to_bottom: bool,
     pub streaming_assistant: bool,
     pub show_help: bool,
+    pub search_mode: bool,
+    pub search_query: String,
+    pub search_results: Vec<usize>, // indices into transcript
+    pub search_current: usize,
+    pub session_picker: Option<SessionPickerState>,
+}
+
+#[derive(Debug)]
+pub struct SessionPickerState {
+    pub sessions: Vec<SessionMeta>,
+    pub selected: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct SessionMeta {
+    pub path: std::path::PathBuf,
+    pub modified: String, // formatted date
+    pub message_count: usize,
+    pub preview: String, // first user message, truncated
 }
 
 impl TuiState {
@@ -109,6 +128,11 @@ impl TuiState {
             scroll_locked_to_bottom: true,
             streaming_assistant: false,
             show_help: false,
+            search_mode: false,
+            search_query: String::new(),
+            search_results: Vec::new(),
+            search_current: 0,
+            session_picker: None,
         }
     }
 }
@@ -138,6 +162,12 @@ pub enum Msg {
     ScrollToBottom,
     ToggleHelp,
     CycleMode,
+    SearchStart,
+    SearchChar(char),
+    SearchBackspace,
+    SearchNext,
+    SearchPrev,
+    SearchClose,
 }
 
 // ---------------------------------------------------------------------------
@@ -254,6 +284,57 @@ pub fn update(state: &mut TuiState, msg: Msg) {
                 "PLAN" => "ASK".to_string(),
                 _ => "AGENT".to_string(),
             };
+        }
+        Msg::SearchStart => {
+            state.search_mode = true;
+            state.search_query.clear();
+            state.search_results.clear();
+            state.search_current = 0;
+        }
+        Msg::SearchChar(c) => {
+            state.search_query.push(c);
+            run_search(state);
+        }
+        Msg::SearchBackspace => {
+            state.search_query.pop();
+            run_search(state);
+        }
+        Msg::SearchNext => {
+            if !state.search_results.is_empty() {
+                state.search_current = (state.search_current + 1) % state.search_results.len();
+            }
+        }
+        Msg::SearchPrev => {
+            if !state.search_results.is_empty() {
+                state.search_current = if state.search_current == 0 {
+                    state.search_results.len() - 1
+                } else {
+                    state.search_current - 1
+                };
+            }
+        }
+        Msg::SearchClose => {
+            state.search_mode = false;
+            state.search_query.clear();
+            state.search_results.clear();
+        }
+    }
+}
+
+fn run_search(state: &mut TuiState) {
+    state.search_results.clear();
+    state.search_current = 0;
+    if state.search_query.is_empty() {
+        return;
+    }
+    let query_lower = state.search_query.to_lowercase();
+    for (i, entry) in state.transcript.iter().enumerate() {
+        let text = match entry {
+            TranscriptEntry::User(t) | TranscriptEntry::Assistant(t) | TranscriptEntry::SystemMessage(t) => t,
+            TranscriptEntry::ToolCard(card) => &card.tool_name,
+        };
+        if text.to_lowercase().contains(&query_lower) {
+            state.search_results.push(i);
         }
     }
 }
