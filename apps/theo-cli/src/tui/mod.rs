@@ -64,6 +64,10 @@ pub async fn run(
     provider_name: String,
     initial_prompt: Option<String>,
 ) -> anyhow::Result<()> {
+    // Ensure log directory exists
+    let _ = std::fs::create_dir_all(dirs_path());
+    tui_log("=== TUI START ===");
+
     // Setup terminal
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();
@@ -122,6 +126,14 @@ pub async fn run(
     loop {
         // Drain all pending messages
         while let Ok(msg) = msg_rx.try_recv() {
+            // Log non-trivial messages
+            match &msg {
+                Msg::Submit(_) | Msg::LoginStart(_) | Msg::LoginComplete(_) | Msg::LoginFailed(_)
+                | Msg::AgentComplete(_, _) | Msg::LoginServer(_) | Msg::LoginWithKey(_) => {
+                    tui_log(&format!("MSG: {:?}", std::mem::discriminant(&msg)));
+                }
+                _ => {}
+            }
             // In search mode, redirect input to search
             let msg = if state.search_mode {
                 match msg {
@@ -169,6 +181,11 @@ pub async fn run(
                 }
             } else {
                 // Normal mode: intercept Submit
+                // Debug: log every message type
+                if matches!(&msg, Msg::Submit(_)) {
+                    let s_content = if let Msg::Submit(ref s) = msg { s.clone() } else { String::new() };
+                    tui_log(&format!("SUBMIT received: s='{}' input_text='{}'", s_content, state.input_text));
+                }
                 match msg {
                     Msg::Submit(ref s) if s.is_empty() && !state.input_text.is_empty() => {
                         let text = state.input_text.clone();
