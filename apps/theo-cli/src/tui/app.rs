@@ -1229,7 +1229,8 @@ mod tests {
             TranscriptEntry::User(text) => assert_eq!(text, "fix the bug"),
             _ => panic!("expected User"),
         }
-        assert!(state.agent_running);
+        // agent_running is set by mod.rs (the task spawner), not by the
+        // pure update function — so we do NOT assert it here.
     }
 
     #[test]

@@ -1,0 +1,61 @@
+{
+  "schema": "theo.smoke.v1",
+  "scenarios_total": 1,
+  "scenarios_passed": 1,
+  "pass_rate": 1.0,
+  "totals": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "iterations": 2,
+    "tool_calls": 1,
+    "llm_calls": 2,
+    "retries": 0,
+    "duration_ms": 3318
+  },
+  "by_category": {
+    "read": {
+      "total": 1,
+      "passed": 1
+    }
+  },
+  "results": [
+    {
+      "id": "01-read-answer",
+      "category": "read",
+      "mode": "agent",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 3.66,
+      "check_passed": true,
+      "check_stderr": "rc=0 stdout='' stderr=''",
+      "headless": {
+        "duration_ms": 3318,
+        "files_edited": [],
+        "iterations": 2,
+        "llm": {
+          "calls": 2,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.3-codex",
+        "provider": "ChatGPT Codex (OAuth)",
+        "schema": "theo.headless.v1",
+        "success": true,
+        "summary": "7",
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "total": 0
+        },
+        "tools": {
+          "success": 1,
+          "total": 1
+        }
+      },
+      "stderr_tail": "[theo] Auto-initialized .theo/theo.md \u2014 run `theo init` for detailed context\n",
+      "workdir": null
+    }
+  ],
+  "timestamp": 1776275616,
+  "theo_bin": "/home/paulo/theo-code/target/release/theo"
+}

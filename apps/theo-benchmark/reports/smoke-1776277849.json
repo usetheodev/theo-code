@@ -1,0 +1,38 @@
+{
+  "schema": "theo.smoke.v1",
+  "scenarios_total": 1,
+  "scenarios_passed": 0,
+  "pass_rate": 0.0,
+  "totals": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "iterations": 0,
+    "tool_calls": 0,
+    "llm_calls": 0,
+    "retries": 0,
+    "duration_ms": 0
+  },
+  "by_category": {
+    "plan": {
+      "total": 1,
+      "passed": 0
+    }
+  },
+  "results": [
+    {
+      "id": "09-plan-mode",
+      "category": "plan",
+      "mode": "plan",
+      "exit_code": -1,
+      "error": "timeout after 240s",
+      "wallclock_secs": 240.04,
+      "check_passed": false,
+      "check_stderr": "",
+      "headless": null,
+      "stderr_tail": "",
+      "workdir": null
+    }
+  ],
+  "timestamp": 1776277849,
+  "theo_bin": "/home/paulo/theo-code/target/release/theo"
+}
