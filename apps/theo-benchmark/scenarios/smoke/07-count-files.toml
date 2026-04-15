@@ -1,0 +1,27 @@
+id = "07-count-files"
+category = "explore"
+description = "Count files matching a glob pattern"
+prompt = "How many .rs files exist under src/? Reply with just the integer."
+mode = "agent"
+timeout_secs = 90
+
+success_check = '''
+echo "$THEO_SUMMARY" | grep -qE "(^|[^0-9])3([^0-9]|$)"
+'''
+
+[[setup_files]]
+path = "src/a.rs"
+content = "pub fn a() {}\n"
+
+[[setup_files]]
+path = "src/b.rs"
+content = "pub fn b() {}\n"
+
+[[setup_files]]
+path = "src/c.rs"
+content = "pub fn c() {}\n"
+
+[[setup_files]]
+path = "src/notes.txt"
+content = "ignore me\n"
+

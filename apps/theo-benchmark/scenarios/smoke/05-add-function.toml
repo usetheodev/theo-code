@@ -1,0 +1,26 @@
+id = "05-add-function"
+category = "add-feature"
+description = "Add a new public function to a file"
+prompt = "Add a public function `square(n: i32) -> i32` to src/math.rs that returns n * n. Keep the existing functions untouched."
+mode = "agent"
+timeout_secs = 120
+
+success_check = '''
+grep -q "fn square" src/math.rs && \
+  grep -q "n \* n" src/math.rs && \
+  grep -q "fn double" src/math.rs && \
+  grep -q "fn triple" src/math.rs
+'''
+
+[[setup_files]]
+path = "src/math.rs"
+content = """
+pub fn double(n: i32) -> i32 {
+    n * 2
+}
+
+pub fn triple(n: i32) -> i32 {
+    n * 3
+}
+"""
+

@@ -154,9 +154,12 @@ Write a complete plan in your assistant message using this structure:
 - <how we verify success: tests, builds, manual checks>
 ```
 
-**Step 3 — Save & Hand Off**
-- Optionally save the plan to `.theo/plans/NN-slug.md` with the `write` tool.
-- Then call `done` with a one-line summary like: "Plan ready. Switch to agent mode to implement."
+**Step 3 — Save & Hand Off (MANDATORY tool calls)**
+After writing the plan as visible markdown text in your assistant message, you MUST do BOTH of the following in the same response or the next iteration:
+1. Call the `write` tool to persist the plan to `.theo/plans/NN-slug.md` (use a sensible NN like `01`, `02`, etc., and a kebab-case slug). The file content must match the markdown plan you wrote.
+2. Call `done` with a one-line summary like: "Plan saved to .theo/plans/NN-slug.md. Switch to agent mode to implement."
+
+Producing the plan text without calling `write` is a failure — the user explicitly needs the file on disk. Producing `write` without `done` is a failure — the harness needs to know you finished.
 
 ## REMEMBER
 The user sees your assistant text. They do not see tool internals. Speak to them in markdown. Plans are documents, not silent tool sequences."#,

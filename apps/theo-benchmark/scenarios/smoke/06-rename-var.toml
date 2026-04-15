@@ -1,0 +1,27 @@
+id = "06-rename-var"
+category = "refactor"
+description = "Rename a variable in a function"
+prompt = "In src/parse.rs, rename the local variable `x` inside `parse_int` to `value`. Do not change anything else in the repo."
+mode = "agent"
+timeout_secs = 150
+
+success_check = '''
+grep -q "let value = s.trim().parse::<i64>" src/parse.rs && \
+  grep -q "Some(value)" src/parse.rs && \
+  grep -q "let x = s.trim().parse::<f64>" src/parse.rs
+'''
+
+[[setup_files]]
+path = "src/parse.rs"
+content = """
+pub fn parse_int(s: &str) -> Option<i64> {
+    let x = s.trim().parse::<i64>().ok()?;
+    Some(x)
+}
+
+pub fn parse_float(s: &str) -> Option<f64> {
+    let x = s.trim().parse::<f64>().ok()?;
+    Some(x)
+}
+"""
+
