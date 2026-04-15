@@ -12,7 +12,7 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Wrap},
 };
 
-use super::app::{TuiState, TranscriptEntry, ToolCardStatus, SessionPickerState};
+use super::app::{TuiState, TranscriptEntry, ToolCardStatus, SessionPickerState, ToastLevel};
 
 /// Draw the full TUI layout.
 pub fn draw(frame: &mut Frame, state: &TuiState) {
@@ -51,6 +51,11 @@ pub fn draw(frame: &mut Frame, state: &TuiState) {
     // Session picker overlay
     if let Some(ref picker) = state.session_picker {
         render_session_picker(frame, picker);
+    }
+
+    // Toast notifications (top-right)
+    if !state.toasts.is_empty() {
+        render_toasts(frame, state);
     }
 
     // Help overlay (on top of everything)
@@ -309,6 +314,37 @@ fn render_help_overlay(frame: &mut Frame) {
             .title(" Help "));
 
     frame.render_widget(help, help_area);
+}
+
+fn render_toasts(frame: &mut Frame, state: &TuiState) {
+    let area = frame.area();
+    let max_width = 50u16.min(area.width.saturating_sub(2));
+
+    for (i, toast) in state.toasts.iter().rev().take(3).enumerate() {
+        let y = 1 + (i as u16 * 2);
+        if y >= area.height.saturating_sub(2) {
+            break;
+        }
+        let x = area.width.saturating_sub(max_width + 1);
+        let toast_area = Rect::new(x, y, max_width, 1);
+
+        let (fg, prefix) = match toast.level {
+            ToastLevel::Info => (Color::Cyan, "ℹ"),
+            ToastLevel::Warning => (Color::Yellow, "⚠"),
+            ToastLevel::Error => (Color::Red, "✗"),
+        };
+
+        let text = format!(" {prefix} {} ", toast.message);
+        let truncated = if text.len() > max_width as usize {
+            format!("{}…", &text[..max_width as usize - 1])
+        } else {
+            text
+        };
+
+        let toast_widget = Paragraph::new(truncated)
+            .style(Style::default().fg(fg).bg(Color::Black));
+        frame.render_widget(toast_widget, toast_area);
+    }
 }
 
 fn render_session_picker(frame: &mut Frame, picker: &SessionPickerState) {

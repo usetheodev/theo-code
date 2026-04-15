@@ -169,9 +169,10 @@ pub async fn run(
             }
         }
 
-        // Cursor blink
+        // Cursor blink + toast cleanup
         if cursor_interval.tick().now_or_never().is_some() {
             app::update(&mut state, Msg::CursorBlink);
+            app::update(&mut state, Msg::DismissExpiredToasts);
         }
 
         // Draw
