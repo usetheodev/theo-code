@@ -42,7 +42,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash /home/paulo/Projetos/usetheo/theo-code/.claude/hooks/block-main-branch.sh",
+            "command": "bash /home/paulo/theo-code/.claude/hooks/block-main-branch.sh",
             "timeout": 5
           }
         ]
@@ -52,7 +52,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash /home/paulo/Projetos/usetheo/theo-code/.claude/hooks/meeting-gate.sh",
+            "command": "bash /home/paulo/theo-code/.claude/hooks/meeting-gate.sh",
             "timeout": 5
           }
         ]
@@ -64,7 +64,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash /home/paulo/Projetos/usetheo/theo-code/.claude/hooks/post-edit-lint.sh",
+            "command": "bash /home/paulo/theo-code/.claude/hooks/post-edit-lint.sh",
             "timeout": 30
           }
         ]

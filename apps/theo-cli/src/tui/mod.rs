@@ -184,10 +184,16 @@ pub async fn run(
                 // Debug: log every message type
                 if matches!(&msg, Msg::Submit(_)) {
                     let s_content = if let Msg::Submit(ref s) = msg { s.clone() } else { String::new() };
-                    tui_log(&format!("SUBMIT received: s='{}' input_text='{}'", s_content, state.input_text));
+                    tui_log(&format!("SUBMIT in normal mode: s='{}' input_text='{}' autocomplete_active={}", s_content, state.input_text, state.autocomplete.active));
+                }
+                // Force close autocomplete on Submit so it doesn't intercept
+                if matches!(&msg, Msg::Submit(_)) && state.autocomplete.active {
+                    state.autocomplete.active = false;
+                    tui_log("Autocomplete was active on Submit — force closed");
                 }
                 match msg {
                     Msg::Submit(ref s) if s.is_empty() && !state.input_text.is_empty() => {
+                        tui_log(&format!("SUBMIT matched: will process '{}'", state.input_text));
                         let text = state.input_text.clone();
                         // Check if it's a slash command
                         if let Some(cmds) = commands::process_command(&text, &state) {

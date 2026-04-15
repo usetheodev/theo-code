@@ -2,7 +2,7 @@
 # MEETING GATE — Bloqueia Edit/Write sem meeting aprovada
 set -euo pipefail
 
-GATE_DIR="/home/paulo/Projetos/usetheo/theo-code/.claude/gate"
+GATE_DIR="/home/paulo/theo-code/.claude/gate"
 STATUS_FILE="$GATE_DIR/status"
 
 INPUT=$(cat)

@@ -386,7 +386,8 @@ pub fn update(state: &mut TuiState, msg: Msg) {
                 state.transcript.push(TranscriptEntry::User(text));
                 state.input_text.clear();
                 state.input_cursor = 0;
-                state.agent_running = true;
+                // NOTE: agent_running is set by mod.rs AFTER spawning the agent
+                // Setting it here would prevent the agent from launching
                 state.streaming_assistant = false;
                 if state.scroll_locked_to_bottom {
                     state.scroll_offset = 0;
