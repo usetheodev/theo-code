@@ -108,8 +108,9 @@ def build_prompt(instance: dict) -> str:
     """Build the prompt for the agent from the SWE-bench instance."""
     issue = instance.get("problem_statement", "")
     hints = instance.get("hints_text", "")
+    fail_to_pass = instance.get("FAIL_TO_PASS", "")
 
-    prompt = f"""You are fixing a bug in an open-source project. Below is the issue report.
+    prompt = f"""Fix this bug. Be FAST and MINIMAL — aim for under 15 iterations.
 
 ## Issue
 
@@ -121,16 +122,31 @@ def build_prompt(instance: dict) -> str:
 
 {hints}
 """
+    if fail_to_pass:
+        prompt += f"""
+## Failing Tests (CRITICAL — your fix MUST make these pass)
+
+{fail_to_pass}
+
+Read these test files FIRST to understand what the expected behavior is.
+The test assertions tell you exactly what the code should do.
+"""
     prompt += """
-## Instructions
+## Strategy (follow this order)
 
-1. Read the relevant source code to understand the bug.
-2. Make the minimal change to fix the issue.
-3. Do NOT add new tests or modify test files.
-4. Do NOT refactor unrelated code.
-5. Your changes should make the failing tests pass.
+1. Read the failing test file(s) to understand WHAT the test expects.
+2. Use grep to find the function/class being tested in the source code.
+3. Read the relevant source code section (not the whole file).
+4. Make the MINIMAL change to fix the bug. One-line fixes are ideal.
+5. Verify your edit by re-reading the changed section.
+6. Call done immediately. Do NOT run tests (no test environment available).
 
-Fix the bug now."""
+CRITICAL RULES:
+- Do NOT add new tests or modify test files.
+- Do NOT refactor unrelated code.
+- Do NOT create new files.
+- Prefer editing existing code over adding new code.
+- If the fix is a one-liner, just do it. Don't overthink."""
 
     return prompt
 
