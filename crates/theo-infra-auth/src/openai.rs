@@ -79,10 +79,33 @@ struct TokenResponse {
 #[derive(Deserialize)]
 struct DeviceCodeResponse {
     user_code: String,
-    verification_uri: String,
-    device_code: String,
+    #[serde(default)]
+    verification_uri: Option<String>,
+    /// OpenAI returns `device_auth_id` instead of RFC 8628 `device_code`
+    #[serde(alias = "device_code")]
+    device_auth_id: Option<String>,
+    #[serde(default)]
+    device_code: Option<String>,
+    /// Can be string or number depending on API version
+    #[serde(deserialize_with = "deserialize_interval")]
     interval: Option<u64>,
+    #[serde(default)]
     expires_in: Option<u64>,
+    #[serde(default)]
+    expires_at: Option<String>,
+}
+
+fn deserialize_interval<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::Deserialize;
+    let v = Option::<serde_json::Value>::deserialize(deserializer)?;
+    match v {
+        Some(serde_json::Value::Number(n)) => Ok(n.as_u64()),
+        Some(serde_json::Value::String(s)) => Ok(s.parse().ok()),
+        _ => Ok(None),
+    }
 }
 
 #[derive(Deserialize)]
@@ -310,10 +333,10 @@ impl OpenAIAuth {
         let resp = self
             .http
             .post(DEVICE_CODE_URL)
-            .form(&[
-                ("client_id", CLIENT_ID),
-                ("scope", SCOPES),
-            ])
+            .json(&serde_json::json!({
+                "client_id": CLIENT_ID,
+                "scope": SCOPES,
+            }))
             .send()
             .await?;
 
@@ -326,12 +349,27 @@ impl OpenAIAuth {
         let dc: DeviceCodeResponse = resp.json().await
             .map_err(|e| AuthError::OAuth(format!("parse device code: {e}")))?;
 
+        // OpenAI returns device_auth_id instead of device_code
+        let device_code = dc.device_code
+            .or(dc.device_auth_id)
+            .unwrap_or_default();
+
+        // Verification URI may not be in response — use hardcoded OpenAI URL
+        let verification_uri = dc.verification_uri
+            .unwrap_or_else(|| "https://auth.openai.com/activate".to_string());
+
+        // expires_in from expires_at if needed
+        let expires_in = dc.expires_in.unwrap_or_else(|| {
+            // Parse expires_at if available, default to 600s
+            600
+        });
+
         Ok(DeviceCode {
             user_code: dc.user_code,
-            verification_uri: dc.verification_uri,
-            device_code: dc.device_code,
+            verification_uri,
+            device_code,
             interval: dc.interval.unwrap_or(5),
-            expires_in: dc.expires_in.unwrap_or(600),
+            expires_in,
         })
     }
 
@@ -351,11 +389,11 @@ impl OpenAIAuth {
             let resp = self
                 .http
                 .post(DEVICE_TOKEN_URL)
-                .form(&[
-                    ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
-                    ("device_code", &device_code.device_code),
-                    ("client_id", CLIENT_ID),
-                ])
+                .json(&serde_json::json!({
+                    "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+                    "device_code": &device_code.device_code,
+                    "client_id": CLIENT_ID,
+                }))
                 .send()
                 .await?;
 
