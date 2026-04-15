@@ -108,13 +108,42 @@ where
     }
 }
 
+/// Token response from the device auth token endpoint.
+/// Handles both the old format (flat error string) and new format (error object).
 #[derive(Deserialize)]
 struct DeviceTokenResponse {
     access_token: Option<String>,
     refresh_token: Option<String>,
     expires_in: Option<u64>,
     id_token: Option<String>,
+    /// Old format: "authorization_pending" / New format: {"message":"...", "code":"..."}
+    #[serde(default, deserialize_with = "deserialize_error_field")]
     error: Option<String>,
+}
+
+fn deserialize_error_field<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::Deserialize;
+    let v = Option::<serde_json::Value>::deserialize(deserializer)?;
+    match v {
+        None => Ok(None),
+        Some(serde_json::Value::String(s)) => Ok(Some(s)),
+        Some(serde_json::Value::Object(obj)) => {
+            // New API: {"message": "...", "code": "deviceauth_authorization_pending"}
+            let code = obj.get("code").and_then(|v| v.as_str()).unwrap_or("");
+            let msg = obj.get("message").and_then(|v| v.as_str()).unwrap_or("");
+            if !code.is_empty() {
+                Ok(Some(code.to_string()))
+            } else if !msg.is_empty() {
+                Ok(Some(msg.to_string()))
+            } else {
+                Ok(Some("unknown_error".to_string()))
+            }
+        }
+        Some(other) => Ok(Some(other.to_string())),
+    }
 }
 
 impl OpenAIAuth {
@@ -390,24 +419,50 @@ impl OpenAIAuth {
                 .http
                 .post(DEVICE_TOKEN_URL)
                 .json(&serde_json::json!({
-                    "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
-                    "device_code": &device_code.device_code,
+                    "device_auth_id": &device_code.device_code,
+                    "user_code": &device_code.user_code,
                     "client_id": CLIENT_ID,
                 }))
                 .send()
                 .await?;
 
-            let dt: DeviceTokenResponse = resp.json().await
-                .map_err(|e| AuthError::OAuth(format!("parse device token: {e}")))?;
+            // Try to parse as token response; on failure check if error response
+            let body = resp.text().await
+                .map_err(|e| AuthError::OAuth(format!("read response: {e}")))?;
+
+            let dt: DeviceTokenResponse = match serde_json::from_str(&body) {
+                Ok(dt) => dt,
+                Err(_) => {
+                    // May be an error-only response with different shape
+                    if let Ok(err_obj) = serde_json::from_str::<serde_json::Value>(&body) {
+                        let code = err_obj.get("error")
+                            .and_then(|e| e.get("code"))
+                            .and_then(|c| c.as_str())
+                            .unwrap_or("");
+                        match code {
+                            "deviceauth_authorization_pending" => continue,
+                            "deviceauth_user_code_expired" => return Err(AuthError::DeviceExpired),
+                            _ => {
+                                let msg = err_obj.get("error")
+                                    .and_then(|e| e.get("message"))
+                                    .and_then(|m| m.as_str())
+                                    .unwrap_or(&body);
+                                return Err(AuthError::OAuth(format!("device token error: {msg}")));
+                            }
+                        }
+                    }
+                    return Err(AuthError::OAuth(format!("unexpected response: {body}")));
+                }
+            };
 
             if let Some(error) = &dt.error {
                 match error.as_str() {
-                    "authorization_pending" => continue,
+                    "authorization_pending" | "deviceauth_authorization_pending" => continue,
                     "slow_down" => {
                         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                         continue;
                     }
-                    "expired_token" => return Err(AuthError::DeviceExpired),
+                    "expired_token" | "deviceauth_user_code_expired" => return Err(AuthError::DeviceExpired),
                     _ => return Err(AuthError::OAuth(format!("device flow error: {error}"))),
                 }
             }
