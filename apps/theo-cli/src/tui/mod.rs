@@ -32,7 +32,6 @@ use tokio::sync::mpsc;
 use theo_agent_runtime::config::{AgentConfig, AgentMode, system_prompt_for_mode};
 use theo_agent_runtime::event_bus::EventBus;
 #[allow(deprecated)]
-use theo_agent_runtime::events::PrintEventSink;
 use theo_agent_runtime::AgentLoop;
 use theo_infra_llm::types::Message;
 use theo_tooling::registry::create_default_registry;
@@ -475,8 +474,7 @@ pub async fn run(
 
                     let registry = create_default_registry();
                     #[allow(deprecated)]
-                    let event_sink = Arc::new(PrintEventSink);
-                    let agent = AgentLoop::new(cfg.clone(), registry, event_sink);
+                    let agent = AgentLoop::new(cfg.clone(), registry);
 
                     tui_log(&format!("AgentLoop created, calling run_with_history..."));
                     tui_log(&format!("  api_key len: {}", cfg.api_key.as_ref().map(|k| k.len()).unwrap_or(0)));
