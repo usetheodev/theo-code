@@ -210,7 +210,7 @@ pub async fn run(
                                     match auth.start_device_flow().await {
                                         Ok(code) => {
                                             app::update(&mut state, Msg::Notify("─────────────────────────────────────".into()));
-                                            app::update(&mut state, Msg::Notify("1. Open: https://auth.openai.com/activate".into()));
+                                            app::update(&mut state, Msg::Notify(format!("1. Open: {}", code.verification_uri)));
                                             app::update(&mut state, Msg::Notify("2. Login to your OpenAI account if needed".into()));
                                             app::update(&mut state, Msg::Notify(format!("3. Enter code: {}", code.user_code)));
                                             app::update(&mut state, Msg::Notify("4. Click 'Authorize'".into()));
