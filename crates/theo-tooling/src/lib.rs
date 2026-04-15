@@ -27,6 +27,7 @@ pub mod task;
 pub mod think;
 pub mod todo;
 pub mod truncate;
+pub mod undo;
 pub mod webfetch;
 pub mod websearch;
 pub mod write;
