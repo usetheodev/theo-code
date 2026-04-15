@@ -394,7 +394,14 @@ pub async fn run(
             if !state.agent_running {
                 state.agent_running = true;
 
-                let task_config = config.clone();
+                // Re-resolve config to pick up tokens from login
+                let (fresh_config, fresh_provider) = crate::resolve_agent_config(None, None, None).await;
+                if fresh_provider != "default" {
+                    state.status.provider = fresh_provider;
+                    state.status.model = fresh_config.model.clone();
+                }
+
+                let task_config = fresh_config;
                 let task_dir = project_dir.clone();
                 let task_bus = event_bus.clone();
                 let task_messages = session_messages.clone();
