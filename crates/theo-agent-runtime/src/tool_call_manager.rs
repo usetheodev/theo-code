@@ -138,9 +138,40 @@ impl ToolCallManager {
         };
         // Lock is released here — safe to await
 
-        // 3. Execute tool via tool_bridge (no lock held)
+        // 3. Inject stdout streaming channel for live TUI display
+        let (stdout_tx, mut stdout_rx) = tokio::sync::mpsc::channel::<String>(256);
+        let mut streaming_ctx = ctx.clone();
+        streaming_ctx.stdout_tx = Some(stdout_tx);
+
+        // Spawn task to drain stdout lines and publish as ToolCallStdoutDelta events
+        let stream_bus = self.event_bus.clone();
+        let stream_call_id = call_id.clone();
+        let stream_tool_name = {
+            self.records.lock().expect("records lock")
+                .get(call_id)
+                .map(|r| r.tool_name.clone())
+                .unwrap_or_default()
+        };
+        let drainer = tokio::spawn(async move {
+            while let Some(line) = stdout_rx.recv().await {
+                stream_bus.publish(DomainEvent::new(
+                    EventType::ToolCallStdoutDelta,
+                    stream_call_id.as_str(),
+                    serde_json::json!({
+                        "line": line,
+                        "stream": "stdout",
+                        "tool_name": stream_tool_name,
+                    }),
+                ));
+            }
+        });
+
+        // Execute tool via tool_bridge (no lock held)
         let start = std::time::Instant::now();
-        let (message, success) = tool_bridge::execute_tool_call(registry, &lmm_call, ctx).await;
+        let (message, success) = tool_bridge::execute_tool_call(registry, &lmm_call, &streaming_ctx).await;
+        // Drop the tx side so drainer finishes
+        drop(streaming_ctx);
+        let _ = drainer.await;
         let duration_ms = start.elapsed().as_millis() as u64;
 
         // 4. Determine final state
