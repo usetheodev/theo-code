@@ -810,7 +810,7 @@ fn update_autocomplete(state: &mut TuiState) {
 }
 
 /// Simple base64 encoding for OSC52 clipboard
-fn base64_encode(input: &str) -> String {
+pub fn base64_encode(input: &str) -> String {
     use std::io::Write;
     let mut buf = Vec::new();
     {
