@@ -202,19 +202,68 @@ pub async fn run(
             };
             // Handle IO-bound commands before update
             match &msg {
-                Msg::LoginStart(provider) => {
-                    let tx = msg_tx.clone();
-                    let _provider = provider.clone();
-                    // Run login synchronously on current task to ensure messages are sent
-                    // before the render loop continues. Using spawn was causing messages
-                    // to be lost in some terminal environments.
-                    let tx2 = tx.clone();
-                    tokio::spawn(async move {
-                        let result = run_login_flow(tx2).await;
-                        if let Err(e) = result {
-                            let _ = tx.send(Msg::LoginFailed(format!("{e}"))).await;
+                Msg::LoginStart(_provider) => {
+                    // Run device flow start INLINE (not spawned) so messages
+                    // appear immediately in the transcript
+                    let auth = theo_infra_auth::OpenAIAuth::with_default_store();
+
+                    // Check existing tokens
+                    if let Ok(Some(tokens)) = auth.get_tokens() {
+                        if !tokens.is_expired() {
+                            app::update(&mut state, Msg::LoginComplete(
+                                "Already logged in (token valid)".into()
+                            ));
+                            continue;
                         }
-                    });
+                    }
+
+                    app::update(&mut state, Msg::Notify(
+                        "Contacting auth server...".into()
+                    ));
+                    // Force draw so user sees the message
+                    terminal.draw(|frame| view::draw(frame, &state))?;
+
+                    match auth.start_device_flow().await {
+                        Ok(code) => {
+                            app::update(&mut state, Msg::LoginComplete(format!(
+                                "🔗 Open: {}\n   Code: {}",
+                                code.verification_uri, code.user_code
+                            )));
+                            app::update(&mut state, Msg::Notify(
+                                "Waiting for you to authorize in browser...".into()
+                            ));
+                            // Force draw so user sees URL+code immediately
+                            terminal.draw(|frame| view::draw(frame, &state))?;
+
+                            // Open browser
+                            #[cfg(target_os = "linux")]
+                            { let _ = std::process::Command::new("xdg-open").arg(&code.verification_uri).spawn(); }
+                            #[cfg(target_os = "macos")]
+                            { let _ = std::process::Command::new("open").arg(&code.verification_uri).spawn(); }
+
+                            // Poll in background (this is the long-running part)
+                            let tx = msg_tx.clone();
+                            tokio::spawn(async move {
+                                match auth.poll_device_flow(&code).await {
+                                    Ok(_tokens) => {
+                                        let _ = tx.send(Msg::LoginComplete(
+                                            "✓ Authenticated with OpenAI!".into()
+                                        )).await;
+                                    }
+                                    Err(e) => {
+                                        let _ = tx.send(Msg::LoginFailed(
+                                            format!("Auth failed: {e}")
+                                        )).await;
+                                    }
+                                }
+                            });
+                        }
+                        Err(e) => {
+                            app::update(&mut state, Msg::LoginFailed(
+                                format!("Device flow error: {e}")
+                            ));
+                        }
+                    }
                 }
                 Msg::MemoryCommand(arg) => {
                     let tx = msg_tx.clone();
