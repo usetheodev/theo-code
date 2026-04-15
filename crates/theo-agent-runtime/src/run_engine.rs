@@ -49,6 +49,10 @@ pub struct AgentRunEngine {
     metrics: Arc<MetricsCollector>,
     convergence: ConvergenceEvaluator,
     done_attempts: u32,
+    /// One-shot guard: in Plan mode, if the model converges with text only and
+    /// no plan file on disk, we inject a corrective reminder once. After that
+    /// we let it converge normally to avoid infinite reminder loops.
+    plan_mode_nudged: bool,
     failure_tracker: crate::failure_tracker::FailurePatternTracker,
     snapshot_store: Option<Arc<dyn SnapshotStore>>,
     graph_context: Option<Arc<dyn theo_domain::graph_context::GraphContextProvider>>,
@@ -127,6 +131,7 @@ impl AgentRunEngine {
             metrics,
             convergence,
             done_attempts: 0,
+            plan_mode_nudged: false,
             failure_tracker,
             snapshot_store: None,
             graph_context: None,
@@ -735,6 +740,36 @@ impl AgentRunEngine {
                         for fu_msg in follow_ups {
                             messages.push(fu_msg);
                         }
+                        continue;
+                    }
+                }
+
+                // Plan-mode safety net: the model is supposed to end with
+                // tool calls (write the plan file + done). If it converges with
+                // text only and no plan file was written yet, give it ONE
+                // corrective nudge to actually call the tools. Without this
+                // guard the model occasionally produces a beautiful plan as
+                // text and exits without persisting it.
+                if self.config.mode == crate::config::AgentMode::Plan
+                    && !self.plan_mode_nudged
+                    && !content.is_empty()
+                {
+                    let plans_dir = self.project_dir.join(".theo/plans");
+                    let plan_written = plans_dir
+                        .read_dir()
+                        .ok()
+                        .map(|mut it| it.next().is_some())
+                        .unwrap_or(false);
+                    if !plan_written {
+                        self.plan_mode_nudged = true;
+                        messages.push(Message::assistant(&content));
+                        messages.push(Message::user(
+                            "REMINDER: You wrote a plan as text but did not persist it. \
+                             You MUST now call the `write` tool to save the plan to \
+                             `.theo/plans/01-<slug>.md` (use a kebab-case slug derived from \
+                             the task), then call `done` with a one-line summary. Do this in \
+                             your next response. Do not write more prose — just call the tools.",
+                        ));
                         continue;
                     }
                 }

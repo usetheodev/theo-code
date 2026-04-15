@@ -1,0 +1,22 @@
+id = "09-plan-mode"
+category = "plan"
+description = "Produce a markdown plan file in plan mode"
+prompt = "Create a plan to add a new function `mean(values: &[f64]) -> f64` to src/stats.rs that returns the arithmetic mean. Write the plan to .theo/plans/02-mean.md. Do NOT modify src/stats.rs."
+mode = "plan"
+timeout_secs = 360
+
+success_check = '''
+test -f .theo/plans/02-mean.md && \
+  grep -qi "mean" .theo/plans/02-mean.md && \
+  grep -q "fn sum" src/stats.rs && \
+  ! grep -q "fn mean" src/stats.rs
+'''
+
+[[setup_files]]
+path = "src/stats.rs"
+content = """
+pub fn sum(values: &[f64]) -> f64 {
+    values.iter().sum()
+}
+"""
+

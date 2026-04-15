@@ -1,0 +1,19 @@
+id = "03-fix-typo"
+category = "fix-bug"
+description = "Fix a typo in a string constant"
+prompt = "There is a typo in src/messages.rs: the word 'recieved' should be 'received'. Fix it."
+mode = "agent"
+timeout_secs = 120
+
+success_check = '''
+grep -q "received successfully" src/messages.rs && \
+  ! grep -q "recieved" src/messages.rs
+'''
+
+[[setup_files]]
+path = "src/messages.rs"
+content = """
+pub const SUCCESS_MSG: &str = "Request recieved successfully";
+pub const ERROR_MSG: &str = "Request failed";
+"""
+
