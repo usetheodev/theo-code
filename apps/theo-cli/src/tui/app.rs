@@ -297,6 +297,19 @@ pub enum Msg {
     // Approval
     ApproveDecision,
     RejectDecision,
+    // Auth
+    LoginStart(String), // provider name (empty = auto-detect)
+    LoginComplete(String), // success message
+    LoginFailed(String), // error message
+    LogoutRequest,
+    // Memory
+    MemoryCommand(String), // "list", "search <q>", "delete <k>"
+    // Skills
+    SkillsCommand,
+    // Mode set
+    SetMode(String), // "agent", "plan", "ask"
+    // Theme set
+    SetTheme(String), // theme name
 }
 
 // ---------------------------------------------------------------------------
@@ -685,6 +698,97 @@ pub fn update(state: &mut TuiState, msg: Msg) {
         }
         Msg::RejectDecision => {
             state.pending_approval = None;
+        }
+        // Auth — actual login/logout happens in mod.rs; these are UI state updates
+        Msg::LoginStart(_provider) => {
+            state.transcript.push(TranscriptEntry::SystemMessage(
+                "Starting login flow... Check your browser.".to_string(),
+            ));
+        }
+        Msg::LoginComplete(msg) => {
+            state.transcript.push(TranscriptEntry::SystemMessage(
+                format!("✓ {msg}"),
+            ));
+            state.toasts.push(Toast {
+                message: msg,
+                level: ToastLevel::Info,
+                created: Instant::now(),
+            });
+        }
+        Msg::LoginFailed(err) => {
+            state.transcript.push(TranscriptEntry::SystemMessage(
+                format!("✗ Login failed: {err}"),
+            ));
+            state.toasts.push(Toast {
+                message: format!("Login failed: {err}"),
+                level: ToastLevel::Error,
+                created: Instant::now(),
+            });
+        }
+        Msg::LogoutRequest => {
+            // Clear stored tokens
+            let auth_path = std::path::PathBuf::from(
+                std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string())
+            ).join(".config/theo/auth.json");
+            let _ = std::fs::remove_file(&auth_path);
+            state.toasts.push(Toast {
+                message: "Logged out. Tokens cleared.".to_string(),
+                level: ToastLevel::Info,
+                created: Instant::now(),
+            });
+        }
+        Msg::MemoryCommand(arg) => {
+            // Memory operations are handled in mod.rs (needs async IO)
+            // Here we just show the intent
+            if arg.is_empty() || arg == "list" {
+                state.transcript.push(TranscriptEntry::SystemMessage(
+                    "Loading memories...".to_string(),
+                ));
+            }
+        }
+        Msg::SkillsCommand => {
+            state.transcript.push(TranscriptEntry::SystemMessage(
+                "Loading skills...".to_string(),
+            ));
+        }
+        Msg::SetMode(mode_str) => {
+            let mode = match mode_str.to_lowercase().as_str() {
+                "agent" => "AGENT",
+                "plan" => "PLAN",
+                "ask" => "ASK",
+                _ => {
+                    state.toasts.push(Toast {
+                        message: format!("Unknown mode: {mode_str}. Use: agent, plan, ask"),
+                        level: ToastLevel::Warning,
+                        created: Instant::now(),
+                    });
+                    return;
+                }
+            };
+            state.status.mode = mode.to_string();
+            state.toasts.push(Toast {
+                message: format!("Mode: {mode}"),
+                level: ToastLevel::Info,
+                created: Instant::now(),
+            });
+        }
+        Msg::SetTheme(name) => {
+            let themes = super::theme::Theme::all();
+            if let Some(theme) = themes.iter().find(|t| t.name == name) {
+                state.theme = theme.clone();
+                state.toasts.push(Toast {
+                    message: format!("Theme: {name}"),
+                    level: ToastLevel::Info,
+                    created: Instant::now(),
+                });
+            } else {
+                let available: Vec<&str> = themes.iter().map(|t| t.name.as_str()).collect();
+                state.toasts.push(Toast {
+                    message: format!("Unknown theme. Available: {}", available.join(", ")),
+                    level: ToastLevel::Warning,
+                    created: Instant::now(),
+                });
+            }
         }
     }
 }

@@ -359,7 +359,7 @@ fn render_status_line(frame: &mut Frame, area: Rect, state: &TuiState) {
 fn render_help_overlay(frame: &mut Frame) {
     let area = frame.area();
     let help_width = 50u16.min(area.width.saturating_sub(4));
-    let help_height = 18u16.min(area.height.saturating_sub(4));
+    let help_height = 36u16.min(area.height.saturating_sub(4));
     let x = (area.width.saturating_sub(help_width)) / 2;
     let y = (area.height.saturating_sub(help_height)) / 2;
     let help_area = Rect::new(x, y, help_width, help_height);
@@ -372,47 +372,34 @@ fn render_help_overlay(frame: &mut Frame) {
     let help_lines = vec![
         Line::from(Span::styled(" Keybindings", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))),
         Line::from(""),
-        Line::from(vec![
-            Span::styled(" Ctrl+C     ", Style::default().fg(Color::Yellow)),
-            Span::raw("Quit"),
-        ]),
-        Line::from(vec![
-            Span::styled(" Enter      ", Style::default().fg(Color::Yellow)),
-            Span::raw("Submit prompt"),
-        ]),
-        Line::from(vec![
-            Span::styled(" Shift+Tab  ", Style::default().fg(Color::Yellow)),
-            Span::raw("Cycle mode (Agent/Plan/Ask)"),
-        ]),
-        Line::from(vec![
-            Span::styled(" Esc        ", Style::default().fg(Color::Yellow)),
-            Span::raw("Toggle this help / dismiss"),
-        ]),
-        Line::from(vec![
-            Span::styled(" PgUp/PgDn  ", Style::default().fg(Color::Yellow)),
-            Span::raw("Scroll transcript"),
-        ]),
-        Line::from(vec![
-            Span::styled(" Mouse      ", Style::default().fg(Color::Yellow)),
-            Span::raw("Scroll with wheel"),
-        ]),
-        Line::from(vec![
-            Span::styled(" Ctrl+L     ", Style::default().fg(Color::Yellow)),
-            Span::raw("Scroll to bottom"),
-        ]),
+        Line::from(vec![Span::styled(" Ctrl+C     ", Style::default().fg(Color::Yellow)), Span::raw("Interrupt agent / Quit")]),
+        Line::from(vec![Span::styled(" Ctrl+D     ", Style::default().fg(Color::Yellow)), Span::raw("Force quit")]),
+        Line::from(vec![Span::styled(" Enter      ", Style::default().fg(Color::Yellow)), Span::raw("Submit prompt")]),
+        Line::from(vec![Span::styled(" Shift+Tab  ", Style::default().fg(Color::Yellow)), Span::raw("Cycle mode (Agent/Plan/Ask)")]),
+        Line::from(vec![Span::styled(" Esc        ", Style::default().fg(Color::Yellow)), Span::raw("Toggle help / dismiss overlays")]),
+        Line::from(vec![Span::styled(" Tab        ", Style::default().fg(Color::Yellow)), Span::raw("Toggle sidebar")]),
+        Line::from(vec![Span::styled(" Ctrl+F     ", Style::default().fg(Color::Yellow)), Span::raw("Search transcript")]),
+        Line::from(vec![Span::styled(" Ctrl+M     ", Style::default().fg(Color::Yellow)), Span::raw("Switch model")]),
+        Line::from(vec![Span::styled(" Ctrl+T     ", Style::default().fg(Color::Yellow)), Span::raw("New session tab")]),
+        Line::from(vec![Span::styled(" Ctrl+W     ", Style::default().fg(Color::Yellow)), Span::raw("Close tab")]),
+        Line::from(vec![Span::styled(" Ctrl+Up    ", Style::default().fg(Color::Yellow)), Span::raw("Restore last prompt")]),
+        Line::from(vec![Span::styled(" PgUp/PgDn  ", Style::default().fg(Color::Yellow)), Span::raw("Scroll transcript")]),
         Line::from(""),
-        Line::from(vec![
-            Span::styled(" /help      ", Style::default().fg(Color::Yellow)),
-            Span::raw("Show available commands"),
-        ]),
-        Line::from(vec![
-            Span::styled(" /mode      ", Style::default().fg(Color::Yellow)),
-            Span::raw("Change agent mode"),
-        ]),
-        Line::from(vec![
-            Span::styled(" /status    ", Style::default().fg(Color::Yellow)),
-            Span::raw("Show provider/model info"),
-        ]),
+        Line::from(Span::styled(" Commands", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))),
+        Line::from(""),
+        Line::from(vec![Span::styled(" /login     ", Style::default().fg(Color::Yellow)), Span::raw("Authenticate with LLM provider")]),
+        Line::from(vec![Span::styled(" /logout    ", Style::default().fg(Color::Yellow)), Span::raw("Clear auth tokens")]),
+        Line::from(vec![Span::styled(" /status    ", Style::default().fg(Color::Yellow)), Span::raw("Show provider/model/tokens")]),
+        Line::from(vec![Span::styled(" /mode      ", Style::default().fg(Color::Yellow)), Span::raw("Change mode (agent/plan/ask)")]),
+        Line::from(vec![Span::styled(" /model     ", Style::default().fg(Color::Yellow)), Span::raw("Switch model")]),
+        Line::from(vec![Span::styled(" /memory    ", Style::default().fg(Color::Yellow)), Span::raw("Manage memories (list/search/delete)")]),
+        Line::from(vec![Span::styled(" /skills    ", Style::default().fg(Color::Yellow)), Span::raw("List available skills")]),
+        Line::from(vec![Span::styled(" /export    ", Style::default().fg(Color::Yellow)), Span::raw("Export session as markdown")]),
+        Line::from(vec![Span::styled(" /theme     ", Style::default().fg(Color::Yellow)), Span::raw("Change color theme")]),
+        Line::from(vec![Span::styled(" /timeline  ", Style::default().fg(Color::Yellow)), Span::raw("Show tool chain causality")]),
+        Line::from(vec![Span::styled(" /history   ", Style::default().fg(Color::Yellow)), Span::raw("Search across all sessions")]),
+        Line::from(vec![Span::styled(" /clear     ", Style::default().fg(Color::Yellow)), Span::raw("Clear transcript")]),
+        Line::from(vec![Span::styled(" /quit      ", Style::default().fg(Color::Yellow)), Span::raw("Exit")]),
         Line::from(""),
         Line::from(Span::styled(
             " Press Esc to close",
