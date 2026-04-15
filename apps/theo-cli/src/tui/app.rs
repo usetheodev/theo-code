@@ -702,15 +702,13 @@ pub fn update(state: &mut TuiState, msg: Msg) {
         // Auth — actual login/logout happens in mod.rs; these are UI state updates
         Msg::LoginStart(_provider) => {
             state.transcript.push(TranscriptEntry::SystemMessage(
-                "Starting login flow... Check your browser.".to_string(),
+                "🔐 Starting authentication...".to_string(),
             ));
         }
         Msg::LoginComplete(msg) => {
-            state.transcript.push(TranscriptEntry::SystemMessage(
-                format!("✓ {msg}"),
-            ));
+            state.transcript.push(TranscriptEntry::SystemMessage(msg.clone()));
             state.toasts.push(Toast {
-                message: msg,
+                message: if msg.len() > 60 { format!("{}...", &msg[..57]) } else { msg },
                 level: ToastLevel::Info,
                 created: Instant::now(),
             });
@@ -720,7 +718,7 @@ pub fn update(state: &mut TuiState, msg: Msg) {
                 format!("✗ Login failed: {err}"),
             ));
             state.toasts.push(Toast {
-                message: format!("Login failed: {err}"),
+                message: format!("Login failed: {}", if err.len() > 50 { &err[..50] } else { &err }),
                 level: ToastLevel::Error,
                 created: Instant::now(),
             });
