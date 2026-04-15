@@ -145,7 +145,7 @@ pub fn lint_with_threshold(wiki_dir: &Path, large_page_threshold: usize) -> Lint
 
     // Extract all [[wiki-links]] per page
     let mut outbound_links: HashMap<String, Vec<String>> = HashMap::new();
-    let mut all_slugs: HashSet<String> = pages.keys().cloned().collect();
+    let all_slugs: HashSet<String> = pages.keys().cloned().collect();
 
     for (slug, content) in &pages {
         let mut links = Vec::new();

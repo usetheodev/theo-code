@@ -216,15 +216,15 @@ fn highlight_code_line(line: &str, lang: &str) -> Vec<Span<'static>> {
     }
 
     let mut spans: Vec<Span<'static>> = Vec::new();
-    let mut remaining = line.to_string();
+    let remaining = line.to_string();
 
     // Simple tokenizer: split by word boundaries, color keywords
-    let mut result = String::new();
+    let _result = String::new();
     let mut in_string = false;
     let mut string_char = '"';
     let mut in_comment = false;
-    let mut chars = remaining.chars().peekable();
-    let mut current_word = String::new();
+    let _chars = remaining.chars().peekable();
+    let _current_word = String::new();
 
     // Simplified approach: just scan for keywords at word boundaries
     // and color strings/comments differently
@@ -260,7 +260,7 @@ fn highlight_code_line(line: &str, lang: &str) -> Vec<Span<'static>> {
 
     for part in parts {
         let word = part.trim_end_matches(|c: char| !c.is_alphanumeric() && c != '_');
-        let suffix_len = part.len() - word.len();
+        let _suffix_len = part.len() - word.len();
         let suffix = &part[word.len()..];
 
         if keywords.contains(&word) {

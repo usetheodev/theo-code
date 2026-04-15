@@ -8,7 +8,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use super::model::{AuthorityTier, PageFrontmatter, QueryClass, classify_query, parse_frontmatter};
+use super::model::{AuthorityTier, QueryClass, classify_query, parse_frontmatter};
 use crate::code_tokenizer::tokenize_code;
 
 /// Result of a wiki lookup.

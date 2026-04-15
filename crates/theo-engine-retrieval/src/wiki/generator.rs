@@ -25,7 +25,7 @@ pub fn generate_wiki(communities: &[Community], graph: &CodeGraph, project_name:
 pub fn generate_wiki_with_root(
     communities: &[Community],
     graph: &CodeGraph,
-    project_name: &str,
+    _project_name: &str,
     repo_root: Option<&std::path::Path>,
 ) -> Wiki {
     // Build file → community slug reverse map
@@ -1150,7 +1150,7 @@ pub fn generate_wiki_incremental(
         existing_docs.iter().map(|d| (d.slug.clone(), d)).collect();
 
     // Track which existing slugs are still valid
-    let current_slugs: HashSet<String> = active_communities
+    let _current_slugs: HashSet<String> = active_communities
         .iter()
         .map(|c| slugify(&c.name))
         .collect();
