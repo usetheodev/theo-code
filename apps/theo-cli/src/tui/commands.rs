@@ -47,7 +47,25 @@ pub fn process_command(input: &str, state: &TuiState) -> Option<Vec<Msg>> {
 
         // --- Auth ---
         "/login" => {
-            Some(vec![Msg::LoginStart(arg.to_string())])
+            if arg.starts_with("sk-") || arg.starts_with("sess-") {
+                // Direct API key: /login sk-xxx
+                Some(vec![Msg::LoginWithKey(arg.to_string())])
+            } else if arg == "device" || arg == "oauth" {
+                // Force device flow
+                Some(vec![Msg::LoginStart(arg.to_string())])
+            } else if arg.is_empty() {
+                // Show options
+                Some(vec![Msg::Notify(
+                    "/login sk-xxx     Set API key directly".into(),
+                ), Msg::Notify(
+                    "/login device     OAuth device flow (requires browser)".into(),
+                ), Msg::Notify(
+                    "Or set OPENAI_API_KEY env var before starting".into(),
+                )])
+            } else {
+                // Assume it's an API key
+                Some(vec![Msg::LoginWithKey(arg.to_string())])
+            }
         }
         "/logout" => {
             Some(vec![Msg::LogoutRequest])
