@@ -23,9 +23,6 @@ pub struct Theme {
     pub code_bg: Color,
     pub inline_code_fg: Color,
     pub search_highlight: Color,
-    pub toast_info: Color,
-    pub toast_warning: Color,
-    pub toast_error: Color,
     pub accent: Color,
     pub dim: Color,
 }
@@ -49,16 +46,13 @@ impl Theme {
             code_bg: Color::Reset,
             inline_code_fg: Color::Yellow,
             search_highlight: Color::Yellow,
-            toast_info: Color::Cyan,
-            toast_warning: Color::Yellow,
-            toast_error: Color::Red,
             accent: Color::Cyan,
             dim: Color::DarkGray,
         }
     }
 
     pub fn all() -> Vec<Self> {
-        vec![Self::dark(), Self::light(), Self::high_contrast(), Self::dracula()]
+        vec![Self::dark(), Self::light(), Self::high_contrast(), Self::dracula(), Self::tokyo_night()]
     }
 
     pub fn light() -> Self {
@@ -79,9 +73,6 @@ impl Theme {
             code_bg: Color::White,
             inline_code_fg: Color::Magenta,
             search_highlight: Color::Yellow,
-            toast_info: Color::Blue,
-            toast_warning: Color::Yellow,
-            toast_error: Color::Red,
             accent: Color::Blue,
             dim: Color::Gray,
         }
@@ -105,9 +96,6 @@ impl Theme {
             code_bg: Color::Black,
             inline_code_fg: Color::LightYellow,
             search_highlight: Color::LightYellow,
-            toast_info: Color::LightCyan,
-            toast_warning: Color::LightYellow,
-            toast_error: Color::LightRed,
             accent: Color::LightCyan,
             dim: Color::Gray,
         }
@@ -131,9 +119,6 @@ impl Theme {
             code_bg: Color::Rgb(40, 42, 54),
             inline_code_fg: Color::Rgb(241, 250, 140),
             search_highlight: Color::Rgb(241, 250, 140),
-            toast_info: Color::Rgb(139, 233, 253),
-            toast_warning: Color::Rgb(241, 250, 140),
-            toast_error: Color::Rgb(255, 85, 85),
             accent: Color::Rgb(189, 147, 249),
             dim: Color::Rgb(98, 114, 164),
         }
@@ -157,9 +142,6 @@ impl Theme {
             code_bg: Color::Rgb(26, 27, 38),
             inline_code_fg: Color::Rgb(224, 175, 104),
             search_highlight: Color::Rgb(224, 175, 104),
-            toast_info: Color::Rgb(125, 207, 255),
-            toast_warning: Color::Rgb(224, 175, 104),
-            toast_error: Color::Rgb(247, 118, 142),
             accent: Color::Rgb(187, 154, 247),
             dim: Color::Rgb(86, 95, 137),
         }

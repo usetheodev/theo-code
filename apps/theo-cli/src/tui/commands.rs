@@ -3,7 +3,7 @@
 //! Full command set: /help /status /clear /export /mode /quit /login /logout
 //! /memory /skills /timeline /theme /tab /history /model /sidebar
 
-use super::app::{Msg, TuiState, TranscriptEntry, ToastLevel};
+use super::app::{Msg, TuiState, TranscriptEntry};
 
 /// Check if input is a slash command and return the corresponding Msg(s).
 /// Returns None if not a command.
@@ -42,7 +42,7 @@ pub fn process_command(input: &str, state: &TuiState) -> Option<Vec<Msg>> {
                 state.status.tokens_in,
                 state.status.tokens_out,
             );
-            Some(vec![Msg::ShowToast(status_text, ToastLevel::Info)])
+            Some(vec![Msg::Notify(status_text)])
         }
 
         // --- Auth ---
@@ -125,13 +125,12 @@ pub fn process_command(input: &str, state: &TuiState) -> Option<Vec<Msg>> {
                 }
             }
             if found.is_empty() {
-                Some(vec![Msg::ShowToast(
+                Some(vec![Msg::Notify(
                     if arg.is_empty() { "Usage: /history <query>".into() } else { "No matches found".into() },
-                    ToastLevel::Info,
                 )])
             } else {
                 let summary = format!("{} matches across sessions", found.len());
-                Some(vec![Msg::ShowToast(summary, ToastLevel::Info)])
+                Some(vec![Msg::Notify(summary)])
             }
         }
         "/search" | "/find" => {
@@ -140,9 +139,8 @@ pub fn process_command(input: &str, state: &TuiState) -> Option<Vec<Msg>> {
 
         // --- Unknown ---
         _ => {
-            Some(vec![Msg::ShowToast(
+            Some(vec![Msg::Notify(
                 format!("Unknown command: {cmd}. Try /help"),
-                ToastLevel::Warning,
             )])
         }
     }

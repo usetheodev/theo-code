@@ -177,15 +177,13 @@ pub async fn run(
                                     let path = export_dir.join(&filename);
                                     match std::fs::write(&path, &md) {
                                         Ok(_) => {
-                                            app::update(&mut state, Msg::ShowToast(
+                                            app::update(&mut state, Msg::Notify(
                                                 format!("Exported to {}", path.display()),
-                                                app::ToastLevel::Info,
                                             ));
                                         }
                                         Err(e) => {
-                                            app::update(&mut state, Msg::ShowToast(
+                                            app::update(&mut state, Msg::Notify(
                                                 format!("Export failed: {e}"),
-                                                app::ToastLevel::Error,
                                             ));
                                         }
                                     }
@@ -220,18 +218,16 @@ pub async fn run(
                             }
                         }
 
-                        let _ = tx.send(Msg::ShowToast(
+                        let _ = tx.send(Msg::Notify(
                             "Contacting auth server...".into(),
-                            app::ToastLevel::Info,
                         )).await;
 
                         match auth.start_device_flow().await {
                             Ok(code) => {
                                 // Show URL and code prominently in transcript
                                 let _ = tx.send(Msg::DomainEventBatch(vec![])).await; // flush
-                                let _ = tx.send(Msg::ShowToast(
+                                let _ = tx.send(Msg::Notify(
                                     format!("Code: {}", code.user_code),
-                                    app::ToastLevel::Info,
                                 )).await;
                                 // Also show as persistent system message
                                 let _ = tx.send(Msg::LoginComplete(
@@ -248,9 +244,8 @@ pub async fn run(
                                 { let _ = std::process::Command::new("open").arg(&code.verification_uri).spawn(); }
 
                                 // Poll until authorized or expired
-                                let _ = tx.send(Msg::ShowToast(
+                                let _ = tx.send(Msg::Notify(
                                     "Waiting for authorization...".into(),
-                                    app::ToastLevel::Info,
                                 )).await;
 
                                 match auth.poll_device_flow(&code).await {
@@ -312,7 +307,7 @@ pub async fn run(
                         } else {
                             "Usage: /memory [list|search <q>|delete <key>]".to_string()
                         };
-                        let _ = tx.send(Msg::ShowToast(result, app::ToastLevel::Info)).await;
+                        let _ = tx.send(Msg::Notify(result)).await;
                     });
                 }
                 Msg::SkillsCommand => {
@@ -325,14 +320,13 @@ pub async fn run(
                     }
                     let skills = registry.list();
                     if skills.is_empty() {
-                        app::update(&mut state, Msg::ShowToast("No skills available.".into(), app::ToastLevel::Info));
+                        app::update(&mut state, Msg::Notify("No skills available.".into()));
                     } else {
                         let list: Vec<String> = skills.iter()
                             .map(|s| format!("  {} — {}", s.name, s.trigger))
                             .collect();
-                        app::update(&mut state, Msg::ShowToast(
+                        app::update(&mut state, Msg::Notify(
                             format!("{} skills:\n{}", skills.len(), list.join("\n")),
-                            app::ToastLevel::Info,
                         ));
                     }
                 }
@@ -388,10 +382,9 @@ pub async fn run(
             }
         }
 
-        // Cursor blink + toast cleanup
+        // Cursor blink
         if cursor_interval.tick().now_or_never().is_some() {
             app::update(&mut state, Msg::CursorBlink);
-            app::update(&mut state, Msg::DismissExpiredToasts);
         }
 
         // Draw

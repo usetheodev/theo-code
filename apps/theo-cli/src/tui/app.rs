@@ -79,7 +79,6 @@ pub struct TuiState {
     pub search_results: Vec<usize>, // indices into transcript
     pub search_current: usize,
     pub session_picker: Option<SessionPickerState>,
-    pub toasts: Vec<Toast>,
     pub prompt_history: Vec<String>,
     pub show_sidebar: bool,
     pub sidebar_tab: super::widgets::sidebar::SidebarTab,
@@ -187,7 +186,6 @@ impl TuiState {
             search_results: Vec::new(),
             search_current: 0,
             session_picker: None,
-            toasts: Vec::new(),
             prompt_history: Vec::new(),
             show_sidebar: width > 120,
             sidebar_tab: super::widgets::sidebar::SidebarTab::Status,
@@ -218,19 +216,7 @@ impl TuiState {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct Toast {
-    pub message: String,
-    pub level: ToastLevel,
-    pub created: Instant,
-}
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum ToastLevel {
-    Info,
-    Warning,
-    Error,
-}
 
 // ---------------------------------------------------------------------------
 // Messages
@@ -265,8 +251,7 @@ pub enum Msg {
     SearchClose,
     AgentComplete(String, bool), // (summary, success)
     RestoreLastPrompt,
-    ShowToast(String, ToastLevel),
-    DismissExpiredToasts,
+    Notify(String),
     CopyToClipboard(String),
     InterruptAgent,
     ClearTranscript,
@@ -497,24 +482,13 @@ pub fn update(state: &mut TuiState, msg: Msg) {
                 }
             }
         }
-        Msg::ShowToast(message, level) => {
-            state.toasts.push(Toast {
-                message,
-                level,
-                created: Instant::now(),
-            });
-        }
-        Msg::DismissExpiredToasts => {
-            state.toasts.retain(|t| t.created.elapsed().as_secs() < 5);
+        Msg::Notify(message) => {
+            state.transcript.push(TranscriptEntry::SystemMessage(message));
         }
         Msg::CopyToClipboard(text) => {
             // OSC52 clipboard escape sequence (works in most modern terminals + tmux + SSH)
             eprint!("\x1b]52;c;{}\x07", base64_encode(&text));
-            state.toasts.push(Toast {
-                message: "Copied to clipboard".to_string(),
-                level: ToastLevel::Info,
-                created: Instant::now(),
-            });
+            state.transcript.push(TranscriptEntry::SystemMessage("Copied to clipboard".to_string()));
         }
         Msg::InterruptAgent => {
             if state.agent_running {
@@ -523,11 +497,7 @@ pub fn update(state: &mut TuiState, msg: Msg) {
                 state.transcript.push(TranscriptEntry::SystemMessage(
                     "⏸ Agent interrupted. Enter a new prompt to continue.".to_string(),
                 ));
-                state.toasts.push(Toast {
-                    message: "Agent interrupted".to_string(),
-                    level: ToastLevel::Warning,
-                    created: Instant::now(),
-                });
+                state.transcript.push(TranscriptEntry::SystemMessage("Agent interrupted".to_string()));
             } else {
                 // If agent is not running, Ctrl+C quits
                 state.should_quit = true;
@@ -540,11 +510,7 @@ pub fn update(state: &mut TuiState, msg: Msg) {
             state.scroll_locked_to_bottom = true;
         }
         Msg::ExportSession => {
-            state.toasts.push(Toast {
-                message: "Exporting session...".to_string(),
-                level: ToastLevel::Info,
-                created: Instant::now(),
-            });
+            state.transcript.push(TranscriptEntry::SystemMessage("Exporting session...".to_string()));
         }
         Msg::ToggleSidebar => {
             state.show_sidebar = !state.show_sidebar;
@@ -570,11 +536,7 @@ pub fn update(state: &mut TuiState, msg: Msg) {
             if let Some(model) = state.available_models.get(state.model_picker_selected) {
                 state.status.model = model.clone();
                 state.show_model_picker = false;
-                state.toasts.push(Toast {
-                    message: format!("Model: {model}"),
-                    level: ToastLevel::Info,
-                    created: Instant::now(),
-                });
+                state.transcript.push(TranscriptEntry::SystemMessage(format!("Model: {model}")));
             }
         }
         Msg::ToggleThemePicker => {
@@ -594,11 +556,7 @@ pub fn update(state: &mut TuiState, msg: Msg) {
             if let Some(theme) = themes.get(state.theme_picker_selected) {
                 state.theme = theme.clone();
                 state.show_theme_picker = false;
-                state.toasts.push(Toast {
-                    message: format!("Theme: {}", theme.name),
-                    level: ToastLevel::Info,
-                    created: Instant::now(),
-                });
+                state.transcript.push(TranscriptEntry::SystemMessage(format!("Theme: {}", theme.name)));
             }
         }
         Msg::AutocompleteUpdate => {
@@ -707,21 +665,13 @@ pub fn update(state: &mut TuiState, msg: Msg) {
         }
         Msg::LoginComplete(msg) => {
             state.transcript.push(TranscriptEntry::SystemMessage(msg.clone()));
-            state.toasts.push(Toast {
-                message: if msg.len() > 60 { format!("{}...", &msg[..57]) } else { msg },
-                level: ToastLevel::Info,
-                created: Instant::now(),
-            });
+            state.transcript.push(TranscriptEntry::SystemMessage(if msg.len() > 60 { format!("{}...", &msg[..57]) } else { msg }));
         }
         Msg::LoginFailed(err) => {
             state.transcript.push(TranscriptEntry::SystemMessage(
                 format!("✗ Login failed: {err}"),
             ));
-            state.toasts.push(Toast {
-                message: format!("Login failed: {}", if err.len() > 50 { &err[..50] } else { &err }),
-                level: ToastLevel::Error,
-                created: Instant::now(),
-            });
+            state.transcript.push(TranscriptEntry::SystemMessage(format!("Login failed: {}", if err.len() > 50 { &err[..50] } else { &err })));
         }
         Msg::LogoutRequest => {
             // Clear stored tokens
@@ -729,11 +679,7 @@ pub fn update(state: &mut TuiState, msg: Msg) {
                 std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string())
             ).join(".config/theo/auth.json");
             let _ = std::fs::remove_file(&auth_path);
-            state.toasts.push(Toast {
-                message: "Logged out. Tokens cleared.".to_string(),
-                level: ToastLevel::Info,
-                created: Instant::now(),
-            });
+            state.transcript.push(TranscriptEntry::SystemMessage("Logged out. Tokens cleared.".to_string()));
         }
         Msg::MemoryCommand(arg) => {
             // Memory operations are handled in mod.rs (needs async IO)
@@ -755,37 +701,21 @@ pub fn update(state: &mut TuiState, msg: Msg) {
                 "plan" => "PLAN",
                 "ask" => "ASK",
                 _ => {
-                    state.toasts.push(Toast {
-                        message: format!("Unknown mode: {mode_str}. Use: agent, plan, ask"),
-                        level: ToastLevel::Warning,
-                        created: Instant::now(),
-                    });
+                    state.transcript.push(TranscriptEntry::SystemMessage(format!("Unknown mode: {mode_str}. Use: agent, plan, ask")));
                     return;
                 }
             };
             state.status.mode = mode.to_string();
-            state.toasts.push(Toast {
-                message: format!("Mode: {mode}"),
-                level: ToastLevel::Info,
-                created: Instant::now(),
-            });
+            state.transcript.push(TranscriptEntry::SystemMessage(format!("Mode: {mode}")));
         }
         Msg::SetTheme(name) => {
             let themes = super::theme::Theme::all();
             if let Some(theme) = themes.iter().find(|t| t.name == name) {
                 state.theme = theme.clone();
-                state.toasts.push(Toast {
-                    message: format!("Theme: {name}"),
-                    level: ToastLevel::Info,
-                    created: Instant::now(),
-                });
+                state.transcript.push(TranscriptEntry::SystemMessage(format!("Theme: {name}")));
             } else {
                 let available: Vec<&str> = themes.iter().map(|t| t.name.as_str()).collect();
-                state.toasts.push(Toast {
-                    message: format!("Unknown theme. Available: {}", available.join(", ")),
-                    level: ToastLevel::Warning,
-                    created: Instant::now(),
-                });
+                state.transcript.push(TranscriptEntry::SystemMessage(format!("Unknown theme. Available: {}", available.join(", "))));
             }
         }
     }
@@ -1028,11 +958,7 @@ fn handle_domain_event(state: &mut TuiState, event: DomainEvent) {
             state.transcript.push(TranscriptEntry::SystemMessage(
                 format!("⚠ {msg}"),
             ));
-            state.toasts.push(Toast {
-                message: format!("⚠ {msg}"),
-                level: ToastLevel::Warning,
-                created: Instant::now(),
-            });
+            state.transcript.push(TranscriptEntry::SystemMessage(format!("⚠ {msg}")));
         }
         EventType::Error => {
             if event.payload.get("type").and_then(|v| v.as_str()) == Some("retry") {
@@ -1045,11 +971,7 @@ fn handle_domain_event(state: &mut TuiState, event: DomainEvent) {
             state.transcript.push(TranscriptEntry::SystemMessage(
                 format!("❌ {msg}"),
             ));
-            state.toasts.push(Toast {
-                message: msg.to_string(),
-                level: ToastLevel::Error,
-                created: Instant::now(),
-            });
+            state.transcript.push(TranscriptEntry::SystemMessage(msg.to_string()));
         }
         EventType::GovernanceDecisionPending => {
             let decision_id = event.payload.get("decision_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
