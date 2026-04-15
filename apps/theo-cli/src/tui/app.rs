@@ -693,8 +693,7 @@ pub fn update(state: &mut TuiState, msg: Msg) {
             ));
         }
         Msg::LoginComplete(msg) => {
-            state.transcript.push(TranscriptEntry::SystemMessage(msg.clone()));
-            state.transcript.push(TranscriptEntry::SystemMessage(if msg.len() > 60 { format!("{}...", &msg[..57]) } else { msg }));
+            state.transcript.push(TranscriptEntry::SystemMessage(msg));
         }
         Msg::LoginFailed(err) => {
             state.transcript.push(TranscriptEntry::SystemMessage(
