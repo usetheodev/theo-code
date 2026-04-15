@@ -1,0 +1,31 @@
+{
+  "schema": "theo.swe.v1",
+  "dataset": "lite",
+  "total": 3,
+  "with_patch": 0,
+  "errors": 3,
+  "results": [
+    {
+      "instance_id": "astropy__astropy-12907",
+      "repo": "astropy/astropy",
+      "model_patch": "",
+      "model_name_or_path": "theo-code",
+      "error": "setup_failed"
+    },
+    {
+      "instance_id": "astropy__astropy-14182",
+      "repo": "astropy/astropy",
+      "model_patch": "",
+      "model_name_or_path": "theo-code",
+      "error": "setup_failed"
+    },
+    {
+      "instance_id": "astropy__astropy-14365",
+      "repo": "astropy/astropy",
+      "model_patch": "",
+      "model_name_or_path": "theo-code",
+      "error": "setup_failed"
+    }
+  ],
+  "timestamp": 1776281731
+}
