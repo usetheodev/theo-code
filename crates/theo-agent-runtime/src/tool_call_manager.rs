@@ -27,6 +27,7 @@ pub struct ToolCallManager {
     results: Mutex<HashMap<CallId, ToolResultRecord>>,
     event_bus: Arc<EventBus>,
     capability_gate: Option<Arc<CapabilityGate>>,
+    approval_gate: Option<Arc<dyn crate::approval_gate::ApprovalGate>>,
 }
 
 impl ToolCallManager {
@@ -36,12 +37,19 @@ impl ToolCallManager {
             results: Mutex::new(HashMap::new()),
             event_bus,
             capability_gate: None,
+            approval_gate: None,
         }
     }
 
     /// Sets the capability gate for tool access control.
     pub fn with_capability_gate(mut self, gate: Arc<CapabilityGate>) -> Self {
         self.capability_gate = Some(gate);
+        self
+    }
+
+    /// Sets the approval gate for interactive tool approval.
+    pub fn with_approval_gate(mut self, gate: Arc<dyn crate::approval_gate::ApprovalGate>) -> Self {
+        self.approval_gate = Some(gate);
         self
     }
 
@@ -106,6 +114,48 @@ impl ToolCallManager {
                         .map(|t| t.category())
                         .unwrap_or(ToolCategory::Utility);
                     gate.check_tool(&record.tool_name, category)?;
+                }
+            }
+        }
+
+        // 0.5. Interactive approval check (if gate is set)
+        if let Some(approval_gate) = &self.approval_gate {
+            let tool_name = {
+                self.records.lock().expect("records lock")
+                    .get(call_id)
+                    .map(|r| r.tool_name.clone())
+                    .unwrap_or_default()
+            };
+            let tool_args = {
+                self.records.lock().expect("records lock")
+                    .get(call_id)
+                    .map(|r| r.input.clone())
+                    .unwrap_or(serde_json::Value::Null)
+            };
+            let risk = crate::approval_gate::tool_risk_level(&tool_name);
+            let request = crate::approval_gate::ApprovalRequest {
+                decision_id: call_id.as_str().to_string(),
+                tool_name: tool_name.clone(),
+                tool_args,
+                risk_level: risk,
+            };
+            match approval_gate.request_approval(request).await {
+                crate::approval_gate::ApprovalOutcome::Approved => { /* continue */ }
+                crate::approval_gate::ApprovalOutcome::Rejected(reason) => {
+                    return Err(ToolCallManagerError::CapabilityDenied(
+                        CapabilityDenied {
+                            tool_name,
+                            reason: format!("Rejected by approval gate: {reason}"),
+                        }
+                    ));
+                }
+                crate::approval_gate::ApprovalOutcome::Timeout => {
+                    return Err(ToolCallManagerError::CapabilityDenied(
+                        CapabilityDenied {
+                            tool_name,
+                            reason: "Approval timed out (5 minutes)".to_string(),
+                        }
+                    ));
                 }
             }
         }
