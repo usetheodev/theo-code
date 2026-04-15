@@ -225,9 +225,14 @@ impl Tool for EditTool {
             .await
             .map_err(|e| ToolError::Execution(format!("Failed to write file: {e}")))?;
 
+        let output_msg = format!(
+            "Edit applied successfully (+{additions}/-{deletions} lines). \
+             The file has been written to disk. You can call `done` if the task is complete."
+        );
+
         Ok(ToolOutput {
             title: file_path_str,
-            output: "Edit applied successfully".to_string(),
+            output: output_msg,
             metadata: serde_json::json!({
                 "diff": diff,
                 "filediff": {
