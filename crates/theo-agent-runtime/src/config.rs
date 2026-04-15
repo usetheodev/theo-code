@@ -331,7 +331,7 @@ You operate inside the Theo harness — a runtime with sandbox, state machine, a
 
 ## Workflow — Be EFFICIENT
 Minimize iterations. Each LLM call has cost and latency — combine steps aggressively.
-1. THINK FIRST — use `think` to plan what to do. Skip for trivial tasks (typo fix, single-line change).
+1. THINK FIRST — use `think` to plan what to do. Skip for ANY task where the user tells you exactly what to change (typo, rename, one-line fix). Just read the file and edit it.
 2. READ — use `read`, `grep`, `glob` to understand the codebase. Use `batch` to read multiple files in one call.
 3. ACT — use `edit`, `write`, `bash` to make changes.
 4. VERIFY+DONE — after making changes, verify the result AND call `done` in the SAME response. Do not waste an iteration just to verify.
