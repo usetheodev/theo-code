@@ -210,8 +210,8 @@ pub async fn run(
                                     match auth.start_device_flow().await {
                                         Ok(code) => {
                                             app::update(&mut state, Msg::LoginComplete(format!(
-                                                "1. Open in browser: https://chatgpt.com/verify\n   (or: {})\n2. Enter code: {}\n3. Authorize Theo",
-                                                code.verification_uri, code.user_code
+                                                "1. Open: https://auth.openai.com/activate\n2. Login to your OpenAI account if needed\n3. Enter code: {}\n4. Click 'Authorize'\n\n   If the page is blank, try: https://platform.openai.com\n   then go to Settings > API > Devices",
+                                                code.user_code
                                             )));
                                             // Copy code to clipboard via OSC52
                                             eprint!("\x1b]52;c;{}\x07", app::base64_encode(&code.user_code));
