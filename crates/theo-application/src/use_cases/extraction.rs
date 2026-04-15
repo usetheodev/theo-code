@@ -7,11 +7,10 @@ use std::time::Instant;
 
 use rayon::prelude::*;
 use theo_engine_graph::bridge::{
-    DataModelData, FileData, ImportData, ReferenceData, ReferenceKindDto, SymbolData, SymbolKindDto,
+    DataModelData, FileData, ImportData, ReferenceData, SymbolData,
 };
 use theo_engine_parser::extractors;
 use theo_engine_parser::tree_sitter::{detect_language, parse_source};
-use theo_engine_parser::types::{ReferenceKind, SymbolKind};
 
 // ---------------------------------------------------------------------------
 // Public API

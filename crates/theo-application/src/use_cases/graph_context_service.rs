@@ -5,7 +5,7 @@
 //! context boundaries — the runtime only sees the trait from `theo-domain`.
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime};
@@ -15,14 +15,13 @@ use theo_domain::graph_context::{
 };
 
 use theo_engine_graph::bridge::{
-    self, DataModelData, FileData, ImportData, ReferenceData, ReferenceKindDto, SymbolData,
-    SymbolKindDto,
+    self, DataModelData, FileData, ImportData, ReferenceData, SymbolData,
 };
 use theo_engine_graph::cluster::{ClusterAlgorithm, ClusterResult, Community};
 use theo_engine_graph::model::CodeGraph;
 
 use theo_engine_parser::tree_sitter::{self as ts, SupportedLanguage};
-use theo_engine_parser::types::{FileExtraction, ReferenceKind, SymbolKind};
+use theo_engine_parser::types::FileExtraction;
 
 use theo_engine_retrieval::assembly;
 use theo_engine_retrieval::search::{FileBm25, MultiSignalScorer};

@@ -6,4 +6,3 @@
 
 pub mod format;
 
-pub use format::{Segment, StatusLine, render_status};

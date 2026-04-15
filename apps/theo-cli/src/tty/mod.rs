@@ -7,4 +7,3 @@ pub mod caps;
 pub mod resize;
 
 pub use caps::TtyCaps;
-pub use resize::{current_width, install_resize_listener, set_width};

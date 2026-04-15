@@ -922,7 +922,7 @@ impl MultiSignalScorer {
         let bm25_range = bm25_max - bm25_min;
 
         // 2. Semantic scores — skip for large repos (expensive)
-        let (semantic_raw, sem_range, sem_min): (HashMap<&str, f64>, f64, f64) = if large_repo {
+        let (_semantic_raw, _sem_range, _sem_min): (HashMap<&str, f64>, f64, f64) = if large_repo {
             (HashMap::new(), 0.0, 0.0)
         } else {
             let query_vec: Vec<f64> = if let Some(ref embedder) = self.embedder {
@@ -947,7 +947,7 @@ impl MultiSignalScorer {
         };
 
         // 3-4. Graph attention — skip for large repos (O(N) per node is too slow for 60K+ nodes)
-        let graph_attention_scores: HashMap<String, f64> = if large_repo {
+        let _graph_attention_scores: HashMap<String, f64> = if large_repo {
             HashMap::new()
         } else {
             let initial_node_scores: HashMap<String, f64> = {

@@ -10,5 +10,3 @@
 pub mod prompt;
 pub mod session;
 
-pub use prompt::{PermissionDecision, PermissionRequest, prompt_for};
-pub use session::{PermissionSession, SessionOutcome};
