@@ -385,7 +385,7 @@ impl OpenAIAuth {
 
         // Verification URI may not be in response — use hardcoded OpenAI URL
         let verification_uri = dc.verification_uri
-            .unwrap_or_else(|| "https://auth.openai.com/activate".to_string());
+            .unwrap_or_else(|| "https://auth.openai.com/codex/device".to_string());
 
         // expires_in from expires_at if needed
         let expires_in = dc.expires_in.unwrap_or_else(|| {
