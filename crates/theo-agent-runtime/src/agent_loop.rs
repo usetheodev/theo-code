@@ -14,7 +14,7 @@ use crate::task_manager::TaskManager;
 use crate::tool_call_manager::ToolCallManager;
 
 /// Result of an agent loop execution.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct AgentResult {
     pub success: bool,
     pub summary: String,
@@ -31,6 +31,16 @@ pub struct AgentResult {
     pub input_tokens: u64,
     /// Output (completion) tokens consumed during this run.
     pub output_tokens: u64,
+    /// Total tool calls dispatched during this run.
+    pub tool_calls_total: u64,
+    /// Tool calls that returned without error.
+    pub tool_calls_success: u64,
+    /// Total LLM API calls during this run.
+    pub llm_calls: u64,
+    /// Total LLM retries triggered during this run.
+    pub retries: u64,
+    /// Wall-clock duration of the run, milliseconds. Filled by the caller.
+    pub duration_ms: u64,
 }
 
 /// The main agent loop that orchestrates LLM ↔ tool execution.

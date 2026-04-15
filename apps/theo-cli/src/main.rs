@@ -60,6 +60,12 @@ struct Cli {
     #[arg(long, global = true)]
     tui: bool,
 
+    /// Headless mode for benchmarks/CI: read prompt from stdin (or --prompt arg),
+    /// emit a single JSON result line on stdout, no banners/REPL/streaming chrome.
+    /// Exit code 0 = success, 1 = failure.
+    #[arg(long, global = true)]
+    headless: bool,
+
     #[command(subcommand)]
     command: Option<Commands>,
 
@@ -134,6 +140,10 @@ fn main() {
     match cli.command {
         Some(Commands::Init) => cmd_init(cli.repo),
         Some(Commands::Agent { prompt }) => {
+            if cli.headless {
+                cmd_headless(prompt, cli.repo, cli.provider, cli.model, cli.max_iter, cli.mode);
+                return;
+            }
             cmd_agent(
                 prompt,
                 cli.repo,
@@ -170,6 +180,10 @@ fn main() {
             cmd_stats(&repo_path);
         }
         None => {
+            if cli.headless {
+                cmd_headless(cli.prompt, cli.repo, cli.provider, cli.model, cli.max_iter, cli.mode);
+                return;
+            }
             // Default: agent mode. REPL if no prompt, single-shot if prompt given.
             cmd_agent(
                 cli.prompt,
@@ -258,6 +272,120 @@ fn cmd_agent(
             repl.run().await;
         }
     });
+}
+
+/// Headless mode for benchmarks/CI.
+///
+/// Reads prompt from CLI args (joined) or, if empty, from stdin.
+/// Emits exactly one line of JSON on stdout with run metrics and exit code
+/// 0 (success) or 1 (failure). All chrome (banners, streaming, REPL) is
+/// suppressed; non-result diagnostics go to stderr.
+///
+/// Schema (single line, application/json):
+/// ```json
+/// {
+///   "schema": "theo.headless.v1",
+///   "success": bool,
+///   "summary": str,
+///   "iterations": u64,
+///   "duration_ms": u64,
+///   "tokens": {"input": u64, "output": u64, "total": u64},
+///   "tools": {"total": u64, "success": u64},
+///   "llm": {"calls": u64, "retries": u64},
+///   "files_edited": [str],
+///   "model": str,
+///   "mode": str,
+///   "provider": str
+/// }
+/// ```
+fn cmd_headless(
+    prompt: Vec<String>,
+    repo: PathBuf,
+    provider_id: Option<String>,
+    model: Option<String>,
+    max_iter: Option<usize>,
+    mode: Option<String>,
+) {
+    use std::io::Read;
+    use std::time::Instant;
+
+    let project_dir = resolve_dir(repo);
+
+    let task = if !prompt.is_empty() {
+        prompt.join(" ")
+    } else {
+        let mut buf = String::new();
+        if std::io::stdin().read_to_string(&mut buf).is_err() {
+            emit_headless_error("failed to read stdin");
+            std::process::exit(1);
+        }
+        buf.trim().to_string()
+    };
+
+    if task.is_empty() {
+        emit_headless_error("empty prompt: pass via args or stdin");
+        std::process::exit(1);
+    }
+
+    let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
+    rt.block_on(async {
+        let (mut config, provider_name) =
+            resolve_agent_config(provider_id.as_deref(), model.as_deref(), max_iter).await;
+
+        let mode_str = mode.as_deref().unwrap_or("agent");
+        let agent_mode = theo_agent_runtime::config::AgentMode::from_str(mode_str)
+            .unwrap_or(theo_agent_runtime::config::AgentMode::Agent);
+        config.mode = agent_mode;
+        config.system_prompt = theo_agent_runtime::config::system_prompt_for_mode(agent_mode);
+
+        let model_name = config.model.clone();
+
+        let registry = theo_tooling::registry::create_default_registry();
+        let agent = theo_agent_runtime::AgentLoop::new(config, registry);
+
+        let started = Instant::now();
+        let mut result = agent
+            .run_with_history(&task, &project_dir, vec![], None)
+            .await;
+        result.duration_ms = started.elapsed().as_millis() as u64;
+
+        let json = serde_json::json!({
+            "schema": "theo.headless.v1",
+            "success": result.success,
+            "summary": result.summary,
+            "iterations": result.iterations_used,
+            "duration_ms": result.duration_ms,
+            "tokens": {
+                "input": result.input_tokens,
+                "output": result.output_tokens,
+                "total": result.tokens_used,
+            },
+            "tools": {
+                "total": result.tool_calls_total,
+                "success": result.tool_calls_success,
+            },
+            "llm": {
+                "calls": result.llm_calls,
+                "retries": result.retries,
+            },
+            "files_edited": result.files_edited,
+            "model": model_name,
+            "mode": mode_str,
+            "provider": provider_name,
+        });
+        println!("{}", serde_json::to_string(&json).unwrap_or_default());
+
+        std::process::exit(if result.success { 0 } else { 1 });
+    });
+}
+
+fn emit_headless_error(msg: &str) {
+    let json = serde_json::json!({
+        "schema": "theo.headless.v1",
+        "success": false,
+        "error": msg,
+    });
+    println!("{}", serde_json::to_string(&json).unwrap_or_default());
 }
 
 fn cmd_pilot(
