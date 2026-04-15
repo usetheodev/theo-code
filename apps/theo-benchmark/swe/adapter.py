@@ -110,7 +110,7 @@ def build_prompt(instance: dict) -> str:
     hints = instance.get("hints_text", "")
     fail_to_pass = instance.get("FAIL_TO_PASS", "")
 
-    prompt = f"""Fix this bug. Be FAST and MINIMAL — aim for under 15 iterations.
+    prompt = f"""Fix this bug in an open-source project. Be precise — correctness matters more than speed.
 
 ## Issue
 
@@ -134,19 +134,19 @@ The test assertions tell you exactly what the code should do.
     prompt += """
 ## Strategy (follow this order)
 
-1. Read the failing test file(s) to understand WHAT the test expects.
-2. Use grep to find the function/class being tested in the source code.
-3. Read the relevant source code section (not the whole file).
-4. Make the MINIMAL change to fix the bug. One-line fixes are ideal.
-5. Verify your edit by re-reading the changed section.
-6. Call done immediately. Do NOT run tests (no test environment available).
+1. Read the failing test file(s) to understand WHAT behavior the test expects.
+2. Understand the test assertions — they define the correct behavior.
+3. Use grep to find the function/class being tested in the source code.
+4. Read the relevant source code to understand WHY it fails.
+5. Make the MINIMAL change to fix the bug. Match exactly what the tests expect.
+6. Re-read the changed file to verify your edit is correct.
+7. Call done with a summary of what you changed and why.
 
-CRITICAL RULES:
+RULES:
 - Do NOT add new tests or modify test files.
-- Do NOT refactor unrelated code.
-- Do NOT create new files.
+- Do NOT refactor unrelated code or create new files.
 - Prefer editing existing code over adding new code.
-- If the fix is a one-liner, just do it. Don't overthink."""
+- If unsure between two fixes, choose the one the test assertions imply."""
 
     return prompt
 
@@ -178,18 +178,29 @@ def run_instance(
 
         prompt = build_prompt(instance)
 
-        proc = subprocess.run(
-            [
-                str(theo_bin),
-                "--headless",
-                "--repo", str(workdir),
-                "--max-iter", "30",
-                prompt,
-            ],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
+        # Retry with backoff on rate limit errors
+        proc = None
+        for attempt in range(3):
+            proc = subprocess.run(
+                [
+                    str(theo_bin),
+                    "--headless",
+                    "--repo", str(workdir),
+                    "--max-iter", "30",
+                    prompt,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+            # Check if rate limited
+            if "rate limited" in proc.stdout.lower() or "rate limited" in proc.stderr.lower():
+                wait = 30 * (attempt + 1)
+                print(f"  ⏳ Rate limited on {iid}, waiting {wait}s (attempt {attempt+1}/3)",
+                      file=sys.stderr, flush=True)
+                time.sleep(wait)
+                continue
+            break
 
         # Parse headless JSON
         for line in reversed(proc.stdout.splitlines()):

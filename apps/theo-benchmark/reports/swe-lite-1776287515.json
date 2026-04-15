@@ -1,0 +1,222 @@
+{
+  "schema": "theo.swe.v1",
+  "dataset": "lite",
+  "total": 6,
+  "with_patch": 6,
+  "errors": 0,
+  "results": [
+    {
+      "instance_id": "psf__requests-1963",
+      "repo": "psf/requests",
+      "model_patch": "diff --git a/requests/sessions.py b/requests/sessions.py\nindex 425db22c..23d25634 100644\n--- a/requests/sessions.py\n+++ b/requests/sessions.py\n@@ -88,7 +88,7 @@ class SessionRedirectMixin(object):\n         i = 0\n \n         while resp.is_redirect:\n-            prepared_request = req.copy()\n+            prepared_request = resp.request.copy()\n \n             resp.content  # Consume socket so it can be released\n \n",
+      "model_name_or_path": "theo-code",
+      "duration_secs": 89.4,
+      "error": null,
+      "headless": {
+        "duration_ms": 86501,
+        "files_edited": [
+          "requests/sessions.py"
+        ],
+        "iterations": 18,
+        "llm": {
+          "calls": 18,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.3-codex",
+        "provider": "ChatGPT Codex (OAuth)",
+        "schema": "theo.headless.v1",
+        "success": true,
+        "summary": "Implemented a minimal one-line fix in `requests/sessions.py` for redirect method handling: changed `prepared_request = req.copy()` to `prepared_request = resp.request.copy()` inside `SessionRedirectMixin.resolve_redirects`. This ensures each redirect step is based on the most recent request (including prior method changes like POST->GET on 303), preventing incorrect method reversion on subsequent redirects (e.g., 307 preserving GET). Verified the changed section by re-reading the file.",
+        "tokens": {
+          "input": 153930,
+          "output": 3269,
+          "total": 157199
+        },
+        "tools": {
+          "success": 29,
+          "total": 32
+        }
+      },
+      "has_patch": true
+    },
+    {
+      "instance_id": "psf__requests-2148",
+      "repo": "psf/requests",
+      "model_patch": "diff --git a/requests/models.py b/requests/models.py\nindex 0dc55568..2ababaf8 100644\n--- a/requests/models.py\n+++ b/requests/models.py\n@@ -9,6 +9,7 @@ This module contains the primary objects that power Requests.\n \n import collections\n import datetime\n+import socket\n \n from io import BytesIO, UnsupportedOperation\n from .hooks import default_hooks\n@@ -22,7 +23,7 @@ from .packages.urllib3.util import parse_url\n from .packages.urllib3.exceptions import DecodeError\n from .exceptions import (\n     HTTPError, RequestException, MissingSchema, InvalidURL,\n-    ChunkedEncodingError, ContentDecodingError)\n+    ChunkedEncodingError, ContentDecodingError, ConnectionError)\n from .utils import (\n     guess_filename, get_auth_from_url, requote_uri,\n     stream_decode_response_unicode, to_key_val_list, parse_header_links,\n@@ -640,6 +641,8 @@ class Response(object):\n                     raise ChunkedEncodingError(e)\n                 except DecodeError as e:\n                     raise ContentDecodingError(e)\n+                except socket.error as e:\n+                    raise ConnectionError(e)\n             except AttributeError:\n                 # Standard file-like object.\n                 while True:\n",
+      "model_name_or_path": "theo-code",
+      "duration_secs": 91.2,
+      "error": null,
+      "headless": {
+        "duration_ms": 88214,
+        "files_edited": [
+          "requests/models.py",
+          "requests/models.py",
+          "requests/models.py"
+        ],
+        "iterations": 23,
+        "llm": {
+          "calls": 23,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.3-codex",
+        "provider": "ChatGPT Codex (OAuth)",
+        "schema": "theo.headless.v1",
+        "success": true,
+        "summary": "Implemented a minimal fix in `requests/models.py` so `Response.iter_content()` now wraps low-level `socket.error` as `requests.exceptions.ConnectionError` instead of leaking raw socket exceptions.\n\nChanges made:\n- Added `import socket`.\n- Imported `ConnectionError` from `requests.exceptions`.\n- In `Response.iter_content()`\u2019s urllib3 streaming path, added:\n  - `except socket.error as e: raise ConnectionError(e)`\n\nThis is a targeted change with no test modifications and directly addresses the reported bug/hint about `iter_content` handling socket errors.",
+        "tokens": {
+          "input": 299115,
+          "output": 2273,
+          "total": 301388
+        },
+        "tools": {
+          "success": 21,
+          "total": 22
+        }
+      },
+      "has_patch": true
+    },
+    {
+      "instance_id": "psf__requests-2317",
+      "repo": "psf/requests",
+      "model_patch": "diff --git a/requests/sessions.py b/requests/sessions.py\nindex d701ff2e..adcfbac7 100644\n--- a/requests/sessions.py\n+++ b/requests/sessions.py\n@@ -425,7 +425,7 @@ class Session(SessionRedirectMixin):\n             If Tuple, ('cert', 'key') pair.\n         \"\"\"\n \n-        method = builtin_str(method)\n+        method = to_native_string(method)\n \n         # Create the Request.\n         req = Request(\n",
+      "model_name_or_path": "theo-code",
+      "duration_secs": 53.5,
+      "error": null,
+      "headless": {
+        "duration_ms": 50516,
+        "files_edited": [
+          "requests/sessions.py"
+        ],
+        "iterations": 14,
+        "llm": {
+          "calls": 14,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.3-codex",
+        "provider": "ChatGPT Codex (OAuth)",
+        "schema": "theo.headless.v1",
+        "success": true,
+        "summary": "Applied a minimal one-line bug fix in requests/sessions.py: replaced `method = builtin_str(method)` with `method = to_native_string(method)` inside `Session.request`. This ensures byte-string HTTP methods (e.g. `b'GET'`) are decoded to native text instead of being stringified to `\"b'GET'\"`, matching the expected behavior indicated by the failing tests.",
+        "tokens": {
+          "input": 89893,
+          "output": 1709,
+          "total": 91602
+        },
+        "tools": {
+          "success": 23,
+          "total": 25
+        }
+      },
+      "has_patch": true
+    },
+    {
+      "instance_id": "psf__requests-2674",
+      "repo": "psf/requests",
+      "model_patch": "diff --git a/requests/adapters.py b/requests/adapters.py\nindex 841cbbfe..19ef486b 100644\n--- a/requests/adapters.py\n+++ b/requests/adapters.py\n@@ -430,6 +430,6 @@ class HTTPAdapter(BaseAdapter):\n             elif isinstance(e, ReadTimeoutError):\n                 raise ReadTimeout(e, request=request)\n             else:\n-                raise\n+                raise ConnectionError(e, request=request)\n \n         return self.build_response(request, resp)\n",
+      "model_name_or_path": "theo-code",
+      "duration_secs": 103.7,
+      "error": null,
+      "headless": {
+        "duration_ms": 100653,
+        "files_edited": [
+          "requests/adapters.py"
+        ],
+        "iterations": 21,
+        "llm": {
+          "calls": 21,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.3-codex",
+        "provider": "ChatGPT Codex (OAuth)",
+        "schema": "theo.headless.v1",
+        "success": true,
+        "summary": "Implemented a minimal fix in `requests/adapters.py` to prevent urllib3 exceptions from leaking through Requests API. In `HTTPAdapter.send`, the fallback branch of `except (_SSLError, _HTTPError)` now raises `requests.exceptions.ConnectionError(e, request=request)` instead of re-raising raw urllib3 exceptions. This preserves existing special handling for SSL and read-timeout errors while wrapping remaining urllib3 HTTP errors in Requests exceptions.",
+        "tokens": {
+          "input": 319044,
+          "output": 3438,
+          "total": 322482
+        },
+        "tools": {
+          "success": 34,
+          "total": 39
+        }
+      },
+      "has_patch": true
+    },
+    {
+      "instance_id": "psf__requests-3362",
+      "repo": "psf/requests",
+      "model_patch": "diff --git a/requests/utils.py b/requests/utils.py\nindex 8d17b6b2..ad68d708 100644\n--- a/requests/utils.py\n+++ b/requests/utils.py\n@@ -359,12 +359,16 @@ def get_encoding_from_headers(headers):\n def stream_decode_response_unicode(iterator, r):\n     \"\"\"Stream decodes a iterator.\"\"\"\n \n-    if r.encoding is None:\n+    encoding = r.encoding\n+    if encoding is None:\n+        encoding = r.apparent_encoding\n+\n+    if encoding is None:\n         for item in iterator:\n             yield item\n         return\n \n-    decoder = codecs.getincrementaldecoder(r.encoding)(errors='replace')\n+    decoder = codecs.getincrementaldecoder(encoding)(errors='replace')\n     for chunk in iterator:\n         rv = decoder.decode(chunk)\n         if rv:\n",
+      "model_name_or_path": "theo-code",
+      "duration_secs": 72.1,
+      "error": null,
+      "headless": {
+        "duration_ms": 69155,
+        "files_edited": [
+          "requests/utils.py"
+        ],
+        "iterations": 22,
+        "llm": {
+          "calls": 22,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.3-codex",
+        "provider": "ChatGPT Codex (OAuth)",
+        "schema": "theo.headless.v1",
+        "success": true,
+        "summary": "Implemented a minimal fix for unicode decoding in streamed content by updating `requests/utils.py::stream_decode_response_unicode` to fall back to `r.apparent_encoding` when `r.encoding` is `None` (matching `Response.text` behavior). Verified the edited section: it now resolves `encoding` from `r.encoding` first, then `r.apparent_encoding`, and decodes chunks with that encoding.",
+        "tokens": {
+          "input": 198447,
+          "output": 2388,
+          "total": 200835
+        },
+        "tools": {
+          "success": 20,
+          "total": 26
+        }
+      },
+      "has_patch": true
+    },
+    {
+      "instance_id": "psf__requests-863",
+      "repo": "psf/requests",
+      "model_patch": "diff --git a/requests/models.py b/requests/models.py\nindex d8456375..6b8d7f9e 100644\n--- a/requests/models.py\n+++ b/requests/models.py\n@@ -463,7 +463,10 @@ class Request(object):\n     def register_hook(self, event, hook):\n         \"\"\"Properly register a hook.\"\"\"\n \n-        self.hooks[event].append(hook)\n+        if hasattr(hook, '__iter__') and not hasattr(hook, '__call__'):\n+            self.hooks[event].extend(hook)\n+        else:\n+            self.hooks[event].append(hook)\n \n     def deregister_hook(self, event, hook):\n         \"\"\"Deregister a previously registered hook.\n",
+      "model_name_or_path": "theo-code",
+      "duration_secs": 56.0,
+      "error": null,
+      "headless": {
+        "duration_ms": 52430,
+        "files_edited": [
+          "requests/models.py"
+        ],
+        "iterations": 17,
+        "llm": {
+          "calls": 17,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.3-codex",
+        "provider": "ChatGPT Codex (OAuth)",
+        "schema": "theo.headless.v1",
+        "success": true,
+        "summary": "Implemented a minimal fix for hook list handling in `requests/models.py`.\n\nChanged `Request.register_hook` to support iterable non-callable hook values by extending the event hook list instead of appending the iterable as a single element. This prevents list values in `hooks` (e.g. `{'args': [hook1, hook2]}`) from being wrapped as `[ [hook1, hook2] ]`, which previously caused a non-callable list to be dispatched.\n\nVerified the updated section in file after edit.",
+        "tokens": {
+          "input": 172350,
+          "output": 1555,
+          "total": 173905
+        },
+        "tools": {
+          "success": 14,
+          "total": 20
+        }
+      },
+      "has_patch": true
+    }
+  ],
+  "timestamp": 1776287515
+}
