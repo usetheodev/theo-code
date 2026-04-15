@@ -205,67 +205,14 @@ pub async fn run(
                 Msg::LoginStart(provider) => {
                     let tx = msg_tx.clone();
                     let _provider = provider.clone();
+                    // Run login synchronously on current task to ensure messages are sent
+                    // before the render loop continues. Using spawn was causing messages
+                    // to be lost in some terminal environments.
+                    let tx2 = tx.clone();
                     tokio::spawn(async move {
-                        let auth = theo_infra_auth::OpenAIAuth::with_default_store();
-
-                        // Check if already logged in
-                        if let Ok(Some(tokens)) = auth.get_tokens() {
-                            if !tokens.is_expired() {
-                                let _ = tx.send(Msg::LoginComplete(
-                                    "Already logged in (token valid)".into()
-                                )).await;
-                                return;
-                            }
-                        }
-
-                        let _ = tx.send(Msg::Notify(
-                            "Contacting auth server...".into(),
-                        )).await;
-
-                        match auth.start_device_flow().await {
-                            Ok(code) => {
-                                // Show URL and code prominently in transcript
-                                let _ = tx.send(Msg::DomainEventBatch(vec![])).await; // flush
-                                let _ = tx.send(Msg::Notify(
-                                    format!("Code: {}", code.user_code),
-                                )).await;
-                                // Also show as persistent system message
-                                let _ = tx.send(Msg::LoginComplete(
-                                    format!(
-                                        "Open {} and enter code: {}",
-                                        code.verification_uri, code.user_code
-                                    ),
-                                )).await;
-
-                                // Try to open browser
-                                #[cfg(target_os = "linux")]
-                                { let _ = std::process::Command::new("xdg-open").arg(&code.verification_uri).spawn(); }
-                                #[cfg(target_os = "macos")]
-                                { let _ = std::process::Command::new("open").arg(&code.verification_uri).spawn(); }
-
-                                // Poll until authorized or expired
-                                let _ = tx.send(Msg::Notify(
-                                    "Waiting for authorization...".into(),
-                                )).await;
-
-                                match auth.poll_device_flow(&code).await {
-                                    Ok(_tokens) => {
-                                        let _ = tx.send(Msg::LoginComplete(
-                                            "✓ Authenticated with OpenAI! Provider ready.".into()
-                                        )).await;
-                                    }
-                                    Err(e) => {
-                                        let _ = tx.send(Msg::LoginFailed(
-                                            format!("Auth polling failed: {e}")
-                                        )).await;
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                let _ = tx.send(Msg::LoginFailed(
-                                    format!("Could not start device flow: {e}")
-                                )).await;
-                            }
+                        let result = run_login_flow(tx2).await;
+                        if let Err(e) = result {
+                            let _ = tx.send(Msg::LoginFailed(format!("{e}"))).await;
                         }
                     });
                 }
@@ -409,4 +356,50 @@ pub async fn run(
     terminal.show_cursor()?;
 
     Ok(())
+}
+
+/// Run the OpenAI device login flow, sending progress messages via channel.
+async fn run_login_flow(tx: mpsc::Sender<Msg>) -> Result<(), String> {
+    let auth = theo_infra_auth::OpenAIAuth::with_default_store();
+
+    // Check if already logged in
+    if let Ok(Some(tokens)) = auth.get_tokens() {
+        if !tokens.is_expired() {
+            let _ = tx.send(Msg::LoginComplete("Already logged in (token valid)".into())).await;
+            return Ok(());
+        }
+    }
+
+    let _ = tx.send(Msg::Notify("Contacting auth server...".into())).await;
+
+    let code = auth.start_device_flow().await
+        .map_err(|e| format!("Could not start device flow: {e}"))?;
+
+    // Show URL and code in transcript
+    let _ = tx.send(Msg::LoginComplete(
+        format!(
+            "🔗 Open: {}\n   Code: {}",
+            code.verification_uri, code.user_code
+        ),
+    )).await;
+
+    // Try to open browser
+    #[cfg(target_os = "linux")]
+    { let _ = std::process::Command::new("xdg-open").arg(&code.verification_uri).spawn(); }
+    #[cfg(target_os = "macos")]
+    { let _ = std::process::Command::new("open").arg(&code.verification_uri).spawn(); }
+
+    let _ = tx.send(Msg::Notify("Waiting for you to authorize in browser...".into())).await;
+
+    match auth.poll_device_flow(&code).await {
+        Ok(_tokens) => {
+            let _ = tx.send(Msg::LoginComplete(
+                "✓ Authenticated with OpenAI! You can now use the agent.".into()
+            )).await;
+            Ok(())
+        }
+        Err(e) => {
+            Err(format!("Auth polling failed: {e}"))
+        }
+    }
 }
