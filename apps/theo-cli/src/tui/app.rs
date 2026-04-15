@@ -86,6 +86,11 @@ pub struct TuiState {
     pub show_model_picker: bool,
     pub available_models: Vec<String>,
     pub model_picker_selected: usize,
+    pub theme: super::theme::Theme,
+    pub show_theme_picker: bool,
+    pub theme_picker_selected: usize,
+    pub autocomplete: super::autocomplete::AutocompleteState,
+    pub project_dir: std::path::PathBuf,
 }
 
 #[derive(Debug)]
@@ -154,6 +159,11 @@ impl TuiState {
                 "o3-mini".to_string(),
             ],
             model_picker_selected: 0,
+            theme: super::theme::Theme::dark(),
+            show_theme_picker: false,
+            theme_picker_selected: 0,
+            autocomplete: super::autocomplete::AutocompleteState::new(),
+            project_dir: std::path::PathBuf::new(),
         }
     }
 }
@@ -217,6 +227,15 @@ pub enum Msg {
     ModelPickerUp,
     ModelPickerDown,
     ModelPickerSelect,
+    ToggleThemePicker,
+    ThemePickerUp,
+    ThemePickerDown,
+    ThemePickerSelect,
+    AutocompleteUpdate,
+    AutocompleteUp,
+    AutocompleteDown,
+    AutocompleteAccept,
+    AutocompleteClose,
 }
 
 // ---------------------------------------------------------------------------
@@ -466,6 +485,88 @@ pub fn update(state: &mut TuiState, msg: Msg) {
                 });
             }
         }
+        Msg::ToggleThemePicker => {
+            state.show_theme_picker = !state.show_theme_picker;
+            state.theme_picker_selected = 0;
+        }
+        Msg::ThemePickerUp => {
+            if state.theme_picker_selected > 0 {
+                state.theme_picker_selected -= 1;
+            }
+        }
+        Msg::ThemePickerDown => {
+            state.theme_picker_selected += 1;
+        }
+        Msg::ThemePickerSelect => {
+            let themes = super::theme::Theme::all();
+            if let Some(theme) = themes.get(state.theme_picker_selected) {
+                state.theme = theme.clone();
+                state.show_theme_picker = false;
+                state.toasts.push(Toast {
+                    message: format!("Theme: {}", theme.name),
+                    level: ToastLevel::Info,
+                    created: Instant::now(),
+                });
+            }
+        }
+        Msg::AutocompleteUpdate => {
+            update_autocomplete(state);
+        }
+        Msg::AutocompleteUp => {
+            if state.autocomplete.selected > 0 {
+                state.autocomplete.selected -= 1;
+            }
+        }
+        Msg::AutocompleteDown => {
+            if state.autocomplete.selected < state.autocomplete.candidates.len().saturating_sub(1) {
+                state.autocomplete.selected += 1;
+            }
+        }
+        Msg::AutocompleteAccept => {
+            if let Some(text) = state.autocomplete.selected_text().map(|s| s.to_string()) {
+                state.input_text = if state.autocomplete.trigger == super::autocomplete::AutocompleteTrigger::Slash {
+                    text
+                } else {
+                    // For @file, insert at cursor position
+                    let before = &state.input_text[..state.input_text.rfind('@').unwrap_or(0)];
+                    format!("{}{} ", before, text)
+                };
+                state.input_cursor = state.input_text.len();
+                state.autocomplete.active = false;
+            }
+        }
+        Msg::AutocompleteClose => {
+            state.autocomplete.active = false;
+        }
+    }
+}
+
+fn update_autocomplete(state: &mut TuiState) {
+    use super::autocomplete::{self, AutocompleteTrigger};
+
+    let input = &state.input_text;
+
+    if input.starts_with('/') {
+        // Slash command autocomplete
+        let query = &input[1..];
+        let all = autocomplete::slash_commands();
+        let filtered = autocomplete::filter_candidates(&all, query);
+        state.autocomplete.active = !filtered.is_empty();
+        state.autocomplete.trigger = AutocompleteTrigger::Slash;
+        state.autocomplete.query = query.to_string();
+        state.autocomplete.candidates = filtered;
+        state.autocomplete.selected = 0;
+    } else if let Some(at_pos) = input.rfind('@') {
+        // @file autocomplete
+        let query = &input[at_pos + 1..];
+        let candidates = autocomplete::file_candidates(&state.project_dir, query);
+        state.autocomplete.active = !candidates.is_empty();
+        state.autocomplete.trigger = AutocompleteTrigger::AtFile;
+        state.autocomplete.query = query.to_string();
+        state.autocomplete.candidates = candidates;
+        state.autocomplete.selected = 0;
+    } else {
+        state.autocomplete.active = false;
     }
 }
 

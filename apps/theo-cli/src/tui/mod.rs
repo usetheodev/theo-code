@@ -6,10 +6,12 @@
 //! 3. Render task — 30fps tick, drain messages, update state, draw
 
 mod app;
+mod autocomplete;
 mod commands;
 mod events;
 mod input;
 mod markdown;
+pub mod theme;
 mod view;
 mod widgets;
 
@@ -93,6 +95,7 @@ pub async fn run(
         size.width,
         size.height,
     );
+    state.project_dir = project_dir.clone();
 
     // Session history for agent continuity
     let mut session_messages: Vec<Message> = Vec::new();
@@ -132,6 +135,16 @@ pub async fn run(
                     Msg::ToggleHelp => Msg::ToggleHelp,
                     Msg::Quit => Msg::Quit,
                     _ => Msg::ToggleHelp, // any key closes help
+                }
+            } else if state.autocomplete.active {
+                // Autocomplete mode
+                match msg {
+                    Msg::ScrollUp(_) => Msg::AutocompleteUp,
+                    Msg::ScrollDown(_) => Msg::AutocompleteDown,
+                    Msg::Submit(_) => Msg::AutocompleteAccept, // Enter accepts
+                    Msg::ToggleHelp => Msg::AutocompleteClose, // Esc closes
+                    Msg::ToggleSidebar => Msg::AutocompleteAccept, // Tab accepts
+                    other => other, // Other keys pass through (typing continues)
                 }
             } else {
                 // Normal mode: intercept Submit
@@ -179,6 +192,11 @@ pub async fn run(
                 }
             };
             app::update(&mut state, msg);
+
+            // Trigger autocomplete update after any input change
+            if !state.search_mode && !state.show_help {
+                app::update(&mut state, Msg::AutocompleteUpdate);
+            }
         }
 
         // Launch agent for pending prompt (if not already running)
