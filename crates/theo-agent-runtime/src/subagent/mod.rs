@@ -187,12 +187,7 @@ impl SubAgentManager {
                     success: false,
                     summary: "Sub-agent depth limit reached. Sub-agents cannot spawn sub-agents."
                         .to_string(),
-                    files_edited: vec![],
-                    iterations_used: 0,
-                    was_streamed: false,
-                    tokens_used: 0,
-                    input_tokens: 0,
-                    output_tokens: 0,
+                    ..Default::default()
                 };
             }
 
@@ -248,12 +243,7 @@ impl SubAgentManager {
                         timeout_secs,
                         objective
                     ),
-                    files_edited: vec![],
-                    iterations_used: 0,
-                    was_streamed: false,
-                    tokens_used: 0,
-                    input_tokens: 0,
-                    output_tokens: 0,
+                    ..Default::default()
                 },
             }
         }) // close Box::pin(async move {
@@ -286,12 +276,7 @@ impl SubAgentManager {
                 Err(e) => results.push(AgentResult {
                     success: false,
                     summary: format!("Sub-agent task panicked: {e}"),
-                    files_edited: vec![],
-                    iterations_used: 0,
-                    was_streamed: false,
-                    tokens_used: 0,
-                    input_tokens: 0,
-                    output_tokens: 0,
+                    ..Default::default()
                 }),
             }
         }

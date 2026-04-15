@@ -492,6 +492,11 @@ impl AgentRunEngine {
                     tokens_used: self.metrics.snapshot().total_tokens_used,
                     input_tokens: self.metrics.snapshot().total_input_tokens,
                     output_tokens: self.metrics.snapshot().total_output_tokens,
+                    tool_calls_total: self.metrics.snapshot().total_tool_calls,
+                    tool_calls_success: self.metrics.snapshot().successful_tool_calls,
+                    llm_calls: self.metrics.snapshot().total_llm_calls,
+                    retries: self.metrics.snapshot().total_retries,
+                    duration_ms: 0,
                 };
             }
 
@@ -699,6 +704,11 @@ impl AgentRunEngine {
                         tokens_used: self.metrics.snapshot().total_tokens_used,
                     input_tokens: self.metrics.snapshot().total_input_tokens,
                     output_tokens: self.metrics.snapshot().total_output_tokens,
+                    tool_calls_total: self.metrics.snapshot().total_tool_calls,
+                    tool_calls_success: self.metrics.snapshot().successful_tool_calls,
+                    llm_calls: self.metrics.snapshot().total_llm_calls,
+                    retries: self.metrics.snapshot().total_retries,
+                    duration_ms: 0,
                     };
                 }
             };
@@ -743,6 +753,11 @@ impl AgentRunEngine {
                     tokens_used: self.metrics.snapshot().total_tokens_used,
                     input_tokens: self.metrics.snapshot().total_input_tokens,
                     output_tokens: self.metrics.snapshot().total_output_tokens,
+                    tool_calls_total: self.metrics.snapshot().total_tool_calls,
+                    tool_calls_success: self.metrics.snapshot().successful_tool_calls,
+                    llm_calls: self.metrics.snapshot().total_llm_calls,
+                    retries: self.metrics.snapshot().total_retries,
+                    duration_ms: 0,
                 };
             }
 
@@ -801,6 +816,11 @@ impl AgentRunEngine {
                             tokens_used: self.metrics.snapshot().total_tokens_used,
                     input_tokens: self.metrics.snapshot().total_input_tokens,
                     output_tokens: self.metrics.snapshot().total_output_tokens,
+                    tool_calls_total: self.metrics.snapshot().total_tool_calls,
+                    tool_calls_success: self.metrics.snapshot().successful_tool_calls,
+                    llm_calls: self.metrics.snapshot().total_llm_calls,
+                    retries: self.metrics.snapshot().total_retries,
+                    duration_ms: 0,
                         });
                         break;
                     }
@@ -972,6 +992,11 @@ impl AgentRunEngine {
                         tokens_used: self.metrics.snapshot().total_tokens_used,
                     input_tokens: self.metrics.snapshot().total_input_tokens,
                     output_tokens: self.metrics.snapshot().total_output_tokens,
+                    tool_calls_total: self.metrics.snapshot().total_tool_calls,
+                    tool_calls_success: self.metrics.snapshot().successful_tool_calls,
+                    llm_calls: self.metrics.snapshot().total_llm_calls,
+                    retries: self.metrics.snapshot().total_retries,
+                    duration_ms: 0,
                     });
                     break;
                 }
@@ -1529,6 +1554,11 @@ impl AgentRunEngine {
                                 tokens_used: self.metrics.snapshot().total_tokens_used,
                     input_tokens: self.metrics.snapshot().total_input_tokens,
                     output_tokens: self.metrics.snapshot().total_output_tokens,
+                    tool_calls_total: self.metrics.snapshot().total_tool_calls,
+                    tool_calls_success: self.metrics.snapshot().successful_tool_calls,
+                    llm_calls: self.metrics.snapshot().total_llm_calls,
+                    retries: self.metrics.snapshot().total_retries,
+                    duration_ms: 0,
                             };
                         }
                     }
@@ -2157,6 +2187,11 @@ mod tests {
             tokens_used: 0,
             input_tokens: 0,
             output_tokens: 0,
+            tool_calls_total: 0,
+            tool_calls_success: 0,
+            llm_calls: 0,
+            retries: 0,
+            duration_ms: 0,
         };
         assert!(result.success);
         assert_eq!(result.summary, "done");
