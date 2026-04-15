@@ -440,8 +440,11 @@ impl OpenAIAuth {
                             .and_then(|c| c.as_str())
                             .unwrap_or("");
                         match code {
-                            "deviceauth_authorization_pending" => continue,
-                            "deviceauth_user_code_expired" => return Err(AuthError::DeviceExpired),
+                            "deviceauth_authorization_pending"
+                            | "deviceauth_authorization_unknown"
+                            | "authorization_pending" => continue,
+                            "deviceauth_user_code_expired"
+                            | "expired_token" => return Err(AuthError::DeviceExpired),
                             _ => {
                                 let msg = err_obj.get("error")
                                     .and_then(|e| e.get("message"))
@@ -457,7 +460,9 @@ impl OpenAIAuth {
 
             if let Some(error) = &dt.error {
                 match error.as_str() {
-                    "authorization_pending" | "deviceauth_authorization_pending" => continue,
+                    "authorization_pending"
+                    | "deviceauth_authorization_pending"
+                    | "deviceauth_authorization_unknown" => continue,
                     "slow_down" => {
                         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                         continue;
