@@ -247,7 +247,20 @@ pub fn from_codex_stream(stream_body: &str) -> Option<ChatResponse> {
             let json: serde_json::Value = serde_json::from_str(data).ok()?;
             // The completed event has a "response" field with the full response
             let response = json.get("response").unwrap_or(&json);
-            return from_codex_response(response);
+            // Some Codex responses ship an empty `output` array in the completed
+            // event even when the stream emitted message/function_call items via
+            // delta events. In that case we must fall through to the delta
+            // accumulator instead of returning an empty response.
+            let output_empty = response
+                .get("output")
+                .and_then(|o| o.as_array())
+                .map(|a| a.is_empty())
+                .unwrap_or(true);
+            if !output_empty {
+                return from_codex_response(response);
+            }
+            // else: fall through to delta accumulation below
+            break;
         }
     }
 
