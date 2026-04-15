@@ -49,6 +49,9 @@ pub async fn input_loop(tx: mpsc::Sender<Msg>) {
                     // Mode cycling
                     (KeyCode::BackTab, _) => Some(Msg::CycleMode),
 
+                    // Sidebar toggle and tab
+                    (KeyCode::Tab, _) => Some(Msg::ToggleSidebar),
+
                     // Clear screen
                     (KeyCode::Char('l'), m) if m.contains(KeyModifiers::CONTROL) => Some(Msg::ScrollToBottom),
 
@@ -58,6 +61,9 @@ pub async fn input_loop(tx: mpsc::Sender<Msg>) {
                     // Restore last prompt (Ctrl+Up or Ctrl+P)
                     (KeyCode::Up, m) if m.contains(KeyModifiers::CONTROL) => Some(Msg::RestoreLastPrompt),
                     (KeyCode::Char('p'), m) if m.contains(KeyModifiers::CONTROL) => Some(Msg::RestoreLastPrompt),
+
+                    // Model picker
+                    (KeyCode::Char('m'), m) if m.contains(KeyModifiers::CONTROL) => Some(Msg::ToggleModelPicker),
 
                     // Character input
                     (KeyCode::Char(c), _) => Some(Msg::InputChar(c)),

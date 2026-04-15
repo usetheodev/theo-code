@@ -81,6 +81,11 @@ pub struct TuiState {
     pub session_picker: Option<SessionPickerState>,
     pub toasts: Vec<Toast>,
     pub prompt_history: Vec<String>,
+    pub show_sidebar: bool,
+    pub sidebar_tab: super::widgets::sidebar::SidebarTab,
+    pub show_model_picker: bool,
+    pub available_models: Vec<String>,
+    pub model_picker_selected: usize,
 }
 
 #[derive(Debug)]
@@ -137,6 +142,18 @@ impl TuiState {
             session_picker: None,
             toasts: Vec::new(),
             prompt_history: Vec::new(),
+            show_sidebar: width > 120,
+            sidebar_tab: super::widgets::sidebar::SidebarTab::Status,
+            show_model_picker: false,
+            available_models: vec![
+                "gpt-4o".to_string(),
+                "gpt-4o-mini".to_string(),
+                "gpt-5.3-codex".to_string(),
+                "claude-sonnet-4-5-20250514".to_string(),
+                "claude-opus-4-5-20250514".to_string(),
+                "o3-mini".to_string(),
+            ],
+            model_picker_selected: 0,
         }
     }
 }
@@ -194,6 +211,12 @@ pub enum Msg {
     InterruptAgent,
     ClearTranscript,
     ExportSession,
+    ToggleSidebar,
+    NextSidebarTab,
+    ToggleModelPicker,
+    ModelPickerUp,
+    ModelPickerDown,
+    ModelPickerSelect,
 }
 
 // ---------------------------------------------------------------------------
@@ -406,13 +429,42 @@ pub fn update(state: &mut TuiState, msg: Msg) {
             state.scroll_locked_to_bottom = true;
         }
         Msg::ExportSession => {
-            // Export is handled by mod.rs which has filesystem access
-            // Here we just add a toast; the actual write happens in the render loop
             state.toasts.push(Toast {
                 message: "Exporting session...".to_string(),
                 level: ToastLevel::Info,
                 created: Instant::now(),
             });
+        }
+        Msg::ToggleSidebar => {
+            state.show_sidebar = !state.show_sidebar;
+        }
+        Msg::NextSidebarTab => {
+            state.sidebar_tab = state.sidebar_tab.next();
+        }
+        Msg::ToggleModelPicker => {
+            state.show_model_picker = !state.show_model_picker;
+            state.model_picker_selected = 0;
+        }
+        Msg::ModelPickerUp => {
+            if state.model_picker_selected > 0 {
+                state.model_picker_selected -= 1;
+            }
+        }
+        Msg::ModelPickerDown => {
+            if state.model_picker_selected < state.available_models.len().saturating_sub(1) {
+                state.model_picker_selected += 1;
+            }
+        }
+        Msg::ModelPickerSelect => {
+            if let Some(model) = state.available_models.get(state.model_picker_selected) {
+                state.status.model = model.clone();
+                state.show_model_picker = false;
+                state.toasts.push(Toast {
+                    message: format!("Model: {model}"),
+                    level: ToastLevel::Info,
+                    created: Instant::now(),
+                });
+            }
         }
     }
 }

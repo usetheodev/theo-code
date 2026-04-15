@@ -16,18 +16,35 @@ use super::app::{TuiState, TranscriptEntry, ToolCardStatus, SessionPickerState, 
 
 /// Draw the full TUI layout.
 pub fn draw(frame: &mut Frame, state: &TuiState) {
+    // Split into main + sidebar if sidebar is visible
+    let (main_area, sidebar_area) = if state.show_sidebar {
+        let h_chunks = Layout::horizontal([
+            Constraint::Min(40),
+            Constraint::Length(40),
+        ])
+        .split(frame.area());
+        (h_chunks[0], Some(h_chunks[1]))
+    } else {
+        (frame.area(), None)
+    };
+
     let chunks = Layout::vertical([
         Constraint::Length(1),  // header
         Constraint::Min(1),    // transcript
         Constraint::Length(3), // input
         Constraint::Length(1), // status line
     ])
-    .split(frame.area());
+    .split(main_area);
 
     render_header(frame, chunks[0], state);
     render_transcript(frame, chunks[1], state);
     render_input(frame, chunks[2], state);
     render_status_line(frame, chunks[3], state);
+
+    // Sidebar
+    if let Some(sb_area) = sidebar_area {
+        super::widgets::sidebar::render_sidebar(frame, sb_area, state, state.sidebar_tab);
+    }
 
     // Search bar overlay (above input)
     if state.search_mode {
@@ -56,6 +73,11 @@ pub fn draw(frame: &mut Frame, state: &TuiState) {
     // Toast notifications (top-right)
     if !state.toasts.is_empty() {
         render_toasts(frame, state);
+    }
+
+    // Model picker overlay
+    if state.show_model_picker {
+        render_model_picker(frame, state);
     }
 
     // Help overlay (on top of everything)
@@ -329,6 +351,58 @@ fn render_help_overlay(frame: &mut Frame) {
             .title(" Help "));
 
     frame.render_widget(help, help_area);
+}
+
+fn render_model_picker(frame: &mut Frame, state: &TuiState) {
+    let area = frame.area();
+    let width = 45u16.min(area.width.saturating_sub(4));
+    let height = (state.available_models.len() as u16 + 4).min(area.height.saturating_sub(4));
+    let x = (area.width.saturating_sub(width)) / 2;
+    let y = (area.height.saturating_sub(height)) / 2;
+    let picker_area = Rect::new(x, y, width, height);
+
+    let clear = Block::default().style(Style::default().bg(Color::Black));
+    frame.render_widget(clear, picker_area);
+
+    let mut lines = vec![
+        Line::from(Span::styled(
+            " Select model (Ctrl+M to close)",
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+    ];
+
+    for (i, model) in state.available_models.iter().enumerate() {
+        let is_selected = i == state.model_picker_selected;
+        let is_current = *model == state.status.model;
+        let prefix = if is_selected { "▸ " } else { "  " };
+        let suffix = if is_current { " (current)" } else { "" };
+        let style = if is_selected {
+            Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+        } else if is_current {
+            Style::default().fg(Color::Green)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+        lines.push(Line::from(Span::styled(
+            format!("{prefix}{model}{suffix}"),
+            style,
+        )));
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        " j/k: navigate  Enter: select  Esc: close",
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    let picker = Paragraph::new(lines)
+        .block(Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Cyan))
+            .title(" Model "));
+
+    frame.render_widget(picker, picker_area);
 }
 
 fn render_toasts(frame: &mut Frame, state: &TuiState) {

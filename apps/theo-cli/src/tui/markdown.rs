@@ -99,13 +99,12 @@ pub fn markdown_to_lines(text: &str) -> Vec<Line<'static>> {
                             Style::default().fg(Color::DarkGray),
                         )));
                         for code_line in code_buffer.lines() {
-                            lines.push(Line::from(vec![
+                            let styled_spans = highlight_code_line(code_line, &code_block_lang);
+                            let mut line_spans = vec![
                                 Span::styled("  │ ", Style::default().fg(Color::DarkGray)),
-                                Span::styled(
-                                    code_line.to_string(),
-                                    Style::default().fg(Color::Green),
-                                ),
-                            ]));
+                            ];
+                            line_spans.extend(styled_spans);
+                            lines.push(Line::from(line_spans));
                         }
                         lines.push(Line::from(Span::styled(
                             "  └─────",
@@ -178,6 +177,111 @@ pub fn markdown_to_lines(text: &str) -> Vec<Line<'static>> {
     }
 
     lines
+}
+
+/// Simple keyword-based syntax highlighting for code blocks.
+/// Not as sophisticated as syntect but covers common patterns without heavy deps.
+fn highlight_code_line(line: &str, lang: &str) -> Vec<Span<'static>> {
+    let keywords: &[&str] = match lang {
+        "rust" | "rs" => &[
+            "fn", "let", "mut", "pub", "struct", "enum", "impl", "trait", "use", "mod",
+            "async", "await", "match", "if", "else", "for", "while", "loop", "return",
+            "self", "Self", "super", "crate", "where", "type", "const", "static",
+        ],
+        "typescript" | "ts" | "javascript" | "js" => &[
+            "function", "const", "let", "var", "if", "else", "for", "while", "return",
+            "import", "export", "from", "class", "extends", "interface", "type",
+            "async", "await", "new", "this", "super", "default",
+        ],
+        "python" | "py" => &[
+            "def", "class", "import", "from", "if", "elif", "else", "for", "while",
+            "return", "yield", "async", "await", "with", "as", "try", "except",
+            "raise", "pass", "lambda", "self", "None", "True", "False",
+        ],
+        "go" => &[
+            "func", "var", "const", "type", "struct", "interface", "if", "else",
+            "for", "range", "return", "package", "import", "go", "defer", "chan",
+            "select", "case", "switch", "default", "nil", "true", "false",
+        ],
+        "bash" | "sh" | "shell" | "zsh" => &[
+            "if", "then", "else", "fi", "for", "do", "done", "while", "case", "esac",
+            "function", "return", "export", "local", "echo", "exit",
+        ],
+        _ => &[],
+    };
+
+    if keywords.is_empty() {
+        // No language-specific highlighting, use generic green
+        return vec![Span::styled(line.to_string(), Style::default().fg(Color::Green))];
+    }
+
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    let mut remaining = line.to_string();
+
+    // Simple tokenizer: split by word boundaries, color keywords
+    let mut result = String::new();
+    let mut in_string = false;
+    let mut string_char = '"';
+    let mut in_comment = false;
+    let mut chars = remaining.chars().peekable();
+    let mut current_word = String::new();
+
+    // Simplified approach: just scan for keywords at word boundaries
+    // and color strings/comments differently
+    for (i, ch) in line.char_indices() {
+        if in_comment {
+            // Rest of line is comment
+            break;
+        }
+        if in_string {
+            if ch == string_char && (i == 0 || line.as_bytes().get(i - 1) != Some(&b'\\')) {
+                in_string = false;
+            }
+            continue;
+        }
+        if ch == '"' || ch == '\'' {
+            in_string = true;
+            string_char = ch;
+            continue;
+        }
+        if ch == '/' && line.get(i+1..i+2) == Some("/") {
+            in_comment = true;
+            continue;
+        }
+        if ch == '#' && matches!(lang, "python" | "py" | "bash" | "sh" | "shell" | "zsh") {
+            in_comment = true;
+            continue;
+        }
+    }
+
+    // For simplicity, use a word-by-word coloring approach
+    let parts: Vec<&str> = line.split_inclusive(|c: char| !c.is_alphanumeric() && c != '_')
+        .collect();
+
+    for part in parts {
+        let word = part.trim_end_matches(|c: char| !c.is_alphanumeric() && c != '_');
+        let suffix_len = part.len() - word.len();
+        let suffix = &part[word.len()..];
+
+        if keywords.contains(&word) {
+            spans.push(Span::styled(word.to_string(), Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)));
+            if !suffix.is_empty() {
+                spans.push(Span::styled(suffix.to_string(), Style::default().fg(Color::Green)));
+            }
+        } else if word.starts_with('"') || word.starts_with('\'') {
+            spans.push(Span::styled(part.to_string(), Style::default().fg(Color::Yellow)));
+        } else if word.starts_with("//") || word.starts_with('#') {
+            spans.push(Span::styled(part.to_string(), Style::default().fg(Color::DarkGray)));
+        } else {
+            spans.push(Span::styled(part.to_string(), Style::default().fg(Color::Green)));
+        }
+    }
+
+    if spans.is_empty() {
+        spans.push(Span::styled(line.to_string(), Style::default().fg(Color::Green)));
+    }
+
+    spans
 }
 
 fn flush_line(lines: &mut Vec<Line<'static>>, spans: &mut Vec<Span<'static>>) {
