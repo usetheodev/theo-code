@@ -68,7 +68,7 @@ pub struct OpenAIAuth {
 
 #[derive(Deserialize)]
 struct TokenResponse {
-    access_token: String,
+    access_token: Option<String>,
     refresh_token: Option<String>,
     expires_in: Option<u64>,
     id_token: Option<String>,
@@ -109,13 +109,25 @@ where
 }
 
 /// Token response from the device auth token endpoint.
-/// Handles both the old format (flat error string) and new format (error object).
+/// OpenAI returns either:
+/// - Pending: {"error": {"code": "deviceauth_authorization_unknown"}}
+/// - Success: {"status": "success", "authorization_code": "ac_...", "code_verifier": "..."}
+/// Note: OpenAI does NOT return access_token directly — returns authorization_code
+/// that must be exchanged via /oauth/token (PKCE flow).
 #[derive(Deserialize)]
 struct DeviceTokenResponse {
+    // Standard OAuth fields (used by some servers)
     access_token: Option<String>,
     refresh_token: Option<String>,
     expires_in: Option<u64>,
     id_token: Option<String>,
+    // OpenAI-specific fields (device flow returns auth code, not token)
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(default)]
+    authorization_code: Option<String>,
+    #[serde(default)]
+    code_verifier: Option<String>,
     /// Old format: "authorization_pending" / New format: {"message":"...", "code":"..."}
     #[serde(default, deserialize_with = "deserialize_error_field")]
     error: Option<String>,
@@ -272,8 +284,11 @@ impl OpenAIAuth {
 
         let expires_at = token_resp.expires_in.map(|secs| now_secs() + secs);
 
+        let access_token = token_resp.access_token.clone()
+            .ok_or_else(|| AuthError::OAuth("missing access_token in token response".to_string()))?;
+
         let tokens = OpenAITokens {
-            access_token: token_resp.access_token.clone(),
+            access_token: access_token.clone(),
             refresh_token: token_resp.refresh_token.clone(),
             expires_at,
             account_id: account_id.clone(),
@@ -283,7 +298,7 @@ impl OpenAIAuth {
         self.store.set(
             PROVIDER_ID,
             AuthEntry::OAuth {
-                access_token: token_resp.access_token,
+                access_token,
                 refresh_token: token_resp.refresh_token,
                 expires_at,
                 account_id,
@@ -328,15 +343,18 @@ impl OpenAIAuth {
 
         let expires_at = token_resp.expires_in.map(|secs| now_secs() + secs);
 
+        let access_token = token_resp.access_token
+            .ok_or_else(|| AuthError::OAuth("missing access_token in refresh response".to_string()))?;
+
         self.store.update_tokens(
             PROVIDER_ID,
-            token_resp.access_token.clone(),
+            access_token.clone(),
             token_resp.refresh_token.clone(),
             expires_at,
         )?;
 
         Ok(OpenAITokens {
-            access_token: token_resp.access_token,
+            access_token,
             refresh_token: token_resp.refresh_token,
             expires_at,
             account_id: current.account_id,
@@ -472,8 +490,34 @@ impl OpenAIAuth {
                 }
             }
 
-            let access_token = dt.access_token
-                .ok_or_else(|| AuthError::OAuth(format!("device flow: missing access_token in response: {body}")))?;
+            // OpenAI returns authorization_code instead of access_token
+            // Need to exchange it via /oauth/token (PKCE)
+            let access_token = if let Some(token) = dt.access_token {
+                token
+            } else if let (Some(auth_code), Some(code_verifier)) = (dt.authorization_code, dt.code_verifier) {
+                // Exchange authorization_code for access_token
+                let token_resp = self.http
+                    .post(TOKEN_URL)
+                    .json(&serde_json::json!({
+                        "grant_type": "authorization_code",
+                        "code": auth_code,
+                        "code_verifier": code_verifier,
+                        "client_id": CLIENT_ID,
+                        "redirect_uri": "https://auth.openai.com/deviceauth/callback",
+                    }))
+                    .send()
+                    .await?;
+
+                let token_body = token_resp.text().await
+                    .map_err(|e| AuthError::OAuth(format!("read token exchange response: {e}")))?;
+
+                let tr: TokenResponse = serde_json::from_str(&token_body)
+                    .map_err(|e| AuthError::OAuth(format!("parse token exchange: {e} body: {token_body}")))?;
+
+                tr.access_token.ok_or_else(|| AuthError::OAuth(format!("token exchange: missing access_token: {token_body}")))?
+            } else {
+                return Err(AuthError::OAuth(format!("device flow: no access_token or authorization_code in response: {body}")));
+            };
 
             let account_id = dt.id_token.as_deref().and_then(extract_account_id_from_jwt);
             let expires_at = dt.expires_in.map(|secs| now_secs() + secs);
