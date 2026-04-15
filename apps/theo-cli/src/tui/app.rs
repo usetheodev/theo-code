@@ -287,6 +287,7 @@ pub enum Msg {
     // Auth
     LoginStart(String), // "device" for device flow
     LoginWithKey(String), // direct API key
+    LoginServer(String), // server URL for device flow
     LoginComplete(String), // success message
     LoginFailed(String), // error message
     LogoutRequest,
@@ -666,7 +667,12 @@ pub fn update(state: &mut TuiState, msg: Msg) {
         // Auth — actual login/logout happens in mod.rs; these are UI state updates
         Msg::LoginStart(_provider) => {
             state.transcript.push(TranscriptEntry::SystemMessage(
-                "🔐 Starting device flow authentication...".to_string(),
+                "🔐 Starting OpenAI device flow...".to_string(),
+            ));
+        }
+        Msg::LoginServer(url) => {
+            state.transcript.push(TranscriptEntry::SystemMessage(
+                format!("🔐 Connecting to {}...", url),
             ));
         }
         Msg::LoginWithKey(key) => {

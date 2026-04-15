@@ -5994,6 +5994,7 @@ dependencies = [
  "futures",
  "pulldown-cmark",
  "ratatui",
+ "reqwest 0.12.28",
  "rustyline",
  "serde",
  "serde_json",

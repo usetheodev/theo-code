@@ -1,4 +1,5 @@
 pub mod anthropic;
+pub mod device_flow;
 pub mod bedrock;
 pub mod callback;
 pub mod copilot;

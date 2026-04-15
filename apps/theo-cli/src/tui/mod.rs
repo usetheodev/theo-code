@@ -252,6 +252,55 @@ pub async fn run(
                                             ));
                                         }
                                     }
+                                } else if matches!(cmd_msg, Msg::LoginServer(_)) {
+                                    // Generic device flow against any RFC 8628 server
+                                    let server_url = if let Msg::LoginServer(ref u) = cmd_msg { u.clone() } else { unreachable!() };
+                                    app::update(&mut state, cmd_msg);
+                                    let http = reqwest::Client::new();
+                                    let config = theo_infra_auth::device_flow::DeviceFlowConfig::new(&server_url);
+
+                                    app::update(&mut state, Msg::Notify("Requesting device code...".into()));
+                                    terminal.draw(|frame| view::draw(frame, &state))?;
+
+                                    match theo_infra_auth::device_flow::start_device_flow(&http, &config).await {
+                                        Ok(code) => {
+                                            app::update(&mut state, Msg::Notify("─────────────────────────────────────".into()));
+                                            app::update(&mut state, Msg::Notify(format!("1. Open: {}", code.verification_url)));
+                                            app::update(&mut state, Msg::Notify(format!("2. Enter code: {}", code.user_code)));
+                                            app::update(&mut state, Msg::Notify("3. Authorize Theo".into()));
+                                            app::update(&mut state, Msg::Notify("─────────────────────────────────────".into()));
+                                            eprint!("\x1b]52;c;{}\x07", app::base64_encode(&code.user_code));
+                                            app::update(&mut state, Msg::Notify("Code copied to clipboard. Waiting...".into()));
+                                            terminal.draw(|frame| view::draw(frame, &state))?;
+
+                                            // Open browser silently
+                                            #[cfg(target_os = "linux")]
+                                            { let _ = std::process::Command::new("xdg-open").arg(&code.verification_url).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn(); }
+                                            #[cfg(target_os = "macos")]
+                                            { let _ = std::process::Command::new("open").arg(&code.verification_url).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn(); }
+
+                                            // Poll in background
+                                            let poll_tx = msg_tx.clone();
+                                            let poll_config = config.clone();
+                                            let poll_code = code.clone();
+                                            tokio::spawn(async move {
+                                                let http = reqwest::Client::new();
+                                                match theo_infra_auth::device_flow::poll_device_flow(&http, &poll_config, &poll_code).await {
+                                                    Ok(tokens) => {
+                                                        // Set the access token as env var for the agent
+                                                        unsafe { std::env::set_var("OPENAI_API_KEY", &tokens.access_token); }
+                                                        let _ = poll_tx.send(Msg::LoginComplete("✓ Authenticated! Provider ready.".into())).await;
+                                                    }
+                                                    Err(e) => {
+                                                        let _ = poll_tx.send(Msg::LoginFailed(format!("{e}"))).await;
+                                                    }
+                                                }
+                                            });
+                                        }
+                                        Err(e) => {
+                                            app::update(&mut state, Msg::LoginFailed(format!("Server error: {e}")));
+                                        }
+                                    }
                                 } else {
                                     app::update(&mut state, cmd_msg);
                                 }

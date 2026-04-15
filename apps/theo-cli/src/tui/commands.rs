@@ -50,18 +50,21 @@ pub fn process_command(input: &str, state: &TuiState) -> Option<Vec<Msg>> {
             if arg.starts_with("sk-") || arg.starts_with("sess-") {
                 // Direct API key: /login sk-xxx
                 Some(vec![Msg::LoginWithKey(arg.to_string())])
+            } else if arg.starts_with("http") {
+                // Server URL: /login https://api.opencode.ai (device flow against server)
+                Some(vec![Msg::LoginServer(arg.to_string())])
             } else if arg == "device" || arg == "oauth" {
-                // Force device flow
+                // OpenAI device flow
                 Some(vec![Msg::LoginStart(arg.to_string())])
             } else if arg.is_empty() {
                 // Show options
-                Some(vec![Msg::Notify(
-                    "/login sk-xxx     Set API key directly".into(),
-                ), Msg::Notify(
-                    "/login device     OAuth device flow (requires browser)".into(),
-                ), Msg::Notify(
-                    "Or set OPENAI_API_KEY env var before starting".into(),
-                )])
+                Some(vec![
+                    Msg::Notify("─── Login Options ───".into()),
+                    Msg::Notify("/login https://api.opencode.ai   Device flow (uses your plan)".into()),
+                    Msg::Notify("/login sk-xxxxx                  API key directly".into()),
+                    Msg::Notify("/login device                    OpenAI device flow".into()),
+                    Msg::Notify("Or: OPENAI_API_KEY=sk-xxx theo   Env var".into()),
+                ])
             } else {
                 // Assume it's an API key
                 Some(vec![Msg::LoginWithKey(arg.to_string())])
