@@ -341,6 +341,7 @@ pub async fn run(
                             continue;
                         }
                         pending_prompt = Some(text.clone());
+                        tui_log(&format!("pending_prompt SET to '{}'", &text[..text.len().min(40)]));
                         Msg::Submit(text)
                     }
                     Msg::Submit(ref s) if s.is_empty() => continue, // empty submit, skip
@@ -423,7 +424,11 @@ pub async fn run(
         }
 
         // Launch agent for pending prompt (if not already running)
+        if pending_prompt.is_some() {
+            tui_log(&format!("TICK: pending_prompt=Some agent_running={}", state.agent_running));
+        }
         if let Some(prompt) = pending_prompt.take() {
+            tui_log(&format!("PROMPT TAKEN: '{}' agent_running={}", &prompt[..prompt.len().min(40)], state.agent_running));
             if !state.agent_running {
                 state.agent_running = true;
                 tui_log("=== AGENT LAUNCH START ===");
