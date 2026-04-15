@@ -287,6 +287,10 @@ pub struct AgentConfig {
     /// Sequential = one at a time (default). Parallel = concurrent dispatch.
     /// See [`ToolExecutionMode`] for details on the parallel strategy.
     pub tool_execution_mode: ToolExecutionMode,
+    /// Use aggressive retry policy (5 retries, 10-120s delays) for rate limits.
+    /// Useful in headless/benchmark mode where losing an instance to a transient
+    /// rate limit is expensive. Default: false (uses standard 3 retries, 1-30s).
+    pub aggressive_retry: bool,
 }
 
 impl Default for AgentConfig {
@@ -309,6 +313,7 @@ impl Default for AgentConfig {
             doom_loop_threshold: Some(3),
             context_window_tokens: 128_000,
             tool_execution_mode: ToolExecutionMode::default(),
+            aggressive_retry: false,
         }
     }
 }
