@@ -27,7 +27,6 @@ pub struct ToolCallManager {
     results: Mutex<HashMap<CallId, ToolResultRecord>>,
     event_bus: Arc<EventBus>,
     capability_gate: Option<Arc<CapabilityGate>>,
-    approval_gate: Option<Arc<dyn crate::approval_gate::ApprovalGate>>,
 }
 
 impl ToolCallManager {
@@ -37,7 +36,6 @@ impl ToolCallManager {
             results: Mutex::new(HashMap::new()),
             event_bus,
             capability_gate: None,
-            approval_gate: None,
         }
     }
 
@@ -47,11 +45,6 @@ impl ToolCallManager {
         self
     }
 
-    /// Sets the approval gate for interactive tool approval.
-    pub fn with_approval_gate(mut self, gate: Arc<dyn crate::approval_gate::ApprovalGate>) -> Self {
-        self.approval_gate = Some(gate);
-        self
-    }
 
     /// Enqueues a new tool call with a unique CallId (Invariant 2).
     ///
@@ -114,48 +107,6 @@ impl ToolCallManager {
             }
         }
 
-        // 0.5. Interactive approval check (if gate is set)
-        if let Some(approval_gate) = &self.approval_gate {
-            let tool_name = {
-                self.records.lock().expect("records lock")
-                    .get(call_id)
-                    .map(|r| r.tool_name.clone())
-                    .unwrap_or_default()
-            };
-            let tool_args = {
-                self.records.lock().expect("records lock")
-                    .get(call_id)
-                    .map(|r| r.input.clone())
-                    .unwrap_or(serde_json::Value::Null)
-            };
-            let risk = crate::approval_gate::tool_risk_level(&tool_name);
-            let request = crate::approval_gate::ApprovalRequest {
-                decision_id: call_id.as_str().to_string(),
-                tool_name: tool_name.clone(),
-                tool_args,
-                risk_level: risk,
-            };
-            match approval_gate.request_approval(request).await {
-                crate::approval_gate::ApprovalOutcome::Approved => { /* continue */ }
-                crate::approval_gate::ApprovalOutcome::Rejected(reason) => {
-                    return Err(ToolCallManagerError::CapabilityDenied(
-                        CapabilityDenied {
-                            tool_name,
-                            reason: format!("Rejected by approval gate: {reason}"),
-                        }
-                    ));
-                }
-                crate::approval_gate::ApprovalOutcome::Timeout => {
-                    return Err(ToolCallManagerError::CapabilityDenied(
-                        CapabilityDenied {
-                            tool_name,
-                            reason: "Approval timed out (5 minutes)".to_string(),
-                        }
-                    ));
-                }
-            }
-        }
-
         // 1. Transition Queued → Dispatched (under lock)
         let lmm_call = {
             let mut records = self.records.lock().expect("records lock poisoned");
@@ -184,54 +135,10 @@ impl ToolCallManager {
         };
         // Lock is released here — safe to await
 
-        // 3. Inject stdout streaming channel for live TUI display
-        let (stdout_tx, mut stdout_rx) = tokio::sync::mpsc::channel::<String>(256);
-        let mut streaming_ctx = ctx.clone();
-        streaming_ctx.stdout_tx = Some(stdout_tx);
-
-        // Spawn task to drain stdout lines and publish as ToolCallStdoutDelta events
-        let stream_bus = self.event_bus.clone();
-        let stream_call_id = call_id.clone();
-        let stream_tool_name = {
-            self.records.lock().expect("records lock")
-                .get(call_id)
-                .map(|r| r.tool_name.clone())
-                .unwrap_or_default()
-        };
-        let drainer = tokio::spawn(async move {
-            while let Some(line) = stdout_rx.recv().await {
-                stream_bus.publish(DomainEvent::new(
-                    EventType::ToolCallStdoutDelta,
-                    stream_call_id.as_str(),
-                    serde_json::json!({
-                        "line": line,
-                        "stream": "stdout",
-                        "tool_name": stream_tool_name,
-                    }),
-                ));
-            }
-        });
-
-        // Execute tool via tool_bridge (no lock held)
+        // 3. Execute tool via tool_bridge (no lock held)
         let start = std::time::Instant::now();
-        let (message, success, metadata) = tool_bridge::execute_tool_call(registry, &lmm_call, &streaming_ctx).await;
-        // Drop the tx side so drainer finishes
-        drop(streaming_ctx);
-        let _ = drainer.await;
+        let (message, success) = tool_bridge::execute_tool_call(registry, &lmm_call, ctx).await;
         let duration_ms = start.elapsed().as_millis() as u64;
-
-        // Publish TodoUpdated if tool returned task metadata
-        if let Some(ref meta) = metadata {
-            if let Some(meta_type) = meta.get("type").and_then(|v| v.as_str()) {
-                if meta_type == "task_create" || meta_type == "task_update" {
-                    self.event_bus.publish(DomainEvent::new(
-                        EventType::TodoUpdated,
-                        call_id.as_str(),
-                        meta.clone(),
-                    ));
-                }
-            }
-        }
 
         // 4. Determine final state
         let final_state = if success {

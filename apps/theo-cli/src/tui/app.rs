@@ -972,7 +972,7 @@ fn handle_domain_event(state: &mut TuiState, event: DomainEvent) {
             state.active_tool_cards.insert(call_id, idx);
             state.status.tools_running += 1;
         }
-        EventType::ToolCallStdoutDelta => {
+        EventType::ToolCallProgress => {
             if let Some(line) = event.payload.get("line").and_then(|v| v.as_str()) {
                 if let Some(&idx) = state.active_tool_cards.get(&event.entity_id) {
                     if let Some(TranscriptEntry::ToolCard(card)) = state.transcript.get_mut(idx) {
@@ -1182,7 +1182,7 @@ mod tests {
         let queued = make_event(EventType::ToolCallQueued, "c-1", serde_json::json!({"tool_name": "bash"}));
         update(&mut state, Msg::DomainEvent(queued));
         // Send stdout
-        let delta = make_event(EventType::ToolCallStdoutDelta, "c-1", serde_json::json!({"line": "Compiling..."}));
+        let delta = make_event(EventType::ToolCallProgress, "c-1", serde_json::json!({"line": "Compiling..."}));
         update(&mut state, Msg::DomainEvent(delta));
 
         match &state.transcript[0] {

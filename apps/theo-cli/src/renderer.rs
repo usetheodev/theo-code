@@ -72,7 +72,7 @@ impl EventListener for CliRenderer {
                 let tool_name = event.payload.get("tool_name").and_then(|v| v.as_str()).unwrap_or("?");
                 eprint!("\n  \x1b[36m⠋\x1b[0m {tool_name} \x1b[90mrunning...\x1b[0m");
             }
-            EventType::ToolCallStdoutDelta => {
+            EventType::ToolCallProgress => {
                 if let Some(line) = event.payload.get("line").and_then(|v| v.as_str()) {
                     let display = if line.len() > 120 {
                         format!("{}…", &line[..119])
