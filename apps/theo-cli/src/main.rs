@@ -9,6 +9,7 @@ mod render;
 mod renderer;
 mod repl;
 mod status_line;
+mod tui;
 mod tty;
 
 use std::path::{Path, PathBuf};
@@ -54,6 +55,10 @@ struct Cli {
     /// Agent mode
     #[arg(long, global = true, value_parser = ["agent", "plan", "ask"])]
     mode: Option<String>,
+
+    /// Launch TUI mode (ratatui)
+    #[arg(long, global = true)]
+    tui: bool,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -136,6 +141,7 @@ fn main() {
                 cli.model,
                 cli.max_iter,
                 cli.mode,
+                cli.tui,
             );
         }
         Some(Commands::Pilot {
@@ -172,6 +178,7 @@ fn main() {
                 cli.model,
                 cli.max_iter,
                 cli.mode,
+                cli.tui,
             );
         }
     }
@@ -212,6 +219,7 @@ fn cmd_agent(
     model: Option<String>,
     max_iter: Option<usize>,
     mode: Option<String>,
+    use_tui: bool,
 ) {
     let project_dir = resolve_dir(repo);
 
@@ -225,6 +233,14 @@ fn cmd_agent(
     rt.block_on(async {
         let (config, provider_name) =
             resolve_agent_config(provider_id.as_deref(), model.as_deref(), max_iter).await;
+
+        if use_tui {
+            if let Err(e) = tui::run(config, project_dir, provider_name, inline_prompt).await {
+                eprintln!("TUI error: {e}");
+                std::process::exit(1);
+            }
+            return;
+        }
 
         let mut repl = repl::Repl::new(config, project_dir, provider_name);
         if let Some(ref mode_str) = mode {

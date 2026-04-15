@@ -14,7 +14,7 @@ use super::app::Msg;
 /// This function blocks its task waiting for crossterm events.
 /// Exits when the mpsc sender is dropped (render loop closed).
 pub async fn input_loop(tx: mpsc::Sender<Msg>) {
-    let mut reader = event::EventStream::new();
+    let mut reader = crossterm::event::EventStream::new();
 
     while let Some(Ok(evt)) = reader.next().await {
         let msg = match evt {

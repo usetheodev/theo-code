@@ -1056,21 +1056,6 @@ fn handle_domain_event(state: &mut TuiState, event: DomainEvent) {
             ));
             state.transcript.push(TranscriptEntry::SystemMessage(msg.to_string()));
         }
-        EventType::GovernanceDecisionPending => {
-            let decision_id = event.payload.get("decision_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let tool_name = event.payload.get("tool_name").and_then(|v| v.as_str()).unwrap_or("?").to_string();
-            let risk_level = event.payload.get("risk_level").and_then(|v| v.as_str()).unwrap_or("Medium").to_string();
-            let args_preview = event.payload.get("args_preview").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            state.pending_approval = Some(PendingApproval {
-                decision_id,
-                tool_name,
-                risk_level,
-                args_preview,
-            });
-        }
-        EventType::GovernanceDecisionResolved => {
-            state.pending_approval = None;
-        }
         EventType::TodoUpdated => {
             let action = event.payload.get("type").and_then(|v| v.as_str()).unwrap_or("");
             let content = event.payload.get("content").and_then(|v| v.as_str()).unwrap_or("");

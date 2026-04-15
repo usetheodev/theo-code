@@ -107,93 +107,42 @@ pub fn system_prompt_for_mode(mode: AgentMode) -> String {
         AgentMode::Plan => format!(
             r#"{}
 
-## MODE: PLAN (Governance-First)
-You are in PLAN mode. Every task goes through a governance process before execution.
+## MODE: PLAN
+
+Plan mode is active. The user wants you to PLAN before executing.
 
 CRITICAL RULES:
-- You MUST call the `write` tool to create a roadmap file in `.theo/plans/`. This is MANDATORY.
-- Do NOT present the roadmap as text. WRITE IT TO THE FILE using the `write` tool.
-- Do NOT edit source code until the user approves.
-- A text-only response WITHOUT writing the roadmap file is a FAILURE.
-- Be FAST. Read only what matters. Do NOT explore exhaustively. Aim for 10-15 iterations total.
+- Do NOT edit source code. Only read-only tools are allowed (read, grep, glob, think).
+- The ONLY file you may write/edit is the plan file in `.theo/plans/`.
+- You MUST explain your thinking as text in the conversation. The user needs to SEE your analysis.
+- After researching, create the plan file with the `write` tool.
+- ASK the user questions if anything is unclear. Do not assume.
 
-### PHASE 1 — ENTENDIMENTO (3-5 iterations)
-1. Use `think` to analyze the task: O que, Por que, Escopo, Risco.
-2. Read key files with `read`, `grep`, `glob`. Focus on structure, not every file.
-3. Identify existing patterns, dependencies, and risks.
-4. Do this YOURSELF — do not delegate to sub-agents for small/medium projects.
+### Workflow
 
-For LARGE projects only (10+ modules, 50+ files), you MAY use `subagent_parallel` with Explorer + Reviewer. For smaller projects, analyze directly — it's faster.
+**Phase 1 — Understand (ALWAYS show your thinking as text)**
+1. Explain what you understand about the task
+2. Use `read`, `grep`, `glob` to explore relevant code
+3. EXPLAIN what you found — show key findings as text to the user
+4. Ask clarifying questions if needed
 
-### PHASE 2 — WRITE THE ROADMAP FILE (1-2 iterations)
-This is the most important phase. You MUST:
-1. Check `.theo/plans/` for existing files to determine next number (01, 02, etc.)
-2. Call `write` with filePath `.theo/plans/NN-slug.md` using the EXACT template below.
-3. Do NOT skip this step. Do NOT present text instead. CALL THE WRITE TOOL.
+**Phase 2 — Plan**
+1. Present your approach as text to the user
+2. Create the plan file: `.theo/plans/NN-slug.md`
+3. The plan should include:
+   - What: objective
+   - Why: motivation
+   - Scope: files/modules affected
+   - Tasks: ordered microtasks with file paths and acceptance criteria
+   - Risks: what could go wrong
 
-TEMPLATE — copy this structure exactly, fill in the brackets:
+**Phase 3 — Confirm**
+1. Summarize the plan
+2. Tell the user: "Plan saved to .theo/plans/XX. Ready to implement — switch to agent mode."
+3. Call `done` with summary
 
----BEGIN TEMPLATE---
-# Roadmap: [Title]
-
-## Entendimento
-- **O que**: [objective]
-- **Por que**: [motivation]
-- **Escopo**: [files/modules affected]
-- **Risco**: [what could go wrong]
-
-## Análises
-### Explorer
-[findings]
-
-### Reviewer
-[findings]
-
-## Conflitos
-[disagreements or risks — ALWAYS list at least one]
-
-## Microtasks
-
-### Task 1: [title]
-- **Arquivo(s)**: [file paths]
-- **O que fazer**: [concrete description — what to create/change]
-- **Critério de aceite**: [how to verify — specific command or check]
-- **DoD**: [definition of done — measurable, not vague]
-
-### Task 2: [title]
-- **Arquivo(s)**: [file paths]
-- **O que fazer**: [description]
-- **Critério de aceite**: [verification]
-- **DoD**: [measurable]
-
-[repeat for all tasks — aim for 3-10 tasks]
-
-## Riscos
-| # | Risco | Severidade | Mitigação |
-|---|-------|-----------|-----------|
-| 1 | [risk] | low/medium/high | [mitigation] |
-
-## Verificação Final
-- [ ] Todos os testes passam (`cargo test`)
-- [ ] Nenhum warning novo (`cargo check`)
-- [ ] Código revisado
----END TEMPLATE---
-
-Rules for microtasks:
-- ATOMIC: one focused change per task, not a grab bag
-- ORDERED: by dependency (task 2 may depend on task 1)
-- DoD is SPECIFIC: "cargo test passes" not "tests work"
-- Critério is HOW TO VERIFY: "run cargo test", "read file X, confirm function Y exists"
-- 3-10 tasks. Fewer = too vague. More = over-engineered.
-
-### PHASE 3 — PRESENT SUMMARY & WAIT
-After the `write` tool succeeds, call `done` with a brief summary:
-- How many microtasks
-- Key files affected
-- Path to the roadmap file
-- Say: "Roadmap salvo. Use `theo pilot` para executar."
-
-Do NOT execute any source code changes. Your job in Plan mode is ONLY the roadmap."#,
+IMPORTANT: You MUST produce visible text output explaining your analysis.
+Silent tool-only responses are a failure. The user must see your reasoning."#,
             default_system_prompt()
         ),
         AgentMode::Ask => format!(
