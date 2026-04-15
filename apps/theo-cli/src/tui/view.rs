@@ -228,17 +228,32 @@ fn render_status_line(frame: &mut Frame, area: Rect, state: &TuiState) {
         String::new()
     };
 
-    let status_text = format!(
-        " {} │ {} │ {}/{} iter{} │ ? ajuda  Ctrl+C sair",
-        state.status.mode,
-        state.status.phase,
-        state.status.iteration,
-        state.status.max_iterations,
-        tools_str,
-    );
+    // Phase indicator with color coding
+    let phase = &state.status.phase;
+    let phase_color = match phase.as_str() {
+        "Initialized" | "READY" => Color::DarkGray,
+        "Planning" => Color::Blue,
+        "Executing" => Color::Yellow,
+        "Evaluating" => Color::Cyan,
+        "Converged" => Color::Green,
+        "Aborted" => Color::Red,
+        _ if phase.starts_with("SubAgent") => Color::Magenta,
+        _ => Color::DarkGray,
+    };
 
-    let status = Paragraph::new(status_text)
-        .style(Style::default().fg(Color::DarkGray).bg(Color::Black));
+    let ctrl_c_hint = if state.agent_running { "Ctrl+C interrupt" } else { "Ctrl+C sair" };
+
+    let status_line = Line::from(vec![
+        Span::styled(format!(" {} ", state.status.mode), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::styled("│ ", Style::default().fg(Color::DarkGray)),
+        Span::styled(phase.as_str(), Style::default().fg(phase_color)),
+        Span::styled(format!(" │ {}/{} iter", state.status.iteration, state.status.max_iterations), Style::default().fg(Color::DarkGray)),
+        Span::styled(&tools_str, Style::default().fg(Color::Yellow)),
+        Span::styled(format!(" │ Esc ajuda  {ctrl_c_hint}"), Style::default().fg(Color::DarkGray)),
+    ]);
+
+    let status = Paragraph::new(status_line)
+        .style(Style::default().bg(Color::Black));
 
     frame.render_widget(status, area);
 }

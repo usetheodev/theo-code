@@ -20,8 +20,8 @@ pub async fn input_loop(tx: mpsc::Sender<Msg>) {
         let msg = match evt {
             Event::Key(KeyEvent { code, modifiers, kind: KeyEventKind::Press, .. }) => {
                 match (code, modifiers) {
-                    // Quit
-                    (KeyCode::Char('c'), m) if m.contains(KeyModifiers::CONTROL) => Some(Msg::Quit),
+                    // Quit or interrupt
+                    (KeyCode::Char('c'), m) if m.contains(KeyModifiers::CONTROL) => Some(Msg::InterruptAgent),
                     (KeyCode::Char('d'), m) if m.contains(KeyModifiers::CONTROL) => Some(Msg::Quit),
 
                     // Submit
