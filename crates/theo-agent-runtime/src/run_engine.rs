@@ -1265,6 +1265,7 @@ impl AgentRunEngine {
                                 abort: abort_rx.clone(),
                                 project_dir: self.project_dir.clone(),
                                 graph_context: self.graph_context.clone(),
+                                stdout_tx: None,
                             };
 
                             futures.push(async move {
@@ -1452,6 +1453,7 @@ impl AgentRunEngine {
                     abort: abort_rx.clone(),
                     project_dir: self.project_dir.clone(),
                     graph_context: self.graph_context.clone(),
+                    stdout_tx: None,
                 };
 
                 let tool_result = self
