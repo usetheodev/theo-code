@@ -1213,7 +1213,7 @@ impl AgentRunEngine {
                     abort: abort_rx.clone(),
                     project_dir: self.project_dir.clone(),
                     graph_context: self.graph_context.clone(),
-                    stdout_tx: None, // TODO(F1-T04): inject broadcast tx here
+                    stdout_tx: None, // ToolCallManager injects its own channel in dispatch_and_execute
                 };
 
                 let tool_result = self.tool_call_manager
