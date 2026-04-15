@@ -80,6 +80,45 @@ pub fn draw(frame: &mut Frame, state: &TuiState) {
         render_model_picker(frame, state);
     }
 
+    // Autocomplete dropdown (above input)
+    if state.autocomplete.active && !state.autocomplete.candidates.is_empty() {
+        let max_shown = 6.min(state.autocomplete.candidates.len());
+        let dropdown_height = max_shown as u16 + 2; // +2 for border
+        let input_area = chunks[2];
+        let dropdown_area = Rect::new(
+            input_area.x,
+            input_area.y.saturating_sub(dropdown_height),
+            input_area.width.min(50),
+            dropdown_height,
+        );
+
+        let mut lines: Vec<Line> = Vec::new();
+        for (i, candidate) in state.autocomplete.candidates.iter().take(max_shown).enumerate() {
+            let is_selected = i == state.autocomplete.selected;
+            let prefix = if is_selected { "▸ " } else { "  " };
+            let style = if is_selected {
+                Style::default().fg(Color::White).bg(Color::DarkGray)
+            } else {
+                Style::default().fg(Color::DarkGray)
+            };
+            let desc = if candidate.description.is_empty() {
+                String::new()
+            } else {
+                format!("  {}", candidate.description)
+            };
+            lines.push(Line::from(vec![
+                Span::styled(format!("{prefix}{}", candidate.text), style),
+                Span::styled(desc, Style::default().fg(Color::DarkGray)),
+            ]));
+        }
+
+        let dropdown = Paragraph::new(lines)
+            .block(Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Cyan)));
+        frame.render_widget(dropdown, dropdown_area);
+    }
+
     // Help overlay (on top of everything)
     if state.show_help {
         render_help_overlay(frame);
