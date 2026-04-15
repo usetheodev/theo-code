@@ -72,14 +72,31 @@ def setup_repo(instance: dict, workdir: Path) -> bool:
     repo_url = f"https://github.com/{repo}.git"
 
     try:
-        subprocess.run(
+        # Try shallow clone first (fast), fall back to full clone if commit is old
+        shallow = subprocess.run(
             ["git", "clone", "--depth", "50", repo_url, str(workdir)],
-            capture_output=True, text=True, timeout=120, check=True,
+            capture_output=True, text=True, timeout=180,
         )
-        subprocess.run(
+        if shallow.returncode != 0:
+            subprocess.run(
+                ["git", "clone", repo_url, str(workdir)],
+                capture_output=True, text=True, timeout=600, check=True,
+            )
+
+        co = subprocess.run(
             ["git", "checkout", base_commit],
-            cwd=workdir, capture_output=True, text=True, timeout=30, check=True,
+            cwd=workdir, capture_output=True, text=True, timeout=30,
         )
+        if co.returncode != 0:
+            # Commit not in shallow history — fetch it or do full clone
+            subprocess.run(
+                ["git", "fetch", "--unshallow"],
+                cwd=workdir, capture_output=True, text=True, timeout=600,
+            )
+            subprocess.run(
+                ["git", "checkout", base_commit],
+                cwd=workdir, capture_output=True, text=True, timeout=30, check=True,
+            )
         return True
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
         print(f"  SKIP {instance['instance_id']}: clone/checkout failed: {e}",
