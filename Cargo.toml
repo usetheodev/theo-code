@@ -13,6 +13,7 @@ members = [
     "crates/theo-application",
     "apps/theo-desktop",
     "apps/theo-cli",
+    "apps/theo-marklive",
 ]
 resolver = "3"
 
@@ -50,15 +51,23 @@ ignore = "0.4"
 log = "0.4"
 landlock = "0.4"
 libc = "0.2"
-rustyline = "14"
-futures = "0.3"
-ratatui = "0.29"
+rustyline = "15"
 crossterm = "0.28"
-tui-textarea = "0.7"
-pulldown-cmark = "0.12"
+pulldown-cmark = "0.13"
+syntect = { version = "5", default-features = false, features = ["default-fancy"] }
+indicatif = "0.17"
+console = "0.15"
+dialoguer = "0.11"
+textwrap = { version = "0.16", features = ["terminal_size"] }
+comfy-table = "7"
+dirs = "5"
+insta = { version = "1", features = ["yaml"] }
+proptest = "1"
+criterion = { version = "0.5", features = ["html_reports"] }
 toml = "0.8"
 rayon = "1"
 bincode = "1"
 scip = "0.5"
 protobuf = "3"
 tantivy = "0.22"
+blake3 = "1"

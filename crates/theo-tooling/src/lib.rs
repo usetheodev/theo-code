@@ -15,6 +15,7 @@ pub mod ls;
 pub mod lsp;
 pub mod memory;
 pub mod multiedit;
+pub mod mutation_queue;
 pub mod plan;
 pub mod question;
 pub mod read;
@@ -26,10 +27,12 @@ pub mod skill;
 pub mod task;
 pub mod think;
 pub mod todo;
+pub mod tool_manifest;
 pub mod truncate;
 pub mod undo;
 pub mod webfetch;
 pub mod websearch;
+pub mod wiki_tool;
 pub mod write;
 
 #[cfg(test)]

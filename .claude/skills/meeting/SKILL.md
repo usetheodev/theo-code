@@ -1,114 +1,175 @@
 ---
 name: meeting
-description: OBRIGATORIO antes de qualquer alteracao no sistema. Convoca o time de agentes para analisar a proposta (feature, bug fix, refactor) e produz um veredito. Sem /meeting aprovado, Edit e Write estao bloqueados.
+description: Convoca reuniao com TODO o time de agentes (16 personas). Cada agente analisa o tema, debate, e produz uma ata estruturada em .claude/meetings/. Use para decisoes estrategicas, tecnicas, arquiteturais, ou qualquer tema que impacte o projeto.
 user-invocable: true
-allowed-tools: Read, Grep, Glob, Bash(cargo *), Bash(git *), Agent, Write
+allowed-tools: Bash(date *) Bash(git *) Bash(ls *) Bash(cat *) Read Write Edit Glob Grep Agent
+argument-hint: "<tema da reuniao>"
 ---
 
-# Meeting — Gate Obrigatorio
+# Meeting — Reuniao do Time Completo
 
-Voce e o facilitador de uma reuniao tecnica obrigatoria. NENHUMA alteracao no sistema acontece sem esta reuniao.
-
-## Quando Executar
-
-ANTES de qualquer:
-- Feature nova
-- Bug fix
-- Refatoracao
-- Mudanca de dependencia
-- Mudanca de configuracao
-- Qualquer Edit ou Write em codigo do projeto
+Convoque TODOS os 16 agentes para uma reuniao sobre: **$ARGUMENTS**
 
 ## Protocolo
 
-### FASE 1 — Entendimento
+### 1. Abertura
 
-Documente claramente:
-- **O que**: descricao objetiva da mudanca proposta
-- **Por que**: motivacao (ticket, bug report, decisao tecnica)
-- **Escopo**: quais crates/arquivos serao afetados
-- **Risco**: o que pode dar errado
+Gere o ID da reuniao:
 
-Se $ARGUMENTS estiver vazio ou vago, PARE e pergunte ao usuario o que sera feito. Nao invente escopo.
-
-### FASE 2 — Convocacao do Time
-
-Lance os agentes RELEVANTES em paralelo (minimo 2, maximo 5):
-
-**Sempre convocados:**
-- `governance` — veredito de governanca (veto absoluto)
-- `qa` — validacao de testabilidade
-
-**Convocados por contexto:**
-- `runtime` — se envolve agent loop, state machine, async
-- `graphctx` — se envolve parsers, graph, dependencias entre crates
-- `tooling` — se envolve tool execution ou comandos shell
-- `infra` — se envolve performance, LLM calls, custo
-- `frontend` — se envolve UI, componentes React, UX
-
-Passe como argumento de cada agente: a descricao da mudanca + escopo + arquivos afetados.
-
-### FASE 3 — Sintese e Conflitos
-
-Analise as respostas dos agentes:
-
-1. **Convergencia**: onde todos concordam
-2. **Conflitos**: onde discordam (OBRIGATORIO identificar pelo menos 1 risco)
-3. **Pontos cegos**: riscos que nenhum agente levantou
-
-Se TODOS concordam sem ressalvas → voce DEVE levantar pelo menos um risco como advocacia do diabo.
-
-### FASE 4 — Veredito
-
-Aplique a regra de consenso:
-```
-SE Governance = REJECT → REJECT
-SE QA.validated = false → REJECT
-SE Runtime.risk_level = CRITICAL → REJECT
-SENAO → APPROVE
+```!
+date +%Y%m%d-%H%M%S
 ```
 
-### FASE 5 — Ata e Gate
+Branch e estado atual:
 
-Escreva a ata em `.claude/gate/meeting-minutes.md` com:
+```!
+git branch --show-current
+git log --oneline -3
+```
+
+### 2. Pauta
+
+Defina a pauta baseada no tema "$ARGUMENTS":
+- Contexto: o que motivou essa reuniao
+- Questoes a decidir
+- Riscos a avaliar
+- Restricoes conhecidas
+
+### 3. Convocacao do Time
+
+Convoque TODOS os agentes em grupos paralelos. Cada agente deve analisar o tema da perspectiva do seu dominio e retornar:
+- **Posicao**: APPROVE / REJECT / CONCERN / ABSTAIN
+- **Analise**: 2-5 frases do ponto de vista do seu dominio
+- **Riscos**: o que pode dar errado
+- **Recomendacoes**: o que faria diferente
+
+#### Grupo 1 — Estrategia (paralelo)
+- `chief-architect` — impacto no pipeline e execucao
+- `evolution-agent` — impacto no sistema como um todo
+
+#### Grupo 2 — Conhecimento (paralelo)
+- `knowledge-compiler` — impacto na wiki e knowledge base
+- `ontology-manager` — impacto na taxonomia e conceitos
+- `data-ingestor` — impacto na ingestao de dados
+- `wiki-expert` — impacto na experiencia da wiki
+
+#### Grupo 3 — Qualidade (paralelo)
+- `validator` — riscos de corrupcao e consistencia
+- `linter` — impacto na saude do sistema
+- `retrieval-engineer` — impacto na busca e ranking
+- `memory-synthesizer` — impacto na sintese e datasets
+
+#### Grupo 4 — Engineering (paralelo)
+- `code-reviewer` — qualidade de codigo
+- `graphctx-expert` — impacto no GRAPHCTX
+- `arch-validator` — violacoes arquiteturais
+- `test-runner` — impacto em testes
+- `frontend-dev` — impacto na UI
+
+#### Grupo 5 — Pesquisa
+- `research-agent` — estado da arte e referencias externas
+
+### 4. Debate
+
+Apos coletar todas as posicoes:
+- Identifique **conflitos** (agentes que discordam)
+- Identifique **consenso** (agentes que concordam)
+- Resolva conflitos com argumentos, nao autoridade
+- Se houver REJECT de chief-architect ou validator → o tema precisa ser revisado
+
+### 5. Veredito
+
+```
+APPROVED  — maioria aprova, sem REJECT critico
+REJECTED  — bloqueios nao resolvidos
+DEFERRED  — precisa de mais informacao
+REVISED   — aprovado com modificacoes
+```
+
+### 6. Ata
+
+Salve a ata em `.claude/meetings/YYYYMMDD-HHMMSS-<slug>.md` com esta estrutura:
 
 ```markdown
-# Meeting — [data e hora]
+---
+id: YYYYMMDD-HHMMSS
+date: YYYY-MM-DD
+topic: "<tema>"
+verdict: APPROVED | REJECTED | DEFERRED | REVISED
+participants: 16
+---
 
-## Proposta
-[descricao]
+# Reuniao: <tema>
 
-## Participantes
-[lista de agentes convocados]
+## Pauta
+<contexto e questoes>
 
-## Analises
-[resumo de cada agente]
+## Posicoes por Agente
+
+### Estrategia
+| Agente | Posicao | Resumo |
+|--------|---------|--------|
+| chief-architect | APPROVE | ... |
+| evolution-agent | CONCERN | ... |
+
+### Conhecimento
+| Agente | Posicao | Resumo |
+|--------|---------|--------|
+| knowledge-compiler | APPROVE | ... |
+| ... | ... | ... |
+
+### Qualidade
+| Agente | Posicao | Resumo |
+|--------|---------|--------|
+| validator | APPROVE | ... |
+| ... | ... | ... |
+
+### Engineering
+| Agente | Posicao | Resumo |
+|--------|---------|--------|
+| code-reviewer | APPROVE | ... |
+| ... | ... | ... |
+
+### Pesquisa
+| Agente | Posicao | Resumo |
+|--------|---------|--------|
+| research-agent | APPROVE | ... |
 
 ## Conflitos
-[pontos de discordancia]
+<debates e resolucoes>
 
-## Veredito
-**APPROVED** ou **REJECTED**
+## Decisoes
+1. <decisao 1>
+2. <decisao 2>
 
-## Escopo Aprovado
-[lista EXATA de arquivos/crates que podem ser alterados]
+## Action Items
+- [ ] <quem> — <o que> — <quando>
 
-## Condicoes
-[requisitos obrigatorios: testes, validacoes, etc.]
+## Veredito Final
+**<VERDICT>**: <justificativa em 1-2 frases>
 ```
 
-Se APPROVED: escreva "APPROVED" no arquivo `.claude/gate/status`
-Se REJECTED: escreva "REJECTED" no arquivo `.claude/gate/status`
+## Regras
 
-O arquivo `.claude/gate/status` contem APENAS a palavra APPROVED ou REJECTED. Nada mais.
+1. **Todos participam** — nenhum agente pode ser omitido
+2. **Conflito obrigatorio** — se todos concordam sem debate, forca contra-argumentos
+3. **Ata obrigatoria** — sem ata, a reuniao nao aconteceu
+4. **Veredito claro** — APPROVED/REJECTED/DEFERRED/REVISED, sem ambiguidade
+5. **Action items concretos** — quem, o que, quando
+6. **Historico preservado** — atas nunca sao editadas apos salvas
+7. **TDD obrigatorio** — toda decisao que envolva codigo deve incluir um plano TDD (RED-GREEN-REFACTOR) nos action items. Sem plano de testes = decisao incompleta.
 
-## Regras Inquebraveis
+## TDD na Ata
 
-1. Sem meeting → sem alteracao. Sem excecoes.
-2. "E so uma mudanca pequena" NAO e excecao. Rode a meeting.
-3. "Ja sei o que fazer" NAO e excecao. Rode a meeting.
-4. "O usuario pediu pra ir rapido" NAO e excecao. Rode a meeting.
-5. Se o veredito for REJECTED, a unica opcao e revisar a proposta e rodar `/meeting` novamente.
-6. O escopo aprovado e EXATO — nao extrapole para outros arquivos.
+Toda decisao que envolva codigo DEVE incluir na ata:
 
-Argumento: $ARGUMENTS
+```markdown
+## Plano TDD
+Para cada action item que envolve codigo:
+1. RED: <que teste sera escrito primeiro>
+2. GREEN: <que implementacao minima>
+3. REFACTOR: <que limpeza>
+4. VERIFY: `cargo test -p <crate>`
+```
+
+O test-runner DEVE validar que o plano TDD e viavel. Se nao for → CONCERN obrigatorio.

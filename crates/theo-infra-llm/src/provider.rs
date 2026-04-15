@@ -84,8 +84,8 @@ pub mod registry {
             id: "chatgpt-codex",
             name: "ChatGPT Codex",
             display_name: "ChatGPT Codex",
-            base_url: "https://api.openai.com",
-            endpoint_path: "/v1/chat/completions",
+            base_url: "https://chatgpt.com",
+            endpoint_path: "/backend-api/codex/responses",
             api_key_env_var: Some("OPENAI_API_KEY"),
         });
 

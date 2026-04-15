@@ -4,7 +4,6 @@
 /// extracting structural metadata from the code graph instead of sending
 /// full source code. This dramatically reduces token usage while preserving
 /// the information an LLM needs to reason about the code.
-
 use std::collections::HashSet;
 
 use theo_engine_graph::cluster::Community;
@@ -31,10 +30,7 @@ pub struct CompressedSymbol {
 // ---------------------------------------------------------------------------
 
 /// Generate compressed representations for all symbols in a community.
-pub fn compress_community(
-    community: &Community,
-    graph: &CodeGraph,
-) -> Vec<CompressedSymbol> {
+pub fn compress_community(community: &Community, graph: &CodeGraph) -> Vec<CompressedSymbol> {
     let community_ids: HashSet<&str> = community.node_ids.iter().map(String::as_str).collect();
 
     community
@@ -59,9 +55,7 @@ fn compress_symbol(
     let node = graph.get_node(node_id);
     let signature = node
         .and_then(|n| n.signature.clone())
-        .unwrap_or_else(|| {
-            node.map(|n| n.name.clone()).unwrap_or_default()
-        });
+        .unwrap_or_else(|| node.map(|n| n.name.clone()).unwrap_or_default());
 
     // 1. Calls: all outgoing CALLS edges targets
     let calls: Vec<String> = outgoing_targets(graph, node_id, &EdgeType::Calls);
@@ -149,10 +143,7 @@ pub fn format_compressed(sym: &CompressedSymbol) -> String {
             parts.push(sym.tested_by.join(", "));
         }
         if !sym.untested_paths.is_empty() {
-            parts.push(format!(
-                "(UNTESTED: {})",
-                sym.untested_paths.join(", ")
-            ));
+            parts.push(format!("(UNTESTED: {})", sym.untested_paths.join(", ")));
         }
         lines.push(format!("/// Tested by: {}", parts.join(" ")));
     }
@@ -303,10 +294,7 @@ fn file_co_changes(graph: &CodeGraph, node_id: &str) -> Vec<(String, f64)> {
             };
             if let Some(other) = other_id {
                 if let Some(other_node) = graph.get_node(other) {
-                    let name = other_node
-                        .file_path
-                        .as_deref()
-                        .unwrap_or(&other_node.name);
+                    let name = other_node.file_path.as_deref().unwrap_or(&other_node.name);
                     co_changes.push((name.to_string(), edge.weight));
                 }
             }
@@ -653,9 +641,7 @@ mod tests {
             vt.co_changes
         );
         assert!(
-            vt.co_changes
-                .iter()
-                .any(|(f, _)| f.contains("crypto")),
+            vt.co_changes.iter().any(|(f, _)| f.contains("crypto")),
             "co_changes should include crypto.rs, got: {:?}",
             vt.co_changes
         );

@@ -9,23 +9,36 @@ use theo_domain::tool::{
 fn validate_url(url: &str) -> Result<(), ToolError> {
     // Reuse SSRF protection logic from WebFetchTool
     if !url.starts_with("http://") && !url.starts_with("https://") {
-        return Err(ToolError::Execution(format!("Only http/https URLs allowed: {url}")));
+        return Err(ToolError::Execution(format!(
+            "Only http/https URLs allowed: {url}"
+        )));
     }
     let host = url
-        .strip_prefix("http://").or_else(|| url.strip_prefix("https://"))
+        .strip_prefix("http://")
+        .or_else(|| url.strip_prefix("https://"))
         .and_then(|rest| rest.split('/').next())
         .and_then(|h| h.split(':').next())
         .unwrap_or("");
-    let blocked = ["127.0.0.1", "localhost", "0.0.0.0", "169.254.169.254", "metadata.google.internal"];
+    let blocked = [
+        "127.0.0.1",
+        "localhost",
+        "0.0.0.0",
+        "169.254.169.254",
+        "metadata.google.internal",
+    ];
     if blocked.contains(&host) {
         return Err(ToolError::Execution(format!("SSRF blocked: {host}")));
     }
-    let blocked_prefixes = ["10.", "172.16.", "172.17.", "172.18.", "172.19.", "172.20.",
-        "172.21.", "172.22.", "172.23.", "172.24.", "172.25.", "172.26.", "172.27.",
-        "172.28.", "172.29.", "172.30.", "172.31.", "192.168.", "169.254."];
+    let blocked_prefixes = [
+        "10.", "172.16.", "172.17.", "172.18.", "172.19.", "172.20.", "172.21.", "172.22.",
+        "172.23.", "172.24.", "172.25.", "172.26.", "172.27.", "172.28.", "172.29.", "172.30.",
+        "172.31.", "192.168.", "169.254.",
+    ];
     for prefix in &blocked_prefixes {
         if host.starts_with(prefix) {
-            return Err(ToolError::Execution(format!("SSRF blocked (private IP): {host}")));
+            return Err(ToolError::Execution(format!(
+                "SSRF blocked (private IP): {host}"
+            )));
         }
     }
     Ok(())
@@ -39,18 +52,43 @@ pub struct HttpGetTool;
 
 #[async_trait]
 impl Tool for HttpGetTool {
-    fn id(&self) -> &str { "http_get" }
-    fn description(&self) -> &str { "Make an HTTP GET request and return the response body. Has SSRF protection." }
-    fn category(&self) -> ToolCategory { ToolCategory::Utility }
+    fn id(&self) -> &str {
+        "http_get"
+    }
+    fn description(&self) -> &str {
+        "Make an HTTP GET request and return the response body. Has SSRF protection."
+    }
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Utility
+    }
     fn schema(&self) -> ToolSchema {
-        ToolSchema { params: vec![
-            ToolParam { name: "url".into(), param_type: "string".into(), description: "URL to GET".into(), required: true },
-            ToolParam { name: "headers".into(), param_type: "object".into(), description: "Optional headers as key-value pairs".into(), required: false },
-        ] }
+        ToolSchema {
+            params: vec![
+                ToolParam {
+                    name: "url".into(),
+                    param_type: "string".into(),
+                    description: "URL to GET".into(),
+                    required: true,
+                },
+                ToolParam {
+                    name: "headers".into(),
+                    param_type: "object".into(),
+                    description: "Optional headers as key-value pairs".into(),
+                    required: false,
+                },
+            ],
+        }
     }
 
-    async fn execute(&self, args: serde_json::Value, _ctx: &ToolContext, _p: &mut PermissionCollector) -> Result<ToolOutput, ToolError> {
-        let url = args.get("url").and_then(|v| v.as_str())
+    async fn execute(
+        &self,
+        args: serde_json::Value,
+        _ctx: &ToolContext,
+        _p: &mut PermissionCollector,
+    ) -> Result<ToolOutput, ToolError> {
+        let url = args
+            .get("url")
+            .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::Execution("url required".into()))?;
         validate_url(url)?;
 
@@ -68,13 +106,23 @@ impl Tool for HttpGetTool {
             }
         }
 
-        let resp = req.send().await.map_err(|e| ToolError::Execution(format!("request failed: {e}")))?;
+        let resp = req
+            .send()
+            .await
+            .map_err(|e| ToolError::Execution(format!("request failed: {e}")))?;
         let status = resp.status().as_u16();
-        let body = resp.text().await.map_err(|e| ToolError::Execution(format!("read body: {e}")))?;
+        let body = resp
+            .text()
+            .await
+            .map_err(|e| ToolError::Execution(format!("read body: {e}")))?;
 
         // Truncate large responses
         let body_display = if body.len() > 8000 {
-            format!("{}...\n[truncated, {} bytes total]", &body[..8000], body.len())
+            format!(
+                "{}...\n[truncated, {} bytes total]",
+                &body[..8000],
+                body.len()
+            )
         } else {
             body
         };
@@ -96,19 +144,49 @@ pub struct HttpPostTool;
 
 #[async_trait]
 impl Tool for HttpPostTool {
-    fn id(&self) -> &str { "http_post" }
-    fn description(&self) -> &str { "Make an HTTP POST request with JSON body. Has SSRF protection." }
-    fn category(&self) -> ToolCategory { ToolCategory::Utility }
+    fn id(&self) -> &str {
+        "http_post"
+    }
+    fn description(&self) -> &str {
+        "Make an HTTP POST request with JSON body. Has SSRF protection."
+    }
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Utility
+    }
     fn schema(&self) -> ToolSchema {
-        ToolSchema { params: vec![
-            ToolParam { name: "url".into(), param_type: "string".into(), description: "URL to POST".into(), required: true },
-            ToolParam { name: "body".into(), param_type: "object".into(), description: "JSON body to send".into(), required: false },
-            ToolParam { name: "headers".into(), param_type: "object".into(), description: "Optional headers".into(), required: false },
-        ] }
+        ToolSchema {
+            params: vec![
+                ToolParam {
+                    name: "url".into(),
+                    param_type: "string".into(),
+                    description: "URL to POST".into(),
+                    required: true,
+                },
+                ToolParam {
+                    name: "body".into(),
+                    param_type: "object".into(),
+                    description: "JSON body to send".into(),
+                    required: false,
+                },
+                ToolParam {
+                    name: "headers".into(),
+                    param_type: "object".into(),
+                    description: "Optional headers".into(),
+                    required: false,
+                },
+            ],
+        }
     }
 
-    async fn execute(&self, args: serde_json::Value, _ctx: &ToolContext, _p: &mut PermissionCollector) -> Result<ToolOutput, ToolError> {
-        let url = args.get("url").and_then(|v| v.as_str())
+    async fn execute(
+        &self,
+        args: serde_json::Value,
+        _ctx: &ToolContext,
+        _p: &mut PermissionCollector,
+    ) -> Result<ToolOutput, ToolError> {
+        let url = args
+            .get("url")
+            .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::Execution("url required".into()))?;
         validate_url(url)?;
 
@@ -128,9 +206,15 @@ impl Tool for HttpPostTool {
             }
         }
 
-        let resp = req.send().await.map_err(|e| ToolError::Execution(format!("request failed: {e}")))?;
+        let resp = req
+            .send()
+            .await
+            .map_err(|e| ToolError::Execution(format!("request failed: {e}")))?;
         let status = resp.status().as_u16();
-        let resp_body = resp.text().await.map_err(|e| ToolError::Execution(format!("read body: {e}")))?;
+        let resp_body = resp
+            .text()
+            .await
+            .map_err(|e| ToolError::Execution(format!("read body: {e}")))?;
 
         Ok(ToolOutput {
             title: format!("HTTP POST {url} → {status}"),

@@ -12,6 +12,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 theo-agent-runtime = { path = "../../crates/theo-agent-runtime" }
+theo-domain = { path = "../../crates/theo-domain" }
 theo-infra-auth = { path = "../../crates/theo-infra-auth" }
 theo-infra-llm = { path = "../../crates/theo-infra-llm" }
 theo-tooling = { path = "../../crates/theo-tooling" }

@@ -1,5 +1,10 @@
+pub mod context_assembler;
 pub mod conversion;
 pub mod extraction;
 pub mod graph_context_service;
+pub mod impact;
 pub mod pipeline;
 pub mod run_agent_session;
+pub mod wiki_backend_impl;
+pub mod wiki_enrichment;
+pub mod wiki_highlevel;

@@ -1,9 +1,8 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use theo_agent_runtime::event_bus::PrintEventListener;
 use theo_agent_runtime::{AgentConfig, AgentLoop};
-#[allow(deprecated)]
-use theo_agent_runtime::events::PrintEventSink;
 use theo_infra_auth::OpenAIAuth;
 use theo_infra_llm::provider::registry::create_default_registry as create_provider_registry;
 use theo_tooling::registry::create_default_registry;
@@ -18,7 +17,9 @@ fn print_usage() {
     eprintln!("Agent options:");
     eprintln!("  --repo <path>        Path to the repository to work on");
     eprintln!("  --task <task>        Task description for the agent");
-    eprintln!("  --provider <id>      LLM provider (openai, ollama, groq, anthropic, chatgpt-codex, ...)");
+    eprintln!(
+        "  --provider <id>      LLM provider (openai, ollama, groq, anthropic, chatgpt-codex, ...)"
+    );
     eprintln!("  --url <url>          LLM API base URL (legacy, overrides --provider)");
     eprintln!("  --model <model>      Model name (default: provider-specific)");
     eprintln!("  --api-key <key>      API key (default: from env or OAuth)");
@@ -118,9 +119,7 @@ async fn main() {
     if let Some(ref raw_url) = url {
         // Legacy mode: raw URL
         config.base_url = raw_url.clone();
-        config.model = model.unwrap_or_else(|| {
-            std::env::var("MODEL_NAME").unwrap_or(config.model)
-        });
+        config.model = model.unwrap_or_else(|| std::env::var("MODEL_NAME").unwrap_or(config.model));
         config.api_key = api_key
             .or_else(|| std::env::var("OPENAI_API_KEY").ok())
             .or_else(|| std::env::var("ANTHROPIC_API_KEY").ok());
@@ -163,7 +162,13 @@ async fn main() {
     eprintln!("║        theo-agent v0.1.0         ║");
     eprintln!("╠══════════════════════════════════╣");
     eprintln!("║ Model: {:<24} ║", config.model);
-    eprintln!("║ URL:   {:<24} ║", config.endpoint_override.as_deref().unwrap_or(&config.base_url));
+    eprintln!(
+        "║ URL:   {:<24} ║",
+        config
+            .endpoint_override
+            .as_deref()
+            .unwrap_or(&config.base_url)
+    );
     eprintln!("║ Repo:  {:<24} ║", repo);
     eprintln!("║ Max:   {:<24} ║", config.max_iterations);
     eprintln!("╚══════════════════════════════════╝");
@@ -171,10 +176,9 @@ async fn main() {
     eprintln!("Task: {task}");
     eprintln!();
 
-    #[allow(deprecated)]
-    let event_sink = Arc::new(PrintEventSink);
     let registry = create_default_registry();
-    let agent = AgentLoop::new(config, registry, event_sink);
+    let event_listener = Arc::new(PrintEventListener);
+    let agent = AgentLoop::new(config, registry).with_event_listener(event_listener);
     let result = agent.run(&task, &project_dir).await;
 
     eprintln!();
@@ -269,7 +273,8 @@ fn resolve_explicit_provider(pid: &str, explicit_api_key: &Option<String>) -> Re
     let api_key = explicit_api_key.clone().or_else(|| {
         let registry = create_provider_registry();
         registry.get(pid).and_then(|spec| {
-            spec.api_key_env_var().and_then(|var| std::env::var(var).ok())
+            spec.api_key_env_var()
+                .and_then(|var| std::env::var(var).ok())
         })
     });
 

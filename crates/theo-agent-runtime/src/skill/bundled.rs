@@ -216,13 +216,23 @@ mod tests {
     fn test_is_subagent_verifier() {
         let skills = bundled_skills();
         let test = skills.iter().find(|s| s.name == "test").unwrap();
-        assert!(matches!(test.mode, SkillMode::SubAgent { role: SubAgentRole::Verifier }));
+        assert!(matches!(
+            test.mode,
+            SkillMode::SubAgent {
+                role: SubAgentRole::Verifier
+            }
+        ));
     }
 
     #[test]
     fn review_is_subagent_reviewer() {
         let skills = bundled_skills();
         let review = skills.iter().find(|s| s.name == "review").unwrap();
-        assert!(matches!(review.mode, SkillMode::SubAgent { role: SubAgentRole::Reviewer }));
+        assert!(matches!(
+            review.mode,
+            SkillMode::SubAgent {
+                role: SubAgentRole::Reviewer
+            }
+        ));
     }
 }

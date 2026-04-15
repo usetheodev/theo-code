@@ -1,7 +1,7 @@
-use theo_domain::error::ToolError;
-use theo_domain::tool::{Tool, ToolCategory, ToolDefinition};
 use std::collections::HashMap;
 use std::path::Path;
+use theo_domain::error::ToolError;
+use theo_domain::tool::{Tool, ToolCategory, ToolDefinition};
 
 pub struct ToolRegistry {
     tools: HashMap<String, Box<dyn Tool>>,
@@ -59,11 +59,7 @@ impl ToolRegistry {
 
     /// Generate ToolDefinitions for all registered tools (sorted by id).
     pub fn definitions(&self) -> Vec<ToolDefinition> {
-        let mut defs: Vec<ToolDefinition> = self
-            .tools
-            .values()
-            .map(|t| t.definition())
-            .collect();
+        let mut defs: Vec<ToolDefinition> = self.tools.values().map(|t| t.definition()).collect();
         defs.sort_by(|a, b| a.id.cmp(&b.id));
         defs
     }
@@ -98,18 +94,18 @@ impl Default for ToolRegistry {
 ///
 /// Panics if any built-in tool has an invalid schema (programming error).
 pub fn create_default_registry() -> ToolRegistry {
-    use crate::bash::BashTool;
-    use crate::read::ReadTool;
-    use crate::write::WriteTool;
-    use crate::edit::EditTool;
-    use crate::grep::GrepTool;
-    use crate::glob::GlobTool;
     use crate::apply_patch::ApplyPatchTool;
-    use crate::webfetch::WebFetchTool;
-    use crate::think::ThinkTool;
-    use crate::reflect::ReflectTool;
+    use crate::bash::BashTool;
+    use crate::edit::EditTool;
+    use crate::glob::GlobTool;
+    use crate::grep::GrepTool;
     use crate::memory::MemoryTool;
+    use crate::read::ReadTool;
+    use crate::reflect::ReflectTool;
+    use crate::think::ThinkTool;
     use crate::todo::{TaskCreateTool, TaskUpdateTool};
+    use crate::webfetch::WebFetchTool;
+    use crate::write::WriteTool;
 
     let mut registry = ToolRegistry::new();
 
@@ -136,7 +132,10 @@ pub fn create_default_registry() -> ToolRegistry {
         "CARGO_TARGET_DIR".to_string(),
     ]);
     let bash_tool = match crate::sandbox::executor::create_executor(&sandbox_config) {
-        Ok(executor) => Box::new(BashTool::with_sandbox(std::sync::Arc::from(executor), sandbox_config)) as Box<dyn Tool>,
+        Ok(executor) => Box::new(BashTool::with_sandbox(
+            std::sync::Arc::from(executor),
+            sandbox_config,
+        )) as Box<dyn Tool>,
         Err(_) => {
             eprintln!("[theo] Warning: sandbox unavailable — BashTool running without isolation");
             Box::new(BashTool::new()) as Box<dyn Tool>
@@ -184,12 +183,22 @@ pub fn create_default_registry() -> ToolRegistry {
 /// Called after create_default_registry() with discovered plugins.
 pub fn register_plugin_tools(
     registry: &mut ToolRegistry,
-    plugin_tools: Vec<(String, String, std::path::PathBuf, Vec<theo_domain::tool::ToolParam>)>,
+    plugin_tools: Vec<(
+        String,
+        String,
+        std::path::PathBuf,
+        Vec<theo_domain::tool::ToolParam>,
+    )>,
 ) {
     use crate::shell_tool::ShellTool;
 
     for (name, description, script_path, params) in plugin_tools {
-        let tool = Box::new(ShellTool::new(name.clone(), description, script_path, params));
+        let tool = Box::new(ShellTool::new(
+            name.clone(),
+            description,
+            script_path,
+            params,
+        ));
         match registry.register(tool) {
             Ok(()) => eprintln!("[theo] Plugin tool registered: {name}"),
             Err(e) => eprintln!("[theo] Warning: plugin tool '{name}' failed to register: {e}"),
@@ -201,8 +210,8 @@ pub fn register_plugin_tools(
 mod tests {
     use super::*;
     use crate::bash::BashTool;
-    use crate::read::ReadTool;
     use crate::grep::GrepTool;
+    use crate::read::ReadTool;
     use theo_domain::tool::ToolCategory;
 
     #[test]
@@ -307,7 +316,11 @@ mod tests {
         assert!(search.iter().any(|d| d.id == "glob"));
 
         let execution = registry.definitions_by_category(ToolCategory::Execution);
-        assert!(execution.iter().all(|d| d.category == ToolCategory::Execution));
+        assert!(
+            execution
+                .iter()
+                .all(|d| d.category == ToolCategory::Execution)
+        );
         assert!(execution.iter().any(|d| d.id == "bash"));
 
         let web = registry.definitions_by_category(ToolCategory::Web);
@@ -320,24 +333,26 @@ mod tests {
         // Contract test: every tool that can be instantiated
         // must produce a valid schema and non-Utility category
         // (unless explicitly Utility)
+        use crate::batch::BatchTool;
+        use crate::codesearch::CodeSearchTool;
+        use crate::invalid::InvalidTool;
         use crate::ls::LsTool;
         use crate::lsp::LspTool;
-        use crate::websearch::WebSearchTool;
-        use crate::codesearch::CodeSearchTool;
-        use crate::todo::{TaskCreateTool, TaskUpdateTool};
-        use crate::invalid::InvalidTool;
-        use crate::batch::BatchTool;
         use crate::multiedit::MultiEditTool;
         use crate::plan::PlanExitTool;
+        use crate::todo::{TaskCreateTool, TaskUpdateTool};
+        use crate::websearch::WebSearchTool;
 
-        use crate::task::{TaskTool, SubagentInfo};
-        use crate::skill::{SkillTool, SkillInfo};
-        use crate::question::{QuestionTool, QuestionAsker, Question};
+        use crate::question::{Question, QuestionAsker, QuestionTool};
+        use crate::skill::{SkillInfo, SkillTool};
+        use crate::task::{SubagentInfo, TaskTool};
 
         struct NoopAsker;
         #[async_trait::async_trait]
         impl QuestionAsker for NoopAsker {
-            async fn ask(&self, _: &[Question]) -> Vec<Vec<String>> { vec![] }
+            async fn ask(&self, _: &[Question]) -> Vec<Vec<String>> {
+                vec![]
+            }
         }
 
         let all_tools: Vec<Box<dyn Tool>> = vec![
@@ -354,7 +369,7 @@ mod tests {
             Box::new(WebSearchTool::new()),
             Box::new(CodeSearchTool::new()),
             Box::new(TaskCreateTool::new()),
-        Box::new(TaskUpdateTool::new()),
+            Box::new(TaskUpdateTool::new()),
             Box::new(InvalidTool::new()),
             Box::new(BatchTool::new()),
             Box::new(MultiEditTool::new()),
@@ -384,14 +399,20 @@ mod tests {
 
             // JSON schema must have correct structure
             let json = schema.to_json_schema();
-            assert_eq!(json["type"], "object", "Tool '{id}' schema type must be 'object'");
+            assert_eq!(
+                json["type"], "object",
+                "Tool '{id}' schema type must be 'object'"
+            );
             assert!(
                 json.get("properties").is_some(),
                 "Tool '{id}' schema must have 'properties'"
             );
 
             // Description must not be empty
-            assert!(!tool.description().is_empty(), "Tool '{id}' has empty description");
+            assert!(
+                !tool.description().is_empty(),
+                "Tool '{id}' has empty description"
+            );
 
             // Category must be a valid variant
             let _category = tool.category(); // Just verify it doesn't panic
@@ -400,14 +421,20 @@ mod tests {
 
     #[test]
     fn register_rejects_invalid_schema() {
-        use theo_domain::tool::{PermissionCollector, ToolContext, ToolOutput, ToolParam, ToolSchema};
+        use theo_domain::tool::{
+            PermissionCollector, ToolContext, ToolOutput, ToolParam, ToolSchema,
+        };
 
         struct BadTool;
 
         #[async_trait::async_trait]
         impl Tool for BadTool {
-            fn id(&self) -> &str { "bad" }
-            fn description(&self) -> &str { "A tool with invalid schema" }
+            fn id(&self) -> &str {
+                "bad"
+            }
+            fn description(&self) -> &str {
+                "A tool with invalid schema"
+            }
             fn schema(&self) -> ToolSchema {
                 ToolSchema {
                     params: vec![ToolParam {
@@ -419,7 +446,10 @@ mod tests {
                 }
             }
             async fn execute(
-                &self, _: serde_json::Value, _: &ToolContext, _: &mut PermissionCollector,
+                &self,
+                _: serde_json::Value,
+                _: &ToolContext,
+                _: &mut PermissionCollector,
             ) -> Result<ToolOutput, ToolError> {
                 unreachable!()
             }

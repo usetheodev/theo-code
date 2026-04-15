@@ -159,8 +159,7 @@ fn parse_skill_file(content: &str) -> Option<SkillDefinition> {
 
     let mode = match mode_str.as_str() {
         "subagent" | "sub_agent" => {
-            let role = SubAgentRole::from_str(&subagent_role_str)
-                .unwrap_or(SubAgentRole::Explorer);
+            let role = SubAgentRole::from_str(&subagent_role_str).unwrap_or(SubAgentRole::Explorer);
             SkillMode::SubAgent { role }
         }
         _ => SkillMode::InContext,
@@ -292,6 +291,9 @@ Run deploy script.
         let mut registry = SkillRegistry::new();
         registry.load_from_dir(dir.path());
         assert_eq!(registry.list().len(), 1);
-        assert_eq!(registry.get("deploy").unwrap().trigger, "deploy the application");
+        assert_eq!(
+            registry.get("deploy").unwrap().trigger,
+            "deploy the application"
+        );
     }
 }

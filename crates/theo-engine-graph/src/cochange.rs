@@ -101,3 +101,72 @@ pub fn update_cochanges(graph: &mut CodeGraph, changed_files: &[String], days_si
         graph.add_edge(edge);
     }
 }
+
+// ---------------------------------------------------------------------------
+// Impact set computation (read-only)
+// ---------------------------------------------------------------------------
+
+/// A set of files predicted to be affected by changes to the given files.
+///
+/// Uses co-change edges to find historically correlated files.
+/// Read-only — does not mutate the graph.
+#[derive(Debug, Clone, Default)]
+pub struct ImpactSet {
+    /// Files predicted to be affected, sorted by co-change weight (descending).
+    pub affected_files: Vec<(String, f64)>,
+}
+
+/// Compute the impact set for a list of changed files.
+///
+/// Returns the top-K co-changed files (by weight) that are NOT in the input set.
+/// This is purely read-only — no graph mutation.
+///
+/// # Arguments
+/// * `graph` — the code graph (read-only)
+/// * `changed_files` — file node IDs that were modified
+/// * `top_k` — maximum number of impact files to return
+/// * `min_weight` — minimum co-change weight threshold (0.0 to include all)
+pub fn compute_impact_set(
+    graph: &CodeGraph,
+    changed_files: &[String],
+    top_k: usize,
+    min_weight: f64,
+) -> ImpactSet {
+    let changed_set: std::collections::HashSet<&str> =
+        changed_files.iter().map(|s| s.as_str()).collect();
+    let mut candidates: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
+
+    for edge in graph.edges_of_type(&EdgeType::CoChanges) {
+        if edge.weight < min_weight {
+            continue;
+        }
+
+        // Check if one end is a changed file and the other is not
+        let (changed, other) = if changed_set.contains(edge.source.as_str())
+            && !changed_set.contains(edge.target.as_str())
+        {
+            (true, edge.target.as_str())
+        } else if changed_set.contains(edge.target.as_str())
+            && !changed_set.contains(edge.source.as_str())
+        {
+            (true, edge.source.as_str())
+        } else {
+            (false, "")
+        };
+
+        if changed {
+            let entry = candidates.entry(other.to_string()).or_insert(0.0);
+            if edge.weight > *entry {
+                *entry = edge.weight;
+            }
+        }
+    }
+
+    let mut affected: Vec<(String, f64)> = candidates.into_iter().collect();
+    affected.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    affected.truncate(top_k);
+
+    ImpactSet {
+        affected_files: affected,
+    }
+}

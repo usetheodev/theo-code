@@ -30,7 +30,7 @@ use tree_sitter::Tree;
 
 use crate::tree_sitter::{LanguageFamily, SupportedLanguage};
 
-use crate::types::{estimate_tokens, FileExtraction, FileRole};
+use crate::types::{FileExtraction, FileRole, estimate_tokens};
 
 /// Extract semantic information from a parsed source file.
 ///
@@ -97,8 +97,8 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
-    use crate::types::*;
     use crate::tree_sitter;
+    use crate::types::*;
 
     /// Helper: parse and extract a source file.
     fn parse_and_extract(source: &str, lang: SupportedLanguage, filename: &str) -> FileExtraction {

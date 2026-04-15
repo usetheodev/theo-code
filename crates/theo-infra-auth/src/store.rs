@@ -27,16 +27,17 @@ pub enum AuthEntry {
     },
     /// Manual API key.
     #[serde(rename = "api_key")]
-    ApiKey {
-        key: String,
-    },
+    ApiKey { key: String },
 }
 
 impl AuthEntry {
     /// Check if OAuth tokens are expired.
     pub fn is_expired(&self) -> bool {
         match self {
-            AuthEntry::OAuth { expires_at: Some(exp), .. } => {
+            AuthEntry::OAuth {
+                expires_at: Some(exp),
+                ..
+            } => {
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
@@ -213,13 +214,18 @@ mod tests {
     #[test]
     fn test_set_and_get_oauth() {
         let (store, _dir) = temp_store();
-        store.set("openai", AuthEntry::OAuth {
-            access_token: "at_123".to_string(),
-            refresh_token: Some("rt_456".to_string()),
-            expires_at: Some(9999999999),
-            account_id: Some("acc_789".to_string()),
-            scopes: Some("openid profile".to_string()),
-        }).unwrap();
+        store
+            .set(
+                "openai",
+                AuthEntry::OAuth {
+                    access_token: "at_123".to_string(),
+                    refresh_token: Some("rt_456".to_string()),
+                    expires_at: Some(9999999999),
+                    account_id: Some("acc_789".to_string()),
+                    scopes: Some("openid profile".to_string()),
+                },
+            )
+            .unwrap();
 
         let entry = store.get("openai").unwrap().unwrap();
         assert_eq!(entry.bearer_token(), "at_123");
@@ -230,7 +236,14 @@ mod tests {
     #[test]
     fn test_set_and_get_api_key() {
         let (store, _dir) = temp_store();
-        store.set("anthropic", AuthEntry::ApiKey { key: "sk-ant-123".to_string() }).unwrap();
+        store
+            .set(
+                "anthropic",
+                AuthEntry::ApiKey {
+                    key: "sk-ant-123".to_string(),
+                },
+            )
+            .unwrap();
 
         let entry = store.get("anthropic").unwrap().unwrap();
         assert_eq!(entry.bearer_token(), "sk-ant-123");
@@ -252,7 +265,14 @@ mod tests {
     #[test]
     fn test_remove_provider() {
         let (store, _dir) = temp_store();
-        store.set("openai", AuthEntry::ApiKey { key: "k".to_string() }).unwrap();
+        store
+            .set(
+                "openai",
+                AuthEntry::ApiKey {
+                    key: "k".to_string(),
+                },
+            )
+            .unwrap();
         assert!(store.get("openai").unwrap().is_some());
         store.remove("openai").unwrap();
         assert!(store.get("openai").unwrap().is_none());
@@ -261,15 +281,27 @@ mod tests {
     #[test]
     fn test_update_tokens() {
         let (store, _dir) = temp_store();
-        store.set("openai", AuthEntry::OAuth {
-            access_token: "old".to_string(),
-            refresh_token: Some("old_rt".to_string()),
-            expires_at: Some(100),
-            account_id: Some("acc".to_string()),
-            scopes: None,
-        }).unwrap();
+        store
+            .set(
+                "openai",
+                AuthEntry::OAuth {
+                    access_token: "old".to_string(),
+                    refresh_token: Some("old_rt".to_string()),
+                    expires_at: Some(100),
+                    account_id: Some("acc".to_string()),
+                    scopes: None,
+                },
+            )
+            .unwrap();
 
-        store.update_tokens("openai", "new_at".to_string(), Some("new_rt".to_string()), Some(200)).unwrap();
+        store
+            .update_tokens(
+                "openai",
+                "new_at".to_string(),
+                Some("new_rt".to_string()),
+                Some(200),
+            )
+            .unwrap();
 
         let entry = store.get("openai").unwrap().unwrap();
         assert_eq!(entry.bearer_token(), "new_at");
@@ -280,8 +312,22 @@ mod tests {
     #[test]
     fn test_multiple_providers() {
         let (store, _dir) = temp_store();
-        store.set("openai", AuthEntry::ApiKey { key: "k1".to_string() }).unwrap();
-        store.set("anthropic", AuthEntry::ApiKey { key: "k2".to_string() }).unwrap();
+        store
+            .set(
+                "openai",
+                AuthEntry::ApiKey {
+                    key: "k1".to_string(),
+                },
+            )
+            .unwrap();
+        store
+            .set(
+                "anthropic",
+                AuthEntry::ApiKey {
+                    key: "k2".to_string(),
+                },
+            )
+            .unwrap();
 
         let mut providers = store.providers().unwrap();
         providers.sort();

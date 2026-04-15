@@ -35,7 +35,10 @@ pub struct GitLabAuth {
 
 impl GitLabAuth {
     pub fn new(store: AuthStore) -> Self {
-        Self { store, config: GitLabConfig::default() }
+        Self {
+            store,
+            config: GitLabConfig::default(),
+        }
     }
 
     pub fn with_config(store: AuthStore, config: GitLabConfig) -> Self {
@@ -77,15 +80,20 @@ impl GitLabAuth {
     }
 
     pub fn set_token(&self, token: String) -> Result<(), AuthError> {
-        self.store.set(PROVIDER_ID, AuthEntry::ApiKey { key: token })
+        self.store
+            .set(PROVIDER_ID, AuthEntry::ApiKey { key: token })
     }
 
     pub fn logout(&self) -> Result<(), AuthError> {
         self.store.remove(PROVIDER_ID)
     }
 
-    pub fn provider_id() -> &'static str { PROVIDER_ID }
-    pub fn instance_url(&self) -> &str { &self.config.instance_url }
+    pub fn provider_id() -> &'static str {
+        PROVIDER_ID
+    }
+    pub fn instance_url(&self) -> &str {
+        &self.config.instance_url
+    }
 }
 
 #[cfg(test)]
@@ -100,7 +108,9 @@ mod tests {
 
     #[test]
     fn gitlab_default_instance() {
-        let config = GitLabConfig { instance_url: DEFAULT_INSTANCE.to_string() };
+        let config = GitLabConfig {
+            instance_url: DEFAULT_INSTANCE.to_string(),
+        };
         assert_eq!(config.instance_url, "https://gitlab.com");
     }
 

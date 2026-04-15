@@ -13,10 +13,8 @@ use serde::Deserialize;
 
 use crate::agent_loop::{AgentLoop, AgentResult};
 use crate::config::AgentConfig;
-use crate::roadmap;
 use crate::event_bus::EventBus;
-#[allow(deprecated)]
-use crate::events::NullEventSink;
+use crate::roadmap;
 use theo_infra_llm::types::Message;
 use theo_tooling::registry::create_default_registry;
 
@@ -46,12 +44,24 @@ pub struct PilotConfig {
     pub circuit_breaker_cooldown_secs: u64,
 }
 
-fn default_max_total_calls() -> usize { 50 }
-fn default_max_loops_per_hour() -> usize { 100 }
-fn default_exit_signal_threshold() -> usize { 2 }
-fn default_cb_no_progress() -> usize { 3 }
-fn default_cb_same_error() -> usize { 5 }
-fn default_cb_cooldown() -> u64 { 300 }
+fn default_max_total_calls() -> usize {
+    50
+}
+fn default_max_loops_per_hour() -> usize {
+    100
+}
+fn default_exit_signal_threshold() -> usize {
+    2
+}
+fn default_cb_no_progress() -> usize {
+    3
+}
+fn default_cb_same_error() -> usize {
+    5
+}
+fn default_cb_cooldown() -> u64 {
+    300
+}
 
 impl Default for PilotConfig {
     fn default() -> Self {
@@ -159,7 +169,10 @@ async fn detect_git_progress(project_dir: &Path, previous_sha: &Option<String>) 
     // Count changed files (staged + unstaged + untracked)
     let files_changed = get_changed_file_count(project_dir).await;
 
-    GitProgress { sha_changed, files_changed }
+    GitProgress {
+        sha_changed,
+        files_changed,
+    }
 }
 
 async fn get_git_sha(project_dir: &Path) -> Option<String> {
@@ -185,7 +198,10 @@ async fn get_changed_file_count(project_dir: &Path) -> usize {
     match output {
         Ok(out) => {
             let text = String::from_utf8_lossy(&out.stdout);
-            text.lines().filter(|l| !l.trim().is_empty()).count().saturating_sub(1) // last line is summary
+            text.lines()
+                .filter(|l| !l.trim().is_empty())
+                .count()
+                .saturating_sub(1) // last line is summary
         }
         Err(_) => 0,
     }
@@ -207,7 +223,10 @@ fn parse_fix_plan(project_dir: &Path) -> (usize, usize) {
 /// Load promise from .theo/PROMPT.md if no inline promise provided.
 pub fn load_promise(project_dir: &Path) -> Option<String> {
     let path = project_dir.join(".theo").join("PROMPT.md");
-    std::fs::read_to_string(path).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+    std::fs::read_to_string(path)
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
 }
 
 // ---------------------------------------------------------------------------
@@ -360,10 +379,8 @@ impl PilotLoop {
             loop_bus.subscribe(forwarder);
 
             // Create fresh agent per iteration with GRAPHCTX
-            #[allow(deprecated)]
-            let event_sink = Arc::new(NullEventSink);
             let registry = create_default_registry();
-            let mut agent = AgentLoop::new(self.agent_config.clone(), registry, event_sink);
+            let mut agent = AgentLoop::new(self.agent_config.clone(), registry);
             if let Some(ref gc) = self.graph_context {
                 agent = agent.with_graph_context(gc.clone());
             }
@@ -390,7 +407,8 @@ impl PilotLoop {
 
             // Record exchange in session (promise is System, not in rotative history)
             self.session_messages.push(Message::user(&task));
-            self.session_messages.push(Message::assistant(&result.summary));
+            self.session_messages
+                .push(Message::assistant(&result.summary));
             if self.session_messages.len() > MAX_SESSION_MESSAGES {
                 let excess = self.session_messages.len() - MAX_SESSION_MESSAGES;
                 self.session_messages.drain(..excess);
@@ -404,20 +422,21 @@ impl PilotLoop {
             self.update_counters(&result, &progress);
 
             // Publish loop summary for CLI display
-            self.parent_event_bus.publish(theo_domain::event::DomainEvent::new(
-                theo_domain::event::EventType::RunStateChanged,
-                "pilot",
-                serde_json::json!({
-                    "from": "Executing",
-                    "to": format!(
-                        "PilotLoopComplete:{}:{}:{}:{}",
-                        self.loop_count,
-                        result.files_edited.len(),
-                        result.tokens_used,
-                        result.iterations_used
-                    ),
-                }),
-            ));
+            self.parent_event_bus
+                .publish(theo_domain::event::DomainEvent::new(
+                    theo_domain::event::EventType::RunStateChanged,
+                    "pilot",
+                    serde_json::json!({
+                        "from": "Executing",
+                        "to": format!(
+                            "PilotLoopComplete:{}:{}:{}:{}",
+                            self.loop_count,
+                            result.files_edited.len(),
+                            result.tokens_used,
+                            result.iterations_used
+                        ),
+                    }),
+                ));
 
             // Evaluate exit
             if let Some(reason) = self.evaluate_exit(&result) {
@@ -432,7 +451,10 @@ impl PilotLoop {
     pub async fn run_from_roadmap(&mut self, roadmap_path: &Path) -> PilotResult {
         let tasks = match roadmap::parse_roadmap(roadmap_path) {
             Ok(t) => t,
-            Err(e) => return self.build_result(ExitReason::Error(format!("Failed to parse roadmap: {e}"))),
+            Err(e) => {
+                return self
+                    .build_result(ExitReason::Error(format!("Failed to parse roadmap: {e}")));
+            }
         };
 
         let pending: Vec<_> = tasks.iter().filter(|t| !t.completed).collect();
@@ -480,10 +502,8 @@ impl PilotLoop {
             loop_bus.subscribe(forwarder);
 
             // Execute with GRAPHCTX
-            #[allow(deprecated)]
-            let event_sink = Arc::new(NullEventSink);
             let registry = create_default_registry();
-            let mut agent = AgentLoop::new(self.agent_config.clone(), registry, event_sink);
+            let mut agent = AgentLoop::new(self.agent_config.clone(), registry);
             if let Some(ref gc) = self.graph_context {
                 agent = agent.with_graph_context(gc.clone());
             }
@@ -507,7 +527,8 @@ impl PilotLoop {
 
             // Session history
             self.session_messages.push(Message::user(&task_prompt));
-            self.session_messages.push(Message::assistant(&result.summary));
+            self.session_messages
+                .push(Message::assistant(&result.summary));
             if self.session_messages.len() > MAX_SESSION_MESSAGES {
                 let excess = self.session_messages.len() - MAX_SESSION_MESSAGES;
                 self.session_messages.drain(..excess);
@@ -541,11 +562,15 @@ impl PilotLoop {
         match &self.circuit_state {
             CircuitBreakerState::Closed => None,
             CircuitBreakerState::Open => {
-                let elapsed_secs = self.circuit_open_since
+                let elapsed_secs = self
+                    .circuit_open_since
                     .map(|since| since.elapsed().as_secs())
                     .unwrap_or(0);
 
-                if should_transition_to_halfopen(elapsed_secs, self.pilot_config.circuit_breaker_cooldown_secs) {
+                if should_transition_to_halfopen(
+                    elapsed_secs,
+                    self.pilot_config.circuit_breaker_cooldown_secs,
+                ) {
                     self.circuit_state = CircuitBreakerState::HalfOpen;
                     None
                 } else {
@@ -560,7 +585,8 @@ impl PilotLoop {
         // Defense in depth: filter empty strings from files_edited.
         // apply_patch with non-standard format can produce "" entries.
         let has_real_files = result.files_edited.iter().any(|f| !f.is_empty());
-        let has_real_progress = has_real_files || progress.sha_changed || progress.files_changed > 0;
+        let has_real_progress =
+            has_real_files || progress.sha_changed || progress.files_changed > 0;
 
         // Completion signals: only count if there was real work
         if result.success && has_real_progress {
@@ -694,7 +720,10 @@ impl PilotLoop {
     }
 
     fn build_result(&self, reason: ExitReason) -> PilotResult {
-        let success = matches!(reason, ExitReason::PromiseFulfilled | ExitReason::FixPlanComplete);
+        let success = matches!(
+            reason,
+            ExitReason::PromiseFulfilled | ExitReason::FixPlanComplete
+        );
         PilotResult {
             success,
             reason,
@@ -763,7 +792,8 @@ max_total_calls = 100
 max_loops_per_hour = 50
 exit_signal_threshold = 3
 "#,
-        ).unwrap();
+        )
+        .unwrap();
 
         let config = PilotConfig::load(dir.path());
         assert_eq!(config.max_total_calls, 100);
@@ -795,11 +825,19 @@ exit_signal_threshold = 3
     #[test]
     fn circuit_breaker_opens_after_no_progress_threshold() {
         let mut pilot = make_test_pilot("test");
-        let no_progress = GitProgress { sha_changed: false, files_changed: 0 };
+        let no_progress = GitProgress {
+            sha_changed: false,
+            files_changed: 0,
+        };
         let fail_result = AgentResult {
-            success: true, summary: "nothing".into(),
-            files_edited: vec![], iterations_used: 1,
-            was_streamed: false, tokens_used: 0,
+            success: true,
+            summary: "nothing".into(),
+            files_edited: vec![],
+            iterations_used: 1,
+            was_streamed: false,
+            tokens_used: 0,
+            input_tokens: 0,
+            output_tokens: 0,
         };
 
         for _ in 0..3 {
@@ -811,11 +849,19 @@ exit_signal_threshold = 3
     #[test]
     fn circuit_breaker_opens_after_same_error_threshold() {
         let mut pilot = make_test_pilot("test");
-        let no_progress = GitProgress { sha_changed: false, files_changed: 0 };
+        let no_progress = GitProgress {
+            sha_changed: false,
+            files_changed: 0,
+        };
         let err_result = AgentResult {
-            success: false, summary: "same error".into(),
-            files_edited: vec![], iterations_used: 1,
-            was_streamed: false, tokens_used: 0,
+            success: false,
+            summary: "same error".into(),
+            files_edited: vec![],
+            iterations_used: 1,
+            was_streamed: false,
+            tokens_used: 0,
+            input_tokens: 0,
+            output_tokens: 0,
         };
 
         for _ in 0..5 {
@@ -829,11 +875,19 @@ exit_signal_threshold = 3
         let mut pilot = make_test_pilot("test");
         pilot.circuit_state = CircuitBreakerState::HalfOpen;
 
-        let progress = GitProgress { sha_changed: true, files_changed: 2 };
+        let progress = GitProgress {
+            sha_changed: true,
+            files_changed: 2,
+        };
         let ok_result = AgentResult {
-            success: true, summary: "done".into(),
-            files_edited: vec!["a.rs".into()], iterations_used: 1,
-            was_streamed: false, tokens_used: 100,
+            success: true,
+            summary: "done".into(),
+            files_edited: vec!["a.rs".into()],
+            iterations_used: 1,
+            was_streamed: false,
+            tokens_used: 100,
+            input_tokens: 0,
+            output_tokens: 0,
         };
 
         pilot.update_counters(&ok_result, &progress);
@@ -845,11 +899,19 @@ exit_signal_threshold = 3
         let mut pilot = make_test_pilot("test");
         pilot.circuit_state = CircuitBreakerState::HalfOpen;
 
-        let no_progress = GitProgress { sha_changed: false, files_changed: 0 };
+        let no_progress = GitProgress {
+            sha_changed: false,
+            files_changed: 0,
+        };
         let fail_result = AgentResult {
-            success: true, summary: "nothing".into(),
-            files_edited: vec![], iterations_used: 1,
-            was_streamed: false, tokens_used: 0,
+            success: true,
+            summary: "nothing".into(),
+            files_edited: vec![],
+            iterations_used: 1,
+            was_streamed: false,
+            tokens_used: 0,
+            input_tokens: 0,
+            output_tokens: 0,
         };
 
         pilot.update_counters(&fail_result, &no_progress);
@@ -861,11 +923,19 @@ exit_signal_threshold = 3
     #[test]
     fn exit_promise_fulfilled_requires_threshold_signals() {
         let mut pilot = make_test_pilot("test");
-        let progress = GitProgress { sha_changed: true, files_changed: 1 };
+        let progress = GitProgress {
+            sha_changed: true,
+            files_changed: 1,
+        };
         let ok_result = AgentResult {
-            success: true, summary: "done".into(),
-            files_edited: vec!["a.rs".into()], iterations_used: 1,
-            was_streamed: false, tokens_used: 100,
+            success: true,
+            summary: "done".into(),
+            files_edited: vec!["a.rs".into()],
+            iterations_used: 1,
+            was_streamed: false,
+            tokens_used: 100,
+            input_tokens: 0,
+            output_tokens: 0,
         };
 
         // First signal — not enough
@@ -881,11 +951,19 @@ exit_signal_threshold = 3
     #[test]
     fn exit_completion_signal_requires_real_progress() {
         let mut pilot = make_test_pilot("test");
-        let no_progress = GitProgress { sha_changed: false, files_changed: 0 };
+        let no_progress = GitProgress {
+            sha_changed: false,
+            files_changed: 0,
+        };
         let empty_done = AgentResult {
-            success: true, summary: "done".into(),
-            files_edited: vec![], iterations_used: 1,
-            was_streamed: false, tokens_used: 0,
+            success: true,
+            summary: "done".into(),
+            files_edited: vec![],
+            iterations_used: 1,
+            was_streamed: false,
+            tokens_used: 0,
+            input_tokens: 0,
+            output_tokens: 0,
         };
 
         // done() without files_edited does NOT count as completion signal
@@ -930,7 +1008,8 @@ exit_signal_threshold = 3
         std::fs::write(
             theo_dir.join("fix_plan.md"),
             "# Tasks\n- [x] Done item\n- [ ] Pending item\n- [x] Another done\n",
-        ).unwrap();
+        )
+        .unwrap();
 
         let (completed, total) = parse_fix_plan(dir.path());
         assert_eq!(completed, 2);
@@ -970,34 +1049,59 @@ exit_signal_threshold = 3
     #[test]
     fn exit_completion_signal_ignores_empty_string_files_edited() {
         let mut pilot = make_test_pilot("test");
-        let no_progress = GitProgress { sha_changed: false, files_changed: 0 };
+        let no_progress = GitProgress {
+            sha_changed: false,
+            files_changed: 0,
+        };
         // files_edited has items but they're all empty strings (apply_patch bug)
         let empty_files_done = AgentResult {
-            success: true, summary: "done".into(),
+            success: true,
+            summary: "done".into(),
             files_edited: vec!["".into(), "".into()],
-            iterations_used: 1, was_streamed: false, tokens_used: 0,
+            iterations_used: 1,
+            was_streamed: false,
+            tokens_used: 0,
+            input_tokens: 0,
+            output_tokens: 0,
         };
 
         pilot.update_counters(&empty_files_done, &no_progress);
-        assert_eq!(pilot.consecutive_completion_signals, 0, "empty strings should not count as progress");
+        assert_eq!(
+            pilot.consecutive_completion_signals, 0,
+            "empty strings should not count as progress"
+        );
 
         pilot.update_counters(&empty_files_done, &no_progress);
-        assert!(pilot.evaluate_exit(&empty_files_done).is_none(), "should not exit with empty files");
+        assert!(
+            pilot.evaluate_exit(&empty_files_done).is_none(),
+            "should not exit with empty files"
+        );
     }
 
     #[test]
     fn exit_completion_signal_counts_when_any_real_file_present() {
         let mut pilot = make_test_pilot("test");
-        let no_progress = GitProgress { sha_changed: false, files_changed: 0 };
+        let no_progress = GitProgress {
+            sha_changed: false,
+            files_changed: 0,
+        };
         // Mix of empty and real files — real file should make it count
         let mixed_files = AgentResult {
-            success: true, summary: "done".into(),
+            success: true,
+            summary: "done".into(),
             files_edited: vec!["".into(), "src/lib.rs".into()],
-            iterations_used: 1, was_streamed: false, tokens_used: 100,
+            iterations_used: 1,
+            was_streamed: false,
+            tokens_used: 100,
+            input_tokens: 0,
+            output_tokens: 0,
         };
 
         pilot.update_counters(&mixed_files, &no_progress);
-        assert_eq!(pilot.consecutive_completion_signals, 1, "real file should count as progress");
+        assert_eq!(
+            pilot.consecutive_completion_signals, 1,
+            "real file should count as progress"
+        );
     }
 
     #[test]

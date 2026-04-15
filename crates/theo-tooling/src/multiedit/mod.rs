@@ -52,6 +52,8 @@ impl Tool for MultiEditTool {
         _permissions: &mut PermissionCollector,
     ) -> Result<ToolOutput, ToolError> {
         // TODO: Implement multi-edit (sequential edits on one file)
-        Err(ToolError::Execution("MultiEdit tool not yet implemented".to_string()))
+        Err(ToolError::Execution(
+            "MultiEdit tool not yet implemented".to_string(),
+        ))
     }
 }

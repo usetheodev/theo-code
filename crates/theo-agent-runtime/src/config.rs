@@ -1,4 +1,54 @@
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
+
+use theo_infra_llm::types::Message;
+
+// ---------------------------------------------------------------------------
+// Steering & Follow-up Message Queues
+// ---------------------------------------------------------------------------
+
+/// Async closure type for message queue resolution.
+/// Returns `Vec<Message>` — empty vec means "nothing queued".
+///
+/// **Pi-mono ref:** `packages/agent/src/types.ts:163-183`
+pub type MessageQueueFn =
+    Arc<dyn Fn() -> Pin<Box<dyn Future<Output = Vec<Message>> + Send>> + Send + Sync>;
+
+/// Message queues for steering (mid-run) and follow-up (post-convergence).
+///
+/// Steering messages are checked after each tool execution batch and injected
+/// as user messages before the next LLM call. Follow-up messages are checked
+/// when the agent would otherwise converge; if present, the agent continues.
+///
+/// Both queues are optional — when absent, behavior is unchanged.
+///
+/// **Pi-mono ref:** `packages/agent/src/agent-loop.ts:165-229`
+pub struct MessageQueues {
+    /// Messages injected mid-run between turns (e.g., user types while agent works).
+    pub steering: Option<MessageQueueFn>,
+    /// Messages checked after natural convergence (extends the run if present).
+    pub follow_up: Option<MessageQueueFn>,
+}
+
+impl Default for MessageQueues {
+    fn default() -> Self {
+        Self {
+            steering: None,
+            follow_up: None,
+        }
+    }
+}
+
+impl std::fmt::Debug for MessageQueues {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MessageQueues")
+            .field("steering", &self.steering.as_ref().map(|_| "Some(Fn)"))
+            .field("follow_up", &self.follow_up.as_ref().map(|_| "Some(Fn)"))
+            .finish()
+    }
+}
 
 // ---------------------------------------------------------------------------
 // AgentMode — interaction style
@@ -164,6 +214,60 @@ Ask questions that matter — don't ask about things you can determine by readin
 }
 
 // ---------------------------------------------------------------------------
+// ToolExecutionMode — parallel vs sequential tool execution
+// ---------------------------------------------------------------------------
+
+/// How tool calls within a single LLM response are executed.
+///
+/// **Sequential** (default): tools execute one at a time in the order the LLM
+/// returned them. Each tool sees the side-effects of the previous one.
+///
+/// **Parallel**: all tool calls are prepared sequentially (argument parsing,
+/// `prepare_arguments` hook, schema validation, doom-loop check), then executed
+/// concurrently via `join_all`. Results are collected in original request order,
+/// not completion order. Meta-tools (`done`, `subagent`, `subagent_parallel`,
+/// `batch`, `skill`, `reflect`, `think`) are still executed sequentially before
+/// the parallel batch — they cannot be parallelised safely.
+///
+/// **Integration point in `run_engine.rs`:** the `for call in tool_calls` loop
+/// (around line 1421) that dispatches regular tools via `ToolCallManager`. In
+/// `Parallel` mode, regular tool calls would be collected into a `Vec<Future>`
+/// after preparation and dispatched with `futures::future::join_all`, mirroring
+/// the existing `batch` tool implementation (lines 1270-1282).
+///
+/// **Pi-mono ref:** `packages/agent/src/agent-loop.ts:390-438`
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum ToolExecutionMode {
+    /// Execute tool calls one at a time in order (current behavior).
+    #[default]
+    Sequential,
+    /// Prepare all sequentially (validation, hooks), then execute concurrently.
+    /// Results are collected in original request order, not completion order.
+    Parallel,
+}
+
+impl std::fmt::Display for ToolExecutionMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ToolExecutionMode::Sequential => write!(f, "sequential"),
+            ToolExecutionMode::Parallel => write!(f, "parallel"),
+        }
+    }
+}
+
+impl ToolExecutionMode {
+    /// Parse from string (CLI flag, config file).
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "sequential" => Some(ToolExecutionMode::Sequential),
+            "parallel" => Some(ToolExecutionMode::Parallel),
+            _ => None,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // AgentConfig
 // ---------------------------------------------------------------------------
 
@@ -211,6 +315,10 @@ pub struct AgentConfig {
     /// Used by compaction to decide when to compress history.
     /// Default: 128_000 (covers most modern models).
     pub context_window_tokens: usize,
+    /// How tool calls within a single LLM response are executed.
+    /// Sequential = one at a time (default). Parallel = concurrent dispatch.
+    /// See [`ToolExecutionMode`] for details on the parallel strategy.
+    pub tool_execution_mode: ToolExecutionMode,
 }
 
 impl Default for AgentConfig {
@@ -232,6 +340,7 @@ impl Default for AgentConfig {
             capability_set: None,
             doom_loop_threshold: Some(3),
             context_window_tokens: 128_000,
+            tool_execution_mode: ToolExecutionMode::default(),
         }
     }
 }
@@ -324,7 +433,10 @@ mod tests {
     #[test]
     fn is_subagent_false_by_default() {
         let config = AgentConfig::default();
-        assert!(!config.is_subagent, "main agents must NOT be marked as sub-agents");
+        assert!(
+            !config.is_subagent,
+            "main agents must NOT be marked as sub-agents"
+        );
     }
 
     #[test]
@@ -356,11 +468,20 @@ mod tests {
         let prompt = system_prompt_for_mode(AgentMode::Plan);
         assert!(prompt.contains("MODE: PLAN"), "missing mode header");
         assert!(prompt.contains("ENTENDIMENTO"), "missing phase 1");
-        assert!(prompt.contains("WRITE THE ROADMAP FILE"), "missing write phase enforcement");
-        assert!(prompt.contains(".theo/plans/"), "missing roadmap output path");
+        assert!(
+            prompt.contains("WRITE THE ROADMAP FILE"),
+            "missing write phase enforcement"
+        );
+        assert!(
+            prompt.contains(".theo/plans/"),
+            "missing roadmap output path"
+        );
         assert!(prompt.contains("Microtasks"), "missing microtasks section");
         assert!(prompt.contains("DoD"), "missing definition of done");
-        assert!(prompt.contains("CALL THE WRITE TOOL"), "missing write enforcement");
+        assert!(
+            prompt.contains("CALL THE WRITE TOOL"),
+            "missing write enforcement"
+        );
         assert!(prompt.contains("BEGIN TEMPLATE"), "missing template");
     }
 
@@ -382,15 +503,72 @@ mod tests {
     fn default_prompt_contains_harness_engineering_clauses() {
         let prompt = default_system_prompt();
         // HE framing must appear before CRITICAL block (early attention)
-        let he_pos = prompt.find("## Harness Context").expect("missing HE section");
-        let critical_pos = prompt.find("## CRITICAL").expect("missing CRITICAL section");
-        assert!(he_pos < critical_pos, "HE framing must come before CRITICAL");
+        let he_pos = prompt
+            .find("## Harness Context")
+            .expect("missing HE section");
+        let critical_pos = prompt
+            .find("## CRITICAL")
+            .expect("missing CRITICAL section");
+        assert!(
+            he_pos < critical_pos,
+            "HE framing must come before CRITICAL"
+        );
 
         // 4 mandatory clauses
-        assert!(prompt.contains("Clean state contract"), "missing clean state clause");
-        assert!(prompt.contains("Generic tools"), "missing generic tools clause");
-        assert!(prompt.contains("Environment legibility"), "missing environment legibility clause");
-        assert!(prompt.contains("Code intelligence"), "missing code intelligence clause");
+        assert!(
+            prompt.contains("Clean state contract"),
+            "missing clean state clause"
+        );
+        assert!(
+            prompt.contains("Generic tools"),
+            "missing generic tools clause"
+        );
+        assert!(
+            prompt.contains("Environment legibility"),
+            "missing environment legibility clause"
+        );
+        assert!(
+            prompt.contains("Code intelligence"),
+            "missing code intelligence clause"
+        );
+    }
+
+    #[test]
+    fn tool_execution_mode_default_is_sequential() {
+        assert_eq!(ToolExecutionMode::default(), ToolExecutionMode::Sequential);
+    }
+
+    #[test]
+    fn tool_execution_mode_from_str_parses_all_modes() {
+        assert_eq!(
+            ToolExecutionMode::from_str("sequential"),
+            Some(ToolExecutionMode::Sequential)
+        );
+        assert_eq!(
+            ToolExecutionMode::from_str("parallel"),
+            Some(ToolExecutionMode::Parallel)
+        );
+        assert_eq!(
+            ToolExecutionMode::from_str("PARALLEL"),
+            Some(ToolExecutionMode::Parallel)
+        );
+        assert_eq!(ToolExecutionMode::from_str("invalid"), None);
+    }
+
+    #[test]
+    fn tool_execution_mode_display() {
+        assert_eq!(ToolExecutionMode::Sequential.to_string(), "sequential");
+        assert_eq!(ToolExecutionMode::Parallel.to_string(), "parallel");
+    }
+
+    #[test]
+    fn agent_config_default_uses_sequential_tool_execution() {
+        let config = AgentConfig::default();
+        assert_eq!(
+            config.tool_execution_mode,
+            ToolExecutionMode::Sequential,
+            "default config must use sequential tool execution for backward compatibility"
+        );
     }
 
     #[test]

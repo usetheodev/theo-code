@@ -1,8 +1,8 @@
 /// Tests for Louvain community detection and label propagation.
 use std::collections::HashMap;
 use theo_engine_graph::cluster::{
-    detect_communities, dir_seed_labels, hierarchical_cluster, leiden_communities,
-    lpa_seeded, subdivide_community, ClusterAlgorithm,
+    ClusterAlgorithm, detect_communities, dir_seed_labels, hierarchical_cluster,
+    leiden_communities, lpa_seeded, subdivide_community,
 };
 use theo_engine_graph::model::{CodeGraph, Edge, EdgeType, Node, NodeType, SymbolKind};
 
@@ -76,18 +76,36 @@ fn louvain_finds_two_communities_in_biclique_graph() {
     let result = detect_communities(&g);
 
     // Should find exactly 2 communities
-    assert_eq!(result.communities.len(), 2, "Expected 2 communities, got {}", result.communities.len());
+    assert_eq!(
+        result.communities.len(),
+        2,
+        "Expected 2 communities, got {}",
+        result.communities.len()
+    );
 
     // Each community should have 5 nodes
     let sizes: Vec<usize> = {
-        let mut s: Vec<usize> = result.communities.iter().map(|c| c.node_ids.len()).collect();
+        let mut s: Vec<usize> = result
+            .communities
+            .iter()
+            .map(|c| c.node_ids.len())
+            .collect();
         s.sort();
         s
     };
-    assert_eq!(sizes, vec![5, 5], "Expected two 5-node communities, got {:?}", sizes);
+    assert_eq!(
+        sizes,
+        vec![5, 5],
+        "Expected two 5-node communities, got {:?}",
+        sizes
+    );
 
     // Modularity should be positive (good partition)
-    assert!(result.modularity > 0.0, "Modularity should be positive, got {}", result.modularity);
+    assert!(
+        result.modularity > 0.0,
+        "Modularity should be positive, got {}",
+        result.modularity
+    );
 }
 
 #[test]
@@ -122,7 +140,11 @@ fn fully_connected_graph_produces_one_community() {
     }
 
     let result = detect_communities(&g);
-    assert_eq!(result.communities.len(), 1, "Expected 1 community for fully connected graph");
+    assert_eq!(
+        result.communities.len(),
+        1,
+        "Expected 1 community for fully connected graph"
+    );
 }
 
 #[test]
@@ -163,7 +185,11 @@ fn label_propagation_subdivides_large_community() {
     let sub = subdivide_community(&g, &big_community, 25);
 
     // Should split into at least 2 sub-communities
-    assert!(sub.len() >= 2, "Expected at least 2 sub-communities, got {}", sub.len());
+    assert!(
+        sub.len() >= 2,
+        "Expected at least 2 sub-communities, got {}",
+        sub.len()
+    );
     // Total nodes across sub-communities should equal 40
     let total: usize = sub.iter().map(|c| c.node_ids.len()).sum();
     assert_eq!(total, 40, "All nodes should be assigned to sub-communities");
@@ -179,7 +205,10 @@ fn hierarchical_cluster_produces_level0_communities() {
 
     // Level-1 subdivision only triggers for communities >30 members.
     // Small test graphs won't produce level-1 communities — that's expected.
-    assert!(!result.communities.is_empty(), "Should have at least 1 community");
+    assert!(
+        !result.communities.is_empty(),
+        "Should have at least 1 community"
+    );
 }
 
 #[test]
@@ -238,7 +267,10 @@ fn barbell_graph() -> CodeGraph {
 }
 
 /// Helper: check that every community in the result is a connected subgraph.
-fn assert_communities_connected(result: &theo_engine_graph::cluster::ClusterResult, graph: &CodeGraph) {
+fn assert_communities_connected(
+    result: &theo_engine_graph::cluster::ClusterResult,
+    graph: &CodeGraph,
+) {
     use std::collections::{HashSet, VecDeque};
 
     for comm in &result.communities {
@@ -256,7 +288,11 @@ fn assert_communities_connected(result: &theo_engine_graph::cluster::ClusterResu
 
         while let Some(current) = queue.pop_front() {
             // Check both forward and reverse neighbors.
-            for nb in graph.neighbors(current).into_iter().chain(graph.reverse_neighbors(current)) {
+            for nb in graph
+                .neighbors(current)
+                .into_iter()
+                .chain(graph.reverse_neighbors(current))
+            {
                 if member_set.contains(nb) && !visited.contains(nb) {
                     visited.insert(nb);
                     queue.push_back(nb);
@@ -323,7 +359,10 @@ fn hierarchical_cluster_works_with_leiden() {
 
     let has_level0 = result.communities.iter().any(|c| c.level == 0);
     assert!(has_level0, "Should have level-0 (domain) communities");
-    assert!(!result.communities.is_empty(), "Should have at least 1 community");
+    assert!(
+        !result.communities.is_empty(),
+        "Should have at least 1 community"
+    );
 
     // Level-0 communities from Leiden must be connected.
     let level0_result = theo_engine_graph::cluster::ClusterResult {
@@ -439,7 +478,11 @@ fn lpa_seeded_converges_on_fully_connected() {
 
     // All nodes should converge to the same label
     let unique: std::collections::HashSet<usize> = labels.values().copied().collect();
-    assert_eq!(unique.len(), 1, "Fully connected graph should converge to 1 community");
+    assert_eq!(
+        unique.len(),
+        1,
+        "Fully connected graph should converge to 1 community"
+    );
 }
 
 #[test]
@@ -451,6 +494,12 @@ fn dir_seed_labels_groups_by_directory() {
     ];
     let seeds = dir_seed_labels(&nodes);
 
-    assert_eq!(seeds[&nodes[0]], seeds[&nodes[1]], "Same dir should have same label");
-    assert_ne!(seeds[&nodes[0]], seeds[&nodes[2]], "Different dirs should have different labels");
+    assert_eq!(
+        seeds[&nodes[0]], seeds[&nodes[1]],
+        "Same dir should have same label"
+    );
+    assert_ne!(
+        seeds[&nodes[0]], seeds[&nodes[2]],
+        "Different dirs should have different labels"
+    );
 }

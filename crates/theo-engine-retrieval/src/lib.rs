@@ -2,19 +2,21 @@
 pub mod assembly;
 pub mod budget;
 pub mod code_tokenizer;
+#[cfg(feature = "dense-retrieval")]
+pub mod dense_search;
 pub mod escape;
+pub mod file_retriever;
 pub mod graph_attention;
 pub mod metrics;
+#[cfg(feature = "reranker")]
+pub mod pipeline;
+#[cfg(feature = "reranker")]
+pub mod reranker;
 pub mod search;
 pub mod summary;
 #[cfg(feature = "tantivy-backend")]
 pub mod tantivy_search;
-#[cfg(feature = "dense-retrieval")]
-pub mod dense_search;
-#[cfg(feature = "reranker")]
-pub mod reranker;
-#[cfg(feature = "reranker")]
-pub mod pipeline;
+pub mod wiki;
 
 // Organized sub-modules
 pub mod embedding;

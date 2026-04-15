@@ -110,15 +110,20 @@ impl BedrockAuth {
     }
 
     pub fn set_bearer_token(&self, token: String) -> Result<(), AuthError> {
-        self.store.set(PROVIDER_ID, AuthEntry::ApiKey { key: token })
+        self.store
+            .set(PROVIDER_ID, AuthEntry::ApiKey { key: token })
     }
 
     pub fn logout(&self) -> Result<(), AuthError> {
         self.store.remove(PROVIDER_ID)
     }
 
-    pub fn config(&self) -> &BedrockConfig { &self.config }
-    pub fn provider_id() -> &'static str { PROVIDER_ID }
+    pub fn config(&self) -> &BedrockConfig {
+        &self.config
+    }
+    pub fn provider_id() -> &'static str {
+        PROVIDER_ID
+    }
 }
 
 /// Apply region prefix to Bedrock model IDs.
@@ -130,7 +135,9 @@ pub fn apply_region_prefix(model_id: &str, region: &str) -> String {
         || model_id.starts_with("mistral.")
         || model_id.contains("nova");
 
-    if !needs_prefix || model_id.contains('.') && model_id.split('.').next().map_or(false, |p| p.len() <= 3) {
+    if !needs_prefix
+        || model_id.contains('.') && model_id.split('.').next().map_or(false, |p| p.len() <= 3)
+    {
         return model_id.to_string();
     }
 
@@ -164,7 +171,10 @@ mod tests {
             profile: None,
         };
         assert_eq!(config.region, "us-east-1");
-        assert_eq!(config.endpoint(), "https://bedrock-runtime.us-east-1.amazonaws.com");
+        assert_eq!(
+            config.endpoint(),
+            "https://bedrock-runtime.us-east-1.amazonaws.com"
+        );
     }
 
     #[test]
@@ -173,14 +183,18 @@ mod tests {
             region: "eu-west-1".to_string(),
             profile: None,
         };
-        assert_eq!(config.endpoint(), "https://bedrock-runtime.eu-west-1.amazonaws.com");
+        assert_eq!(
+            config.endpoint(),
+            "https://bedrock-runtime.eu-west-1.amazonaws.com"
+        );
     }
 
     #[test]
     fn bedrock_store_bearer() {
         let (store, _dir) = temp_store();
         let auth = BedrockAuth::new(store);
-        auth.set_bearer_token("aws-bearer-test".to_string()).unwrap();
+        auth.set_bearer_token("aws-bearer-test".to_string())
+            .unwrap();
         let tokens = auth.get_tokens().unwrap().unwrap();
         assert_eq!(tokens.bearer_token, Some("aws-bearer-test".to_string()));
     }
@@ -202,16 +216,25 @@ mod tests {
 
     #[test]
     fn region_prefix_us() {
-        assert_eq!(apply_region_prefix("anthropic.claude-v2", "us-east-1"), "us.anthropic.claude-v2");
+        assert_eq!(
+            apply_region_prefix("anthropic.claude-v2", "us-east-1"),
+            "us.anthropic.claude-v2"
+        );
     }
 
     #[test]
     fn region_prefix_eu() {
-        assert_eq!(apply_region_prefix("anthropic.claude-v2", "eu-west-1"), "eu.anthropic.claude-v2");
+        assert_eq!(
+            apply_region_prefix("anthropic.claude-v2", "eu-west-1"),
+            "eu.anthropic.claude-v2"
+        );
     }
 
     #[test]
     fn region_prefix_not_needed() {
-        assert_eq!(apply_region_prefix("amazon.titan-text-express-v1", "us-east-1"), "amazon.titan-text-express-v1");
+        assert_eq!(
+            apply_region_prefix("amazon.titan-text-express-v1", "us-east-1"),
+            "amazon.titan-text-express-v1"
+        );
     }
 }

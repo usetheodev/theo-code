@@ -3,8 +3,8 @@
 
 use std::path::Path;
 use theo_domain::sandbox::{
-    FilesystemOp, FilesystemPolicy, SandboxViolation, ALWAYS_DENIED_READ, ALWAYS_DENIED_WRITE,
-    SENSITIVE_FILE_PATTERNS,
+    ALWAYS_DENIED_READ, ALWAYS_DENIED_WRITE, FilesystemOp, FilesystemPolicy,
+    SENSITIVE_FILE_PATTERNS, SandboxViolation,
 };
 
 /// Check if a path is denied for a specific operation.
@@ -107,7 +107,10 @@ mod tests {
         let path = PathBuf::from(format!("{home}/.ssh/id_rsa"));
         let result = check_path_denied(&path, FilesystemOp::Read, &default_policy());
         assert!(result.is_some());
-        assert!(matches!(result.unwrap(), SandboxViolation::FilesystemAccess { .. }));
+        assert!(matches!(
+            result.unwrap(),
+            SandboxViolation::FilesystemAccess { .. }
+        ));
     }
 
     #[test]

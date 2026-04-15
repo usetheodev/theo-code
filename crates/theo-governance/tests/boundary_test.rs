@@ -63,9 +63,7 @@ fn extract_theo_deps(cargo_toml_content: &str) -> Vec<String> {
     for line in cargo_toml_content.lines() {
         let trimmed = line.trim();
 
-        if trimmed.starts_with("[dependencies]")
-            || trimmed.starts_with("[dev-dependencies]")
-        {
+        if trimmed.starts_with("[dependencies]") || trimmed.starts_with("[dev-dependencies]") {
             in_deps = true;
             in_build_deps = false;
             continue;
@@ -215,9 +213,7 @@ fn apps_only_use_allowed_internal_deps() {
                 && !FORBIDDEN_FOR_APPS.contains(&dep.as_str())
             {
                 // Unknown internal dep — flag it
-                violations.push(format!(
-                    "apps/{name} imports unknown internal crate: {dep}"
-                ));
+                violations.push(format!("apps/{name} imports unknown internal crate: {dep}"));
             }
         }
     }
@@ -242,5 +238,8 @@ tokio = "1"
 theo-tooling = { path = "../theo-tooling" }
 "#;
     let deps = extract_theo_deps(content);
-    assert_eq!(deps, vec!["theo-domain", "theo-engine-graph", "theo-tooling"]);
+    assert_eq!(
+        deps,
+        vec!["theo-domain", "theo-engine-graph", "theo-tooling"]
+    );
 }

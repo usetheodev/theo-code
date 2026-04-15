@@ -1,39 +1,46 @@
-# Regras Arquiteturais
+---
+paths:
+  - "crates/**/*.rs"
+  - "apps/**/*.rs"
+---
 
-## Bounded Contexts — Fronteiras Invioláveis
+# Architectural Boundaries
 
-1. **Code Intelligence Engine**: `theo-engine-graph`, `theo-engine-parser`, `theo-engine-retrieval`
-   - Parser e graph são read-only sobre código-fonte
-   - Retrieval consome graph, nunca o contrário
+## Bounded Contexts
+
+1. **Code Intelligence**: `theo-engine-graph`, `theo-engine-parser`, `theo-engine-retrieval`
+   - Parser and graph are read-only over source code
+   - Retrieval consumes graph, never the reverse
 
 2. **Agent Runtime**: `theo-agent-runtime`
-   - Orquestra LLM + tools + governance
-   - TODA tool call passa pelo Decision Control Plane
+   - Orchestrates LLM + tools + governance
+   - State machine governs phase transitions
 
-3. **Governance & Safety**: `theo-governance`
-   - Policy engine, impact analysis, métricas
-   - Obrigatória no caminho crítico
+3. **Governance**: `theo-governance`
+   - Policy engine, simplified
+   - Sits in the critical path but lightweight
 
 4. **Infrastructure**: `theo-infra-llm`, `theo-infra-auth`, `theo-tooling`
-   - Implementações concretas atrás de traits do domain
+   - Concrete implementations behind domain traits
 
-## Dependências Permitidas
+## Dependency Direction (INVIOLABLE)
 
 ```
-theo-domain         → (nenhuma — tipos puros)
-theo-engine-*       → theo-domain
-theo-governance     → theo-domain
-theo-infra-*        → theo-domain
-theo-tooling        → theo-domain
+theo-domain         → (nothing)
+theo-engine-*       → theo-domain only
+theo-governance     → theo-domain only
+theo-infra-*        → theo-domain only
+theo-tooling        → theo-domain only
 theo-agent-runtime  → theo-domain, theo-governance
-theo-api-contracts  → theo-domain
-theo-application    → todos os crates acima
+theo-api-contracts  → theo-domain only
+theo-application    → all crates above
 apps/*              → theo-application, theo-api-contracts
 ```
 
-## Proibições
+## Prohibitions
 
-- Apps NUNCA importam crates engine/infra diretamente
-- `theo-domain` NUNCA depende de outros crates
-- Dependências circulares são proibidas
-- Nada de benchmark/research no runtime de produção
+- Apps NEVER import engine/infra crates directly
+- `theo-domain` NEVER depends on any other crate
+- Circular dependencies are forbidden
+- Benchmark/research code never enters production runtime
+- No `unwrap()` in production code paths — use `?` or typed errors

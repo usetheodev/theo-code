@@ -55,8 +55,7 @@ impl RoadmapTask {
 /// Parse a roadmap markdown file into a list of tasks.
 /// Lenient: missing fields become empty strings, malformed tasks are skipped.
 pub fn parse_roadmap(path: &Path) -> Result<Vec<RoadmapTask>, RoadmapError> {
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| RoadmapError::Io(e.to_string()))?;
+    let content = std::fs::read_to_string(path).map_err(|e| RoadmapError::Io(e.to_string()))?;
     Ok(parse_roadmap_content(&content))
 }
 
@@ -87,10 +86,16 @@ pub fn parse_roadmap_content(content: &str) -> Vec<RoadmapTask> {
                     k if k.contains("arquivo") || k.contains("file") => {
                         builder.files = value.to_string();
                     }
-                    k if k.contains("que fazer") || k.contains("description") || k.contains("what") => {
+                    k if k.contains("que fazer")
+                        || k.contains("description")
+                        || k.contains("what") =>
+                    {
                         builder.description = value.to_string();
                     }
-                    k if k.contains("aceite") || k.contains("acceptance") || k.contains("verification") => {
+                    k if k.contains("aceite")
+                        || k.contains("acceptance")
+                        || k.contains("verification") =>
+                    {
                         builder.acceptance_criteria = value.to_string();
                     }
                     k if k.contains("dod") || k.contains("definition of done") => {
@@ -131,8 +136,7 @@ pub fn find_latest_roadmap(project_dir: &Path) -> Option<std::path::PathBuf> {
 /// Changes `### Task N: title` to `### Task N: ✅ title`.
 /// Idempotent: if already marked, no change.
 pub fn mark_task_completed(path: &Path, task_number: usize) -> Result<(), RoadmapError> {
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| RoadmapError::Io(e.to_string()))?;
+    let content = std::fs::read_to_string(path).map_err(|e| RoadmapError::Io(e.to_string()))?;
 
     let marker = format!("### Task {}:", task_number);
     let mut found = false;
@@ -162,10 +166,8 @@ pub fn mark_task_completed(path: &Path, task_number: usize) -> Result<(), Roadma
     let new_content = new_lines.join("\n");
     // Atomic write: write to temp then rename
     let temp_path = path.with_extension("md.tmp");
-    std::fs::write(&temp_path, &new_content)
-        .map_err(|e| RoadmapError::Io(e.to_string()))?;
-    std::fs::rename(&temp_path, path)
-        .map_err(|e| RoadmapError::Io(e.to_string()))?;
+    std::fs::write(&temp_path, &new_content).map_err(|e| RoadmapError::Io(e.to_string()))?;
+    std::fs::rename(&temp_path, path).map_err(|e| RoadmapError::Io(e.to_string()))?;
 
     Ok(())
 }
@@ -201,7 +203,11 @@ impl TaskBuilder {
 
 fn parse_task_header(line: &str) -> TaskBuilder {
     // Format: ### Task N: title  or  ### Task N: ✅ title
-    let after_task = line.trim_start_matches('#').trim().strip_prefix("Task ").unwrap_or("");
+    let after_task = line
+        .trim_start_matches('#')
+        .trim()
+        .strip_prefix("Task ")
+        .unwrap_or("");
     let (number_str, rest) = after_task.split_once(':').unwrap_or(("", ""));
     let number = number_str.trim().parse::<usize>().ok();
     let rest = rest.trim();
@@ -505,7 +511,10 @@ Something here
 
     #[test]
     fn checkbox_progress_from_file_missing() {
-        assert_eq!(parse_checkbox_progress_from_file(Path::new("/nonexistent")), (0, 0));
+        assert_eq!(
+            parse_checkbox_progress_from_file(Path::new("/nonexistent")),
+            (0, 0)
+        );
     }
 
     #[test]

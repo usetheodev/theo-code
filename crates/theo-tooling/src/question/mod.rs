@@ -1,9 +1,9 @@
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use theo_domain::error::ToolError;
 use theo_domain::tool::{
     PermissionCollector, Tool, ToolCategory, ToolContext, ToolOutput, ToolParam, ToolSchema,
 };
-use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QuestionOption {
@@ -184,6 +184,10 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(result.output.contains("\"What is your favorite animal?\"=\"Dog\""));
+        assert!(
+            result
+                .output
+                .contains("\"What is your favorite animal?\"=\"Dog\"")
+        );
     }
 }
