@@ -210,11 +210,13 @@ pub async fn run(
                                     match auth.start_device_flow().await {
                                         Ok(code) => {
                                             app::update(&mut state, Msg::LoginComplete(format!(
-                                                "🔗 Open: {}\n   Code: {}",
+                                                "1. Open in browser: https://chatgpt.com/verify\n   (or: {})\n2. Enter code: {}\n3. Authorize Theo",
                                                 code.verification_uri, code.user_code
                                             )));
+                                            // Copy code to clipboard via OSC52
+                                            eprint!("\x1b]52;c;{}\x07", app::base64_encode(&code.user_code));
                                             app::update(&mut state, Msg::Notify(
-                                                "Waiting for you to authorize in browser...".into()
+                                                "Code copied to clipboard. Waiting for authorization...".into()
                                             ));
                                             terminal.draw(|frame| view::draw(frame, &state))?;
 
