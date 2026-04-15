@@ -1,0 +1,16 @@
+id = "11-python-fix"
+category = "fix-bug"
+description = "Fix a Python bug (not just Rust)"
+prompt = "The function `avg` in src/stats.py divides by zero when the list is empty. Fix it to return 0.0 for empty lists."
+mode = "agent"
+timeout_secs = 120
+success_check = '''
+grep -q "len(values) == 0" src/stats.py || grep -q "not values" src/stats.py || grep -q "len(values) < 1" src/stats.py
+'''
+
+[[setup_files]]
+path = "src/stats.py"
+content = """
+def avg(values):
+    return sum(values) / len(values)
+"""

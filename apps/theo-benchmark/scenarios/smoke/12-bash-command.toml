@@ -1,0 +1,18 @@
+id = "12-bash-command"
+category = "explore"
+description = "Use bash to answer a question about system state"
+prompt = "How many lines does the file data/input.csv have? Reply with just the integer."
+mode = "agent"
+timeout_secs = 90
+success_check = '''
+echo "$THEO_SUMMARY" | grep -qE "(^|[^0-9])5([^0-9]|$)"
+'''
+
+[[setup_files]]
+path = "data/input.csv"
+content = """name,age
+alice,30
+bob,25
+carol,28
+dave,35
+"""

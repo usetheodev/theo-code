@@ -1,0 +1,33 @@
+id = "13-multi-step-fix"
+category = "fix-bug"
+description = "Fix a bug that requires reading a test to understand expected behavior"
+prompt = "The test in tests/test_calc.py is failing. Read the test to understand what `subtract` should do, then fix src/calc.py to make it pass."
+mode = "agent"
+timeout_secs = 180
+success_check = '''
+grep -q "def subtract" src/calc.py && \
+  grep -A1 "def subtract" src/calc.py | grep -q "a - b"
+'''
+
+[[setup_files]]
+path = "src/calc.py"
+content = """
+def add(a, b):
+    return a + b
+
+def subtract(a, b):
+    return a + b
+"""
+
+[[setup_files]]
+path = "tests/test_calc.py"
+content = """
+from src.calc import add, subtract
+
+def test_add():
+    assert add(2, 3) == 5
+
+def test_subtract():
+    assert subtract(5, 3) == 2
+    assert subtract(10, 4) == 6
+"""
