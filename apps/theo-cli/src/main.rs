@@ -499,7 +499,7 @@ fn build_fresh(
     (graph_ms, git_ms, cluster_ms, communities)
 }
 
-async fn resolve_agent_config(
+pub async fn resolve_agent_config(
     provider_id: Option<&str>,
     model: Option<&str>,
     max_iter: Option<usize>,
