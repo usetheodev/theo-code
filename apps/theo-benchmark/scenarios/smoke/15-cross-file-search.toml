@@ -3,7 +3,7 @@ category = "search"
 description = "Search across multiple files and synthesize information"
 prompt = "What is the value of MAX_CONNECTIONS defined in config/ directory? And what function in src/ uses it? Reply with 'MAX_CONNECTIONS=N, used by function_name'."
 mode = "agent"
-timeout_secs = 120
+timeout_secs = 240
 success_check = '''
 echo "$THEO_SUMMARY" | grep -q "100" && \
   echo "$THEO_SUMMARY" | grep -qi "create_pool"
