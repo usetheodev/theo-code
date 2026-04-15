@@ -22,6 +22,7 @@ wiki/
 wiki-site/
 referencias
 !crates/theo-infra-llm/src/provider
+!crates/theo-engine-retrieval/src/wiki
 
 # Cargo lock — keep for binaries, ignore for libraries
 # (we keep it: this is a binary workspace)
