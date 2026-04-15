@@ -206,26 +206,70 @@ pub async fn run(
             match &msg {
                 Msg::LoginStart(provider) => {
                     let tx = msg_tx.clone();
-                    let provider = provider.clone();
+                    let _provider = provider.clone();
                     tokio::spawn(async move {
                         let auth = theo_infra_auth::OpenAIAuth::with_default_store();
+
+                        // Check if already logged in
+                        if let Ok(Some(tokens)) = auth.get_tokens() {
+                            if !tokens.is_expired() {
+                                let _ = tx.send(Msg::LoginComplete(
+                                    "Already logged in (token valid)".into()
+                                )).await;
+                                return;
+                            }
+                        }
+
+                        let _ = tx.send(Msg::ShowToast(
+                            "Contacting auth server...".into(),
+                            app::ToastLevel::Info,
+                        )).await;
+
                         match auth.start_device_flow().await {
                             Ok(code) => {
+                                // Show URL and code prominently in transcript
+                                let _ = tx.send(Msg::DomainEventBatch(vec![])).await; // flush
                                 let _ = tx.send(Msg::ShowToast(
-                                    format!("Go to {} and enter: {}", code.verification_uri, code.user_code),
+                                    format!("Code: {}", code.user_code),
                                     app::ToastLevel::Info,
                                 )).await;
+                                // Also show as persistent system message
+                                let _ = tx.send(Msg::LoginComplete(
+                                    format!(
+                                        "Open {} and enter code: {}",
+                                        code.verification_uri, code.user_code
+                                    ),
+                                )).await;
+
+                                // Try to open browser
+                                #[cfg(target_os = "linux")]
+                                { let _ = std::process::Command::new("xdg-open").arg(&code.verification_uri).spawn(); }
+                                #[cfg(target_os = "macos")]
+                                { let _ = std::process::Command::new("open").arg(&code.verification_uri).spawn(); }
+
+                                // Poll until authorized or expired
+                                let _ = tx.send(Msg::ShowToast(
+                                    "Waiting for authorization...".into(),
+                                    app::ToastLevel::Info,
+                                )).await;
+
                                 match auth.poll_device_flow(&code).await {
                                     Ok(_tokens) => {
-                                        let _ = tx.send(Msg::LoginComplete("Logged in via OpenAI".into())).await;
+                                        let _ = tx.send(Msg::LoginComplete(
+                                            "✓ Authenticated with OpenAI! Provider ready.".into()
+                                        )).await;
                                     }
                                     Err(e) => {
-                                        let _ = tx.send(Msg::LoginFailed(e.to_string())).await;
+                                        let _ = tx.send(Msg::LoginFailed(
+                                            format!("Auth polling failed: {e}")
+                                        )).await;
                                     }
                                 }
                             }
                             Err(e) => {
-                                let _ = tx.send(Msg::LoginFailed(e.to_string())).await;
+                                let _ = tx.send(Msg::LoginFailed(
+                                    format!("Could not start device flow: {e}")
+                                )).await;
                             }
                         }
                     });
