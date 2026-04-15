@@ -55,6 +55,10 @@ pub async fn input_loop(tx: mpsc::Sender<Msg>) {
                     // Search (Ctrl+F)
                     (KeyCode::Char('f'), m) if m.contains(KeyModifiers::CONTROL) => Some(Msg::SearchStart),
 
+                    // Restore last prompt (Ctrl+Up or Ctrl+P)
+                    (KeyCode::Up, m) if m.contains(KeyModifiers::CONTROL) => Some(Msg::RestoreLastPrompt),
+                    (KeyCode::Char('p'), m) if m.contains(KeyModifiers::CONTROL) => Some(Msg::RestoreLastPrompt),
+
                     // Character input
                     (KeyCode::Char(c), _) => Some(Msg::InputChar(c)),
 

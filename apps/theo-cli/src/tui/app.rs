@@ -79,6 +79,8 @@ pub struct TuiState {
     pub search_results: Vec<usize>, // indices into transcript
     pub search_current: usize,
     pub session_picker: Option<SessionPickerState>,
+    pub toasts: Vec<Toast>,
+    pub prompt_history: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -133,8 +135,24 @@ impl TuiState {
             search_results: Vec::new(),
             search_current: 0,
             session_picker: None,
+            toasts: Vec::new(),
+            prompt_history: Vec::new(),
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct Toast {
+    pub message: String,
+    pub level: ToastLevel,
+    pub created: Instant,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ToastLevel {
+    Info,
+    Warning,
+    Error,
 }
 
 // ---------------------------------------------------------------------------
@@ -169,6 +187,9 @@ pub enum Msg {
     SearchPrev,
     SearchClose,
     AgentComplete(String, bool), // (summary, success)
+    RestoreLastPrompt,
+    ShowToast(String, ToastLevel),
+    DismissExpiredToasts,
 }
 
 // ---------------------------------------------------------------------------
@@ -249,6 +270,7 @@ pub fn update(state: &mut TuiState, msg: Msg) {
         }
         Msg::Submit(text) => {
             if !text.is_empty() {
+                state.prompt_history.push(text.clone());
                 state.transcript.push(TranscriptEntry::User(text));
                 state.input_text.clear();
                 state.input_cursor = 0;
@@ -328,6 +350,24 @@ pub fn update(state: &mut TuiState, msg: Msg) {
                     format!("{icon} {summary}"),
                 ));
             }
+        }
+        Msg::RestoreLastPrompt => {
+            if state.input_text.is_empty() {
+                if let Some(last) = state.prompt_history.last() {
+                    state.input_text = last.clone();
+                    state.input_cursor = state.input_text.len();
+                }
+            }
+        }
+        Msg::ShowToast(message, level) => {
+            state.toasts.push(Toast {
+                message,
+                level,
+                created: Instant::now(),
+            });
+        }
+        Msg::DismissExpiredToasts => {
+            state.toasts.retain(|t| t.created.elapsed().as_secs() < 5);
         }
     }
 }
@@ -458,8 +498,16 @@ fn handle_domain_event(state: &mut TuiState, event: DomainEvent) {
             state.transcript.push(TranscriptEntry::SystemMessage(
                 format!("⚠ {msg}"),
             ));
+            state.toasts.push(Toast {
+                message: format!("⚠ {msg}"),
+                level: ToastLevel::Warning,
+                created: Instant::now(),
+            });
         }
         EventType::Error => {
+            if event.payload.get("type").and_then(|v| v.as_str()) == Some("retry") {
+                return; // Don't show retry errors as toasts
+            }
             let msg = event.payload.get("error")
                 .or(event.payload.get("reason"))
                 .and_then(|v| v.as_str())
@@ -467,6 +515,11 @@ fn handle_domain_event(state: &mut TuiState, event: DomainEvent) {
             state.transcript.push(TranscriptEntry::SystemMessage(
                 format!("❌ {msg}"),
             ));
+            state.toasts.push(Toast {
+                message: msg.to_string(),
+                level: ToastLevel::Error,
+                created: Instant::now(),
+            });
         }
         _ => {}
     }
