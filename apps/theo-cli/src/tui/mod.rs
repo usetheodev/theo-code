@@ -116,6 +116,16 @@ pub async fn run(
                     Msg::ToggleHelp => Msg::SearchClose,
                     other => other,
                 }
+            } else if state.show_model_picker {
+                // Model picker mode
+                match msg {
+                    Msg::InputChar('j') | Msg::ScrollDown(_) => Msg::ModelPickerDown,
+                    Msg::InputChar('k') | Msg::ScrollUp(_) => Msg::ModelPickerUp,
+                    Msg::Submit(_) => Msg::ModelPickerSelect,
+                    Msg::ToggleHelp | Msg::ToggleModelPicker => Msg::ToggleModelPicker,
+                    Msg::Quit => Msg::Quit,
+                    _ => continue,
+                }
             } else if state.show_help {
                 // In help mode, Esc closes help
                 match msg {
