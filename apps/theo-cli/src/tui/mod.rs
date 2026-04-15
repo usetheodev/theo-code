@@ -39,6 +39,16 @@ use theo_tooling::registry::create_default_registry;
 
 use app::{Msg, TuiState};
 
+/// Write debug log to ~/.config/theo/tui.log (visible outside the TUI)
+fn tui_log(msg: &str) {
+    use std::io::Write;
+    let path = dirs_path().join("tui.log");
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        let ts = chrono::Utc::now().format("%H:%M:%S%.3f");
+        let _ = writeln!(f, "[{ts}] {msg}");
+    }
+}
+
 fn dirs_path() -> std::path::PathBuf {
     std::env::var("HOME")
         .map(std::path::PathBuf::from)
@@ -393,13 +403,31 @@ pub async fn run(
         if let Some(prompt) = pending_prompt.take() {
             if !state.agent_running {
                 state.agent_running = true;
+                tui_log("=== AGENT LAUNCH START ===");
+                tui_log(&format!("Prompt: {}", &prompt[..prompt.len().min(80)]));
 
                 // Re-resolve config to pick up tokens from login
                 let (fresh_config, fresh_provider) = crate::resolve_agent_config(None, None, None).await;
+                tui_log(&format!("Resolved provider: {fresh_provider}"));
+                tui_log(&format!("Model: {}", fresh_config.model));
+                tui_log(&format!("Base URL: {}", fresh_config.base_url));
+                tui_log(&format!("API key present: {}", fresh_config.api_key.is_some()));
+                tui_log(&format!("Endpoint override: {:?}", fresh_config.endpoint_override));
+
                 if fresh_provider != "default" {
-                    state.status.provider = fresh_provider;
+                    state.status.provider = fresh_provider.clone();
                     state.status.model = fresh_config.model.clone();
                 }
+
+                // Show debug info in transcript
+                let debug_msg = format!(
+                    "[debug] provider={} model={} key={} url={}",
+                    &state.status.provider,
+                    &fresh_config.model,
+                    if fresh_config.api_key.is_some() { "yes" } else { "NO" },
+                    &fresh_config.base_url,
+                );
+                app::update(&mut state, Msg::Notify(debug_msg));
 
                 let task_config = fresh_config;
                 let task_dir = project_dir.clone();
@@ -412,6 +440,7 @@ pub async fn run(
                 session_messages.push(Message::user(&prompt));
 
                 tokio::spawn(async move {
+                    tui_log("Agent task spawned");
                     let mut cfg = task_config;
                     cfg.system_prompt = system_prompt_for_mode(AgentMode::Agent);
                     cfg.mode = AgentMode::Agent;
@@ -419,7 +448,13 @@ pub async fn run(
                     let registry = create_default_registry();
                     #[allow(deprecated)]
                     let event_sink = Arc::new(PrintEventSink);
-                    let agent = AgentLoop::new(cfg, registry, event_sink);
+                    let agent = AgentLoop::new(cfg.clone(), registry, event_sink);
+
+                    tui_log(&format!("AgentLoop created, calling run_with_history..."));
+                    tui_log(&format!("  api_key len: {}", cfg.api_key.as_ref().map(|k| k.len()).unwrap_or(0)));
+                    tui_log(&format!("  base_url: {}", cfg.base_url));
+                    tui_log(&format!("  endpoint: {:?}", cfg.endpoint_override));
+                    tui_log(&format!("  history msgs: {}", task_messages.len()));
 
                     let result = agent
                         .run_with_history(
@@ -430,8 +465,7 @@ pub async fn run(
                         )
                         .await;
 
-                    // Signal completion via a DomainEvent (LlmCallEnd with final summary)
-                    // The result summary will be picked up by the event stream
+                    tui_log(&format!("Agent finished: success={} summary={}", result.success, &result.summary[..result.summary.len().min(100)]));
                     let _ = task_msg_tx.send(Msg::AgentComplete(result.summary, result.success)).await;
                 });
             }
