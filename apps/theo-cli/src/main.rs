@@ -340,6 +340,24 @@ fn cmd_headless(
 
         let model_name = config.model.clone();
 
+        // In headless mode, trim the system prompt to reduce per-call token overhead.
+        // Remove verbose sections that don't help a single-shot benchmark task.
+        if config.system_prompt.contains("## Task Management") {
+            let lean = config.system_prompt
+                .lines()
+                .filter(|l| {
+                    // Remove verbose sections that waste tokens in benchmark mode
+                    !l.contains("task_create") && !l.contains("task_update")
+                        && !l.contains("subagent") && !l.contains("subagent_parallel")
+                        && !l.contains("## Skills") && !l.contains("skill")
+                        && !l.contains("## Self-Reflection") && !l.contains("`reflect`")
+                        && !l.contains("## Memory") && !l.contains("`memory`")
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            config.system_prompt = lean;
+        }
+
         let registry = theo_tooling::registry::create_default_registry();
         let agent = theo_agent_runtime::AgentLoop::new(config, registry);
 
