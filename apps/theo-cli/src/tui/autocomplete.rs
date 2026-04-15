@@ -60,6 +60,9 @@ pub fn slash_commands() -> Vec<Candidate> {
         Candidate { text: "/export".into(), description: "Export session as markdown".into(), kind: CandidateKind::SlashCommand },
         Candidate { text: "/mode".into(), description: "Cycle agent mode (agent/plan/ask)".into(), kind: CandidateKind::SlashCommand },
         Candidate { text: "/quit".into(), description: "Exit theo".into(), kind: CandidateKind::SlashCommand },
+        Candidate { text: "/timeline".into(), description: "Show tool chain causality".into(), kind: CandidateKind::SlashCommand },
+        Candidate { text: "/theme".into(), description: "Change color theme".into(), kind: CandidateKind::SlashCommand },
+        Candidate { text: "/tab".into(), description: "Open new session tab".into(), kind: CandidateKind::SlashCommand },
     ]
 }
 

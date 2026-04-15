@@ -91,6 +91,29 @@ pub struct TuiState {
     pub theme_picker_selected: usize,
     pub autocomplete: super::autocomplete::AutocompleteState,
     pub project_dir: std::path::PathBuf,
+    // Session tabs (F6)
+    pub tabs: Vec<TabState>,
+    pub active_tab: usize,
+    // Budget visual (F5-T04)
+    pub budget_tokens_used: u64,
+    pub budget_tokens_limit: u64,
+    // Timeline (F4-T04)
+    pub tool_chain: Vec<ToolChainEntry>,
+    pub show_timeline: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct TabState {
+    pub name: String,
+    pub transcript_snapshot: Vec<TranscriptEntry>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ToolChainEntry {
+    pub tool_name: String,
+    pub reason: String, // why this tool was called
+    pub status: ToolCardStatus,
+    pub duration_ms: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -164,6 +187,12 @@ impl TuiState {
             theme_picker_selected: 0,
             autocomplete: super::autocomplete::AutocompleteState::new(),
             project_dir: std::path::PathBuf::new(),
+            tabs: vec![TabState { name: "Session 1".to_string(), transcript_snapshot: Vec::new() }],
+            active_tab: 0,
+            budget_tokens_used: 0,
+            budget_tokens_limit: 200_000, // default budget
+            tool_chain: Vec::new(),
+            show_timeline: false,
         }
     }
 }
@@ -236,6 +265,14 @@ pub enum Msg {
     AutocompleteDown,
     AutocompleteAccept,
     AutocompleteClose,
+    // Session tabs (F6)
+    NewTab,
+    CloseTab,
+    SwitchTab(usize),
+    // Timeline (F4)
+    ToggleTimeline,
+    // Notifications
+    NotifyCompletion(String),
 }
 
 // ---------------------------------------------------------------------------
@@ -395,6 +432,24 @@ pub fn update(state: &mut TuiState, msg: Msg) {
                 state.transcript.push(TranscriptEntry::SystemMessage(
                     format!("{icon} {summary}"),
                 ));
+                // OS notification (F7-T05)
+                #[cfg(target_os = "linux")]
+                {
+                    let title = if success { "Theo ✓" } else { "Theo ✗" };
+                    let _ = std::process::Command::new("notify-send")
+                        .args([title, &summary])
+                        .spawn();
+                }
+                #[cfg(target_os = "macos")]
+                {
+                    let script = format!(
+                        "display notification \"{}\" with title \"Theo\"",
+                        summary.replace('"', "\\\"")
+                    );
+                    let _ = std::process::Command::new("osascript")
+                        .args(["-e", &script])
+                        .spawn();
+                }
             }
         }
         Msg::RestoreLastPrompt => {
@@ -537,6 +592,68 @@ pub fn update(state: &mut TuiState, msg: Msg) {
         }
         Msg::AutocompleteClose => {
             state.autocomplete.active = false;
+        }
+        Msg::NewTab => {
+            let n = state.tabs.len() + 1;
+            state.tabs.push(TabState {
+                name: format!("Session {n}"),
+                transcript_snapshot: Vec::new(),
+            });
+            // Save current transcript to current tab
+            if let Some(tab) = state.tabs.get_mut(state.active_tab) {
+                tab.transcript_snapshot = state.transcript.clone();
+            }
+            state.active_tab = state.tabs.len() - 1;
+            state.transcript.clear();
+            state.active_tool_cards.clear();
+            state.tool_chain.clear();
+        }
+        Msg::CloseTab => {
+            if state.tabs.len() > 1 {
+                state.tabs.remove(state.active_tab);
+                if state.active_tab >= state.tabs.len() {
+                    state.active_tab = state.tabs.len() - 1;
+                }
+                // Restore transcript from new active tab
+                if let Some(tab) = state.tabs.get(state.active_tab) {
+                    state.transcript = tab.transcript_snapshot.clone();
+                }
+            }
+        }
+        Msg::SwitchTab(idx) => {
+            if idx < state.tabs.len() && idx != state.active_tab {
+                // Save current transcript
+                if let Some(tab) = state.tabs.get_mut(state.active_tab) {
+                    tab.transcript_snapshot = state.transcript.clone();
+                }
+                state.active_tab = idx;
+                // Restore target tab transcript
+                if let Some(tab) = state.tabs.get(state.active_tab) {
+                    state.transcript = tab.transcript_snapshot.clone();
+                }
+            }
+        }
+        Msg::ToggleTimeline => {
+            state.show_timeline = !state.show_timeline;
+        }
+        Msg::NotifyCompletion(summary) => {
+            // OS notification for task completion (Linux: notify-send)
+            #[cfg(target_os = "linux")]
+            {
+                let _ = std::process::Command::new("notify-send")
+                    .args(["Theo", &summary])
+                    .spawn();
+            }
+            #[cfg(target_os = "macos")]
+            {
+                let script = format!(
+                    "display notification \"{}\" with title \"Theo\"",
+                    summary.replace('"', "\\\"")
+                );
+                let _ = std::process::Command::new("osascript")
+                    .args(["-e", &script])
+                    .spawn();
+            }
         }
     }
 }
@@ -732,6 +849,18 @@ fn handle_domain_event(state: &mut TuiState, event: DomainEvent) {
                     card.duration_ms = duration_ms;
                 }
             }
+            // Track in tool chain for timeline
+            let tool_name = event.payload.get("tool_name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?")
+                .to_string();
+            state.tool_chain.push(ToolChainEntry {
+                tool_name,
+                reason: String::new(), // TODO: extract from LLM reasoning
+                status: if success { ToolCardStatus::Succeeded } else { ToolCardStatus::Failed },
+                duration_ms,
+            });
+
             state.active_tool_cards.remove(&event.entity_id);
             state.status.tools_running = state.status.tools_running.saturating_sub(1);
         }
@@ -755,6 +884,7 @@ fn handle_domain_event(state: &mut TuiState, event: DomainEvent) {
             if let Some(t_out) = event.payload.get("tokens_out").and_then(|v| v.as_u64()) {
                 state.status.tokens_out += t_out;
             }
+            state.budget_tokens_used = state.status.tokens_in + state.status.tokens_out;
             state.agent_running = false;
             state.streaming_assistant = false;
         }

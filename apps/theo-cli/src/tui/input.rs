@@ -65,6 +65,18 @@ pub async fn input_loop(tx: mpsc::Sender<Msg>) {
                     // Model picker
                     (KeyCode::Char('m'), m) if m.contains(KeyModifiers::CONTROL) => Some(Msg::ToggleModelPicker),
 
+                    // Timeline toggle (only when input is empty)
+                    // Note: 't' with no modifier goes to InputChar normally,
+                    // timeline toggles via /timeline command or sidebar
+
+                    // Session tabs
+                    (KeyCode::Char('t'), m) if m.contains(KeyModifiers::CONTROL) => Some(Msg::NewTab),
+                    (KeyCode::Char('w'), m) if m.contains(KeyModifiers::CONTROL) => Some(Msg::CloseTab),
+                    (KeyCode::Char('1'), m) if m.contains(KeyModifiers::CONTROL) => Some(Msg::SwitchTab(0)),
+                    (KeyCode::Char('2'), m) if m.contains(KeyModifiers::CONTROL) => Some(Msg::SwitchTab(1)),
+                    (KeyCode::Char('3'), m) if m.contains(KeyModifiers::CONTROL) => Some(Msg::SwitchTab(2)),
+                    (KeyCode::Char('4'), m) if m.contains(KeyModifiers::CONTROL) => Some(Msg::SwitchTab(3)),
+
                     // Character input
                     (KeyCode::Char(c), _) => Some(Msg::InputChar(c)),
 

@@ -46,6 +46,15 @@ pub fn process_command(input: &str, state: &TuiState) -> Option<Vec<Msg>> {
         "/quit" | "/exit" | "/q" => {
             Some(vec![Msg::Quit])
         }
+        "/timeline" | "/chain" => {
+            Some(vec![Msg::ToggleTimeline])
+        }
+        "/theme" => {
+            Some(vec![Msg::ToggleThemePicker])
+        }
+        "/tab" | "/new" => {
+            Some(vec![Msg::NewTab])
+        }
         _ => {
             Some(vec![Msg::ShowToast(
                 format!("Unknown command: {cmd}. Try /help"),

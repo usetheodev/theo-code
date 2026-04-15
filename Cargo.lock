@@ -6006,6 +6006,7 @@ dependencies = [
  "theo-infra-llm",
  "theo-tooling",
  "tokio",
+ "toml 0.8.2",
  "tui-textarea",
 ]
 
