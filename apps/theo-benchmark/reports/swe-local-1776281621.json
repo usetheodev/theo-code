@@ -1,0 +1,38 @@
+{
+  "results": [
+    {
+      "instance_id": "requests__requests-2317",
+      "repo": "psf/requests",
+      "model_patch": "diff --git a/requests/models.py b/requests/models.py\nindex fbb3c7e6..8b6dde9e 100644\n--- a/requests/models.py\n+++ b/requests/models.py\n@@ -321,7 +321,7 @@ class PreparedRequest(RequestEncodingMixin, RequestHooksMixin):\n         \"\"\"Prepares the given HTTP method.\"\"\"\n         self.method = method\n         if self.method is not None:\n-            self.method = to_native_string(self.method.upper())\n+            self.method = method.upper()\n \n     def prepare_url(self, url, params):\n         \"\"\"Prepares the given HTTP URL.\"\"\"\n",
+      "has_patch": true,
+      "duration_secs": 39.4,
+      "headless": {
+        "duration_ms": 37327,
+        "files_edited": [
+          "requests/models.py"
+        ],
+        "iterations": 11,
+        "llm": {
+          "calls": 11,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.3-codex",
+        "provider": "ChatGPT Codex (OAuth)",
+        "schema": "theo.headless.v1",
+        "success": true,
+        "summary": "Implemented the minimal fix in `requests/models.py` within `PreparedRequest.prepare_method`: replaced `to_native_string(self.method.upper())` with `method.upper()`, resulting in direct assignment to uppercase method without unnecessary conversion. Verified the file parses by running `python3 -m py_compile requests/models.py` successfully (only a pre-existing SyntaxWarning unrelated to this change).",
+        "tokens": {
+          "input": 67746,
+          "output": 1404,
+          "total": 69150
+        },
+        "tools": {
+          "success": 11,
+          "total": 13
+        }
+      }
+    }
+  ],
+  "timestamp": 1776281621
+}
