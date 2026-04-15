@@ -1,0 +1,26 @@
+[
+  {
+    "instance_id": "django__django-16527",
+    "repo": "django/django",
+    "base_commit": "aeb4e41b53c4fa8e7cd29e8c4e6fce9fde7f9e5d",
+    "problem_statement": "\"show_hidden\" not used in BaseForm._html_output.\n\nDescription\n\nWhen rendering a form, hidden fields are supposed to be gathered and rendered at the top of the form. However, the `show_hidden` parameter in `BaseForm._html_output` is never actually used, and hidden fields are always included in the output. This means there's no way to skip hidden fields when rendering.",
+    "hints_text": "Look at django/forms/forms.py, the _html_output method.",
+    "difficulty": "easy"
+  },
+  {
+    "instance_id": "requests__requests-2317",
+    "repo": "psf/requests",
+    "base_commit": "36453b95b13079296776d11b09cab2567ea3e703",
+    "problem_statement": "method = builtin_str(method) not needed\n\nIn `requests/models.py`, line 441, there's `self.method = builtin_str(method)` but since Python 2 is no longer supported, `builtin_str` is just `str`, making this call unnecessary. Simplify it to `self.method = method.upper()`.",
+    "hints_text": "Check requests/models.py, the PreparedRequest.prepare_method.",
+    "difficulty": "easy"
+  },
+  {
+    "instance_id": "flask__flask-4045",
+    "repo": "pallets/flask",
+    "base_commit": "97b83e2e7c2db8c37e22c96f01c47cc2949ef2c2",
+    "problem_statement": "Raise `BadRequest` for duplicate keys in JSON\n\nWhen parsing JSON request data, Flask's `get_json()` silently accepts duplicate keys and uses the last value. This can lead to subtle bugs. It should raise a 400 Bad Request when duplicate keys are detected.",
+    "hints_text": "Look at flask/wrappers.py and the json mixin.",
+    "difficulty": "medium"
+  }
+]
