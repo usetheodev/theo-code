@@ -209,15 +209,15 @@ pub async fn run(
 
                                     match auth.start_device_flow().await {
                                         Ok(code) => {
-                                            app::update(&mut state, Msg::LoginComplete(format!(
-                                                "1. Open: https://auth.openai.com/activate\n2. Login to your OpenAI account if needed\n3. Enter code: {}\n4. Click 'Authorize'\n\n   If the page is blank, try: https://platform.openai.com\n   then go to Settings > API > Devices",
-                                                code.user_code
-                                            )));
+                                            app::update(&mut state, Msg::Notify("─────────────────────────────────────".into()));
+                                            app::update(&mut state, Msg::Notify("1. Open: https://auth.openai.com/activate".into()));
+                                            app::update(&mut state, Msg::Notify("2. Login to your OpenAI account if needed".into()));
+                                            app::update(&mut state, Msg::Notify(format!("3. Enter code: {}", code.user_code)));
+                                            app::update(&mut state, Msg::Notify("4. Click 'Authorize'".into()));
+                                            app::update(&mut state, Msg::Notify("─────────────────────────────────────".into()));
                                             // Copy code to clipboard via OSC52
                                             eprint!("\x1b]52;c;{}\x07", app::base64_encode(&code.user_code));
-                                            app::update(&mut state, Msg::Notify(
-                                                "Code copied to clipboard. Waiting for authorization...".into()
-                                            ));
+                                            app::update(&mut state, Msg::Notify("Code copied to clipboard. Waiting...".into()));
                                             terminal.draw(|frame| view::draw(frame, &state))?;
 
                                             // Open browser silently (redirect output to /dev/null)
