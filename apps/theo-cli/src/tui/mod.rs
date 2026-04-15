@@ -89,12 +89,25 @@ pub async fn run(
     loop {
         // Drain all pending messages
         while let Ok(msg) = msg_rx.try_recv() {
-            // Intercept empty Submit (from input loop) and fill with actual text
-            let msg = match msg {
-                Msg::Submit(ref s) if s.is_empty() && !state.input_text.is_empty() => {
-                    Msg::Submit(state.input_text.clone())
+            // In search mode, redirect input to search
+            let msg = if state.search_mode {
+                match msg {
+                    Msg::InputChar(c) => Msg::SearchChar(c),
+                    Msg::InputBackspace => Msg::SearchBackspace,
+                    Msg::Submit(_) => Msg::SearchClose, // Enter closes search
+                    Msg::ToggleHelp => Msg::SearchClose, // Esc closes search
+                    Msg::InputChar('n') => Msg::SearchNext,
+                    Msg::InputChar('N') => Msg::SearchPrev,
+                    other => other,
                 }
-                other => other,
+            } else {
+                // Intercept empty Submit (from input loop) and fill with actual text
+                match msg {
+                    Msg::Submit(ref s) if s.is_empty() && !state.input_text.is_empty() => {
+                        Msg::Submit(state.input_text.clone())
+                    }
+                    other => other,
+                }
             };
             app::update(&mut state, msg);
         }

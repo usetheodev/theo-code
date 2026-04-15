@@ -273,3 +273,4 @@ benches/target/
 *.patch
 .sass-cache/
 .claude/review-loop.local.md
+referencias/

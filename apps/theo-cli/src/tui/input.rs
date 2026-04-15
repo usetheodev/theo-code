@@ -52,6 +52,9 @@ pub async fn input_loop(tx: mpsc::Sender<Msg>) {
                     // Clear screen
                     (KeyCode::Char('l'), m) if m.contains(KeyModifiers::CONTROL) => Some(Msg::ScrollToBottom),
 
+                    // Search (Ctrl+F)
+                    (KeyCode::Char('f'), m) if m.contains(KeyModifiers::CONTROL) => Some(Msg::SearchStart),
+
                     // Character input
                     (KeyCode::Char(c), _) => Some(Msg::InputChar(c)),
 
