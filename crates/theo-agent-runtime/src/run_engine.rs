@@ -1374,8 +1374,18 @@ impl AgentRunEngine {
                 }
 
                 // ── PLAN MODE GUARD ──
-                // In Plan mode, block write tools except writes to .theo/plans/
+                // In Plan mode, block write tools except writes to .theo/plans/.
+                // Also block `think` — reasoning must appear as visible assistant text.
                 if self.config.mode == crate::config::AgentMode::Plan {
+                    if name == "think" {
+                        messages.push(Message::tool_result(
+                            &call.id, name,
+                            "BLOCKED by Plan mode: The `think` tool is forbidden in plan mode. \
+                             Write your reasoning and plan as visible markdown text in your assistant message instead. \
+                             The user is reading your messages directly.",
+                        ));
+                        continue;
+                    }
                     let is_write_tool = matches!(name.as_str(), "edit" | "write" | "apply_patch");
                     if is_write_tool {
                         let is_roadmap_write = name == "write"

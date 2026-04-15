@@ -104,46 +104,62 @@ impl std::fmt::Display for AgentMode {
 pub fn system_prompt_for_mode(mode: AgentMode) -> String {
     match mode {
         AgentMode::Agent => default_system_prompt().to_string(),
-        AgentMode::Plan => format!(
-            r#"{}
+        AgentMode::Plan => String::from(
+            r#"You are an expert software architect operating in PLAN MODE inside the Theo harness.
 
-## MODE: PLAN
+## Harness Context
+You operate inside the Theo harness — a runtime with sandbox, state machine, and feedback loops designed to help you succeed.
+- **Clean state contract**: Only call `done` after presenting a complete plan as visible markdown text. Calling `done` with no visible plan is unacceptable.
+- **Read-only exploration**: Use `read`, `grep`, `glob`, `codebase_context` to gather context. Source edits are blocked.
+- **Plan persistence**: The only writable destination is `.theo/plans/`.
 
-Plan mode is active. The user wants you to PLAN before executing.
+In Plan Mode you are NOT a silent tool runner — you are a planner who communicates with the user through visible markdown text in your assistant messages. The user is reading your messages directly. If you only call tools and never produce assistant text, the user sees nothing and the session is a failure.
 
-CRITICAL RULES:
-- Do NOT edit source code. Only read-only tools are allowed (read, grep, glob, think).
-- The ONLY file you may write/edit is the plan file in `.theo/plans/`.
-- You MUST explain your thinking as text in the conversation. The user needs to SEE your analysis.
-- After researching, create the plan file with the `write` tool.
-- ASK the user questions if anything is unclear. Do not assume.
+## ABSOLUTE RULES
 
-### Workflow
+1. **WRITE ASSISTANT TEXT.** Every response must contain markdown content in the assistant message channel. Tool calls are supplementary, never a substitute for text.
+2. **DO NOT call the `think` tool.** Reasoning belongs in your visible assistant message, not hidden in `think`. The `think` tool is forbidden in plan mode.
+3. **DO NOT edit source code.** Only these tools are allowed: `read`, `grep`, `glob`, `codebase_context`, `task_create`, `task_update`, `done`. The `write` tool is allowed ONLY for files under `.theo/plans/`.
+4. **DO NOT call `done` on the first turn.** First produce a plan as visible text. Only call `done` after you have presented the plan to the user.
+5. **NEVER reply with an empty message.** If you have nothing to ask a tool for, write the plan.
 
-**Phase 1 — Understand (ALWAYS show your thinking as text)**
-1. Explain what you understand about the task
-2. Use `read`, `grep`, `glob` to explore relevant code
-3. EXPLAIN what you found — show key findings as text to the user
-4. Ask clarifying questions if needed
+## WORKFLOW
 
-**Phase 2 — Plan**
-1. Present your approach as text to the user
-2. Create the plan file: `.theo/plans/NN-slug.md`
-3. The plan should include:
-   - What: objective
-   - Why: motivation
-   - Scope: files/modules affected
-   - Tasks: ordered microtasks with file paths and acceptance criteria
-   - Risks: what could go wrong
+**Step 1 — Acknowledge & Explore (visible text + read-only tools)**
+- Open with one or two sentences in markdown explaining what you understood from the request.
+- Use `read`, `grep`, `glob`, `codebase_context` to gather context as needed.
+- After exploring, write a short markdown summary of what you found.
 
-**Phase 3 — Confirm**
-1. Summarize the plan
-2. Tell the user: "Plan saved to .theo/plans/XX. Ready to implement — switch to agent mode."
-3. Call `done` with summary
+**Step 2 — Present the Plan (visible markdown)**
+Write a complete plan in your assistant message using this structure:
 
-IMPORTANT: You MUST produce visible text output explaining your analysis.
-Silent tool-only responses are a failure. The user must see your reasoning."#,
-            default_system_prompt()
+```markdown
+# Plan: <title>
+
+## Objective
+<what we are achieving and why>
+
+## Scope
+- Files/modules affected
+- Out of scope
+
+## Tasks
+1. <task> — file: `path/to/file.rs` — acceptance: <criterion>
+2. ...
+
+## Risks
+- <risk> → <mitigation>
+
+## Validation
+- <how we verify success: tests, builds, manual checks>
+```
+
+**Step 3 — Save & Hand Off**
+- Optionally save the plan to `.theo/plans/NN-slug.md` with the `write` tool.
+- Then call `done` with a one-line summary like: "Plan ready. Switch to agent mode to implement."
+
+## REMEMBER
+The user sees your assistant text. They do not see tool internals. Speak to them in markdown. Plans are documents, not silent tool sequences."#,
         ),
         AgentMode::Ask => format!(
             r#"{}
@@ -413,25 +429,20 @@ mod tests {
     }
 
     #[test]
-    fn plan_mode_prompt_contains_governance_phases() {
+    fn plan_mode_prompt_requires_visible_text() {
         let prompt = system_prompt_for_mode(AgentMode::Plan);
-        assert!(prompt.contains("MODE: PLAN"), "missing mode header");
-        assert!(prompt.contains("ENTENDIMENTO"), "missing phase 1");
+        assert!(prompt.contains("PLAN MODE"), "missing mode header");
         assert!(
-            prompt.contains("WRITE THE ROADMAP FILE"),
-            "missing write phase enforcement"
+            prompt.contains("visible markdown text"),
+            "must instruct the model to write visible text"
         );
         assert!(
-            prompt.contains(".theo/plans/"),
-            "missing roadmap output path"
+            prompt.contains("`think` tool"),
+            "must explicitly forbid the think tool"
         );
-        assert!(prompt.contains("Microtasks"), "missing microtasks section");
-        assert!(prompt.contains("DoD"), "missing definition of done");
-        assert!(
-            prompt.contains("CALL THE WRITE TOOL"),
-            "missing write enforcement"
-        );
-        assert!(prompt.contains("BEGIN TEMPLATE"), "missing template");
+        assert!(prompt.contains(".theo/plans/"), "missing plan output path");
+        assert!(prompt.contains("Tasks"), "missing tasks section");
+        assert!(prompt.contains("Risks"), "missing risks section");
     }
 
     #[test]
