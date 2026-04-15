@@ -60,10 +60,10 @@ struct Cli {
     #[arg(long, global = true)]
     tui: bool,
 
-    /// Headless mode for benchmarks/CI: read prompt from stdin (or --prompt arg),
-    /// emit a single JSON result line on stdout, no banners/REPL/streaming chrome.
-    /// Exit code 0 = success, 1 = failure.
-    #[arg(long, global = true)]
+    /// Headless mode for benchmarks/CI: read prompt from args (or stdin),
+    /// emit a single JSON result line on stdout, no banners/REPL/streaming.
+    /// Exit code 0 = success, 1 = failure. -p is an alias matching Claude Code.
+    #[arg(short = 'p', long, global = true)]
     headless: bool,
 
     #[command(subcommand)]
