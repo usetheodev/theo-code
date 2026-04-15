@@ -63,6 +63,7 @@ pub fn slash_commands() -> Vec<Candidate> {
         Candidate { text: "/timeline".into(), description: "Show tool chain causality".into(), kind: CandidateKind::SlashCommand },
         Candidate { text: "/theme".into(), description: "Change color theme".into(), kind: CandidateKind::SlashCommand },
         Candidate { text: "/tab".into(), description: "Open new session tab".into(), kind: CandidateKind::SlashCommand },
+        Candidate { text: "/history".into(), description: "Search across all sessions".into(), kind: CandidateKind::SlashCommand },
     ]
 }
 

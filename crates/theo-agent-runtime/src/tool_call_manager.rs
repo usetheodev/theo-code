@@ -168,11 +168,24 @@ impl ToolCallManager {
 
         // Execute tool via tool_bridge (no lock held)
         let start = std::time::Instant::now();
-        let (message, success) = tool_bridge::execute_tool_call(registry, &lmm_call, &streaming_ctx).await;
+        let (message, success, metadata) = tool_bridge::execute_tool_call(registry, &lmm_call, &streaming_ctx).await;
         // Drop the tx side so drainer finishes
         drop(streaming_ctx);
         let _ = drainer.await;
         let duration_ms = start.elapsed().as_millis() as u64;
+
+        // Publish TodoUpdated if tool returned task metadata
+        if let Some(ref meta) = metadata {
+            if let Some(meta_type) = meta.get("type").and_then(|v| v.as_str()) {
+                if meta_type == "task_create" || meta_type == "task_update" {
+                    self.event_bus.publish(DomainEvent::new(
+                        EventType::TodoUpdated,
+                        call_id.as_str(),
+                        meta.clone(),
+                    ));
+                }
+            }
+        }
 
         // 4. Determine final state
         let final_state = if success {

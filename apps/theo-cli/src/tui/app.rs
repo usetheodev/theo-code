@@ -97,6 +97,8 @@ pub struct TuiState {
     // Budget visual (F5-T04)
     pub budget_tokens_used: u64,
     pub budget_tokens_limit: u64,
+    // Todo list (F5-T02)
+    pub todos: Vec<TodoItem>,
     // Timeline (F4-T04)
     pub tool_chain: Vec<ToolChainEntry>,
     pub show_timeline: bool,
@@ -106,6 +108,13 @@ pub struct TuiState {
 pub struct TabState {
     pub name: String,
     pub transcript_snapshot: Vec<TranscriptEntry>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TodoItem {
+    pub id: String,
+    pub content: String,
+    pub status: String,
 }
 
 #[derive(Debug, Clone)]
@@ -190,7 +199,8 @@ impl TuiState {
             tabs: vec![TabState { name: "Session 1".to_string(), transcript_snapshot: Vec::new() }],
             active_tab: 0,
             budget_tokens_used: 0,
-            budget_tokens_limit: 200_000, // default budget
+            budget_tokens_limit: 200_000,
+            todos: Vec::new(),
             tool_chain: Vec::new(),
             show_timeline: false,
         }
@@ -917,6 +927,30 @@ fn handle_domain_event(state: &mut TuiState, event: DomainEvent) {
                 level: ToastLevel::Error,
                 created: Instant::now(),
             });
+        }
+        EventType::TodoUpdated => {
+            let action = event.payload.get("type").and_then(|v| v.as_str()).unwrap_or("");
+            let content = event.payload.get("content").and_then(|v| v.as_str()).unwrap_or("");
+            let id = event.payload.get("id").and_then(|v| v.as_str())
+                .or_else(|| event.payload.get("id").and_then(|v| v.as_u64()).map(|_| ""))
+                .unwrap_or(&event.entity_id);
+            let status = event.payload.get("status").and_then(|v| v.as_str()).unwrap_or("pending");
+
+            match action {
+                "task_create" => {
+                    state.todos.push(TodoItem {
+                        id: id.to_string(),
+                        content: content.to_string(),
+                        status: "pending".to_string(),
+                    });
+                }
+                "task_update" => {
+                    if let Some(todo) = state.todos.iter_mut().find(|t| t.id == id) {
+                        todo.status = status.to_string();
+                    }
+                }
+                _ => {}
+            }
         }
         _ => {}
     }
