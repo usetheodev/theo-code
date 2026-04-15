@@ -12,6 +12,7 @@ mod markdown;
 mod view;
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use crossterm::{
     event::{DisableMouseCapture, EnableMouseCapture},
@@ -22,7 +23,13 @@ use futures::FutureExt;
 use ratatui::prelude::*;
 use tokio::sync::mpsc;
 
-use theo_agent_runtime::config::AgentConfig;
+use theo_agent_runtime::config::{AgentConfig, AgentMode, system_prompt_for_mode};
+use theo_agent_runtime::event_bus::EventBus;
+#[allow(deprecated)]
+use theo_agent_runtime::events::PrintEventSink;
+use theo_agent_runtime::AgentLoop;
+use theo_infra_llm::types::Message;
+use theo_tooling::registry::create_default_registry;
 
 use app::{Msg, TuiState};
 
@@ -49,7 +56,7 @@ pub async fn run(
     }));
 
     // Create shared EventBus + broadcast bridge
-    let event_bus = std::sync::Arc::new(theo_agent_runtime::event_bus::EventBus::new());
+    let event_bus = Arc::new(EventBus::new());
     let broadcast_rx = event_bus.subscribe_broadcast(1024);
 
     // Message channel: all tasks send Msg here, render loop drains
@@ -77,10 +84,11 @@ pub async fn run(
         size.height,
     );
 
-    // If initial prompt provided, submit it
-    if let Some(prompt) = initial_prompt {
-        app::update(&mut state, Msg::Submit(prompt));
-    }
+    // Session history for agent continuity
+    let mut session_messages: Vec<Message> = Vec::new();
+
+    // If initial prompt provided, queue it for execution
+    let mut pending_prompt: Option<String> = initial_prompt;
 
     // Render loop at ~30fps
     let mut tick_interval = tokio::time::interval(std::time::Duration::from_millis(33));
@@ -94,22 +102,71 @@ pub async fn run(
                 match msg {
                     Msg::InputChar(c) => Msg::SearchChar(c),
                     Msg::InputBackspace => Msg::SearchBackspace,
-                    Msg::Submit(_) => Msg::SearchClose, // Enter closes search
-                    Msg::ToggleHelp => Msg::SearchClose, // Esc closes search
-                    Msg::InputChar('n') => Msg::SearchNext,
-                    Msg::InputChar('N') => Msg::SearchPrev,
+                    Msg::Submit(_) => Msg::SearchClose,
+                    Msg::ToggleHelp => Msg::SearchClose,
                     other => other,
                 }
+            } else if state.show_help {
+                // In help mode, Esc closes help
+                match msg {
+                    Msg::ToggleHelp => Msg::ToggleHelp,
+                    Msg::Quit => Msg::Quit,
+                    _ => Msg::ToggleHelp, // any key closes help
+                }
             } else {
-                // Intercept empty Submit (from input loop) and fill with actual text
+                // Normal mode: intercept Submit
                 match msg {
                     Msg::Submit(ref s) if s.is_empty() && !state.input_text.is_empty() => {
-                        Msg::Submit(state.input_text.clone())
+                        let text = state.input_text.clone();
+                        pending_prompt = Some(text.clone());
+                        Msg::Submit(text)
                     }
+                    Msg::Submit(ref s) if s.is_empty() => continue, // empty submit, skip
                     other => other,
                 }
             };
             app::update(&mut state, msg);
+        }
+
+        // Launch agent for pending prompt (if not already running)
+        if let Some(prompt) = pending_prompt.take() {
+            if !state.agent_running {
+                state.agent_running = true;
+
+                let task_config = config.clone();
+                let task_dir = project_dir.clone();
+                let task_bus = event_bus.clone();
+                let task_messages = session_messages.clone();
+                let task_prompt = prompt.clone();
+                let task_msg_tx = msg_tx.clone();
+
+                // Record in session
+                session_messages.push(Message::user(&prompt));
+
+                tokio::spawn(async move {
+                    let mut cfg = task_config;
+                    cfg.system_prompt = system_prompt_for_mode(AgentMode::Agent);
+                    cfg.mode = AgentMode::Agent;
+
+                    let registry = create_default_registry();
+                    #[allow(deprecated)]
+                    let event_sink = Arc::new(PrintEventSink);
+                    let agent = AgentLoop::new(cfg, registry, event_sink);
+
+                    let result = agent
+                        .run_with_history(
+                            &task_prompt,
+                            &task_dir,
+                            task_messages,
+                            Some(task_bus),
+                        )
+                        .await;
+
+                    // Signal completion via a DomainEvent (LlmCallEnd with final summary)
+                    // The result summary will be picked up by the event stream
+                    let _ = task_msg_tx.send(Msg::AgentComplete(result.summary, result.success)).await;
+                });
+            }
         }
 
         // Cursor blink

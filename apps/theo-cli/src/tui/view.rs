@@ -12,7 +12,7 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Wrap},
 };
 
-use super::app::{TuiState, TranscriptEntry, ToolCardStatus};
+use super::app::{TuiState, TranscriptEntry, ToolCardStatus, SessionPickerState};
 
 /// Draw the full TUI layout.
 pub fn draw(frame: &mut Frame, state: &TuiState) {
@@ -46,6 +46,11 @@ pub fn draw(frame: &mut Frame, state: &TuiState) {
         let search = Paragraph::new(search_text)
             .style(Style::default().fg(Color::Yellow).bg(Color::Black));
         frame.render_widget(search, search_area);
+    }
+
+    // Session picker overlay
+    if let Some(ref picker) = state.session_picker {
+        render_session_picker(frame, picker);
     }
 
     // Help overlay (on top of everything)
@@ -304,4 +309,52 @@ fn render_help_overlay(frame: &mut Frame) {
             .title(" Help "));
 
     frame.render_widget(help, help_area);
+}
+
+fn render_session_picker(frame: &mut Frame, picker: &SessionPickerState) {
+    let area = frame.area();
+    let picker_width = 60u16.min(area.width.saturating_sub(4));
+    let picker_height = (picker.sessions.len() as u16 + 4).min(area.height.saturating_sub(4));
+    let x = (area.width.saturating_sub(picker_width)) / 2;
+    let y = (area.height.saturating_sub(picker_height)) / 2;
+    let picker_area = Rect::new(x, y, picker_width, picker_height);
+
+    let clear = Block::default().style(Style::default().bg(Color::Black));
+    frame.render_widget(clear, picker_area);
+
+    let mut lines = vec![
+        Line::from(Span::styled(
+            " Resume session or start new",
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+    ];
+
+    for (i, session) in picker.sessions.iter().enumerate() {
+        let is_selected = i == picker.selected;
+        let prefix = if is_selected { "▸ " } else { "  " };
+        let style = if is_selected {
+            Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+        lines.push(Line::from(Span::styled(
+            format!("{prefix}{} · {} msgs · {}", session.modified, session.message_count, session.preview),
+            style,
+        )));
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        " Enter: resume  Esc: new session",
+        Style::default().fg(Color::DarkGray),
+    )));
+
+    let picker_widget = Paragraph::new(lines)
+        .block(Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Cyan))
+            .title(" Sessions "));
+
+    frame.render_widget(picker_widget, picker_area);
 }
