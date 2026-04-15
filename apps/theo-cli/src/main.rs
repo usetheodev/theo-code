@@ -3,6 +3,7 @@ mod commands;
 mod pilot;
 mod renderer;
 mod repl;
+mod tui;
 
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -47,6 +48,10 @@ struct Cli {
     /// Agent mode
     #[arg(long, global = true, value_parser = ["agent", "plan", "ask"])]
     mode: Option<String>,
+
+    /// Launch experimental TUI mode (ratatui)
+    #[arg(long, global = true)]
+    tui: bool,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -122,7 +127,7 @@ fn main() {
     match cli.command {
         Some(Commands::Init) => cmd_init(cli.repo),
         Some(Commands::Agent { prompt }) => {
-            cmd_agent(prompt, cli.repo, cli.provider, cli.model, cli.max_iter, cli.mode);
+            cmd_agent(prompt, cli.repo, cli.provider, cli.model, cli.max_iter, cli.mode, cli.tui);
         }
         Some(Commands::Pilot { calls, rate, complete, promise }) => {
             cmd_pilot(promise, cli.repo, cli.provider, cli.model, calls, rate, complete);
@@ -138,7 +143,7 @@ fn main() {
         }
         None => {
             // Default: agent mode. REPL if no prompt, single-shot if prompt given.
-            cmd_agent(cli.prompt, cli.repo, cli.provider, cli.model, cli.max_iter, cli.mode);
+            cmd_agent(cli.prompt, cli.repo, cli.provider, cli.model, cli.max_iter, cli.mode, cli.tui);
         }
     }
 }
@@ -173,6 +178,7 @@ fn cmd_agent(
     model: Option<String>,
     max_iter: Option<usize>,
     mode: Option<String>,
+    use_tui: bool,
 ) {
     let project_dir = resolve_dir(repo);
 
@@ -189,6 +195,15 @@ fn cmd_agent(
             model.as_deref(),
             max_iter,
         ).await;
+
+        if use_tui {
+            eprintln!("\x1b[33m[experimental]\x1b[0m TUI mode — report bugs at https://github.com/phaelion/theo-code/issues");
+            if let Err(e) = tui::run(config, project_dir, provider_name, inline_prompt).await {
+                eprintln!("\x1b[31mTUI error:\x1b[0m {e}");
+                std::process::exit(1);
+            }
+            return;
+        }
 
         let mut repl = repl::Repl::new(config, project_dir, provider_name);
         if let Some(ref mode_str) = mode {

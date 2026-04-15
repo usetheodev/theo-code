@@ -36,7 +36,18 @@ impl EventListener for CliRenderer {
                 }
             }
             EventType::ToolCallQueued => {
-                // Suppressed — shown on ToolCallCompleted
+                let tool_name = event.payload.get("tool_name").and_then(|v| v.as_str()).unwrap_or("?");
+                eprint!("\n  \x1b[36m⠋\x1b[0m {tool_name} \x1b[90mrunning...\x1b[0m");
+            }
+            EventType::ToolCallStdoutDelta => {
+                if let Some(line) = event.payload.get("line").and_then(|v| v.as_str()) {
+                    let display = if line.len() > 120 {
+                        format!("{}…", &line[..119])
+                    } else {
+                        line.to_string()
+                    };
+                    eprintln!("  \x1b[90m│\x1b[0m {display}");
+                }
             }
             EventType::ToolCallCompleted => {
                 render_tool_completed(event);

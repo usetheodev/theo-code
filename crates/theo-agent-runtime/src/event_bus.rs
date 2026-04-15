@@ -107,11 +107,38 @@ impl EventBus {
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
+
+    /// Subscribe with an async broadcast channel.
+    ///
+    /// Returns a `tokio::sync::broadcast::Receiver<DomainEvent>` that receives
+    /// clones of all published events. Useful for async consumers like the TUI
+    /// that cannot block in `on_event`.
+    ///
+    /// `capacity` controls the broadcast buffer size. If the receiver falls behind
+    /// by more than `capacity` events, it will receive `RecvError::Lagged(n)`.
+    /// Recommended: 1024 (15× estimated burst of ~400 events/s with 16ms batching).
+    pub fn subscribe_broadcast(&self, capacity: usize) -> tokio::sync::broadcast::Receiver<DomainEvent> {
+        let (tx, rx) = tokio::sync::broadcast::channel(capacity);
+        self.subscribe(Arc::new(BroadcastListener { tx }));
+        rx
+    }
 }
 
 impl Default for EventBus {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Bridge listener: forwards events from sync EventBus to async broadcast channel.
+struct BroadcastListener {
+    tx: tokio::sync::broadcast::Sender<DomainEvent>,
+}
+
+impl EventListener for BroadcastListener {
+    fn on_event(&self, event: &DomainEvent) {
+        // Ignore SendError: no receivers means nobody is listening (ok to drop)
+        let _ = self.tx.send(event.clone());
     }
 }
 
@@ -373,5 +400,79 @@ mod tests {
         assert_eq!(bus.len(), 1);
         assert_eq!(listener.captured().len(), 1);
         assert_eq!(listener.captured()[0].entity_id, "t-from-thread");
+    }
+
+    // -----------------------------------------------------------------------
+    // Broadcast bridge
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn broadcast_receives_events() {
+        let bus = EventBus::new();
+        let mut rx = bus.subscribe_broadcast(1024);
+
+        bus.publish(make_event(EventType::TaskCreated, "t-1"));
+        bus.publish(make_event(EventType::ToolCallQueued, "c-1"));
+        bus.publish(make_event(EventType::ContentDelta, "r-1"));
+
+        let e1 = rx.try_recv().expect("should receive first event");
+        assert_eq!(e1.event_type, EventType::TaskCreated);
+        let e2 = rx.try_recv().expect("should receive second event");
+        assert_eq!(e2.event_type, EventType::ToolCallQueued);
+        let e3 = rx.try_recv().expect("should receive third event");
+        assert_eq!(e3.event_type, EventType::ContentDelta);
+        assert!(rx.try_recv().is_err(), "no more events");
+    }
+
+    #[test]
+    fn broadcast_lagged_returns_error() {
+        let bus = EventBus::new();
+        let mut rx = bus.subscribe_broadcast(2);
+
+        // Publish 5 events without consuming — buffer is 2
+        for i in 0..5 {
+            bus.publish(make_event(EventType::TaskCreated, &format!("t-{i}")));
+        }
+
+        // First recv should report lagged
+        match rx.try_recv() {
+            Err(tokio::sync::broadcast::error::TryRecvError::Lagged(n)) => {
+                assert!(n >= 1, "should have lagged at least 1 event, got {n}");
+            }
+            other => panic!("expected Lagged, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn broadcast_drop_receiver_no_crash() {
+        let bus = EventBus::new();
+        let rx = bus.subscribe_broadcast(16);
+        drop(rx); // Drop immediately
+
+        // Publishing after drop must not panic
+        bus.publish(make_event(EventType::Error, "e-1"));
+        bus.publish(make_event(EventType::Error, "e-2"));
+
+        // Log still works
+        assert_eq!(bus.len(), 2);
+    }
+
+    #[test]
+    fn broadcast_coexists_with_sync_listeners() {
+        let bus = EventBus::new();
+
+        // Sync listener registered BEFORE broadcast
+        let sync_listener = Arc::new(CapturingListener::new());
+        bus.subscribe(sync_listener.clone());
+
+        // Broadcast registered AFTER
+        let mut rx = bus.subscribe_broadcast(1024);
+
+        bus.publish(make_event(EventType::RunInitialized, "r-1"));
+
+        // Both received the event
+        assert_eq!(sync_listener.captured().len(), 1);
+        let broadcast_event = rx.try_recv().expect("broadcast should receive");
+        assert_eq!(broadcast_event.event_type, EventType::RunInitialized);
     }
 }
