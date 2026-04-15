@@ -192,6 +192,8 @@ pub enum Msg {
     DismissExpiredToasts,
     CopyToClipboard(String),
     InterruptAgent,
+    ClearTranscript,
+    ExportSession,
 }
 
 // ---------------------------------------------------------------------------
@@ -396,6 +398,21 @@ pub fn update(state: &mut TuiState, msg: Msg) {
                 // If agent is not running, Ctrl+C quits
                 state.should_quit = true;
             }
+        }
+        Msg::ClearTranscript => {
+            state.transcript.clear();
+            state.active_tool_cards.clear();
+            state.scroll_offset = 0;
+            state.scroll_locked_to_bottom = true;
+        }
+        Msg::ExportSession => {
+            // Export is handled by mod.rs which has filesystem access
+            // Here we just add a toast; the actual write happens in the render loop
+            state.toasts.push(Toast {
+                message: "Exporting session...".to_string(),
+                level: ToastLevel::Info,
+                created: Instant::now(),
+            });
         }
     }
 }

@@ -6,10 +6,12 @@
 //! 3. Render task — 30fps tick, drain messages, update state, draw
 
 mod app;
+mod commands;
 mod events;
 mod input;
 mod markdown;
 mod view;
+mod widgets;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -32,6 +34,14 @@ use theo_infra_llm::types::Message;
 use theo_tooling::registry::create_default_registry;
 
 use app::{Msg, TuiState};
+
+fn dirs_path() -> std::path::PathBuf {
+    std::env::var("HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::path::PathBuf::from("/tmp"))
+        .join(".config")
+        .join("theo")
+}
 
 /// Main entry point for TUI mode.
 pub async fn run(
@@ -118,6 +128,39 @@ pub async fn run(
                 match msg {
                     Msg::Submit(ref s) if s.is_empty() && !state.input_text.is_empty() => {
                         let text = state.input_text.clone();
+                        // Check if it's a slash command
+                        if let Some(cmds) = commands::process_command(&text, &state) {
+                            // Clear input and process command messages
+                            state.input_text.clear();
+                            state.input_cursor = 0;
+                            for cmd_msg in cmds {
+                                // Handle ExportSession with filesystem access
+                                if matches!(cmd_msg, Msg::ExportSession) {
+                                    let md = commands::export_transcript(&state);
+                                    let export_dir = dirs_path().join("exports");
+                                    let _ = std::fs::create_dir_all(&export_dir);
+                                    let filename = format!("{}.md", chrono::Utc::now().format("%Y%m%d-%H%M%S"));
+                                    let path = export_dir.join(&filename);
+                                    match std::fs::write(&path, &md) {
+                                        Ok(_) => {
+                                            app::update(&mut state, Msg::ShowToast(
+                                                format!("Exported to {}", path.display()),
+                                                app::ToastLevel::Info,
+                                            ));
+                                        }
+                                        Err(e) => {
+                                            app::update(&mut state, Msg::ShowToast(
+                                                format!("Export failed: {e}"),
+                                                app::ToastLevel::Error,
+                                            ));
+                                        }
+                                    }
+                                } else {
+                                    app::update(&mut state, cmd_msg);
+                                }
+                            }
+                            continue;
+                        }
                         pending_prompt = Some(text.clone());
                         Msg::Submit(text)
                     }
