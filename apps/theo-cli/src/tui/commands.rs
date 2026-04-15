@@ -55,6 +55,39 @@ pub fn process_command(input: &str, state: &TuiState) -> Option<Vec<Msg>> {
         "/tab" | "/new" => {
             Some(vec![Msg::NewTab])
         }
+        "/history" => {
+            // Search across all saved sessions
+            let sessions_dir = std::path::PathBuf::from(
+                std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string())
+            ).join(".config/theo/sessions");
+            let mut found = Vec::new();
+            if let Ok(entries) = std::fs::read_dir(&sessions_dir) {
+                for entry in entries.flatten() {
+                    if entry.path().extension().is_some_and(|e| e == "json") {
+                        if let Ok(data) = std::fs::read_to_string(entry.path()) {
+                            if let Ok(msgs) = serde_json::from_str::<Vec<serde_json::Value>>(&data) {
+                                for msg in &msgs {
+                                    if let Some(content) = msg.get("content").and_then(|v| v.as_str()) {
+                                        if !_arg.is_empty() && content.to_lowercase().contains(&_arg.to_lowercase()) {
+                                            found.push(format!("  {}", &content[..content.len().min(80)]));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if found.is_empty() {
+                Some(vec![Msg::ShowToast(
+                    if _arg.is_empty() { "Usage: /history <query>".into() } else { "No matches found".into() },
+                    ToastLevel::Info,
+                )])
+            } else {
+                let summary = format!("{} matches across sessions", found.len());
+                Some(vec![Msg::ShowToast(summary, ToastLevel::Info)])
+            }
+        }
         _ => {
             Some(vec![Msg::ShowToast(
                 format!("Unknown command: {cmd}. Try /help"),

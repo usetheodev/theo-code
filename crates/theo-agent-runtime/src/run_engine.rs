@@ -1059,7 +1059,7 @@ impl AgentRunEngine {
                             };
 
                             futures.push(async move {
-                                let (msg, success) = tool_bridge::execute_tool_call(
+                                let (msg, success, _metadata) = tool_bridge::execute_tool_call(
                                     &reg, &batch_tool_call, &batch_ctx,
                                 ).await;
                                 (i, tool_name, tool_args, msg, success)

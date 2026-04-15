@@ -150,24 +150,59 @@ fn render_tools_tab(state: &TuiState) -> Vec<Line<'static>> {
         )));
     }
 
+    // Todos section
+    if !state.todos.is_empty() {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            " Tasks",
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        )));
+        for todo in &state.todos {
+            let (icon, color) = match todo.status.as_str() {
+                "completed" => ("✓", Color::Green),
+                "in_progress" => ("⠋", Color::Yellow),
+                "cancelled" => ("✗", Color::Red),
+                _ => ("○", Color::DarkGray),
+            };
+            lines.push(Line::from(vec![
+                Span::styled(format!(" {icon} "), Style::default().fg(color)),
+                Span::styled(todo.content.clone(), Style::default().fg(Color::White)),
+            ]));
+        }
+    }
+
     lines
 }
 
-fn render_context_tab(_state: &TuiState) -> Vec<Line<'static>> {
-    // Placeholder for GRAPHCTX integration (F5-T03)
-    vec![
-        Line::from(Span::styled(
-            " Context graph",
+fn render_context_tab(state: &TuiState) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+
+    // Tool chain (causality timeline)
+    if !state.tool_chain.is_empty() {
+        lines.push(Line::from(Span::styled(
+            " Tool Chain",
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        )));
+        lines.push(Line::from(""));
+        for entry in state.tool_chain.iter().rev().take(15) {
+            let (icon, color) = match entry.status {
+                crate::tui::app::ToolCardStatus::Succeeded => ("✓", Color::Green),
+                crate::tui::app::ToolCardStatus::Failed => ("✗", Color::Red),
+                crate::tui::app::ToolCardStatus::Running => ("⠋", Color::Yellow),
+            };
+            let dur = entry.duration_ms.map(|ms| format!(" {ms}ms")).unwrap_or_default();
+            lines.push(Line::from(vec![
+                Span::styled(format!(" {icon} "), Style::default().fg(color)),
+                Span::styled(entry.tool_name.clone(), Style::default().fg(Color::White)),
+                Span::styled(dur, Style::default().fg(Color::DarkGray)),
+            ]));
+        }
+    } else {
+        lines.push(Line::from(Span::styled(
+            " No tools executed yet",
             Style::default().fg(Color::DarkGray),
-        )),
-        Line::from(""),
-        Line::from(Span::styled(
-            " (GRAPHCTX integration",
-            Style::default().fg(Color::DarkGray),
-        )),
-        Line::from(Span::styled(
-            "  coming in F5)",
-            Style::default().fg(Color::DarkGray),
-        )),
-    ]
+        )));
+    }
+
+    lines
 }

@@ -49,9 +49,9 @@ struct Cli {
     #[arg(long, global = true, value_parser = ["agent", "plan", "ask"])]
     mode: Option<String>,
 
-    /// Launch experimental TUI mode (ratatui)
+    /// Use legacy REPL mode instead of TUI
     #[arg(long, global = true)]
-    tui: bool,
+    legacy: bool,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -127,7 +127,7 @@ fn main() {
     match cli.command {
         Some(Commands::Init) => cmd_init(cli.repo),
         Some(Commands::Agent { prompt }) => {
-            cmd_agent(prompt, cli.repo, cli.provider, cli.model, cli.max_iter, cli.mode, cli.tui);
+            cmd_agent(prompt, cli.repo, cli.provider, cli.model, cli.max_iter, cli.mode, !cli.legacy);
         }
         Some(Commands::Pilot { calls, rate, complete, promise }) => {
             cmd_pilot(promise, cli.repo, cli.provider, cli.model, calls, rate, complete);
@@ -143,7 +143,7 @@ fn main() {
         }
         None => {
             // Default: agent mode. REPL if no prompt, single-shot if prompt given.
-            cmd_agent(cli.prompt, cli.repo, cli.provider, cli.model, cli.max_iter, cli.mode, cli.tui);
+            cmd_agent(cli.prompt, cli.repo, cli.provider, cli.model, cli.max_iter, cli.mode, !cli.legacy);
         }
     }
 }
@@ -197,7 +197,6 @@ fn cmd_agent(
         ).await;
 
         if use_tui {
-            eprintln!("\x1b[33m[experimental]\x1b[0m TUI mode — report bugs at https://github.com/phaelion/theo-code/issues");
             if let Err(e) = tui::run(config, project_dir, provider_name, inline_prompt).await {
                 eprintln!("\x1b[31mTUI error:\x1b[0m {e}");
                 std::process::exit(1);
