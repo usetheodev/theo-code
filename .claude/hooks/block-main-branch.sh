@@ -7,7 +7,7 @@ COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // ""')
 
 # Detecta operações na branch main
 if echo "$COMMAND" | grep -qE 'git (commit|merge|rebase|cherry-pick)'; then
-  BRANCH=$(git -C /home/paulo/Projetos/usetheo/theo-code branch --show-current 2>/dev/null || echo "")
+  BRANCH=$(git -C /home/paulo/theo-code branch --show-current 2>/dev/null || echo "")
   if [ "$BRANCH" = "main" ]; then
     echo "BLOQUEADO: operação git na branch main. Crie uma branch primeiro." >&2
     exit 2
