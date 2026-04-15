@@ -1,3 +1,4 @@
+pub mod approval_gate;
 pub mod budget_enforcer;
 pub mod capability_gate;
 pub mod compaction;

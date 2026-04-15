@@ -102,6 +102,8 @@ pub struct TuiState {
     // Timeline (F4-T04)
     pub tool_chain: Vec<ToolChainEntry>,
     pub show_timeline: bool,
+    // Approval modal (F4-T02)
+    pub pending_approval: Option<PendingApproval>,
 }
 
 #[derive(Debug, Clone)]
@@ -115,6 +117,14 @@ pub struct TodoItem {
     pub id: String,
     pub content: String,
     pub status: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct PendingApproval {
+    pub decision_id: String,
+    pub tool_name: String,
+    pub risk_level: String,
+    pub args_preview: String,
 }
 
 #[derive(Debug, Clone)]
@@ -203,6 +213,7 @@ impl TuiState {
             todos: Vec::new(),
             tool_chain: Vec::new(),
             show_timeline: false,
+            pending_approval: None,
         }
     }
 }
@@ -283,6 +294,9 @@ pub enum Msg {
     ToggleTimeline,
     // Notifications
     NotifyCompletion(String),
+    // Approval
+    ApproveDecision,
+    RejectDecision,
 }
 
 // ---------------------------------------------------------------------------
@@ -665,6 +679,13 @@ pub fn update(state: &mut TuiState, msg: Msg) {
                     .spawn();
             }
         }
+        Msg::ApproveDecision => {
+            // Actual resolution happens in mod.rs which has access to the gate
+            state.pending_approval = None;
+        }
+        Msg::RejectDecision => {
+            state.pending_approval = None;
+        }
     }
 }
 
@@ -927,6 +948,21 @@ fn handle_domain_event(state: &mut TuiState, event: DomainEvent) {
                 level: ToastLevel::Error,
                 created: Instant::now(),
             });
+        }
+        EventType::GovernanceDecisionPending => {
+            let decision_id = event.payload.get("decision_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let tool_name = event.payload.get("tool_name").and_then(|v| v.as_str()).unwrap_or("?").to_string();
+            let risk_level = event.payload.get("risk_level").and_then(|v| v.as_str()).unwrap_or("Medium").to_string();
+            let args_preview = event.payload.get("args_preview").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            state.pending_approval = Some(PendingApproval {
+                decision_id,
+                tool_name,
+                risk_level,
+                args_preview,
+            });
+        }
+        EventType::GovernanceDecisionResolved => {
+            state.pending_approval = None;
         }
         EventType::TodoUpdated => {
             let action = event.payload.get("type").and_then(|v| v.as_str()).unwrap_or("");

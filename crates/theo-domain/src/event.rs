@@ -31,6 +31,10 @@ pub enum EventType {
     // Streaming — tool call stdout/stderr lines (for live TUI display)
     ToolCallStdoutDelta,
 
+    // Governance — interactive approval handshake
+    GovernanceDecisionPending,
+    GovernanceDecisionResolved,
+
     // Task management
     TodoUpdated,
 }
@@ -52,13 +56,15 @@ impl std::fmt::Display for EventType {
             EventType::ReasoningDelta => write!(f, "ReasoningDelta"),
             EventType::ContentDelta => write!(f, "ContentDelta"),
             EventType::ToolCallStdoutDelta => write!(f, "ToolCallStdoutDelta"),
+            EventType::GovernanceDecisionPending => write!(f, "GovernanceDecisionPending"),
+            EventType::GovernanceDecisionResolved => write!(f, "GovernanceDecisionResolved"),
             EventType::TodoUpdated => write!(f, "TodoUpdated"),
         }
     }
 }
 
 /// All EventType variants for iteration in tests.
-pub const ALL_EVENT_TYPES: [EventType; 15] = [
+pub const ALL_EVENT_TYPES: [EventType; 17] = [
     EventType::TaskCreated,
     EventType::TaskStateChanged,
     EventType::ToolCallQueued,
@@ -73,6 +79,8 @@ pub const ALL_EVENT_TYPES: [EventType; 15] = [
     EventType::ReasoningDelta,
     EventType::ContentDelta,
     EventType::ToolCallStdoutDelta,
+    EventType::GovernanceDecisionPending,
+    EventType::GovernanceDecisionResolved,
     EventType::TodoUpdated,
 ];
 
@@ -133,7 +141,8 @@ mod tests {
             "ToolCallQueued", "ToolCallDispatched", "ToolCallCompleted",
             "RunInitialized", "RunStateChanged",
             "LlmCallStart", "LlmCallEnd", "BudgetExceeded", "Error",
-            "ReasoningDelta", "ContentDelta", "ToolCallStdoutDelta", "TodoUpdated",
+            "ReasoningDelta", "ContentDelta", "ToolCallStdoutDelta",
+            "GovernanceDecisionPending", "GovernanceDecisionResolved", "TodoUpdated",
         ];
         assert_eq!(ALL_EVENT_TYPES.len(), expected.len(), "ALL_EVENT_TYPES and expected must have same length");
         for (et, name) in ALL_EVENT_TYPES.iter().zip(expected.iter()) {

@@ -124,8 +124,13 @@ pub fn draw(frame: &mut Frame, state: &TuiState) {
         render_timeline(frame, state);
     }
 
-    // Help overlay (on top of everything)
-    if state.show_help {
+    // Approval modal (highest priority overlay)
+    if let Some(ref approval) = state.pending_approval {
+        render_approval_modal(frame, approval);
+    }
+
+    // Help overlay (on top of everything except approval)
+    if state.show_help && state.pending_approval.is_none() {
         render_help_overlay(frame);
     }
 }
@@ -605,4 +610,66 @@ fn render_timeline(frame: &mut Frame, state: &TuiState) {
             .title(" Timeline "));
 
     frame.render_widget(timeline, timeline_area);
+}
+
+fn render_approval_modal(frame: &mut Frame, approval: &super::app::PendingApproval) {
+    let area = frame.area();
+    let width = 60u16.min(area.width.saturating_sub(4));
+    let height = 12u16.min(area.height.saturating_sub(4));
+    let x = (area.width.saturating_sub(width)) / 2;
+    let y = (area.height.saturating_sub(height)) / 2;
+    let modal_area = Rect::new(x, y, width, height);
+
+    let clear = Block::default().style(Style::default().bg(Color::Black));
+    frame.render_widget(clear, modal_area);
+
+    let risk_color = match approval.risk_level.as_str() {
+        "Low" => Color::Green,
+        "Medium" => Color::Yellow,
+        "High" => Color::Red,
+        "Critical" => Color::LightRed,
+        _ => Color::Yellow,
+    };
+
+    let args_display = if approval.args_preview.len() > 45 {
+        format!("{}...", &approval.args_preview[..45])
+    } else {
+        approval.args_preview.clone()
+    };
+
+    let lines = vec![
+        Line::from(Span::styled(
+            " Approval Required",
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled(" Tool:  ", Style::default().fg(Color::DarkGray)),
+            Span::styled(&approval.tool_name, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+        ]),
+        Line::from(vec![
+            Span::styled(" Risk:  ", Style::default().fg(Color::DarkGray)),
+            Span::styled(&approval.risk_level, Style::default().fg(risk_color).add_modifier(Modifier::BOLD)),
+        ]),
+        Line::from(vec![
+            Span::styled(" Args:  ", Style::default().fg(Color::DarkGray)),
+            Span::styled(args_display, Style::default().fg(Color::DarkGray)),
+        ]),
+        Line::from(""),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  [a]", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+            Span::styled("pprove   ", Style::default().fg(Color::DarkGray)),
+            Span::styled("[r]", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+            Span::styled("eject", Style::default().fg(Color::DarkGray)),
+        ]),
+    ];
+
+    let modal = Paragraph::new(lines)
+        .block(Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Yellow))
+            .title(" ⚠ Governance "));
+
+    frame.render_widget(modal, modal_area);
 }

@@ -7,6 +7,7 @@
 
 mod app;
 mod autocomplete;
+mod bench;
 mod commands;
 pub mod config;
 mod events;
@@ -119,6 +120,15 @@ pub async fn run(
                     Msg::Submit(_) => Msg::SearchClose,
                     Msg::ToggleHelp => Msg::SearchClose,
                     other => other,
+                }
+            } else if state.pending_approval.is_some() {
+                // Approval modal — only a/r/Esc
+                match msg {
+                    Msg::InputChar('a') | Msg::InputChar('A') => Msg::ApproveDecision,
+                    Msg::InputChar('r') | Msg::InputChar('R') => Msg::RejectDecision,
+                    Msg::ToggleHelp => Msg::RejectDecision, // Esc = reject
+                    Msg::Quit => Msg::Quit,
+                    _ => continue, // ignore all other input
                 }
             } else if state.show_model_picker {
                 // Model picker mode
