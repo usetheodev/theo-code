@@ -137,6 +137,17 @@ pub fn process_command(input: &str, state: &TuiState) -> Option<Vec<Msg>> {
             Some(vec![Msg::SearchStart])
         }
 
+        // --- Copy ---
+        "/copy" => {
+            match arg {
+                "code" | "block" => Some(vec![Msg::CopyLastCodeBlock]),
+                _ => Some(vec![Msg::CopyLastResponse]),
+            }
+        }
+        "/select" => {
+            Some(vec![Msg::ToggleCopyMode])
+        }
+
         // --- Unknown ---
         _ => {
             Some(vec![Msg::Notify(

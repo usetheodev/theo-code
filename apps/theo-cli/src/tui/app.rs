@@ -80,6 +80,7 @@ pub struct TuiState {
     pub search_current: usize,
     pub session_picker: Option<SessionPickerState>,
     pub prompt_history: Vec<String>,
+    pub copy_mode: bool, // when true, mouse capture is disabled for native selection
     pub show_sidebar: bool,
     pub sidebar_tab: super::widgets::sidebar::SidebarTab,
     pub show_model_picker: bool,
@@ -187,6 +188,7 @@ impl TuiState {
             search_current: 0,
             session_picker: None,
             prompt_history: Vec::new(),
+            copy_mode: false,
             show_sidebar: width > 120,
             sidebar_tab: super::widgets::sidebar::SidebarTab::Status,
             show_model_picker: false,
@@ -295,6 +297,9 @@ pub enum Msg {
     SetMode(String), // "agent", "plan", "ask"
     // Theme set
     SetTheme(String), // theme name
+    ToggleCopyMode,
+    CopyLastResponse,
+    CopyLastCodeBlock,
 }
 
 // ---------------------------------------------------------------------------
@@ -707,6 +712,60 @@ pub fn update(state: &mut TuiState, msg: Msg) {
             };
             state.status.mode = mode.to_string();
             state.transcript.push(TranscriptEntry::SystemMessage(format!("Mode: {mode}")));
+        }
+        Msg::ToggleCopyMode => {
+            state.copy_mode = !state.copy_mode;
+            let msg = if state.copy_mode {
+                "📋 Copy mode ON — use mouse to select text, then right-click or Ctrl+Shift+C to copy. Press Ctrl+Y again to exit."
+            } else {
+                "📋 Copy mode OFF"
+            };
+            state.transcript.push(TranscriptEntry::SystemMessage(msg.to_string()));
+        }
+        Msg::CopyLastResponse => {
+            // Find the last assistant message and copy via OSC52
+            let last_assistant = state.transcript.iter().rev().find_map(|e| {
+                if let TranscriptEntry::Assistant(text) = e { Some(text.clone()) } else { None }
+            });
+            if let Some(text) = last_assistant {
+                eprint!("\x1b]52;c;{}\x07", base64_encode(&text));
+                state.transcript.push(TranscriptEntry::SystemMessage(
+                    "📋 Last response copied to clipboard".to_string()
+                ));
+            } else {
+                state.transcript.push(TranscriptEntry::SystemMessage(
+                    "No assistant response to copy".to_string()
+                ));
+            }
+        }
+        Msg::CopyLastCodeBlock => {
+            // Find last code block in assistant messages
+            let last_code = state.transcript.iter().rev().find_map(|e| {
+                if let TranscriptEntry::Assistant(text) = e {
+                    // Extract content between ``` markers
+                    if let Some(start) = text.find("```") {
+                        let after = &text[start + 3..];
+                        // Skip language identifier line
+                        let code_start = after.find('\n').map(|i| i + 1).unwrap_or(0);
+                        if let Some(end) = after[code_start..].find("```") {
+                            return Some(after[code_start..code_start + end].trim().to_string());
+                        }
+                    }
+                    None
+                } else {
+                    None
+                }
+            });
+            if let Some(code) = last_code {
+                eprint!("\x1b]52;c;{}\x07", base64_encode(&code));
+                state.transcript.push(TranscriptEntry::SystemMessage(
+                    "📋 Code block copied to clipboard".to_string()
+                ));
+            } else {
+                state.transcript.push(TranscriptEntry::SystemMessage(
+                    "No code block found to copy".to_string()
+                ));
+            }
         }
         Msg::SetTheme(name) => {
             let themes = super::theme::Theme::all();

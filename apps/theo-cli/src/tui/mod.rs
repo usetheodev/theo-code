@@ -371,6 +371,20 @@ pub async fn run(
             app::update(&mut state, Msg::CursorBlink);
         }
 
+        // Toggle mouse capture for copy mode
+        // When copy_mode is on, disable mouse capture so terminal handles selection
+        static mut LAST_COPY_MODE: bool = false;
+        unsafe {
+            if state.copy_mode != LAST_COPY_MODE {
+                if state.copy_mode {
+                    execute!(std::io::stdout(), DisableMouseCapture)?;
+                } else {
+                    execute!(std::io::stdout(), EnableMouseCapture)?;
+                }
+                LAST_COPY_MODE = state.copy_mode;
+            }
+        }
+
         // Draw
         terminal.draw(|frame| {
             view::draw(frame, &state);

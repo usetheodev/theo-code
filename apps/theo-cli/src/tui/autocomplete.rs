@@ -72,6 +72,9 @@ pub fn slash_commands() -> Vec<Candidate> {
         Candidate { text: "/sidebar".into(), description: "Toggle sidebar panel".into(), kind: CandidateKind::SlashCommand },
         Candidate { text: "/search".into(), description: "Search in transcript (Ctrl+F)".into(), kind: CandidateKind::SlashCommand },
         Candidate { text: "/close".into(), description: "Close current tab".into(), kind: CandidateKind::SlashCommand },
+        Candidate { text: "/copy".into(), description: "Copy last response to clipboard".into(), kind: CandidateKind::SlashCommand },
+        Candidate { text: "/copy code".into(), description: "Copy last code block".into(), kind: CandidateKind::SlashCommand },
+        Candidate { text: "/select".into(), description: "Toggle mouse selection mode (Ctrl+Y)".into(), kind: CandidateKind::SlashCommand },
     ]
 }
 
