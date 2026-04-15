@@ -1,0 +1,63 @@
+{
+  "schema": "theo.smoke.v1",
+  "scenarios_total": 1,
+  "scenarios_passed": 0,
+  "pass_rate": 0.0,
+  "totals": {
+    "input_tokens": 29961,
+    "output_tokens": 697,
+    "iterations": 9,
+    "tool_calls": 9,
+    "llm_calls": 9,
+    "retries": 0,
+    "duration_ms": 21538
+  },
+  "by_category": {
+    "fix-bug": {
+      "total": 1,
+      "passed": 0
+    }
+  },
+  "results": [
+    {
+      "id": "13-multi-step-fix",
+      "category": "fix-bug",
+      "mode": "agent",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 21.84,
+      "check_passed": false,
+      "check_stderr": "rc=1 stdout='' stderr=''",
+      "headless": {
+        "duration_ms": 21538,
+        "files_edited": [
+          "src/calc.py"
+        ],
+        "iterations": 9,
+        "llm": {
+          "calls": 9,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.3-codex",
+        "provider": "ChatGPT Codex (OAuth)",
+        "schema": "theo.headless.v1",
+        "success": true,
+        "summary": "Read tests/test_calc.py to confirm expected behavior for subtract, fixed src/calc.py by changing subtract(a, b) from addition to subtraction (return a - b), and verified behavior with direct Python assertions equivalent to the test cases (pytest unavailable in environment).",
+        "tokens": {
+          "input": 29961,
+          "output": 697,
+          "total": 30658
+        },
+        "tools": {
+          "success": 7,
+          "total": 9
+        }
+      },
+      "stderr_tail": "[theo] Auto-initialized .theo/theo.md \u2014 run `theo init` for detailed context\n",
+      "workdir": null
+    }
+  ],
+  "timestamp": 1776286435,
+  "theo_bin": "/home/paulo/theo-code/target/release/theo"
+}
