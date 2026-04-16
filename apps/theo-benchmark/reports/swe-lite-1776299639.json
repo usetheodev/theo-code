@@ -1,0 +1,219 @@
+{
+  "schema": "theo.swe.v1",
+  "dataset": "lite",
+  "total": 6,
+  "with_patch": 6,
+  "errors": 0,
+  "results": [
+    {
+      "instance_id": "psf__requests-1963",
+      "repo": "psf/requests",
+      "model_patch": "diff --git a/requests/sessions.py b/requests/sessions.py\nindex 425db22c..39c93ca3 100644\n--- a/requests/sessions.py\n+++ b/requests/sessions.py\n@@ -88,7 +88,7 @@ class SessionRedirectMixin(object):\n         i = 0\n \n         while resp.is_redirect:\n-            prepared_request = req.copy()\n+            prepared_request = resp.request.copy()\n \n             resp.content  # Consume socket so it can be released\n \n@@ -99,7 +99,7 @@ class SessionRedirectMixin(object):\n             resp.close()\n \n             url = resp.headers['location']\n-            method = req.method\n+            method = prepared_request.method\n \n             # Handle redirection without scheme (see: RFC 1808 Section 4)\n             if url.startswith('//'):\n",
+      "model_name_or_path": "theo-code",
+      "duration_secs": 156.6,
+      "error": null,
+      "headless": {
+        "duration_ms": 153726,
+        "files_edited": [
+          "requests/sessions.py",
+          "requests/sessions.py",
+          "requests/sessions.py"
+        ],
+        "iterations": 30,
+        "llm": {
+          "calls": 30,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.3-codex",
+        "provider": "ChatGPT Codex (OAuth)",
+        "schema": "theo.headless.v1",
+        "success": true,
+        "summary": "Implemented a minimal fix for redirect method handling in `Session.resolve_redirects` (`requests/sessions.py`).\n\n### What changed\n- In the redirect loop, changed:\n  - `prepared_request = req.copy()` \u2192 `prepared_request = resp.request.copy()`\n  - `method = req.method` \u2192 `method = prepared_request.method`\n\n### Why this fixes the bug\nPreviously, each redirect iteration cloned the original request (`req`), so method changes made by an earlier redirect (e.g., `POST` \u2192 `GET` on 303) were lost on later redirects (e.g., 307), causing incorrect method reuse.\n\nBy copying `resp.request` (the request that was actually sent for the previous hop), subsequent redirects now preserve the current method correctly.\n\n### Verification performed\n- Re-read `requests/sessions.py` to confirm the final logic is correct and minimal.\n- Ran `python3 -m compileall -q requests` successfully (no syntax errors in modified code).\n\n### Environment limitation\n- Could not run the listed pytest tests because `pytest` is not installed in this environment (`python3 -m pytest` -> `No module named pytest`).",
+        "tokens": {
+          "input": 372811,
+          "output": 5451,
+          "total": 378262
+        },
+        "tools": {
+          "success": 36,
+          "total": 38
+        }
+      },
+      "has_patch": true
+    },
+    {
+      "instance_id": "psf__requests-2148",
+      "repo": "psf/requests",
+      "model_patch": "diff --git a/requests/models.py b/requests/models.py\nindex 0dc55568..25bf6b7e 100644\n--- a/requests/models.py\n+++ b/requests/models.py\n@@ -9,6 +9,7 @@ This module contains the primary objects that power Requests.\n \n import collections\n import datetime\n+import socket\n \n from io import BytesIO, UnsupportedOperation\n from .hooks import default_hooks\n@@ -22,7 +23,7 @@ from .packages.urllib3.util import parse_url\n from .packages.urllib3.exceptions import DecodeError\n from .exceptions import (\n     HTTPError, RequestException, MissingSchema, InvalidURL,\n-    ChunkedEncodingError, ContentDecodingError)\n+    ChunkedEncodingError, ContentDecodingError, ConnectionError)\n from .utils import (\n     guess_filename, get_auth_from_url, requote_uri,\n     stream_decode_response_unicode, to_key_val_list, parse_header_links,\n@@ -640,6 +641,9 @@ class Response(object):\n                     raise ChunkedEncodingError(e)\n                 except DecodeError as e:\n                     raise ContentDecodingError(e)\n+                except socket.error as e:\n+                    # Wrap low-level socket errors in Requests exceptions.\n+                    raise ConnectionError(e)\n             except AttributeError:\n                 # Standard file-like object.\n                 while True:\n",
+      "model_name_or_path": "theo-code",
+      "duration_secs": 154.5,
+      "error": null,
+      "headless": {
+        "duration_ms": 151684,
+        "files_edited": [
+          "requests/models.py"
+        ],
+        "iterations": 30,
+        "llm": {
+          "calls": 30,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.3-codex",
+        "provider": "ChatGPT Codex (OAuth)",
+        "schema": "theo.headless.v1",
+        "success": true,
+        "summary": "Fixed the socket exception wrapping bug in `requests/models.py` with a minimal, targeted change.\n\n### What I changed\n- Added `import socket`.\n- Added `ConnectionError` to the imported exceptions from `requests.exceptions`.\n- Updated `Response.iter_content()` (inside `generate()`) to catch low-level `socket.error` from streaming reads and re-raise it as `requests.exceptions.ConnectionError`:\n  - `except socket.error as e: raise ConnectionError(e)`\n\n### Why this fixes the issue\nThe reported traceback shows `socket.error` escaping during `iter_content()` / `response.text` consumption. `iter_content()` already maps other low-level errors (`IncompleteRead`, `DecodeError`) into Requests exceptions, so mapping `socket.error` to `ConnectionError` is the correct and consistent behavior.\n\n### Scope\n- No tests were modified.\n- No unrelated refactors or new files.\n- Only `requests/models.py` was changed.",
+        "tokens": {
+          "input": 383261,
+          "output": 5705,
+          "total": 388966
+        },
+        "tools": {
+          "success": 31,
+          "total": 31
+        }
+      },
+      "has_patch": true
+    },
+    {
+      "instance_id": "psf__requests-2317",
+      "repo": "psf/requests",
+      "model_patch": "diff --git a/requests/sessions.py b/requests/sessions.py\nindex d701ff2e..adcfbac7 100644\n--- a/requests/sessions.py\n+++ b/requests/sessions.py\n@@ -425,7 +425,7 @@ class Session(SessionRedirectMixin):\n             If Tuple, ('cert', 'key') pair.\n         \"\"\"\n \n-        method = builtin_str(method)\n+        method = to_native_string(method)\n \n         # Create the Request.\n         req = Request(\n",
+      "model_name_or_path": "theo-code",
+      "duration_secs": 121.5,
+      "error": null,
+      "headless": {
+        "duration_ms": 118668,
+        "files_edited": [],
+        "iterations": 31,
+        "llm": {
+          "calls": 30,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.3-codex",
+        "provider": "ChatGPT Codex (OAuth)",
+        "schema": "theo.headless.v1",
+        "success": true,
+        "summary": "Budget exceeded: iterations exceeded: 31 > 30 limit. Edits succeeded: 1. Files: ",
+        "tokens": {
+          "input": 331057,
+          "output": 4275,
+          "total": 335332
+        },
+        "tools": {
+          "success": 27,
+          "total": 36
+        }
+      },
+      "has_patch": true
+    },
+    {
+      "instance_id": "psf__requests-2674",
+      "repo": "psf/requests",
+      "model_patch": "diff --git a/requests/adapters.py b/requests/adapters.py\nindex 841cbbfe..c5a24537 100644\n--- a/requests/adapters.py\n+++ b/requests/adapters.py\n@@ -25,6 +25,8 @@ from .packages.urllib3.exceptions import MaxRetryError\n from .packages.urllib3.exceptions import ProxyError as _ProxyError\n from .packages.urllib3.exceptions import ProtocolError\n from .packages.urllib3.exceptions import ReadTimeoutError\n+from .packages.urllib3.exceptions import TimeoutError as _TimeoutError\n+from .packages.urllib3.exceptions import ClosedPoolError\n from .packages.urllib3.exceptions import SSLError as _SSLError\n from .packages.urllib3.exceptions import ResponseError\n from .cookies import extract_cookies_to_jar\n@@ -429,6 +431,10 @@ class HTTPAdapter(BaseAdapter):\n                 raise SSLError(e, request=request)\n             elif isinstance(e, ReadTimeoutError):\n                 raise ReadTimeout(e, request=request)\n+            elif isinstance(e, _TimeoutError):\n+                raise ConnectTimeout(e, request=request)\n+            elif isinstance(e, ClosedPoolError):\n+                raise ConnectionError(e, request=request)\n             else:\n                 raise\n \n",
+      "model_name_or_path": "theo-code",
+      "duration_secs": 163.5,
+      "error": null,
+      "headless": {
+        "duration_ms": 160708,
+        "files_edited": [
+          "requests/adapters.py",
+          "requests/adapters.py"
+        ],
+        "iterations": 31,
+        "llm": {
+          "calls": 30,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.3-codex",
+        "provider": "ChatGPT Codex (OAuth)",
+        "schema": "theo.headless.v1",
+        "success": true,
+        "summary": "Budget exceeded: iterations exceeded: 31 > 30 limit. Edits succeeded: 2. Files: requests/adapters.py, requests/adapters.py",
+        "tokens": {
+          "input": 572501,
+          "output": 5739,
+          "total": 578240
+        },
+        "tools": {
+          "success": 43,
+          "total": 43
+        }
+      },
+      "has_patch": true
+    },
+    {
+      "instance_id": "psf__requests-3362",
+      "repo": "psf/requests",
+      "model_patch": "diff --git a/requests/utils.py b/requests/utils.py\nindex 8d17b6b2..ad68d708 100644\n--- a/requests/utils.py\n+++ b/requests/utils.py\n@@ -359,12 +359,16 @@ def get_encoding_from_headers(headers):\n def stream_decode_response_unicode(iterator, r):\n     \"\"\"Stream decodes a iterator.\"\"\"\n \n-    if r.encoding is None:\n+    encoding = r.encoding\n+    if encoding is None:\n+        encoding = r.apparent_encoding\n+\n+    if encoding is None:\n         for item in iterator:\n             yield item\n         return\n \n-    decoder = codecs.getincrementaldecoder(r.encoding)(errors='replace')\n+    decoder = codecs.getincrementaldecoder(encoding)(errors='replace')\n     for chunk in iterator:\n         rv = decoder.decode(chunk)\n         if rv:\n",
+      "model_name_or_path": "theo-code",
+      "duration_secs": 135.4,
+      "error": null,
+      "headless": {
+        "duration_ms": 132249,
+        "files_edited": [
+          "requests/utils.py"
+        ],
+        "iterations": 29,
+        "llm": {
+          "calls": 29,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.3-codex",
+        "provider": "ChatGPT Codex (OAuth)",
+        "schema": "theo.headless.v1",
+        "success": true,
+        "summary": "Implemented a minimal fix for the unicode-decoding bug in `iter_content(decode_unicode=True)`.\n\n### \u2705 What I changed\n\n**File edited:** `requests/utils.py`  \n**Function:** `stream_decode_response_unicode`\n\nBefore:\n- If `r.encoding` was `None`, the function returned raw bytes unchanged.\n\nAfter:\n- It now mirrors `Response.text` behavior by falling back to `r.apparent_encoding` when `r.encoding` is `None`.\n- Only if both are `None` does it yield original bytes unchanged.\n\nPatch summary:\n```diff\n-    if r.encoding is None:\n+    encoding = r.encoding\n+    if encoding is None:\n+        encoding = r.apparent_encoding\n+\n+    if encoding is None:\n         for item in iterator:\n             yield item\n         return\n-\n-    decoder = codecs.getincrementaldecoder(r.encoding)(errors='replace')\n+    decoder = codecs.getincrementaldecoder(encoding)(errors='replace')\n```\n\n### Why this is correct\n\nThe failing behavior described in the issue is exactly that `iter_content(decode_unicode=True)` did not use apparent encoding fallback, unlike `.text`.  \nThis change makes decoding logic consistent with `.text` for the no-`encoding` case, which is what the test intent and issue discussion require.\n\n### Verification\n\n- I could not run `pytest` directly in this environment (`pytest` module unavailable).\n- I did run a focused Python verification script (with a compatibility shim due to legacy code vs Python 3.12) that confirmed:\n  - Existing `test_response_decode_unicode` scenarios still produce `str`.\n  - Regression case (`r.encoding is None`) now also yields `str` for `iter_content(..., decode_unicode=True)`.\n\n",
+        "tokens": {
+          "input": 335987,
+          "output": 4855,
+          "total": 340842
+        },
+        "tools": {
+          "success": 35,
+          "total": 37
+        }
+      },
+      "has_patch": true
+    },
+    {
+      "instance_id": "psf__requests-863",
+      "repo": "psf/requests",
+      "model_patch": "diff --git a/requests/models.py b/requests/models.py\nindex d8456375..337215d5 100644\n--- a/requests/models.py\n+++ b/requests/models.py\n@@ -462,8 +462,10 @@ class Request(object):\n \n     def register_hook(self, event, hook):\n         \"\"\"Properly register a hook.\"\"\"\n-\n-        self.hooks[event].append(hook)\n+        if isinstance(hook, (list, tuple)):\n+            self.hooks[event].extend(hook)\n+        else:\n+            self.hooks[event].append(hook)\n \n     def deregister_hook(self, event, hook):\n         \"\"\"Deregister a previously registered hook.\n",
+      "model_name_or_path": "theo-code",
+      "duration_secs": 150.7,
+      "error": null,
+      "headless": {
+        "duration_ms": 147697,
+        "files_edited": [],
+        "iterations": 31,
+        "llm": {
+          "calls": 30,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.3-codex",
+        "provider": "ChatGPT Codex (OAuth)",
+        "schema": "theo.headless.v1",
+        "success": true,
+        "summary": "Budget exceeded: iterations exceeded: 31 > 30 limit. Edits succeeded: 1. Files: ",
+        "tokens": {
+          "input": 404884,
+          "output": 5676,
+          "total": 410560
+        },
+        "tools": {
+          "success": 42,
+          "total": 44
+        }
+      },
+      "has_patch": true
+    }
+  ],
+  "timestamp": 1776299639
+}
