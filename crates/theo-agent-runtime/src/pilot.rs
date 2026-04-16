@@ -275,6 +275,9 @@ pub struct PilotLoop {
 
     // Heuristic reflector for failure classification and corrective guidance
     reflector: crate::reflector::HeuristicReflector,
+
+    // Evolution loop — structured retry with reflection between attempts
+    evolution: crate::evolution::EvolutionLoop,
 }
 
 const MAX_SESSION_MESSAGES: usize = 100;
@@ -311,6 +314,7 @@ impl PilotLoop {
             interrupted: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             graph_context: None,
             reflector: crate::reflector::HeuristicReflector::new(),
+            evolution: crate::evolution::EvolutionLoop::new(),
         }
     }
 
@@ -420,6 +424,51 @@ impl PilotLoop {
 
             // Update counters based on result
             self.update_counters(&result, &progress);
+
+            // Record attempt in evolution loop and generate reflection for next iteration
+            {
+                let outcome = if result.success {
+                    theo_domain::evolution::AttemptOutcome::Success
+                } else if result.files_edited.iter().any(|f| !f.is_empty()) {
+                    theo_domain::evolution::AttemptOutcome::Partial
+                } else {
+                    theo_domain::evolution::AttemptOutcome::Failure
+                };
+
+                let strategy = if self.loop_count <= 1 {
+                    theo_domain::retry_policy::CorrectionStrategy::RetryLocal
+                } else if let Some(ref r) = self.evolution.reflections().last() {
+                    r.recommended_strategy
+                } else {
+                    theo_domain::retry_policy::CorrectionStrategy::RetryLocal
+                };
+
+                self.evolution.record_attempt(
+                    strategy,
+                    outcome,
+                    result.files_edited.clone(),
+                    if result.success { None } else { Some(result.summary.clone()) },
+                    result.duration_ms,
+                    result.tokens_used,
+                );
+
+                // Generate reflection after failure and inject into session
+                if !result.success {
+                    if let Some(reflection) = self.evolution.reflect() {
+                        self.session_messages.push(Message::system(&format!(
+                            "## Evolution Reflection (after attempt {})\n\
+                             **What failed:** {}\n\
+                             **Why:** {}\n\
+                             **Change strategy to:** {} — {}\n",
+                            reflection.prior_attempt,
+                            reflection.what_failed,
+                            reflection.why_it_failed,
+                            reflection.recommended_strategy,
+                            reflection.what_to_change,
+                        )));
+                    }
+                }
+            }
 
             // Publish loop summary for CLI display
             self.parent_event_bus
@@ -683,6 +732,12 @@ impl PilotLoop {
                 "Fix plan: {}/{} tasks completed.\n",
                 fix_completed, fix_total
             ));
+        }
+
+        // Evolution context — prior attempt history and reflections
+        let evolution_ctx = self.evolution.build_evolution_prompt();
+        if !evolution_ctx.is_empty() {
+            prompt.push_str(&format!("\n{evolution_ctx}\n"));
         }
 
         // Corrective guidance

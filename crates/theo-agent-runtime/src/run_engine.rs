@@ -330,6 +330,30 @@ impl AgentRunEngine {
             }
         }
 
+        // Inject episode summaries from previous runs (cross-session learning).
+        if !self.config.is_subagent {
+            let episodes = crate::state_manager::StateManager::load_episode_summaries(&self.project_dir);
+            if !episodes.is_empty() {
+                let episode_context: Vec<String> = episodes
+                    .iter()
+                    .rev()
+                    .take(5) // Most recent 5 episodes
+                    .map(|ep| {
+                        format!(
+                            "- **{}**: {} (files: {})",
+                            ep.run_id,
+                            ep.machine_summary.objective,
+                            ep.affected_files.join(", ")
+                        )
+                    })
+                    .collect();
+                messages.push(Message::system(&format!(
+                    "## Recent Episode History\n{}",
+                    episode_context.join("\n")
+                )));
+            }
+        }
+
         // Boot sequence: inject progress from previous sessions + recent git activity.
         // Inserted after memories, before skills — so the agent knows where it left off.
         if !self.config.is_subagent {
@@ -443,6 +467,23 @@ impl AgentRunEngine {
             messages.push(Message::user(&task.objective));
         }
 
+        // Initialize state manager for file-backed persistence (crash recovery).
+        // Best-effort: if creation fails, continue without persistence.
+        let mut state_manager = if !self.config.is_subagent {
+            match crate::state_manager::StateManager::create(
+                &self.project_dir,
+                self.run.run_id.as_str(),
+            ) {
+                Ok(sm) => Some(sm),
+                Err(e) => {
+                    eprintln!("[theo] State manager init failed (non-fatal): {e}");
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         // Initialize hook runner for pre/post tool hooks
         let hook_runner = if !self.config.is_subagent {
             Some(crate::hooks::HookRunner::new(
@@ -451,6 +492,22 @@ impl AgentRunEngine {
             ))
         } else {
             None // Sub-agents don't run hooks
+        };
+
+        // Initialize sensor runner for computational verification after write tools.
+        // Sensors fire asynchronously and results are drained before each LLM call.
+        let sensor_runner = if !self.config.is_subagent {
+            let runner = crate::sensor::SensorRunner::new(
+                &self.project_dir,
+                crate::hooks::HookConfig::default(),
+            );
+            if runner.has_sensors() {
+                Some(runner)
+            } else {
+                None
+            }
+        } else {
+            None
         };
 
         // Doom loop detector — tracks recent tool calls to detect repetition
@@ -503,6 +560,44 @@ impl AgentRunEngine {
                     retries: self.metrics.snapshot().total_retries,
                     duration_ms: 0,
                 };
+            }
+
+            // ── SENSOR DRAIN ──
+            // Drain pending sensor results and inject as system messages before LLM call.
+            // This provides the LLM with feedback from computational verification (e.g. clippy, tests).
+            if let Some(ref sensor_runner) = sensor_runner {
+                for result in sensor_runner.drain_pending() {
+                    let severity = if result.exit_code == 0 { "OK" } else { "ISSUE" };
+                    let preview = if result.output.len() > 1000 {
+                        format!(
+                            "{}...\n[truncated]",
+                            &result.output[..result.output
+                                .char_indices()
+                                .nth(1000)
+                                .map(|(i, _)| i)
+                                .unwrap_or(result.output.len())]
+                        )
+                    } else {
+                        result.output.clone()
+                    };
+                    messages.push(Message::system(&format!(
+                        "[SENSOR {severity}] {} (via {}): {preview}",
+                        result.file_path, result.tool_name
+                    )));
+
+                    // Publish SensorExecuted event
+                    self.event_bus.publish(DomainEvent::new(
+                        EventType::SensorExecuted,
+                        self.run.run_id.as_str(),
+                        serde_json::json!({
+                            "file": result.file_path,
+                            "exit_code": result.exit_code,
+                            "output_preview": &preview[..preview.len().min(200)],
+                            "duration_ms": result.duration_ms,
+                            "tool_name": result.tool_name,
+                        }),
+                    ));
+                }
             }
 
             // ── PLANNING phase ──
@@ -810,6 +905,12 @@ impl AgentRunEngine {
                 response.content().map(String::from),
                 tool_calls.to_vec(),
             ));
+
+            // Persist assistant message to state manager (crash recovery)
+            if let Some(ref mut sm) = state_manager {
+                let content = response.content().unwrap_or("");
+                let _ = sm.append_message("assistant", content);
+            }
 
             let mut should_return = None;
 
@@ -1691,6 +1792,30 @@ impl AgentRunEngine {
                         );
                     }
                     _ => {}
+                }
+
+                // Persist tool result to state manager (crash recovery)
+                if let Some(ref mut sm) = state_manager {
+                    let _ = sm.append_message("tool", &output);
+                }
+
+                // ── SENSOR FIRE: trigger computational verification after successful writes ──
+                if success && crate::sensor::is_write_tool(name) {
+                    if let Some(ref sensor_runner) = sensor_runner {
+                        let file_path = call
+                            .parse_arguments()
+                            .ok()
+                            .and_then(|args| {
+                                args.get("filePath")
+                                    .or(args.get("file_path"))
+                                    .and_then(|p| p.as_str())
+                                    .map(String::from)
+                            })
+                            .unwrap_or_default();
+                        if !file_path.is_empty() {
+                            sensor_runner.fire(name, &file_path, &self.project_dir);
+                        }
+                    }
                 }
 
                 messages.push(result_msg);
