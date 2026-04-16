@@ -172,13 +172,31 @@ def call_llm(messages: list[dict], max_tokens: int = 2048) -> dict:
         return {"content": f"ERROR: {e}", "input_tokens": 0, "output_tokens": 0}
 
 def check_success(response: str, task: Task) -> bool:
-    """Check if the LLM found the target file and expected symbols."""
+    """Check if the LLM found the target file and expected symbols.
+
+    Requires:
+      1. The EXACT relative file path (not just the stem)
+      2. At least 2 expected symbols that actually exist in that file
+    This prevents false positives from hallucinated paths or lucky guesses.
+    """
     text = response.lower()
-    # Must mention the target file
-    file_found = task.target_file.lower().replace("/", " ").split()[-1].replace(".rs", "") in text
-    # Must mention at least 2 of the expected symbols
-    symbols_found = sum(1 for s in task.expected_symbols if s.lower() in text)
-    return file_found and symbols_found >= 2
+
+    # Must mention the exact file path (e.g. "crates/graph/src/cluster.rs")
+    target_lower = task.target_file.lower()
+    file_found = target_lower in text
+
+    if not file_found:
+        return False
+
+    # Symbols must appear AFTER the file path mention — verifies they're
+    # associated with the correct file, not mentioned in a different context.
+    file_pos = text.index(target_lower)
+    text_after_file = text[file_pos:]
+
+    symbols_found = sum(
+        1 for s in task.expected_symbols if s.lower() in text_after_file
+    )
+    return symbols_found >= 2
 
 # ---------------------------------------------------------------------------
 # GRAPHCTX context generation

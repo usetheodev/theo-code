@@ -216,3 +216,78 @@ class TestWilsonCi:
         lo_large, hi_large = _wilson_ci(33, 100)
         # Small sample should have wider interval
         assert (hi_small - lo_small) > (hi_large - lo_large)
+
+
+# ---------------------------------------------------------------------------
+# Temperature CLI flag propagation (P0 bug fix validation)
+# ---------------------------------------------------------------------------
+
+
+class TestTemperaturePropagation:
+    """Validates that temperature is passed as CLI flag, not just env var."""
+
+    def test_temperature_flag_in_command(self):
+        """--temperature must appear in the subprocess command args."""
+        from unittest.mock import patch, MagicMock
+        from _headless import run_headless
+
+        with patch("_headless.subprocess.run") as mock_run, \
+             patch("pathlib.Path.exists", return_value=True):
+            mock_proc = MagicMock()
+            mock_proc.returncode = 0
+            mock_proc.stdout = '{"schema":"theo.headless.v2","success":true,"summary":"ok","iterations":1,"duration_ms":100,"tokens":{"input":10,"output":5,"total":15},"tools":{"total":1,"success":1},"llm":{"calls":1,"retries":0},"files_edited":[],"model":"test","mode":"agent","provider":"test"}'
+            mock_proc.stderr = ""
+            mock_run.return_value = mock_proc
+
+            run_headless("test prompt", temperature=0.0, theo_bin=Path("/fake/theo"))
+
+            # Verify --temperature 0.0 appears in the command
+            call_args = mock_run.call_args
+            cmd = call_args[0][0]  # positional arg 0 = command list
+            assert "--temperature" in cmd, f"--temperature not found in command: {cmd}"
+            temp_idx = cmd.index("--temperature")
+            assert cmd[temp_idx + 1] == "0.0", f"temperature value wrong: {cmd[temp_idx + 1]}"
+
+    def test_no_temperature_flag_when_none(self):
+        """When temperature is None, --temperature should NOT appear in command."""
+        from unittest.mock import patch, MagicMock
+        from _headless import run_headless
+
+        with patch("_headless.subprocess.run") as mock_run, \
+             patch("pathlib.Path.exists", return_value=True):
+            mock_proc = MagicMock()
+            mock_proc.returncode = 0
+            mock_proc.stdout = '{"schema":"theo.headless.v2","success":true,"summary":"ok","iterations":1,"duration_ms":100,"tokens":{"input":10,"output":5,"total":15},"tools":{"total":1,"success":1},"llm":{"calls":1,"retries":0},"files_edited":[],"model":"test","mode":"agent","provider":"test"}'
+            mock_proc.stderr = ""
+            mock_run.return_value = mock_proc
+
+            run_headless("test prompt", temperature=None, theo_bin=Path("/fake/theo"))
+
+            cmd = mock_run.call_args[0][0]
+            assert "--temperature" not in cmd, f"--temperature should not be in command when None: {cmd}"
+
+    def test_headless_v2_schema_parsed(self):
+        """HeadlessResult should parse the v2 schema with environment block."""
+        data = {
+            "schema": "theo.headless.v2",
+            "success": True,
+            "summary": "done",
+            "iterations": 3,
+            "duration_ms": 5000,
+            "tokens": {"input": 1000, "output": 200, "total": 1200},
+            "tools": {"total": 5, "success": 5},
+            "llm": {"calls": 3, "retries": 0},
+            "files_edited": [],
+            "model": "qwen3-30B",
+            "mode": "agent",
+            "provider": "local",
+            "environment": {
+                "temperature_actual": 0.0,
+                "theo_version": "0.1.0",
+            },
+        }
+        result = HeadlessResult.from_json(data, exit_code=0)
+        assert result.success is True
+        assert result.model == "qwen3-30B"
+        # Environment block is in raw_json
+        assert result.raw_json["environment"]["temperature_actual"] == 0.0

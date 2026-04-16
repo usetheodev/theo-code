@@ -285,3 +285,10 @@ benches/target/
 .sass-cache/
 .claude/review-loop.local.md
 referencias/
+
+# ----------------------------------------------------------------------------
+# Autoresearch experiment logs
+# ----------------------------------------------------------------------------
+results.tsv
+eval.log
+eval_detail.json

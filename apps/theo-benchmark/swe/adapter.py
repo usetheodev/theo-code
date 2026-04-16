@@ -430,8 +430,10 @@ def main() -> int:
                     help="run official SWE-bench grader (requires Docker + swebench)")
     ap.add_argument("--temperature", type=float, default=0.0,
                     help="sampling temperature (default: 0.0 for deterministic)")
+    ap.add_argument("--oracle", action="store_true",
+                    help="include FAIL_TO_PASS test names in prompt (data leakage — NOT for publication)")
     ap.add_argument("--no-oracle", action="store_true",
-                    help="don't include FAIL_TO_PASS test names in prompt")
+                    help="(deprecated, now the default) don't include FAIL_TO_PASS test names")
     ap.add_argument("--resume", action="store_true",
                     help="skip instances already in the report file")
     args = ap.parse_args()
@@ -441,17 +443,31 @@ def main() -> int:
         print(f"ERROR: theo binary not found at {theo_bin}", file=sys.stderr)
         return 2
 
+    if args.oracle:
+        print("WARNING: Oracle mode enabled — includes FAIL_TO_PASS test names in prompt.",
+              file=sys.stderr)
+        print("         Results are NOT comparable with published SWE-bench baselines.",
+              file=sys.stderr)
+
     instances = load_dataset(args.dataset, args.limit, args.filter)
     if not instances:
         print("ERROR: no instances matched", file=sys.stderr)
         return 2
 
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    out_path = Path(args.report) if args.report else (
-        REPORTS_DIR / f"swe-{args.dataset}-{int(time.time())}.json"
-    )
 
-    # Resume support
+    # When resuming, use a stable path so we can find the previous JSONL.
+    # With --report, the user controls the path.
+    # Without --report + --resume, use a deterministic name (no timestamp).
+    # Without --report + no resume, use timestamped name for fresh runs.
+    if args.report:
+        out_path = Path(args.report)
+    elif args.resume:
+        out_path = REPORTS_DIR / f"swe-{args.dataset}-latest.json"
+    else:
+        out_path = REPORTS_DIR / f"swe-{args.dataset}-{int(time.time())}.json"
+
+    # Resume support: read completed IDs from the JSONL sidecar
     completed_ids: set[str] = set()
     if args.resume:
         jsonl_path = out_path.with_suffix(".jsonl")
@@ -459,6 +475,8 @@ def main() -> int:
         if completed_ids:
             print(f"  Resuming: {len(completed_ids)} already completed", file=sys.stderr)
             instances = [i for i in instances if i["instance_id"] not in completed_ids]
+        else:
+            print(f"  Resume: no previous results found at {jsonl_path}", file=sys.stderr)
 
     results = []
     for i, inst in enumerate(instances):
@@ -466,7 +484,7 @@ def main() -> int:
         result = run_instance(
             inst, theo_bin, args.timeout, args.keep_tmp,
             temperature=args.temperature,
-            oracle=not args.no_oracle,
+            oracle=args.oracle,
         )
         results.append(result)
 
@@ -488,7 +506,7 @@ def main() -> int:
         "with_patch": sum(1 for r in results if r.get("has_patch")),
         "errors": sum(1 for r in results if r.get("error")),
         "temperature": args.temperature,
-        "oracle_mode": not args.no_oracle,
+        "oracle_mode": args.oracle,
         "total_cost_usd": round(total_cost, 2),
         "results": results,
         "timestamp": int(time.time()),
