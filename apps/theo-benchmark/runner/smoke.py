@@ -79,7 +79,7 @@ def materialize_setup(scenario: dict, workdir: Path) -> None:
     )
 
 
-def run_scenario(scenario: dict, theo_bin: Path, keep_tmp: bool) -> dict:
+def run_scenario(scenario: dict, theo_bin: Path, keep_tmp: bool, temperature: float | None = 0.0) -> dict:
     sid = scenario["id"]
     timeout = scenario.get("timeout_secs", 180)
     mode = scenario.get("mode", "agent")
@@ -95,15 +95,19 @@ def run_scenario(scenario: dict, theo_bin: Path, keep_tmp: bool) -> dict:
     try:
         materialize_setup(scenario, workdir)
 
+        cmd = [
+            str(theo_bin),
+            "--headless",
+            "--repo", str(workdir),
+            "--mode", mode,
+            "--max-iter", "20",
+        ]
+        if temperature is not None:
+            cmd.extend(["--temperature", str(temperature)])
+        cmd.append(prompt)
+
         proc = subprocess.run(
-            [
-                str(theo_bin),
-                "--headless",
-                "--repo", str(workdir),
-                "--mode", mode,
-                "--max-iter", "20",
-                prompt,
-            ],
+            cmd,
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -257,6 +261,8 @@ def main() -> int:
                     help="keep tmpdirs for inspection")
     ap.add_argument("--report",
                     help="report output path (default: reports/smoke-<ts>.json)")
+    ap.add_argument("--temperature", type=float, default=0.0,
+                    help="sampling temperature (default: 0.0 for deterministic)")
     args = ap.parse_args()
 
     theo_bin = Path(args.bin)
@@ -276,7 +282,7 @@ def main() -> int:
     results = []
     for sc in scenarios:
         print(f"  → {sc['id']}", file=sys.stderr, flush=True)
-        results.append(run_scenario(sc, theo_bin, args.keep_tmp))
+        results.append(run_scenario(sc, theo_bin, args.keep_tmp, temperature=args.temperature))
 
     report = aggregate(results)
     report["results"] = results

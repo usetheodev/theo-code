@@ -214,10 +214,13 @@ def run_headless(
         cmd.extend(["--model", model])
     if provider:
         cmd.extend(["--provider", provider])
+    # Pass temperature as CLI flag (highest precedence, explicit > env var)
+    if temperature is not None:
+        cmd.extend(["--temperature", str(temperature)])
     cmd.append(prompt)
 
     env = os.environ.copy()
-    # Determinism controls via env vars (the Rust binary reads these)
+    # Also set env var as fallback (for compatibility)
     if temperature is not None:
         env["THEO_TEMPERATURE"] = str(temperature)
     if env_extra:

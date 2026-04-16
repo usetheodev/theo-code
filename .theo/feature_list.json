@@ -1,0 +1,90 @@
+{
+  "features": [
+    {
+      "id": "fix-application-compile",
+      "priority": 1,
+      "status": "pending",
+      "description": "Fix compile errors in theo-application crate",
+      "target_files": ["crates/theo-application/src/**"],
+      "acceptance": "cargo check -p theo-application succeeds with zero errors"
+    },
+    {
+      "id": "fix-workspace-warnings",
+      "priority": 2,
+      "status": "pending",
+      "description": "Fix compiler warnings across workspace (unused imports, dead code, unused mut)",
+      "target_files": ["crates/*/src/**"],
+      "acceptance": "cargo check 2>&1 | grep -c 'warning\\[' returns 0"
+    },
+    {
+      "id": "fix-failing-tests",
+      "priority": 3,
+      "status": "pending",
+      "description": "Fix any tests that currently fail across the workspace",
+      "target_files": ["crates/*/src/**"],
+      "acceptance": "cargo test --workspace --no-fail-fast reports 0 failures"
+    },
+    {
+      "id": "convergence-tests",
+      "priority": 4,
+      "status": "pending",
+      "description": "Add integration tests for ConvergenceEvaluator covering async git operations and edge cases",
+      "target_files": ["crates/theo-agent-runtime/src/convergence.rs"],
+      "acceptance": "3+ new tests for convergence evaluation scenarios"
+    },
+    {
+      "id": "agent-loop-edge-cases",
+      "priority": 5,
+      "status": "pending",
+      "description": "Add tests for AgentLoop and RunEngine edge cases: timeout, empty LLM response, malformed tool calls",
+      "target_files": ["crates/theo-agent-runtime/src/agent_loop.rs", "crates/theo-agent-runtime/src/run_engine.rs"],
+      "acceptance": "5+ new edge case tests"
+    },
+    {
+      "id": "tool-registry-validation",
+      "priority": 6,
+      "status": "pending",
+      "description": "Add tests for tool registry: duplicate tool names, schema validation, category enforcement",
+      "target_files": ["crates/theo-tooling/src/registry.rs"],
+      "acceptance": "4+ new validation tests"
+    },
+    {
+      "id": "graph-engine-robustness",
+      "priority": 7,
+      "status": "pending",
+      "description": "Test graph engine with malformed files, empty files, encoding issues, very large files",
+      "target_files": ["crates/theo-engine-graph/src/**"],
+      "acceptance": "5+ robustness tests that exercise edge cases"
+    },
+    {
+      "id": "error-handling-audit",
+      "priority": 8,
+      "status": "pending",
+      "description": "Find unwrap() calls in non-test production code and replace with proper error handling (? operator or explicit match)",
+      "target_files": ["crates/*/src/**"],
+      "acceptance": "Reduce unwrap() count in production code by 50%+"
+    },
+    {
+      "id": "dead-code-removal",
+      "priority": 9,
+      "status": "pending",
+      "description": "Remove dead code identified by warnings, unused imports, #[allow(dead_code)] attributes",
+      "target_files": ["crates/*/src/**"],
+      "acceptance": "No unnecessary #[allow(dead_code)] attributes remain"
+    },
+    {
+      "id": "domain-model-tests",
+      "priority": 10,
+      "status": "pending",
+      "description": "Add comprehensive tests for theo-domain types: serialization roundtrips, boundary values, Display impls",
+      "target_files": ["crates/theo-domain/src/**"],
+      "acceptance": "10+ new tests covering domain model invariants"
+    }
+  ],
+  "meta": {
+    "last_updated": "2026-04-16",
+    "total_features": 10,
+    "completed": 0,
+    "note": "Agent updates status to 'in_progress' or 'done'. Do NOT remove or rewrite entries."
+  }
+}

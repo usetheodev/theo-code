@@ -3,6 +3,20 @@
 ## [Unreleased]
 
 ### Added
+- `--temperature` CLI flag for deterministic benchmarks — propagates to AgentConfig with highest precedence (CLI > env var > config.toml > default)
+- `--seed` CLI flag for LLM sampling seed (provider-dependent, aids reproducibility)
+- `environment` block in headless JSON output (schema v2) with `temperature_actual` and `theo_version` for benchmark auditability
+- `--oracle` opt-in flag for SWE-bench adapter — oracle mode is no longer the default
+- `--temperature` flag in smoke runner for deterministic scenario execution
+- 3 new Python tests validating temperature CLI flag propagation
+- 2 new Rust tests validating env var override → AgentConfig pipeline
+- `REPORTS_MIGRATION.md` documenting invalidation of historical benchmark reports
+
+### Fixed
+- **P0 benchmark bug**: `THEO_TEMPERATURE` env var was never read by the Rust binary — all benchmarks ran with temperature=0.1 regardless of configuration. Now `ProjectConfig::with_env_overrides().apply_to()` is called in `cmd_headless()`
+- SWE-bench adapter defaulted to oracle mode (data leakage) — flipped to non-oracle default with explicit `--oracle` opt-in and warning
+
+### Changed
 - Event-based extension system (`theo-agent-runtime::extension`) — `Extension` trait with lifecycle hooks (before_agent_start, on_tool_call, on_tool_result, on_context_transform, on_input), `ExtensionRegistry` with first-block-wins and pipeline semantics (7 tests)
 - Model selector infrastructure (`theo-cli::input::model_selector`) — `ModelSelector` with next/prev cycling and wrap-around for Ctrl+P model switching (5 tests)
 - Session management commands (`theo-cli::commands::session_commands`) — `SessionCommand` enum with parse() for /sessions, /tree, /fork, /compact slash commands (9 tests)

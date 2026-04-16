@@ -66,6 +66,16 @@ struct Cli {
     #[arg(short = 'p', long, global = true)]
     headless: bool,
 
+    /// Sampling temperature (0.0 = deterministic). Overrides THEO_TEMPERATURE env var
+    /// and .theo/config.toml. Required for reproducible benchmarks.
+    #[arg(long, global = true)]
+    temperature: Option<f32>,
+
+    /// Random seed for LLM sampling (provider-dependent). Aids reproducibility
+    /// when combined with temperature=0.0.
+    #[arg(long, global = true)]
+    seed: Option<u64>,
+
     #[command(subcommand)]
     command: Option<Commands>,
 
@@ -141,7 +151,7 @@ fn main() {
         Some(Commands::Init) => cmd_init(cli.repo),
         Some(Commands::Agent { prompt }) => {
             if cli.headless {
-                cmd_headless(prompt, cli.repo, cli.provider, cli.model, cli.max_iter, cli.mode);
+                cmd_headless(prompt, cli.repo, cli.provider, cli.model, cli.max_iter, cli.mode, cli.temperature, cli.seed);
                 return;
             }
             cmd_agent(
@@ -181,7 +191,7 @@ fn main() {
         }
         None => {
             if cli.headless {
-                cmd_headless(cli.prompt, cli.repo, cli.provider, cli.model, cli.max_iter, cli.mode);
+                cmd_headless(cli.prompt, cli.repo, cli.provider, cli.model, cli.max_iter, cli.mode, cli.temperature, cli.seed);
                 return;
             }
             // Default: agent mode. REPL if no prompt, single-shot if prompt given.
@@ -305,6 +315,8 @@ fn cmd_headless(
     model: Option<String>,
     max_iter: Option<usize>,
     mode: Option<String>,
+    temperature: Option<f32>,
+    _seed: Option<u64>,
 ) {
     use std::io::Read;
     use std::time::Instant;
@@ -332,6 +344,17 @@ fn cmd_headless(
         let (mut config, provider_name) =
             resolve_agent_config(provider_id.as_deref(), model.as_deref(), max_iter).await;
 
+        // Apply project config + env var overrides (THEO_TEMPERATURE, THEO_MODEL, etc.)
+        // Precedence: CLI flag > env var > .theo/config.toml > default
+        let project_config = theo_agent_runtime::project_config::ProjectConfig::load(&project_dir)
+            .with_env_overrides();
+        project_config.apply_to(&mut config);
+
+        // CLI flags override everything (highest precedence)
+        if let Some(t) = temperature {
+            config.temperature = t;
+        }
+
         let mode_str = mode.as_deref().unwrap_or("agent");
         let agent_mode = theo_agent_runtime::config::AgentMode::from_str(mode_str)
             .unwrap_or(theo_agent_runtime::config::AgentMode::Agent);
@@ -339,6 +362,7 @@ fn cmd_headless(
         config.system_prompt = theo_agent_runtime::config::system_prompt_for_mode(agent_mode);
 
         let model_name = config.model.clone();
+        let temperature_actual = config.temperature;
 
         // In headless mode, trim the system prompt to reduce per-call token overhead.
         // Remove verbose sections that don't help a single-shot benchmark task.
@@ -371,7 +395,7 @@ fn cmd_headless(
         result.duration_ms = started.elapsed().as_millis() as u64;
 
         let json = serde_json::json!({
-            "schema": "theo.headless.v1",
+            "schema": "theo.headless.v2",
             "success": result.success,
             "summary": result.summary,
             "iterations": result.iterations_used,
@@ -393,6 +417,10 @@ fn cmd_headless(
             "model": model_name,
             "mode": mode_str,
             "provider": provider_name,
+            "environment": {
+                "temperature_actual": temperature_actual,
+                "theo_version": env!("CARGO_PKG_VERSION"),
+            },
         });
         println!("{}", serde_json::to_string(&json).unwrap_or_default());
 

@@ -340,25 +340,42 @@ def run_tests(repo_dir: Path, test_patch: str, timeout: int = 300) -> dict:
     # Detect test framework: Django uses its own test runner
     is_django = (repo_dir / "django").is_dir() and (repo_dir / "tests").is_dir()
 
-    # Install repo dependencies if needed (first time only)
+    # Install repo dependencies if needed (first time only).
+    # Only mark as installed if ALL pip commands succeed — otherwise the
+    # broken environment contaminates test results.
     setup_marker = repo_dir / ".theo_deps_installed"
     if not setup_marker.exists():
+        deps_ok = True
         try:
             if is_django:
-                # Django needs its test requirements
                 reqs = repo_dir / "tests" / "requirements" / "py3.txt"
                 if reqs.exists():
-                    subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-r", str(reqs)],
-                                   capture_output=True, timeout=120)
-                # Install Django itself in dev mode
-                subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-e", str(repo_dir)],
-                               capture_output=True, timeout=120)
+                    r = subprocess.run(
+                        [sys.executable, "-m", "pip", "install", "-q", "-r", str(reqs)],
+                        capture_output=True, timeout=120,
+                    )
+                    if r.returncode != 0:
+                        deps_ok = False
+                        print(f"  WARNING: pip install -r {reqs.name} failed (exit {r.returncode})")
+                r = subprocess.run(
+                    [sys.executable, "-m", "pip", "install", "-q", "-e", str(repo_dir)],
+                    capture_output=True, timeout=120,
+                )
+                if r.returncode != 0:
+                    deps_ok = False
+                    print(f"  WARNING: pip install -e . failed (exit {r.returncode})")
             elif (repo_dir / "setup.py").exists() or (repo_dir / "pyproject.toml").exists():
-                subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-e", str(repo_dir)],
-                               capture_output=True, timeout=120)
-            setup_marker.touch()
-        except Exception:
-            pass
+                r = subprocess.run(
+                    [sys.executable, "-m", "pip", "install", "-q", "-e", str(repo_dir)],
+                    capture_output=True, timeout=120,
+                )
+                if r.returncode != 0:
+                    deps_ok = False
+                    print(f"  WARNING: pip install -e . failed (exit {r.returncode})")
+            if deps_ok:
+                setup_marker.touch()
+        except Exception as e:
+            print(f"  WARNING: dep install exception: {e}")
 
     if is_django:
         # Django test runner: python tests/runtests.py <test_module>
@@ -477,6 +494,41 @@ def evaluate_task(
         # Step 1: Clone
         repo_dir = clone_repo(repo, base_commit, work_dir)
 
+        # Step 1b: BASELINE — verify the bug exists BEFORE the agent runs.
+        # Apply the gold test patch to the untouched repo and run tests.
+        # If the tests already pass, this instance is invalid (env drift).
+        print(f"  Baseline check (proving bug exists)...")
+        baseline_patch_ok = apply_test_patch(repo_dir, test_patch)
+        if baseline_patch_ok:
+            baseline_results = run_tests(repo_dir, test_patch, timeout=120)
+            baseline_passes = (
+                baseline_results["passed"] > 0
+                and baseline_results["failed"] == 0
+                and baseline_results["error"] == 0
+            )
+            if baseline_passes:
+                elapsed = time.time() - start
+                return TaskResult(
+                    instance_id=instance_id,
+                    repo=repo,
+                    success=False,
+                    time_seconds=elapsed,
+                    error="BASELINE_ALREADY_PASSES: tests pass without agent fix — skipping",
+                    patch_applied=False,
+                )
+            # Revert the test patch so the agent starts from clean state
+            subprocess.run(
+                ["git", "checkout", "-f", "."],
+                cwd=repo_dir, capture_output=True, text=True, timeout=30,
+            )
+        else:
+            # Can't even apply the test patch to baseline — note it but continue
+            print(f"  Baseline: test patch didn't apply cleanly (will retry after agent)")
+            subprocess.run(
+                ["git", "checkout", "-f", "."],
+                cwd=repo_dir, capture_output=True, text=True, timeout=30,
+            )
+
         # Step 2: Run agent
         print(f"  Running agent...")
         exit_code, agent_output = run_agent(repo_dir, problem_statement, timeout)
@@ -493,7 +545,7 @@ def evaluate_task(
                 agent_exit_code=exit_code,
             )
 
-        # Step 3: Apply test patch
+        # Step 3: Apply test patch (on top of agent's changes)
         print(f"  Applying test patch...")
         patch_ok = apply_test_patch(repo_dir, test_patch)
 
