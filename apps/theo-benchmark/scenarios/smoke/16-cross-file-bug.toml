@@ -1,0 +1,48 @@
+id = "16-cross-file-bug"
+category = "fix-bug"
+description = "Fix a bug where module A calls module B with wrong argument order"
+prompt = "There's a bug: `process_order` in src/orders.py calls `calculate_tax(amount, rate)` but the function in src/tax.py expects `calculate_tax(rate, amount)`. The arguments are swapped. Fix it."
+mode = "agent"
+timeout_secs = 120
+
+success_check = '''
+python3 -c "
+import sys; sys.path.insert(0, '.')
+from src.orders import process_order
+result = process_order(100.0, 'US')
+# tax for US = 0.08 * 100 = 8.0, total = 108.0
+assert abs(result - 108.0) < 0.01, f'Expected 108.0, got {result}'
+print('OK')
+"
+'''
+
+[[setup_files]]
+path = "src/__init__.py"
+content = ""
+
+[[setup_files]]
+path = "src/tax.py"
+content = """
+TAX_RATES = {
+    "US": 0.08,
+    "UK": 0.20,
+    "DE": 0.19,
+}
+
+def calculate_tax(rate: float, amount: float) -> float:
+    \"\"\"Calculate tax. Args: rate (e.g. 0.08), amount (e.g. 100.0).\"\"\"
+    return rate * amount
+"""
+
+[[setup_files]]
+path = "src/orders.py"
+content = """
+from src.tax import calculate_tax, TAX_RATES
+
+def process_order(amount: float, country: str) -> float:
+    \"\"\"Process an order and return total with tax.\"\"\"
+    rate = TAX_RATES.get(country, 0.0)
+    # BUG: arguments are swapped (amount, rate) instead of (rate, amount)
+    tax = calculate_tax(amount, rate)
+    return amount + tax
+"""
