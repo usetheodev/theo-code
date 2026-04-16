@@ -36,9 +36,9 @@ from typing import Optional
 
 import requests
 
-# Import from theo_agent
+# Import shared tools (extracted from former theo_agent.py)
 sys.path.insert(0, os.path.dirname(__file__))
-from theo_agent import (
+from _tools import (
     TOOLS, execute_tool, validate_edit, auto_verify,
     UndoStack, decompose_task, VLLM_URL, MODEL_NAME, THEO_CODE_BIN,
     MAX_ITERATIONS
