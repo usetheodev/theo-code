@@ -1,0 +1,51 @@
+id = "17-missing-error-handling"
+category = "fix-bug"
+description = "Add missing error handling for None input in a data pipeline"
+prompt = "The function `transform_records` in src/pipeline.py crashes with AttributeError when a record has a None value for 'name'. Add a check to skip records where 'name' is None instead of crashing. The filtered count should still be accurate."
+mode = "agent"
+timeout_secs = 120
+
+success_check = '''
+python3 -c "
+import sys; sys.path.insert(0, '.')
+from src.pipeline import transform_records
+
+records = [
+    {'name': 'Alice', 'score': 90},
+    {'name': None, 'score': 50},
+    {'name': 'Bob', 'score': 85},
+    {'name': None, 'score': 0},
+    {'name': 'Carol', 'score': 70},
+]
+result = transform_records(records)
+assert len(result) == 3, f'Expected 3 valid records, got {len(result)}'
+assert result[0]['name_upper'] == 'ALICE'
+assert result[2]['name_upper'] == 'CAROL'
+print('OK')
+"
+'''
+
+[[setup_files]]
+path = "src/__init__.py"
+content = ""
+
+[[setup_files]]
+path = "src/pipeline.py"
+content = """
+def transform_records(records: list[dict]) -> list[dict]:
+    \"\"\"Transform records: uppercase names, filter by score > 60.
+
+    Returns list of transformed records.
+    \"\"\"
+    result = []
+    for record in records:
+        # BUG: crashes when record['name'] is None
+        transformed = {
+            'name_upper': record['name'].upper(),
+            'score': record['score'],
+            'passed': record['score'] > 60,
+        }
+        if transformed['passed']:
+            result.append(transformed)
+    return result
+"""

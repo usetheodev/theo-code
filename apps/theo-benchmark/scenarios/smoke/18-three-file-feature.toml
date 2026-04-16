@@ -1,0 +1,55 @@
+id = "18-three-file-feature"
+category = "add-feature"
+description = "Add a discount system that spans model, service, and config"
+prompt = "Add a 10% discount for orders over $100. The discount rate should be defined in src/config.py as DISCOUNT_RATE=0.10 and DISCOUNT_THRESHOLD=100.0. The discount logic should be in src/pricing.py as a function apply_discount(subtotal) that returns the discounted price. Then update src/checkout.py to use apply_discount before computing the final total."
+mode = "agent"
+timeout_secs = 150
+
+success_check = '''
+python3 -c "
+import sys; sys.path.insert(0, '.')
+from src.checkout import checkout
+
+# Order under threshold: no discount
+total1 = checkout([{'price': 30.0, 'qty': 2}])  # subtotal=60
+assert abs(total1 - 60.0) < 0.01, f'Expected 60.0, got {total1}'
+
+# Order over threshold: 10% discount
+total2 = checkout([{'price': 50.0, 'qty': 3}])  # subtotal=150, discount=15
+assert abs(total2 - 135.0) < 0.01, f'Expected 135.0, got {total2}'
+
+print('OK')
+"
+'''
+
+[[setup_files]]
+path = "src/__init__.py"
+content = ""
+
+[[setup_files]]
+path = "src/config.py"
+content = """
+# Application configuration
+APP_NAME = \"MyShop\"
+TAX_RATE = 0.0  # tax handled separately
+"""
+
+[[setup_files]]
+path = "src/pricing.py"
+content = """
+# Pricing utilities
+def format_price(amount: float) -> str:
+    return f\"${amount:.2f}\"
+"""
+
+[[setup_files]]
+path = "src/checkout.py"
+content = """
+from src.pricing import format_price
+
+def checkout(items: list[dict]) -> float:
+    \"\"\"Calculate total for a list of items. Each item has 'price' and 'qty'.\"\"\"
+    subtotal = sum(item['price'] * item['qty'] for item in items)
+    # TODO: apply discount for large orders
+    return subtotal
+"""
