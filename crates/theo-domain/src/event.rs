@@ -47,6 +47,11 @@ pub enum EventType {
     DecisionMade,
     /// Agent learned a constraint from execution. Payload MUST contain "constraint" and "scope".
     ConstraintLearned,
+
+    // Sensors
+    /// Computational sensor executed after a write tool (e.g., clippy, cargo test).
+    /// Payload contains "file", "exit_code", "output_preview".
+    SensorExecuted,
 }
 
 /// Scope of a learned constraint.
@@ -186,12 +191,13 @@ impl std::fmt::Display for EventType {
             EventType::HypothesisInvalidated => write!(f, "HypothesisInvalidated"),
             EventType::DecisionMade => write!(f, "DecisionMade"),
             EventType::ConstraintLearned => write!(f, "ConstraintLearned"),
+            EventType::SensorExecuted => write!(f, "SensorExecuted"),
         }
     }
 }
 
 /// All EventType variants for iteration in tests.
-pub const ALL_EVENT_TYPES: [EventType; 20] = [
+pub const ALL_EVENT_TYPES: [EventType; 21] = [
     EventType::TaskCreated,
     EventType::TaskStateChanged,
     EventType::ToolCallQueued,
@@ -212,6 +218,7 @@ pub const ALL_EVENT_TYPES: [EventType; 20] = [
     EventType::HypothesisInvalidated,
     EventType::DecisionMade,
     EventType::ConstraintLearned,
+    EventType::SensorExecuted,
 ];
 
 /// A domain event representing a significant occurrence in the system.
@@ -495,7 +502,7 @@ mod tests {
         assert!(ALL_EVENT_TYPES.contains(&EventType::HypothesisInvalidated));
         assert!(ALL_EVENT_TYPES.contains(&EventType::DecisionMade));
         assert!(ALL_EVENT_TYPES.contains(&EventType::ConstraintLearned));
-        assert_eq!(ALL_EVENT_TYPES.len(), 20);
+        assert_eq!(ALL_EVENT_TYPES.len(), 21);
     }
 
     // --- P-1 BF2: Contextual validation tests ---

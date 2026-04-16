@@ -1260,6 +1260,8 @@ fn save_cache_atomic(cache_path: &Path, graph: &CodeGraph, project_dir: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use theo_engine_graph::bridge::{ReferenceKindDto, SymbolKindDto};
+    use theo_engine_parser::types::{ReferenceKind, SymbolKind};
 
     /// Helper: wait for the service to become ready (background build to complete).
     async fn wait_ready(service: &GraphContextService, timeout_secs: u64) -> bool {
