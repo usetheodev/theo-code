@@ -214,6 +214,52 @@ impl HookRunner {
         }
     }
 
+    /// Find hook scripts matching a hook type. Public for sensor integration.
+    pub fn find_hooks_for_type(&self, hook_type: &str) -> Vec<PathBuf> {
+        self.find_hooks(hook_type)
+    }
+
+    /// Execute a sensor hook and return the result (captures output unlike post-hooks).
+    ///
+    /// Similar to pre-hooks but does not block on failure — always returns a result.
+    pub async fn run_sensor_hook(&self, hook_type: &str, event: &HookEvent) -> HookResult {
+        let scripts = self.find_hooks(hook_type);
+        if scripts.is_empty() {
+            return HookResult {
+                allowed: true,
+                output: String::new(),
+                exit_code: 0,
+            };
+        }
+
+        let event_json = serde_json::to_string(event).unwrap_or_default();
+        let timeout = Duration::from_secs(self.config.timeout_secs.min(30));
+
+        let mut combined_output = String::new();
+        let mut last_exit_code = 0;
+
+        for script in &scripts {
+            match self.execute_script(script, &event_json, timeout).await {
+                Ok(result) => {
+                    if !result.output.is_empty() {
+                        combined_output.push_str(&result.output);
+                    }
+                    last_exit_code = result.exit_code;
+                }
+                Err(e) => {
+                    combined_output.push_str(&format!("Sensor error: {e}\n"));
+                    last_exit_code = -1;
+                }
+            }
+        }
+
+        HookResult {
+            allowed: last_exit_code == 0,
+            output: combined_output,
+            exit_code: last_exit_code,
+        }
+    }
+
     /// Check if any hooks are registered.
     pub fn has_hooks(&self) -> bool {
         !self.hooks_dirs.is_empty()
@@ -241,7 +287,7 @@ impl HookRunner {
     }
 }
 
-fn now_millis() -> u64 {
+pub fn now_millis() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
