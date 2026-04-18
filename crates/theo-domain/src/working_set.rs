@@ -6,6 +6,27 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Isolation mode for multi-agent WorkingSet.
+///
+/// Determines how a sub-agent's context relates to its parent.
+/// Reference: OpenDev SubAgentSpec IsolationMode, Anthropic Managed Agents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub enum WorkingSetIsolation {
+    /// Inherits parent's WorkingSet (current default behavior).
+    Shared,
+    /// Has its own private WorkingSet, merges results back to parent.
+    Owned,
+    /// Can read parent's context but cannot modify it.
+    ReadOnly,
+}
+
+impl Default for WorkingSetIsolation {
+    fn default() -> Self {
+        WorkingSetIsolation::Shared
+    }
+}
+
 /// The agent's active context scope during execution.
 ///
 /// Tracks what files, events, hypotheses, and plan steps are currently
@@ -26,6 +47,9 @@ pub struct WorkingSet {
     /// Agent ID for multi-agent isolation. None = main agent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_id: Option<String>,
+    /// Isolation mode for multi-agent context.
+    #[serde(default)]
+    pub isolation: WorkingSetIsolation,
 }
 
 impl WorkingSet {
@@ -123,6 +147,7 @@ mod tests {
             current_plan_step: Some("run tests".into()),
             constraints: vec!["no unwrap in auth".into()],
             agent_id: Some("agent-sub-1".into()),
+            isolation: WorkingSetIsolation::Owned,
         };
         let json = serde_json::to_string(&ws).unwrap();
         let back: WorkingSet = serde_json::from_str(&json).unwrap();
@@ -136,6 +161,42 @@ mod tests {
         assert!(ws.hot_files.is_empty());
         assert!(ws.active_hypothesis.is_none());
         assert!(ws.agent_id.is_none());
+    }
+
+    // --- WorkingSetIsolation tests ---
+
+    #[test]
+    fn isolation_default_is_shared() {
+        let ws = WorkingSet::new();
+        assert_eq!(ws.isolation, WorkingSetIsolation::Shared);
+    }
+
+    #[test]
+    fn isolation_serde_roundtrip() {
+        for iso in &[
+            WorkingSetIsolation::Shared,
+            WorkingSetIsolation::Owned,
+            WorkingSetIsolation::ReadOnly,
+        ] {
+            let json = serde_json::to_string(iso).unwrap();
+            let back: WorkingSetIsolation = serde_json::from_str(&json).unwrap();
+            assert_eq!(*iso, back);
+        }
+    }
+
+    #[test]
+    fn isolation_backward_compat() {
+        let json = "{}";
+        let ws: WorkingSet = serde_json::from_str(json).unwrap();
+        assert_eq!(ws.isolation, WorkingSetIsolation::Shared);
+    }
+
+    #[test]
+    fn owned_isolation_preserves_on_clone() {
+        let mut ws = WorkingSet::new();
+        ws.isolation = WorkingSetIsolation::Owned;
+        let cloned = ws.clone();
+        assert_eq!(cloned.isolation, WorkingSetIsolation::Owned);
     }
 
     // --- P1.5: Multi-agent isolation tests ---

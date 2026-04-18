@@ -58,6 +58,9 @@ pub struct EpisodeSummary {
     /// Memory lifecycle tier (Active → Cooling → Archived).
     #[serde(default)]
     pub lifecycle: MemoryLifecycle,
+    /// What kind of knowledge this summary represents.
+    #[serde(default)]
+    pub memory_kind: MemoryKind,
 }
 
 /// Machine-readable episode summary for agent resume.
@@ -86,6 +89,46 @@ pub enum EpisodeOutcome {
     Failure,
     Partial,
     Inconclusive,
+}
+
+/// What kind of knowledge this memory represents.
+///
+/// Orthogonal to `MemoryLifecycle` (lifecycle = when to transition, kind = what type).
+/// Eviction policy and assembly priority vary by kind.
+///
+/// Reference: MemGPT/Letta three-tier (Core/Recall/Archival),
+/// Knowledge Objects [arxiv 2603.17781], MemArchitect [arxiv 2603.18330].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub enum MemoryKind {
+    /// Runtime-only context, never persisted across episodes.
+    /// Evicts on turn/episode boundary.
+    Ephemeral,
+    /// Session-scoped learnings from execution. Evicts by LRU + staleness.
+    Episodic,
+    /// Cross-session knowledge, persists, retrieved on demand.
+    Reusable,
+    /// Permanent facts (hash-keyed). Never auto-evicted.
+    /// Inspired by Knowledge Objects: facts must not live only in context window.
+    Canonical,
+}
+
+impl Default for MemoryKind {
+    fn default() -> Self {
+        MemoryKind::Episodic
+    }
+}
+
+impl MemoryKind {
+    /// Whether this kind of memory should survive episode compaction.
+    pub fn survives_compaction(&self) -> bool {
+        matches!(self, MemoryKind::Reusable | MemoryKind::Canonical)
+    }
+
+    /// Whether this kind can be auto-evicted by the assembler.
+    pub fn auto_evictable(&self) -> bool {
+        matches!(self, MemoryKind::Ephemeral | MemoryKind::Episodic)
+    }
 }
 
 /// Memory lifecycle tier for episode summaries.
@@ -159,6 +202,10 @@ pub enum HypothesisSource {
 }
 
 /// A tracked hypothesis with confidence scoring and lifecycle.
+///
+/// Evidence tracking: `evidence_for` and `evidence_against` count supporting
+/// and contradicting observations. Auto-prunes when against > for * 2.
+/// Reference: LATS [arxiv 2310.04406] — confidence as accumulated reward.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Hypothesis {
     pub id: String,
@@ -171,6 +218,12 @@ pub struct Hypothesis {
     pub created_at: u64,
     pub last_accessed_iteration: usize,
     pub source: HypothesisSource,
+    /// Count of observations supporting this hypothesis.
+    #[serde(default)]
+    pub evidence_for: u32,
+    /// Count of observations contradicting this hypothesis.
+    #[serde(default)]
+    pub evidence_against: u32,
 }
 
 impl Hypothesis {
@@ -189,6 +242,8 @@ impl Hypothesis {
                 .as_millis() as u64,
             last_accessed_iteration: 0,
             source: HypothesisSource::Explicit,
+            evidence_for: 0,
+            evidence_against: 0,
         }
     }
 
@@ -206,6 +261,39 @@ impl Hypothesis {
     pub fn supersede(&mut self, by: &str) {
         self.status = HypothesisStatus::Superseded;
         self.superseded_by = Some(by.to_string());
+    }
+
+    /// Record supporting evidence. Updates confidence upward.
+    pub fn record_support(&mut self, event_id: &str) {
+        self.evidence_for += 1;
+        self.evidence_event_ids.push(event_id.to_string());
+        self.update_confidence();
+    }
+
+    /// Record contradicting evidence. Updates confidence downward.
+    /// Auto-prunes to Stale when evidence_against > evidence_for * 2.
+    pub fn record_contradiction(&mut self, event_id: &str) {
+        self.evidence_against += 1;
+        self.evidence_event_ids.push(event_id.to_string());
+        self.update_confidence();
+        if self.should_auto_prune() {
+            self.status = HypothesisStatus::Stale;
+        }
+    }
+
+    /// Recompute confidence from evidence counts.
+    /// confidence = (evidence_for + 1) / (evidence_for + evidence_against + 2)
+    /// Laplace smoothing: starts at 0.5 with no evidence.
+    fn update_confidence(&mut self) {
+        let total = self.evidence_for + self.evidence_against + 2;
+        self.confidence = (self.evidence_for + 1) as f64 / total as f64;
+    }
+
+    /// Whether this hypothesis should be auto-pruned.
+    /// Threshold: evidence_against > evidence_for * 2 AND total evidence >= 3.
+    pub fn should_auto_prune(&self) -> bool {
+        let total = self.evidence_for + self.evidence_against;
+        total >= 3 && self.evidence_against > self.evidence_for * 2
     }
 
     pub fn is_eligible_for_assembly(&self) -> bool {
@@ -421,6 +509,7 @@ impl EpisodeSummary {
 
         // Infer TTL from constraint scopes
         let ttl_policy = infer_ttl_policy(events);
+        let memory_kind = infer_memory_kind(&ttl_policy);
 
         EpisodeSummary {
             summary_id: format!("ep-{}", uuid_v4_simple()),
@@ -448,7 +537,21 @@ impl EpisodeSummary {
             created_at: now,
             ttl_policy,
             lifecycle: MemoryLifecycle::Active,
+            memory_kind,
         }
+    }
+}
+
+/// Infer the memory kind from the TTL policy.
+///
+/// Permanent → Canonical (cross-session facts)
+/// TimeScoped → Reusable (task-scoped knowledge)
+/// RunScoped → Episodic (session learnings)
+pub fn infer_memory_kind(ttl: &TtlPolicy) -> MemoryKind {
+    match ttl {
+        TtlPolicy::Permanent => MemoryKind::Canonical,
+        TtlPolicy::TimeScoped { .. } => MemoryKind::Reusable,
+        TtlPolicy::RunScoped => MemoryKind::Episodic,
     }
 }
 
@@ -975,6 +1078,148 @@ mod tests {
                 .any(|c| c.contains("compile error")),
             "Should include failure-derived constraint in learned_constraints"
         );
+    }
+
+    // --- MemoryKind tests ---
+
+    #[test]
+    fn memory_kind_default_is_episodic() {
+        assert_eq!(MemoryKind::default(), MemoryKind::Episodic);
+    }
+
+    #[test]
+    fn memory_kind_survives_compaction() {
+        assert!(!MemoryKind::Ephemeral.survives_compaction());
+        assert!(!MemoryKind::Episodic.survives_compaction());
+        assert!(MemoryKind::Reusable.survives_compaction());
+        assert!(MemoryKind::Canonical.survives_compaction());
+    }
+
+    #[test]
+    fn memory_kind_auto_evictable() {
+        assert!(MemoryKind::Ephemeral.auto_evictable());
+        assert!(MemoryKind::Episodic.auto_evictable());
+        assert!(!MemoryKind::Reusable.auto_evictable());
+        assert!(!MemoryKind::Canonical.auto_evictable());
+    }
+
+    #[test]
+    fn memory_kind_serde_roundtrip() {
+        for kind in &[
+            MemoryKind::Ephemeral,
+            MemoryKind::Episodic,
+            MemoryKind::Reusable,
+            MemoryKind::Canonical,
+        ] {
+            let json = serde_json::to_string(kind).unwrap();
+            let back: MemoryKind = serde_json::from_str(&json).unwrap();
+            assert_eq!(*kind, back);
+        }
+    }
+
+    #[test]
+    fn memory_kind_inferred_from_ttl() {
+        assert_eq!(
+            infer_memory_kind(&TtlPolicy::RunScoped),
+            MemoryKind::Episodic
+        );
+        assert_eq!(
+            infer_memory_kind(&TtlPolicy::TimeScoped { seconds: 3600 }),
+            MemoryKind::Reusable
+        );
+        assert_eq!(
+            infer_memory_kind(&TtlPolicy::Permanent),
+            MemoryKind::Canonical
+        );
+    }
+
+    #[test]
+    fn episode_summary_has_memory_kind() {
+        let events = vec![make_event(
+            EventType::ConstraintLearned,
+            serde_json::json!({"constraint": "no unwrap", "scope": "workspace-local"}),
+        )];
+        let summary = EpisodeSummary::from_events("r-1", None, "task", &events);
+        assert_eq!(summary.memory_kind, MemoryKind::Canonical);
+    }
+
+    #[test]
+    fn episode_summary_default_memory_kind_is_episodic() {
+        let summary = EpisodeSummary::from_events("r-1", None, "task", &[]);
+        assert_eq!(summary.memory_kind, MemoryKind::Episodic);
+    }
+
+    #[test]
+    fn memory_kind_backward_compat_deserialization() {
+        let mut val =
+            serde_json::to_value(&EpisodeSummary::from_events("r-1", None, "t", &[])).unwrap();
+        val.as_object_mut().unwrap().remove("memory_kind");
+        let back: EpisodeSummary = serde_json::from_value(val).unwrap();
+        assert_eq!(back.memory_kind, MemoryKind::Episodic);
+    }
+
+    // --- Hypothesis evidence tracking tests ---
+
+    #[test]
+    fn hypothesis_record_support_increases_confidence() {
+        let mut h = Hypothesis::new("h-1", "bug in auth", "test fails");
+        let initial = h.confidence;
+        h.record_support("evt-1");
+        assert!(h.confidence > initial);
+        assert_eq!(h.evidence_for, 1);
+        assert_eq!(h.evidence_against, 0);
+    }
+
+    #[test]
+    fn hypothesis_record_contradiction_decreases_confidence() {
+        let mut h = Hypothesis::new("h-1", "bug in auth", "test fails");
+        let initial = h.confidence;
+        h.record_contradiction("evt-1");
+        assert!(h.confidence < initial);
+        assert_eq!(h.evidence_for, 0);
+        assert_eq!(h.evidence_against, 1);
+    }
+
+    #[test]
+    fn hypothesis_auto_prunes_on_heavy_contradiction() {
+        let mut h = Hypothesis::new("h-1", "bug", "reason");
+        // 0 for, 3 against → should auto-prune (3 > 0*2, total >= 3)
+        h.record_contradiction("evt-1");
+        h.record_contradiction("evt-2");
+        assert_eq!(h.status, HypothesisStatus::Active); // not yet
+        h.record_contradiction("evt-3");
+        assert_eq!(h.status, HypothesisStatus::Stale); // auto-pruned
+    }
+
+    #[test]
+    fn hypothesis_no_prune_with_balanced_evidence() {
+        let mut h = Hypothesis::new("h-1", "bug", "reason");
+        h.record_support("evt-1");
+        h.record_support("evt-2");
+        h.record_contradiction("evt-3");
+        h.record_contradiction("evt-4");
+        // 2 for, 2 against: 2 > 2*2=4? No → should NOT prune
+        assert_eq!(h.status, HypothesisStatus::Active);
+    }
+
+    #[test]
+    fn hypothesis_confidence_with_laplace_smoothing() {
+        let h = Hypothesis::new("h-1", "test", "reason");
+        // No evidence: (0+1)/(0+0+2) = 0.5
+        assert!((h.confidence - 0.5).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn hypothesis_evidence_backward_compat() {
+        let h = Hypothesis::new("h-1", "test", "reason");
+        let json = serde_json::to_string(&h).unwrap();
+        // Remove the new fields to simulate old data
+        let mut val: serde_json::Value = serde_json::from_str(&json).unwrap();
+        val.as_object_mut().unwrap().remove("evidence_for");
+        val.as_object_mut().unwrap().remove("evidence_against");
+        let back: Hypothesis = serde_json::from_value(val).unwrap();
+        assert_eq!(back.evidence_for, 0);
+        assert_eq!(back.evidence_against, 0);
     }
 
     #[test]
