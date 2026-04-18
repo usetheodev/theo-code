@@ -1,0 +1,21 @@
+id = "14-add-import"
+category = "fix-bug"
+description = "Fix a missing import error"
+prompt = "src/app.py uses `json.dumps` but doesn't import json. Add the missing import."
+mode = "agent"
+timeout_secs = 120
+success_check = '''
+grep -q "import json" src/app.py && \
+  grep -q "json.dumps" src/app.py
+'''
+
+[[setup_files]]
+path = "src/app.py"
+content = """
+def serialize(data):
+    return json.dumps(data)
+
+def main():
+    result = serialize({"key": "value"})
+    print(result)
+"""

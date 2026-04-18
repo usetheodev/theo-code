@@ -1,18 +1,59 @@
 //! CLI event renderer — real-time display of agent activity.
 //!
-//! Output style inspired by Claude Code / agentic tools:
-//! - LLM text as paragraphs between tool groups
-//! - Tool results with └ prefix
-//! - Thinking as dimmed 💭 blocks
+//! This file is a thin adapter: it listens to [`DomainEvent`]s and
+//! delegates all formatting to pure functions in
+//! [`crate::render::tool_result`]. It contains NO raw ANSI escape
+//! sequences; all styling flows through `crate::render::style`.
+//!
+//! See `docs/roadmap/cli-professionalization.md` (T1.1) and
+//! `docs/adr/ADR-001-streaming-markdown.md`.
+
+use std::sync::Mutex;
 
 use theo_agent_runtime::event_bus::EventListener;
 use theo_domain::event::{DomainEvent, EventType};
 
-pub struct CliRenderer;
+use crate::render::streaming::StreamingMarkdownRenderer;
+use crate::render::style::StyleCaps;
+use crate::render::tool_result as tr;
+use crate::tty::TtyCaps;
+
+pub struct CliRenderer {
+    caps: StyleCaps,
+    /// Buffered incremental markdown renderer for `ContentDelta` events.
+    /// Wrapped in `Mutex` because [`EventListener::on_event`] takes `&self`
+    /// and we need interior mutability to update the buffer as chunks arrive.
+    streaming: Mutex<StreamingMarkdownRenderer>,
+}
 
 impl CliRenderer {
     pub fn new() -> Self {
-        Self
+        let caps = TtyCaps::detect().style_caps();
+        Self {
+            caps,
+            streaming: Mutex::new(StreamingMarkdownRenderer::new(caps)),
+        }
+    }
+
+    /// Construct with explicit caps (used in tests / integration with
+    /// a controlled terminal).
+    pub fn with_caps(caps: StyleCaps) -> Self {
+        Self {
+            caps,
+            streaming: Mutex::new(StreamingMarkdownRenderer::new(caps)),
+        }
+    }
+
+    /// Flush any buffered streaming markdown state. Call at turn
+    /// boundaries to avoid leaking unclosed tokens across messages.
+    fn flush_streaming(&self) {
+        if let Ok(mut r) = self.streaming.lock() {
+            r.flush();
+            let out = r.take_output();
+            if !out.is_empty() {
+                eprint!("{out}");
+            }
+        }
     }
 }
 
@@ -20,220 +61,246 @@ impl EventListener for CliRenderer {
     fn on_event(&self, event: &DomainEvent) {
         match event.event_type {
             EventType::RunStateChanged => {
-                let to = event.payload.get("to").and_then(|v| v.as_str()).unwrap_or("?");
-                if to.starts_with("SubAgentParallel:") {
-                    let count = to.strip_prefix("SubAgentParallel:").unwrap_or("?");
-                    eprintln!("\n  \x1b[35m🤖 Spawning {count} sub-agents in parallel\x1b[0m");
-                } else if to.starts_with("SubAgent:") {
-                    let role = to.strip_prefix("SubAgent:").unwrap_or("?");
-                    eprintln!("\n  \x1b[35m🤖 Spawning {} sub-agent\x1b[0m", role);
-                } else {
-                    match to {
-                        "Converged" => eprintln!("\n  \x1b[32m✅ Converged\x1b[0m"),
-                        "Aborted" => eprintln!("\n  \x1b[31m⛔ Aborted\x1b[0m"),
-                        _ => {}
-                    }
+                // Flush any in-flight streaming markdown at turn boundaries.
+                self.flush_streaming();
+                let to = tr::json_str(&event.payload, "to", "?");
+                if let Some(banner) = tr::render_subagent_banner(to, self.caps) {
+                    eprintln!("{banner}");
                 }
             }
             EventType::ToolCallQueued => {
-                // Suppressed — shown on ToolCallCompleted
+                let tool_name = event.payload.get("tool_name").and_then(|v| v.as_str()).unwrap_or("?");
+                eprint!("\n  \x1b[36m⠋\x1b[0m {tool_name} \x1b[90mrunning...\x1b[0m");
+            }
+            EventType::ToolCallProgress => {
+                if let Some(line) = event.payload.get("line").and_then(|v| v.as_str()) {
+                    let display = if line.len() > 120 {
+                        format!("{}…", &line[..119])
+                    } else {
+                        line.to_string()
+                    };
+                    eprintln!("  \x1b[90m│\x1b[0m {display}");
+                }
             }
             EventType::ToolCallCompleted => {
-                render_tool_completed(event);
+                // Flush any pending streaming text before tool output.
+                self.flush_streaming();
+                render_tool_completed(event, self.caps);
             }
             EventType::LlmCallStart | EventType::LlmCallEnd => {}
             EventType::ReasoningDelta => {
                 if let Some(text) = event.payload.get("text").and_then(|v| v.as_str()) {
-                    eprint!("\x1b[90m{text}\x1b[0m");
+                    eprint!("{}", tr::render_reasoning_chunk(text, self.caps));
                 }
             }
             EventType::ContentDelta => {
-                // Real LLM text — show as paragraph (intentions, explanations)
                 if let Some(text) = event.payload.get("text").and_then(|v| v.as_str()) {
-                    eprint!("{text}");
+                    if let Ok(mut r) = self.streaming.lock() {
+                        r.push(text);
+                        let chunk = r.take_output();
+                        if !chunk.is_empty() {
+                            eprint!("{chunk}");
+                        }
+                    }
                 }
             }
             EventType::BudgetExceeded => {
-                let violation = event.payload.get("violation").and_then(|v| v.as_str()).unwrap_or("budget exceeded");
-                eprintln!("\n  \x1b[33m⚠️  {violation}\x1b[0m");
+                let violation = tr::json_str(&event.payload, "violation", "budget exceeded");
+                eprintln!("{}", tr::render_budget_warning(violation, self.caps));
             }
             EventType::TodoUpdated => {}
             EventType::Error => {
-                if event.payload.get("type").and_then(|v| v.as_str()) == Some("retry") {
+                let kind = event.payload.get("type").and_then(|v| v.as_str());
+                if kind == Some("retry") {
                     return;
                 }
-                if event.payload.get("type").and_then(|v| v.as_str()) == Some("capability_denied") {
-                    let tool = event.payload.get("tool_name").and_then(|v| v.as_str()).unwrap_or("?");
-                    eprintln!("  \x1b[31m🚫 {tool} denied\x1b[0m");
+                if kind == Some("capability_denied") {
+                    let tool = tr::json_str(&event.payload, "tool_name", "?");
+                    eprintln!("{}", tr::render_denied(tool, self.caps));
                     return;
                 }
-                let msg = event.payload.get("error")
+                let msg = event
+                    .payload
+                    .get("error")
                     .or(event.payload.get("reason"))
                     .or(event.payload.get("violation"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("unknown error");
-                eprintln!("  \x1b[31m❌ {msg}\x1b[0m");
+                eprintln!("{}", tr::render_error(msg, self.caps));
             }
             _ => {}
         }
     }
 }
 
-fn render_tool_completed(event: &DomainEvent) {
-    // Detect sub-agent events by [Role] prefix in entity_id
-    let prefix = if event.entity_id.starts_with('[') {
-        if let Some(end) = event.entity_id.find(']') {
-            let role = &event.entity_id[1..end];
-            format!("\x1b[35m[{}]\x1b[0m ", role)
-        } else {
-            String::new()
-        }
-    } else {
-        String::new()
-    };
-
-    let success = event.payload.get("success").and_then(|v| v.as_bool()).unwrap_or(false);
-    let tool_name = event.payload.get("tool_name").and_then(|v| v.as_str()).unwrap_or("?");
+fn render_tool_completed(event: &DomainEvent, caps: StyleCaps) {
+    let prefix = tr::sub_agent_prefix(&event.entity_id, caps);
+    let success = event
+        .payload
+        .get("success")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let tool_name = tr::json_str(&event.payload, "tool_name", "?");
     let input = &event.payload["input"];
-    let output = event.payload.get("output_preview").and_then(|v| v.as_str()).unwrap_or("");
-    let duration = event.payload.get("duration_ms").and_then(|v| v.as_u64()).unwrap_or(0);
-
-    let status = if success { "\x1b[32m✓\x1b[0m" } else { "\x1b[31m✗\x1b[0m" };
-
-    let duration_str = if duration > 1000 {
-        format!(" \x1b[90m({:.1}s)\x1b[0m", duration as f64 / 1000.0)
-    } else {
-        String::new()
-    };
+    let output = tr::json_str(&event.payload, "output_preview", "");
+    let duration = event
+        .payload
+        .get("duration_ms")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
 
     match tool_name {
         "read" => {
-            let path = input.get("filePath").and_then(|v| v.as_str()).unwrap_or("?");
+            let path = tr::json_str(input, "filePath", "?");
             let lines = output.lines().count();
-            eprintln!("  {prefix}\x1b[36m•\x1b[0m Read \x1b[1m{path}\x1b[0m {status} \x1b[90m({lines} lines)\x1b[0m{duration_str}");
+            eprintln!(
+                "{}",
+                tr::render_read(&prefix, path, lines, success, duration, caps)
+            );
         }
         "write" => {
-            let path = input.get("filePath").and_then(|v| v.as_str()).unwrap_or("?");
-            let lines = input.get("content").and_then(|v| v.as_str()).map(|c| c.lines().count()).unwrap_or(0);
-            eprintln!("  {prefix}\x1b[36m•\x1b[0m Write \x1b[1m{path}\x1b[0m {status} \x1b[90m({lines} lines)\x1b[0m{duration_str}");
-            if success {
-                if let Some(content) = input.get("content").and_then(|v| v.as_str()) {
-                    for line in content.lines().take(3) {
-                        eprintln!("    \x1b[90m└\x1b[0m \x1b[32m{}\x1b[0m", truncate_line(line, 80));
-                    }
-                    let total = content.lines().count();
-                    if total > 3 {
-                        eprintln!("    \x1b[90m  … +{} more lines\x1b[0m", total - 3);
-                    }
+            let path = tr::json_str(input, "filePath", "?");
+            let content = input.get("content").and_then(|v| v.as_str()).unwrap_or("");
+            let lines = content.lines().count();
+            eprintln!(
+                "{}",
+                tr::render_write_header(&prefix, path, lines, success, duration, caps)
+            );
+            if success && !content.is_empty() {
+                for line in tr::render_write_preview(content, 3, caps) {
+                    eprintln!("{line}");
                 }
             }
         }
         "edit" => {
-            let path = input.get("filePath").and_then(|v| v.as_str()).unwrap_or("?");
-            eprintln!("  {prefix}\x1b[36m•\x1b[0m Edit \x1b[1m{path}\x1b[0m {status}{duration_str}");
+            let path = tr::json_str(input, "filePath", "?");
+            eprintln!(
+                "{}",
+                tr::render_edit_header(&prefix, path, success, duration, caps)
+            );
             if success {
                 if let Some(old) = input.get("oldString").and_then(|v| v.as_str()) {
-                    let old_first = old.lines().next().unwrap_or("");
-                    eprintln!("    \x1b[90m└\x1b[0m \x1b[31m- {}\x1b[0m", truncate_line(old_first, 78));
+                    let first = old.lines().next().unwrap_or("");
+                    eprintln!("{}", tr::render_diff_line('-', first, caps));
                 }
                 if let Some(new) = input.get("newString").and_then(|v| v.as_str()) {
-                    let new_first = new.lines().next().unwrap_or("");
-                    eprintln!("    \x1b[90m└\x1b[0m \x1b[32m+ {}\x1b[0m", truncate_line(new_first, 78));
-                    let new_lines = new.lines().count();
-                    if new_lines > 1 {
-                        eprintln!("    \x1b[90m  … +{} more lines\x1b[0m", new_lines - 1);
+                    let first = new.lines().next().unwrap_or("");
+                    eprintln!("{}", tr::render_diff_line('+', first, caps));
+                    let total = new.lines().count();
+                    if total > 1 {
+                        eprintln!(
+                            "    {}",
+                            crate::render::style::dim(
+                                format!("  … +{} more lines", total - 1),
+                                caps
+                            )
+                        );
                     }
                 }
             }
         }
         "apply_patch" => {
-            let patch = input.get("patchText").and_then(|v| v.as_str()).unwrap_or("");
-            let files: Vec<&str> = patch.lines()
+            let patch = tr::json_str(input, "patchText", "");
+            let files: Vec<&str> = patch
+                .lines()
                 .filter(|l| l.starts_with("+++ "))
                 .filter_map(|l| l.strip_prefix("+++ b/").or(l.strip_prefix("+++ ")))
                 .filter(|f| *f != "/dev/null")
                 .collect();
-            let file_list = if files.is_empty() { "patch".to_string() } else { files.join(", ") };
+            let file_list = if files.is_empty() {
+                "patch".to_string()
+            } else {
+                files.join(", ")
+            };
             let hunks = patch.lines().filter(|l| l.starts_with("@@")).count();
-            eprintln!("  {prefix}\x1b[36m•\x1b[0m Patch \x1b[1m{file_list}\x1b[0m {status} \x1b[90m({hunks} hunks)\x1b[0m{duration_str}");
+            eprintln!(
+                "{}",
+                tr::render_patch(&prefix, &file_list, hunks, success, duration, caps)
+            );
         }
         "glob" => {
-            let pattern = input.get("pattern").and_then(|v| v.as_str()).unwrap_or("*");
+            let pattern = tr::json_str(input, "pattern", "*");
             let count = output.lines().filter(|l| !l.is_empty()).count();
-            eprintln!("  {prefix}\x1b[36m•\x1b[0m Search files \x1b[90m{pattern}\x1b[0m {status} \x1b[90m({count} files)\x1b[0m{duration_str}");
+            eprintln!(
+                "{}",
+                tr::render_glob(&prefix, pattern, count, success, duration, caps)
+            );
         }
         "grep" => {
-            let pattern = input.get("pattern").and_then(|v| v.as_str()).unwrap_or("?");
+            let pattern = tr::json_str(input, "pattern", "?");
             let count = output.lines().filter(|l| !l.is_empty()).count();
-            eprintln!("  {prefix}\x1b[36m•\x1b[0m Search code \x1b[90m\"{pattern}\"\x1b[0m {status} \x1b[90m({count} matches)\x1b[0m{duration_str}");
+            eprintln!(
+                "{}",
+                tr::render_grep(&prefix, pattern, count, success, duration, caps)
+            );
         }
         "bash" => {
-            let cmd = input.get("command").and_then(|v| v.as_str()).unwrap_or("?");
-            let cmd_short = truncate_line(cmd, 70);
-            eprintln!("  {prefix}\x1b[36m•\x1b[0m Ran \x1b[90m{cmd_short}\x1b[0m {status}{duration_str}");
-            // Show first line of output for bash
+            let cmd = tr::json_str(input, "command", "?");
+            eprintln!(
+                "{}",
+                tr::render_bash_header(&prefix, cmd, success, duration, caps)
+            );
             if success && !output.is_empty() {
-                let first = output.lines().next().unwrap_or("");
-                let total = output.lines().count();
-                if !first.is_empty() {
-                    eprintln!("    \x1b[90m└ {}\x1b[0m", truncate_line(first, 78));
-                    if total > 1 {
-                        eprintln!("    \x1b[90m  … +{} lines\x1b[0m", total - 1);
-                    }
+                for line in tr::render_bash_preview(output, caps) {
+                    eprintln!("{line}");
                 }
             }
         }
         "think" => {
-            let thought = input.get("thought").and_then(|v| v.as_str()).unwrap_or("");
-            eprintln!("\n  \x1b[90m💭 {}\x1b[0m\n", thought);
+            let thought = tr::json_str(input, "thought", "");
+            eprintln!("{}", tr::render_think(thought, caps));
         }
         "reflect" => {
-            let confidence = input.get("confidence").and_then(|v| v.as_u64()).unwrap_or(0);
-            let color = if confidence >= 70 { "32" } else if confidence >= 40 { "33" } else { "31" };
-            eprintln!("  {prefix}\x1b[36m•\x1b[0m Reflect {status} \x1b[{color}m(confidence: {confidence}%)\x1b[0m");
+            let confidence = input
+                .get("confidence")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            eprintln!(
+                "{}",
+                tr::render_reflect(&prefix, confidence, success, duration, caps)
+            );
         }
         "memory" => {
-            let action = input.get("action").and_then(|v| v.as_str()).unwrap_or("?");
-            let key = input.get("key").and_then(|v| v.as_str()).unwrap_or("");
-            if key.is_empty() {
-                eprintln!("  {prefix}\x1b[36m•\x1b[0m Memory {action} {status}");
-            } else {
-                eprintln!("  {prefix}\x1b[36m•\x1b[0m Memory {action}: \x1b[1m{key}\x1b[0m {status}");
-            }
+            let action = tr::json_str(input, "action", "?");
+            let key = tr::json_str(input, "key", "");
+            eprintln!(
+                "{}",
+                tr::render_memory(&prefix, action, key, success, caps)
+            );
         }
         "task_create" => {
-            let content = input.get("content").and_then(|v| v.as_str()).unwrap_or("?");
-            eprintln!("  \x1b[36m📋\x1b[0m +task ⬜ {content}");
+            let content = tr::json_str(input, "content", "?");
+            eprintln!(
+                "  {} +task {}",
+                crate::render::style::accent("📋", caps),
+                content
+            );
         }
         "task_update" => {
             let id = input.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
-            let new_status = input.get("status").and_then(|v| v.as_str()).unwrap_or("?");
+            let new_status = tr::json_str(input, "status", "?");
             let icon = match new_status {
                 "completed" => "✅",
                 "in_progress" => "🔄",
                 "cancelled" => "❌",
                 _ => "⬜",
             };
-            eprintln!("  \x1b[36m📋\x1b[0m task {id} {icon} {new_status}");
+            eprintln!(
+                "  {} task {id} {icon} {new_status}",
+                crate::render::style::accent("📋", caps)
+            );
         }
         "done" => {
-            eprintln!("  {prefix}\x1b[36m•\x1b[0m Done {status}");
+            eprintln!(
+                "{}",
+                tr::render_generic(&prefix, "Done", success, duration, caps)
+            );
         }
         _ => {
-            eprintln!("  {prefix}\x1b[36m•\x1b[0m {tool_name} {status}{duration_str}");
+            eprintln!(
+                "{}",
+                tr::render_generic(&prefix, tool_name, success, duration, caps)
+            );
         }
-    }
-}
-
-fn truncate_line(s: &str, max: usize) -> String {
-    let first_line = s.lines().next().unwrap_or(s);
-    if first_line.len() > max {
-        let mut end = max;
-        while end > 0 && !first_line.is_char_boundary(end) {
-            end -= 1;
-        }
-        format!("{}…", &first_line[..end])
-    } else {
-        first_line.to_string()
     }
 }

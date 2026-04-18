@@ -14,8 +14,8 @@ use std::path::Path;
 use tree_sitter::{Node, Tree};
 
 use crate::patterns;
-use crate::types::*;
 use crate::tree_sitter::SupportedLanguage;
+use crate::types::*;
 
 use super::common::{self, anchor_from_node, node_text, node_text_ref, truncate_call_text};
 
@@ -467,13 +467,16 @@ mod tests {
 
     fn extract_java(source: &str) -> FileExtraction {
         let path = PathBuf::from("Controller.java");
-        let parsed = crate::tree_sitter::parse_source(&path, source, SupportedLanguage::Java, None).unwrap();
+        let parsed =
+            crate::tree_sitter::parse_source(&path, source, SupportedLanguage::Java, None).unwrap();
         extract(&path, source, &parsed.tree, SupportedLanguage::Java)
     }
 
     fn extract_kotlin(source: &str) -> FileExtraction {
         let path = PathBuf::from("Controller.kt");
-        let parsed = crate::tree_sitter::parse_source(&path, source, SupportedLanguage::Kotlin, None).unwrap();
+        let parsed =
+            crate::tree_sitter::parse_source(&path, source, SupportedLanguage::Kotlin, None)
+                .unwrap();
         extract(&path, source, &parsed.tree, SupportedLanguage::Kotlin)
     }
 

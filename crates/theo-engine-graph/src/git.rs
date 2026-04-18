@@ -96,9 +96,9 @@ fn parse_git_log(raw: &str) -> Result<Vec<ParsedCommit>, GitError> {
             }
 
             let hash = parts[0].to_string();
-            let timestamp: u64 = parts[1].parse().map_err(|_| {
-                GitError::ParseError(format!("invalid timestamp in line: {line}"))
-            })?;
+            let timestamp: u64 = parts[1]
+                .parse()
+                .map_err(|_| GitError::ParseError(format!("invalid timestamp in line: {line}")))?;
 
             current = Some(ParsedCommit {
                 _hash: hash,
@@ -309,9 +309,9 @@ fn parse_git_log_with_messages(raw: &str) -> Result<Vec<ParsedCommitWithMessage>
                 )));
             }
 
-            let timestamp: u64 = parts[0].parse().map_err(|_| {
-                GitError::ParseError(format!("invalid timestamp in line: {line}"))
-            })?;
+            let timestamp: u64 = parts[0]
+                .parse()
+                .map_err(|_| GitError::ParseError(format!("invalid timestamp in line: {line}")))?;
             let message = parts[1].to_string();
 
             current = Some(ParsedCommitWithMessage {

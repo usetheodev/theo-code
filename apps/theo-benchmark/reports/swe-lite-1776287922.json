@@ -1,0 +1,210 @@
+{
+  "schema": "theo.swe.v1",
+  "dataset": "lite",
+  "total": 6,
+  "with_patch": 2,
+  "errors": 0,
+  "results": [
+    {
+      "instance_id": "psf__requests-1963",
+      "repo": "psf/requests",
+      "model_patch": "diff --git a/requests/sessions.py b/requests/sessions.py\nindex 425db22c..79fbae7a 100644\n--- a/requests/sessions.py\n+++ b/requests/sessions.py\n@@ -88,7 +88,9 @@ class SessionRedirectMixin(object):\n         i = 0\n \n         while resp.is_redirect:\n-            prepared_request = req.copy()\n+            # Always base the next redirect request on the request that\n+            # generated the current response, not on the original request.\n+            prepared_request = resp.request.copy()\n \n             resp.content  # Consume socket so it can be released\n \n@@ -99,7 +101,7 @@ class SessionRedirectMixin(object):\n             resp.close()\n \n             url = resp.headers['location']\n-            method = req.method\n+            method = prepared_request.method\n \n             # Handle redirection without scheme (see: RFC 1808 Section 4)\n             if url.startswith('//'):\n",
+      "model_name_or_path": "theo-code",
+      "duration_secs": 122.1,
+      "error": null,
+      "headless": {
+        "duration_ms": 119146,
+        "files_edited": [
+          "requests/sessions.py"
+        ],
+        "iterations": 26,
+        "llm": {
+          "calls": 26,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.3-codex",
+        "provider": "ChatGPT Codex (OAuth)",
+        "schema": "theo.headless.v1",
+        "success": true,
+        "summary": "Implemented a minimal, targeted fix for the redirect method-selection bug in `requests/sessions.py`.\n\n### What was changed\nIn `SessionRedirectMixin.resolve_redirects`:\n- Changed redirect base request from the original request to the current response\u2019s request:\n  - `prepared_request = req.copy()` -> `prepared_request = resp.request.copy()`\n- Changed method source accordingly:\n  - `method = req.method` -> `method = prepared_request.method`\n\n### Why this is correct\nThe bug occurs because each redirect hop was re-derived from the original request, losing state changes from earlier hops (notably POST -> GET after 303). Using `resp.request` preserves prior redirect mutations, so a subsequent 307/308 correctly preserves the already-updated method (e.g., GET), matching expected behavior from `test_requests_are_updated_each_time` and preventing regressions in related auth/cookie flows.\n\n### Scope and constraints\n- Single-file edit only: `requests/sessions.py`\n- No test files modified\n- No unrelated refactoring or new files",
+        "tokens": {
+          "input": 246598,
+          "output": 4540,
+          "total": 251138
+        },
+        "tools": {
+          "success": 30,
+          "total": 32
+        }
+      },
+      "has_patch": true
+    },
+    {
+      "instance_id": "psf__requests-2148",
+      "repo": "psf/requests",
+      "model_patch": "diff --git a/requests/models.py b/requests/models.py\nindex 0dc55568..2ababaf8 100644\n--- a/requests/models.py\n+++ b/requests/models.py\n@@ -9,6 +9,7 @@ This module contains the primary objects that power Requests.\n \n import collections\n import datetime\n+import socket\n \n from io import BytesIO, UnsupportedOperation\n from .hooks import default_hooks\n@@ -22,7 +23,7 @@ from .packages.urllib3.util import parse_url\n from .packages.urllib3.exceptions import DecodeError\n from .exceptions import (\n     HTTPError, RequestException, MissingSchema, InvalidURL,\n-    ChunkedEncodingError, ContentDecodingError)\n+    ChunkedEncodingError, ContentDecodingError, ConnectionError)\n from .utils import (\n     guess_filename, get_auth_from_url, requote_uri,\n     stream_decode_response_unicode, to_key_val_list, parse_header_links,\n@@ -640,6 +641,8 @@ class Response(object):\n                     raise ChunkedEncodingError(e)\n                 except DecodeError as e:\n                     raise ContentDecodingError(e)\n+                except socket.error as e:\n+                    raise ConnectionError(e)\n             except AttributeError:\n                 # Standard file-like object.\n                 while True:\n",
+      "model_name_or_path": "theo-code",
+      "duration_secs": 138.1,
+      "error": null,
+      "headless": {
+        "duration_ms": 133573,
+        "files_edited": [],
+        "iterations": 31,
+        "llm": {
+          "calls": 30,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.3-codex",
+        "provider": "ChatGPT Codex (OAuth)",
+        "schema": "theo.headless.v1",
+        "success": true,
+        "summary": "Budget exceeded: iterations exceeded: 31 > 30 limit. Edits succeeded: 1. Files: ",
+        "tokens": {
+          "input": 495107,
+          "output": 4410,
+          "total": 499517
+        },
+        "tools": {
+          "success": 30,
+          "total": 30
+        }
+      },
+      "has_patch": true
+    },
+    {
+      "instance_id": "psf__requests-2317",
+      "repo": "psf/requests",
+      "model_patch": "",
+      "model_name_or_path": "theo-code",
+      "duration_secs": 69.1,
+      "error": null,
+      "headless": {
+        "duration_ms": 65853,
+        "files_edited": [],
+        "iterations": 15,
+        "llm": {
+          "calls": 14,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.3-codex",
+        "provider": "ChatGPT Codex (OAuth)",
+        "schema": "theo.headless.v1",
+        "success": false,
+        "summary": "LLM error: rate limited (retry after Nones)",
+        "tokens": {
+          "input": 92370,
+          "output": 2043,
+          "total": 94413
+        },
+        "tools": {
+          "success": 30,
+          "total": 34
+        }
+      },
+      "has_patch": false
+    },
+    {
+      "instance_id": "psf__requests-2674",
+      "repo": "psf/requests",
+      "model_patch": "",
+      "model_name_or_path": "theo-code",
+      "duration_secs": 8.8,
+      "error": null,
+      "headless": {
+        "duration_ms": 5784,
+        "files_edited": [],
+        "iterations": 1,
+        "llm": {
+          "calls": 0,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.3-codex",
+        "provider": "ChatGPT Codex (OAuth)",
+        "schema": "theo.headless.v1",
+        "success": false,
+        "summary": "LLM error: rate limited (retry after Nones)",
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "total": 0
+        },
+        "tools": {
+          "success": 0,
+          "total": 0
+        }
+      },
+      "has_patch": false
+    },
+    {
+      "instance_id": "psf__requests-3362",
+      "repo": "psf/requests",
+      "model_patch": "",
+      "model_name_or_path": "theo-code",
+      "duration_secs": 9.6,
+      "error": null,
+      "headless": {
+        "duration_ms": 6448,
+        "files_edited": [],
+        "iterations": 1,
+        "llm": {
+          "calls": 0,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.3-codex",
+        "provider": "ChatGPT Codex (OAuth)",
+        "schema": "theo.headless.v1",
+        "success": false,
+        "summary": "LLM error: rate limited (retry after Nones)",
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "total": 0
+        },
+        "tools": {
+          "success": 0,
+          "total": 0
+        }
+      },
+      "has_patch": false
+    },
+    {
+      "instance_id": "psf__requests-863",
+      "repo": "psf/requests",
+      "model_patch": "",
+      "model_name_or_path": "theo-code",
+      "duration_secs": 7.0,
+      "error": null,
+      "headless": {
+        "duration_ms": 4074,
+        "files_edited": [],
+        "iterations": 1,
+        "llm": {
+          "calls": 0,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.3-codex",
+        "provider": "ChatGPT Codex (OAuth)",
+        "schema": "theo.headless.v1",
+        "success": false,
+        "summary": "LLM error: rate limited (retry after Nones)",
+        "tokens": {
+          "input": 0,
+          "output": 0,
+          "total": 0
+        },
+        "tools": {
+          "success": 0,
+          "total": 0
+        }
+      },
+      "has_patch": false
+    }
+  ],
+  "timestamp": 1776287922
+}

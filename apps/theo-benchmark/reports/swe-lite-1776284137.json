@@ -1,0 +1,151 @@
+{
+  "schema": "theo.swe.v1",
+  "dataset": "lite",
+  "total": 4,
+  "with_patch": 4,
+  "errors": 0,
+  "results": [
+    {
+      "instance_id": "mwaskom__seaborn-2848",
+      "repo": "mwaskom/seaborn",
+      "model_patch": "diff --git a/seaborn/_oldcore.py b/seaborn/_oldcore.py\nindex c9218c1f..fc98611d 100644\n--- a/seaborn/_oldcore.py\n+++ b/seaborn/_oldcore.py\n@@ -154,7 +154,7 @@ class HueMapping(SemanticMapping):\n             try:\n                 normed = self.norm(key)\n             except TypeError as err:\n-                if np.isnan(key):\n+                if pd.isna(key):\n                     value = (0, 0, 0, 0)\n                 else:\n                     raise err\n",
+      "model_name_or_path": "theo-code",
+      "duration_secs": 181.4,
+      "error": null,
+      "headless": {
+        "duration_ms": 174670,
+        "files_edited": [
+          "seaborn/_oldcore.py"
+        ],
+        "iterations": 26,
+        "llm": {
+          "calls": 26,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.3-codex",
+        "provider": "ChatGPT Codex (OAuth)",
+        "schema": "theo.headless.v1",
+        "success": true,
+        "summary": "Implemented a minimal fix for the reported `pairplot` / `hue_order` crash.\n\n### \u2705 Change made\n\n**File edited:** `seaborn/_oldcore.py`\n\nIn `HueMapping._lookup_single`, I replaced:\n\n```python\nif np.isnan(key):\n```\n\nwith:\n\n```python\nif pd.isna(key):\n```\n\nSo the block is now:\n\n```python\nexcept TypeError as err:\n    if pd.isna(key):\n        value = (0, 0, 0, 0)\n    else:\n        raise err\n```\n\n### Why this fixes the bug\n\nWhen `hue_order` omits some categorical string values, seaborn may look up a hue key not in the mapping.  \nThe fallback path was calling `np.isnan(key)`, which raises `TypeError` for non-numeric keys like strings (e.g., species names), causing the ugly traceback.\n\n`pd.isna(key)` safely handles both numeric and non-numeric/scalar keys, so missing/NA keys get the transparent color fallback and non-NA unknown keys correctly re-raise the original error behavior.\n\n### Verification performed\n\n- `python3 -m compileall -q seaborn` \u2705 (no syntax issues)\n- Could **not** run pytest or runtime plotting checks in this harness because `pytest`, `pip`, and plotting deps (`matplotlib`) are unavailable in the environment.\n\nIf you want, I can also provide the exact one-line patch as a git commit message format.",
+        "tokens": {
+          "input": 300715,
+          "output": 7020,
+          "total": 307735
+        },
+        "tools": {
+          "success": 34,
+          "total": 36
+        }
+      },
+      "has_patch": true
+    },
+    {
+      "instance_id": "mwaskom__seaborn-3010",
+      "repo": "mwaskom/seaborn",
+      "model_patch": "diff --git a/seaborn/_stats/regression.py b/seaborn/_stats/regression.py\nindex 7b7ddc8d..7359b027 100644\n--- a/seaborn/_stats/regression.py\n+++ b/seaborn/_stats/regression.py\n@@ -21,6 +21,7 @@ class PolyFit(Stat):\n \n     def _fit_predict(self, data):\n \n+        data = data.dropna(subset=[\"x\", \"y\"])\n         x = data[\"x\"]\n         y = data[\"y\"]\n         if x.nunique() <= self.order:\n",
+      "model_name_or_path": "theo-code",
+      "duration_secs": 130.1,
+      "error": null,
+      "headless": {
+        "duration_ms": 123853,
+        "files_edited": [
+          "seaborn/_stats/regression.py"
+        ],
+        "iterations": 26,
+        "llm": {
+          "calls": 26,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.3-codex",
+        "provider": "ChatGPT Codex (OAuth)",
+        "schema": "theo.headless.v1",
+        "success": true,
+        "summary": "Fixed PolyFit missing-data robustness bug with a minimal change in `seaborn/_stats/regression.py`.\n\n### Change made\nIn `PolyFit._fit_predict`, I added a single preprocessing line:\n- `data = data.dropna(subset=[\"x\", \"y\"])`\n\nThis ensures `np.polyfit` is only called with finite paired `x`/`y` values, preventing the `LinAlgError: SVD did not converge in Linear Least Squares` that occurred when `None`/NaN values were present.\n\n### Scope\n- Modified only one source file: `seaborn/_stats/regression.py`\n- No tests were added or changed.\n- No unrelated refactoring was performed.\n\n### Verification performed\n- Confirmed the patch via `git diff`.\n- Ran syntax validation on the edited file:\n  - `python3 -m py_compile seaborn/_stats/regression.py` (passed)\n\nNote: Full pytest execution was not possible in this sandbox because `pytest` (and Python packaging tooling in this environment) is unavailable.",
+        "tokens": {
+          "input": 245538,
+          "output": 4163,
+          "total": 249701
+        },
+        "tools": {
+          "success": 24,
+          "total": 26
+        }
+      },
+      "has_patch": true
+    },
+    {
+      "instance_id": "mwaskom__seaborn-3190",
+      "repo": "mwaskom/seaborn",
+      "model_patch": "diff --git a/seaborn/_core/scales.py b/seaborn/_core/scales.py\nindex 6c9ecbc9..7cf22a60 100644\n--- a/seaborn/_core/scales.py\n+++ b/seaborn/_core/scales.py\n@@ -348,9 +348,16 @@ class ContinuousBase(Scale):\n                 vmin, vmax = new.norm\n             vmin, vmax = axis.convert_units((vmin, vmax))\n             a = forward(vmin)\n-            b = forward(vmax) - forward(vmin)\n+            b = forward(vmax)\n+            bool_norm = isinstance(a, (bool, np.bool_))\n+            if bool_norm:\n+                a = float(a)\n+                b = float(b)\n+            b = b - a\n \n             def normalize(x):\n+                if bool_norm:\n+                    x = x.astype(float)\n                 return (x - a) / b\n \n         else:\n",
+      "model_name_or_path": "theo-code",
+      "duration_secs": 95.7,
+      "error": null,
+      "headless": {
+        "duration_ms": 90249,
+        "files_edited": [
+          "seaborn/_core/scales.py",
+          "seaborn/_core/scales.py"
+        ],
+        "iterations": 13,
+        "llm": {
+          "calls": 13,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.3-codex",
+        "provider": "ChatGPT Codex (OAuth)",
+        "schema": "theo.headless.v1",
+        "success": true,
+        "summary": "Implemented a minimal fix in `seaborn/_core/scales.py` for boolean continuous normalization.\n\n### \u2705 What I changed\n\nIn `ContinuousBase._setup`, I updated normalization setup to handle boolean transformed values safely:\n\n- Compute `a = forward(vmin)` and `b = forward(vmax)` first.\n- Detect boolean normalization path with `bool_norm = isinstance(a, (bool, np.bool_))`.\n- Cast `a` and `b` to float when bool-based, then compute `b = b - a`.\n- In `normalize(x)`, cast `x` to float in the bool path before subtraction.\n\nThis avoids NumPy boolean subtraction (`bool - bool` / array-bool subtraction), which caused the reported `TypeError`.\n\n### Why not use `xor` / `^`?\n\n`xor` is not the right operation for normalization. The code needs a numeric span (`vmax - vmin`) and numeric centering/scaling. Booleans here should be treated as numeric 0/1 for normalization, not logical values.\n\n### Verification performed\n\n- Syntax check passed:\n  - `python3 -m compileall seaborn/_core/scales.py`\n\n(`pytest` is not available in this harness environment, so full test execution could not be run here.)",
+        "tokens": {
+          "input": 92035,
+          "output": 3833,
+          "total": 95868
+        },
+        "tools": {
+          "success": 13,
+          "total": 15
+        }
+      },
+      "has_patch": true
+    },
+    {
+      "instance_id": "mwaskom__seaborn-3407",
+      "repo": "mwaskom/seaborn",
+      "model_patch": "diff --git a/seaborn/axisgrid.py b/seaborn/axisgrid.py\nindex 75349099..857f4315 100644\n--- a/seaborn/axisgrid.py\n+++ b/seaborn/axisgrid.py\n@@ -1472,7 +1472,7 @@ class PairGrid(Grid):\n                 for ax in diag_axes[1:]:\n                     share_axis(diag_axes[0], ax, \"y\")\n \n-            self.diag_vars = np.array(diag_vars, np.object_)\n+            self.diag_vars = diag_vars\n             self.diag_axes = np.array(diag_axes, np.object_)\n \n         if \"hue\" not in signature(func).parameters:\n",
+      "model_name_or_path": "theo-code",
+      "duration_secs": 144.6,
+      "error": null,
+      "headless": {
+        "duration_ms": 139425,
+        "files_edited": [
+          "seaborn/axisgrid.py"
+        ],
+        "iterations": 25,
+        "llm": {
+          "calls": 25,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.3-codex",
+        "provider": "ChatGPT Codex (OAuth)",
+        "schema": "theo.headless.v1",
+        "success": true,
+        "summary": "Implemented a minimal fix for the MultiIndex `pairplot` KeyError in `seaborn/axisgrid.py`.\n\n### What changed\n- In `PairGrid.map_diag`, changed how diagonal variable labels are stored:\n  - **Before:** `self.diag_vars = np.array(diag_vars, np.object_)`\n  - **After:** `self.diag_vars = diag_vars`\n\n### Why this fixes the bug\n- When column labels are tuples (as with a `MultiIndex`), converting `diag_vars` to a numpy object array can alter iteration/indexing semantics and cause tuple labels to be treated like list-like keys by pandas, leading to the reported `KeyError`.\n- Keeping `diag_vars` as a plain Python list preserves tuple labels intact, so `self.data[var]` correctly selects the intended MultiIndex column.\n\n### Scope\n- Single-line, minimal change in one file.\n- No test files modified.\n- No unrelated refactors.\n\n### Verification performed\n- Confirmed file parses successfully with:\n  - `python3 -m py_compile seaborn/axisgrid.py`\n- Could not run pytest in this environment because `pytest` (and runtime deps like `numpy`) are not installed (`python3 -m pytest` and importing numpy both fail here).",
+        "tokens": {
+          "input": 285992,
+          "output": 5139,
+          "total": 291131
+        },
+        "tools": {
+          "success": 22,
+          "total": 35
+        }
+      },
+      "has_patch": true
+    }
+  ],
+  "timestamp": 1776284137
+}

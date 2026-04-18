@@ -18,8 +18,15 @@ thiserror.workspace = true
 async-trait.workspace = true
 ignore.workspace = true
 theo-governance.workspace = true
+theo-infra-llm.workspace = true
 rayon.workspace = true
 bincode.workspace = true
+blake3.workspace = true
+
+[features]
+default = []
+tantivy-backend = ["theo-engine-retrieval/tantivy-backend"]
+dense-retrieval = ["tantivy-backend", "theo-engine-retrieval/dense-retrieval"]
 
 [dev-dependencies]
 tempfile.workspace = true

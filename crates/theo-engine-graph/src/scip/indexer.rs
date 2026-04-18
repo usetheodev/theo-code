@@ -28,7 +28,9 @@ pub fn is_rust_analyzer_available() -> bool {
 pub fn generate_scip_index(project_dir: &Path) -> Option<PathBuf> {
     // Verify rust-analyzer is available
     if !is_rust_analyzer_available() {
-        eprintln!("[scip] rust-analyzer not found — SCIP indexing unavailable. Falling back to Tree-Sitter.");
+        eprintln!(
+            "[scip] rust-analyzer not found — SCIP indexing unavailable. Falling back to Tree-Sitter."
+        );
         return None;
     }
 
@@ -67,7 +69,10 @@ pub fn generate_scip_index(project_dir: &Path) -> Option<PathBuf> {
         }
         Ok(output) => {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            eprintln!("[scip] rust-analyzer scip failed: {}", stderr.chars().take(200).collect::<String>());
+            eprintln!(
+                "[scip] rust-analyzer scip failed: {}",
+                stderr.chars().take(200).collect::<String>()
+            );
             None
         }
         Err(e) => {
@@ -81,9 +86,7 @@ pub fn generate_scip_index(project_dir: &Path) -> Option<PathBuf> {
 pub fn is_index_stale(project_dir: &Path) -> bool {
     let index_path = project_dir.join(SCIP_INDEX_FILE);
 
-    let index_mtime = match std::fs::metadata(&index_path)
-        .and_then(|m| m.modified())
-    {
+    let index_mtime = match std::fs::metadata(&index_path).and_then(|m| m.modified()) {
         Ok(t) => t,
         Err(_) => return true, // No index = stale
     };

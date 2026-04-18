@@ -1,6 +1,8 @@
 use async_trait::async_trait;
 use theo_domain::error::ToolError;
-use theo_domain::tool::{PermissionCollector, Tool, ToolCategory, ToolContext, ToolOutput, ToolSchema};
+use theo_domain::tool::{
+    PermissionCollector, Tool, ToolCategory, ToolContext, ToolOutput, ToolSchema,
+};
 
 pub struct PlanExitTool;
 

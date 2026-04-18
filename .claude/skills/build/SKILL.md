@@ -1,25 +1,35 @@
 ---
 name: build
-description: Use when asked to build, compile, or check if the project compiles. Covers cargo build, cargo check, npm build, and cargo tauri build. Also use when a build error needs diagnosis.
-allowed-tools: Bash(cargo *), Bash(npm *), Read, Grep
+description: Build the workspace or specific crate. Use when asked to build, compile, or check compilation.
+user-invocable: true
+allowed-tools: Bash(cargo *)
+argument-hint: "[crate|ui|desktop|check]"
 ---
 
-## Build do Projeto
+Build the Theo Code workspace.
 
-Execute o build conforme o argumento:
+## Arguments
 
-- Sem argumentos ou "all": `cargo build` no workspace inteiro
-- Nome de crate (ex: "theo-engine-graph"): `cargo build -p <crate>`
-- "ui" ou "frontend": `cd apps/theo-ui && npm run build`
-- "desktop": `cd apps/theo-desktop && cargo tauri build`
-- "check": `cargo check` (mais rápido, só verifica compilação)
+- No args: `cargo build` (full workspace)
+- `check`: `cargo check` (type-check only, faster)
+- `ui`: `cd apps/theo-ui && npm run build`
+- `desktop`: `cd apps/theo-desktop && cargo tauri build`
+- Crate name: `cargo build -p $ARGUMENTS`
 
-Diretório do workspace: `/home/paulo/Projetos/usetheo/theo-code`
+## Steps
 
-Se o build falhar:
-1. Leia o erro completo
-2. Identifique o arquivo e linha com problema
-3. Explique o erro em português
-4. Sugira a correção específica
+1. Run the appropriate build command
+2. If errors: analyze the error, show file:line, explain the issue
+3. If warnings: list them grouped by crate
+4. **Run tests**: `cargo test -p <crate>` for affected crate (TDD — build alone is not enough)
+5. Report: PASS (build + tests clean) / PASS with N warnings / FAIL with errors
 
-Argumento: $ARGUMENTS
+## TDD Gate
+
+Build is NOT complete until tests pass. After a successful build, always run:
+```bash
+cargo test -p <crate>  # For specific crate builds
+cargo test             # For full workspace builds
+```
+
+If tests fail → report as FAIL even if build succeeds. Code that compiles but fails tests is broken code.

@@ -1,0 +1,33 @@
+id = "15-cross-file-search"
+category = "search"
+description = "Search across multiple files and synthesize information"
+prompt = "What is the value of MAX_CONNECTIONS defined in config/ directory? And what function in src/ uses it? Reply with 'MAX_CONNECTIONS=N, used by function_name'."
+mode = "agent"
+timeout_secs = 240
+success_check = '''
+echo "$THEO_SUMMARY" | grep -q "100" && \
+  echo "$THEO_SUMMARY" | grep -qi "create_pool"
+'''
+
+[[setup_files]]
+path = "config/database.py"
+content = """
+MAX_CONNECTIONS = 100
+TIMEOUT_MS = 5000
+"""
+
+[[setup_files]]
+path = "src/db.py"
+content = """
+from config.database import MAX_CONNECTIONS
+
+def create_pool():
+    return ConnectionPool(max_size=MAX_CONNECTIONS)
+"""
+
+[[setup_files]]
+path = "src/api.py"
+content = """
+def handle_request(req):
+    return {"status": "ok"}
+"""

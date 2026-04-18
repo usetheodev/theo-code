@@ -1,21 +1,40 @@
 ---
 paths:
-  - "theo-code/crates/**/*.rs"
-  - "theo-code/apps/theo-cli/**/*.rs"
-  - "theo-code/apps/theo-desktop/src/**/*.rs"
+  - "crates/**/*.rs"
+  - "apps/theo-cli/**/*.rs"
+  - "apps/theo-desktop/**/*.rs"
 ---
 
-# Convenções Rust
+# Rust Conventions
 
-- Rust edition 2024 — use features modernas (let chains, etc.)
-- Erros com `thiserror`: cada crate define seu `Error` enum
-- Async runtime: `tokio` com features `full`
-- Serialização: `serde` + `serde_json`
-- Dependências compartilhadas DEVEM ser declaradas em `[workspace.dependencies]`
-- Cada crate publica tipos via `lib.rs` — imports internos são `pub(crate)`
-- Testes unitários em `#[cfg(test)] mod tests` no mesmo arquivo
-- Testes de integração em `tests/` no nível do crate
-- Use `assert_eq!` com mensagens descritivas: `assert_eq!(result, expected, "context: {details}")`
-- Prefira `impl Into<T>` e `AsRef<T>` em parâmetros públicos para ergonomia
-- NUNCA use `unwrap()` em código de produção — apenas em testes
-- Use `?` operator para propagação de erros
+## Error Handling
+- Use `thiserror` for error types. One error enum per crate.
+- Never `unwrap()` or `expect()` in production code. Use `?` operator.
+- Errors must carry context: what happened, which entity, what was expected.
+- `anyhow` only in binary targets (CLI), never in libraries.
+
+## Types
+- Shared types live in `theo-domain`. Import from there.
+- Newtypes for domain identifiers: `FileId(u32)`, `SymbolId(u32)`.
+- `#[non_exhaustive]` on public enums that may grow.
+
+## Dependencies
+- Declare workspace deps in root `Cargo.toml` `[workspace.dependencies]`.
+- Each crate uses `dep.workspace = true` in its own `Cargo.toml`.
+- Feature flags for optional heavy deps (embeddings, GPU).
+
+## Testing
+- Tests in the same file for unit tests (`#[cfg(test)] mod tests`).
+- Integration tests in `tests/` directory of each crate.
+- Use `#[test]` with descriptive names: `test_retrieval_returns_empty_for_unknown_symbol`.
+- Arrange-Act-Assert pattern. One assertion focus per test.
+
+## Async
+- `tokio` as the async runtime. Use `#[tokio::test]` for async tests.
+- Prefer `tokio::spawn` over `std::thread::spawn`.
+- Use `tokio::select!` for concurrent operations, not busy polling.
+
+## Style
+- `cargo fmt` and `cargo clippy` must pass with zero warnings.
+- Code in English. Comments in English for technical context.
+- Imports: std first, external crates second, internal crates third.

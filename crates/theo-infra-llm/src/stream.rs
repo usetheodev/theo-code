@@ -144,10 +144,7 @@ pub fn parse_sse_line(line: &str) -> Option<StreamDelta> {
     }
 
     let json: serde_json::Value = serde_json::from_str(data).ok()?;
-    let delta = json
-        .get("choices")?
-        .get(0)?
-        .get("delta")?;
+    let delta = json.get("choices")?.get(0)?.get("delta")?;
 
     // Check for reasoning/thinking (OpenAI extended thinking)
     if let Some(reasoning) = delta.get("reasoning").and_then(|r| r.as_str()) {
@@ -198,7 +195,9 @@ pub struct SseStream {
 }
 
 impl SseStream {
-    pub fn new(byte_stream: impl Stream<Item = Result<bytes::Bytes, reqwest::Error>> + Send + 'static) -> Self {
+    pub fn new(
+        byte_stream: impl Stream<Item = Result<bytes::Bytes, reqwest::Error>> + Send + 'static,
+    ) -> Self {
         Self {
             inner: Box::pin(byte_stream),
             buffer: String::new(),

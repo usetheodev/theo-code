@@ -23,9 +23,10 @@ Usage:
     python3 swe_bench_harness.py --timeout 900
 
 Environment:
-    VLLM_URL=http://localhost:8000       (vLLM server)
-    MODEL_NAME=...                        (model to use)
-    THEO_CODE_BIN=./theo-code            (binary for context engineering)
+    THEO_BIN=./target/release/theo    (path to Rust binary)
+
+Note: This harness calls `theo --headless` directly. No Python agent
+reimplementation — the Rust binary owns the full agent lifecycle.
 """
 
 import argparse
@@ -44,17 +45,16 @@ from typing import Optional
 # Config
 # ---------------------------------------------------------------------------
 
-VLLM_URL = os.environ.get("VLLM_URL", "http://localhost:8000")
-MODEL_NAME = os.environ.get(
-    "MODEL_NAME", "Qwen/Qwen3-Coder-30B-A3B-Instruct-FP8"
-)
 DEFAULT_TIMEOUT = 600  # seconds per task
 RESULTS_DIR = Path(__file__).parent / "swe_bench_results"
 RESULTS_FILE = RESULTS_DIR / "results.json"
 WORKDIR = Path(tempfile.gettempdir()) / "swe_bench_theo"
-AGENT_SCRIPT = Path(__file__).parent / "theo_agent.py"
 
 HF_DATASET = "princeton-nlp/SWE-bench_Lite"
+
+# Agent execution goes through the Rust binary — no Python reimplementation
+sys.path.insert(0, os.path.dirname(__file__))
+from _headless import run_headless, HeadlessResult, _resolve_bin
 
 # ---------------------------------------------------------------------------
 # Data types
@@ -239,41 +239,22 @@ def cleanup_repo(repo_dir: Path) -> None:
 
 
 def run_agent(repo_dir: Path, problem_statement: str, timeout: int) -> tuple[int, str]:
-    """Run theo_agent.py as a subprocess against the cloned repo.
+    """Run `theo --headless` against the cloned repo.
 
-    Returns (exit_code, stdout+stderr).
+    Uses the Rust binary directly — no Python agent reimplementation.
+    Returns (exit_code, summary_or_error).
     """
-    env = os.environ.copy()
-    env["VLLM_URL"] = VLLM_URL
-    env["MODEL_NAME"] = MODEL_NAME
-    env["THEO_CODE_BIN"] = os.environ.get("THEO_CODE_BIN", "theo-code")
-    # GRAPHCTX always enabled — it's our core differentiator
-    # Allow enough iterations for the fix
-    env["THEO_MAX_ITERATIONS"] = "12"
-
-    cmd = [
-        sys.executable,
-        str(AGENT_SCRIPT),
-        "--repo", str(repo_dir),
-        "--task", problem_statement,
-        "--quiet",
-    ]
-
-    try:
-        proc = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            env=env,
-            cwd=str(repo_dir),
-        )
-        output = proc.stdout + "\n" + proc.stderr
-        return proc.returncode, output
-    except subprocess.TimeoutExpired:
-        return -1, f"TIMEOUT after {timeout}s"
-    except Exception as e:
-        return -1, f"AGENT ERROR: {e}"
+    result = run_headless(
+        problem_statement,
+        repo=repo_dir,
+        max_iter=30,
+        timeout=timeout,
+        theo_bin=_resolve_bin(),
+    )
+    if result.error:
+        return result.exit_code, result.error
+    summary = result.summary or "(no summary)"
+    return result.exit_code, summary
 
 
 # ---------------------------------------------------------------------------
@@ -359,25 +340,42 @@ def run_tests(repo_dir: Path, test_patch: str, timeout: int = 300) -> dict:
     # Detect test framework: Django uses its own test runner
     is_django = (repo_dir / "django").is_dir() and (repo_dir / "tests").is_dir()
 
-    # Install repo dependencies if needed (first time only)
+    # Install repo dependencies if needed (first time only).
+    # Only mark as installed if ALL pip commands succeed — otherwise the
+    # broken environment contaminates test results.
     setup_marker = repo_dir / ".theo_deps_installed"
     if not setup_marker.exists():
+        deps_ok = True
         try:
             if is_django:
-                # Django needs its test requirements
                 reqs = repo_dir / "tests" / "requirements" / "py3.txt"
                 if reqs.exists():
-                    subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-r", str(reqs)],
-                                   capture_output=True, timeout=120)
-                # Install Django itself in dev mode
-                subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-e", str(repo_dir)],
-                               capture_output=True, timeout=120)
+                    r = subprocess.run(
+                        [sys.executable, "-m", "pip", "install", "-q", "-r", str(reqs)],
+                        capture_output=True, timeout=120,
+                    )
+                    if r.returncode != 0:
+                        deps_ok = False
+                        print(f"  WARNING: pip install -r {reqs.name} failed (exit {r.returncode})")
+                r = subprocess.run(
+                    [sys.executable, "-m", "pip", "install", "-q", "-e", str(repo_dir)],
+                    capture_output=True, timeout=120,
+                )
+                if r.returncode != 0:
+                    deps_ok = False
+                    print(f"  WARNING: pip install -e . failed (exit {r.returncode})")
             elif (repo_dir / "setup.py").exists() or (repo_dir / "pyproject.toml").exists():
-                subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-e", str(repo_dir)],
-                               capture_output=True, timeout=120)
-            setup_marker.touch()
-        except Exception:
-            pass
+                r = subprocess.run(
+                    [sys.executable, "-m", "pip", "install", "-q", "-e", str(repo_dir)],
+                    capture_output=True, timeout=120,
+                )
+                if r.returncode != 0:
+                    deps_ok = False
+                    print(f"  WARNING: pip install -e . failed (exit {r.returncode})")
+            if deps_ok:
+                setup_marker.touch()
+        except Exception as e:
+            print(f"  WARNING: dep install exception: {e}")
 
     if is_django:
         # Django test runner: python tests/runtests.py <test_module>
@@ -496,6 +494,41 @@ def evaluate_task(
         # Step 1: Clone
         repo_dir = clone_repo(repo, base_commit, work_dir)
 
+        # Step 1b: BASELINE — verify the bug exists BEFORE the agent runs.
+        # Apply the gold test patch to the untouched repo and run tests.
+        # If the tests already pass, this instance is invalid (env drift).
+        print(f"  Baseline check (proving bug exists)...")
+        baseline_patch_ok = apply_test_patch(repo_dir, test_patch)
+        if baseline_patch_ok:
+            baseline_results = run_tests(repo_dir, test_patch, timeout=120)
+            baseline_passes = (
+                baseline_results["passed"] > 0
+                and baseline_results["failed"] == 0
+                and baseline_results["error"] == 0
+            )
+            if baseline_passes:
+                elapsed = time.time() - start
+                return TaskResult(
+                    instance_id=instance_id,
+                    repo=repo,
+                    success=False,
+                    time_seconds=elapsed,
+                    error="BASELINE_ALREADY_PASSES: tests pass without agent fix — skipping",
+                    patch_applied=False,
+                )
+            # Revert the test patch so the agent starts from clean state
+            subprocess.run(
+                ["git", "checkout", "-f", "."],
+                cwd=repo_dir, capture_output=True, text=True, timeout=30,
+            )
+        else:
+            # Can't even apply the test patch to baseline — note it but continue
+            print(f"  Baseline: test patch didn't apply cleanly (will retry after agent)")
+            subprocess.run(
+                ["git", "checkout", "-f", "."],
+                cwd=repo_dir, capture_output=True, text=True, timeout=30,
+            )
+
         # Step 2: Run agent
         print(f"  Running agent...")
         exit_code, agent_output = run_agent(repo_dir, problem_statement, timeout)
@@ -512,7 +545,7 @@ def evaluate_task(
                 agent_exit_code=exit_code,
             )
 
-        # Step 3: Apply test patch
+        # Step 3: Apply test patch (on top of agent's changes)
         print(f"  Applying test patch...")
         patch_ok = apply_test_patch(repo_dir, test_patch)
 
@@ -614,8 +647,8 @@ def save_results(task_results: list[TaskResult]) -> None:
     output = {
         "metadata": {
             "dataset": HF_DATASET,
-            "model": MODEL_NAME,
-            "vllm_url": VLLM_URL,
+            "model": os.environ.get("THEO_MODEL", "auto"),
+            "vllm_url": os.environ.get("VLLM_URL", ""),
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
         },
         "aggregate": asdict(aggregate),
@@ -711,8 +744,12 @@ def main():
     print("=" * 60)
     print("SWE-bench Lite — Theo Code Agent Evaluation")
     print("=" * 60)
-    print(f"  Model:    {MODEL_NAME}")
-    print(f"  vLLM:     {VLLM_URL}")
+    model = os.environ.get("THEO_MODEL", "auto")
+    vllm = os.environ.get("VLLM_URL", "")
+    print(f"  Model:    {model}")
+    print(f"  Binary:   {_resolve_bin()}")
+    if vllm:
+        print(f"  vLLM:     {vllm}")
     print(f"  Timeout:  {args.timeout}s per task")
     print(f"  Workdir:  {work_dir}")
     print()

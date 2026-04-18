@@ -13,8 +13,8 @@ use std::path::Path;
 
 use tree_sitter::{Node, Tree};
 
-use crate::types::*;
 use crate::tree_sitter::SupportedLanguage;
+use crate::types::*;
 
 use super::common::{self, try_extract_log_sink};
 use super::language_behavior::behavior_for;
@@ -63,19 +63,23 @@ mod tests {
 
     fn extract_python(source: &str) -> FileExtraction {
         let path = PathBuf::from("test.py");
-        let parsed = crate::tree_sitter::parse_source(&path, source, SupportedLanguage::Python, None).unwrap();
+        let parsed =
+            crate::tree_sitter::parse_source(&path, source, SupportedLanguage::Python, None)
+                .unwrap();
         extract(&path, source, &parsed.tree, SupportedLanguage::Python)
     }
 
     fn extract_java(source: &str) -> FileExtraction {
         let path = PathBuf::from("Test.java");
-        let parsed = crate::tree_sitter::parse_source(&path, source, SupportedLanguage::Java, None).unwrap();
+        let parsed =
+            crate::tree_sitter::parse_source(&path, source, SupportedLanguage::Java, None).unwrap();
         extract(&path, source, &parsed.tree, SupportedLanguage::Java)
     }
 
     fn extract_go(source: &str) -> FileExtraction {
         let path = PathBuf::from("main.go");
-        let parsed = crate::tree_sitter::parse_source(&path, source, SupportedLanguage::Go, None).unwrap();
+        let parsed =
+            crate::tree_sitter::parse_source(&path, source, SupportedLanguage::Go, None).unwrap();
         extract(&path, source, &parsed.tree, SupportedLanguage::Go)
     }
 

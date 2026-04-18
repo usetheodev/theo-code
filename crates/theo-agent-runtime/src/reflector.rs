@@ -215,12 +215,7 @@ mod tests {
     #[test]
     fn guidance_same_error_truncates_long_error() {
         let long_error = "x".repeat(500);
-        let text = guidance_for_pattern(
-            FailurePattern::RepeatedSameError,
-            0,
-            2,
-            Some(&long_error),
-        );
+        let text = guidance_for_pattern(FailurePattern::RepeatedSameError, 0, 2, Some(&long_error));
         // Should not contain the full 500-char error.
         assert!(text.len() < 500);
     }

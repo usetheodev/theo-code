@@ -16,12 +16,12 @@ use std::path::Path;
 use tree_sitter::{Node, Tree};
 
 use crate::patterns;
-use crate::types::*;
 use crate::tree_sitter::SupportedLanguage;
+use crate::types::*;
 
 use super::common::{
-    self, anchor_from_node, collect_arguments, extract_string_value, node_text, node_text_ref,
-    strip_quotes, truncate_call_text, ArgumentInfo,
+    self, ArgumentInfo, anchor_from_node, collect_arguments, extract_string_value, node_text,
+    node_text_ref, strip_quotes, truncate_call_text,
 };
 
 /// NestJS HTTP route decorator names → HTTP methods.
@@ -528,7 +528,8 @@ mod tests {
     fn extract_ts(source: &str) -> FileExtraction {
         let path = PathBuf::from("test.ts");
         let parsed =
-            crate::tree_sitter::parse_source(&path, source, SupportedLanguage::TypeScript, None).unwrap();
+            crate::tree_sitter::parse_source(&path, source, SupportedLanguage::TypeScript, None)
+                .unwrap();
         extract(&path, source, &parsed.tree, SupportedLanguage::TypeScript)
     }
 
@@ -664,7 +665,8 @@ app.get('/api/data', (req, res) => {
 });
 "#;
         let parsed =
-            crate::tree_sitter::parse_source(&path, source, SupportedLanguage::JavaScript, None).unwrap();
+            crate::tree_sitter::parse_source(&path, source, SupportedLanguage::JavaScript, None)
+                .unwrap();
         let ext = extract(&path, source, &parsed.tree, SupportedLanguage::JavaScript);
 
         assert_eq!(ext.interfaces.len(), 1);
@@ -899,20 +901,22 @@ app.get('/api/users', (req, res) => {
 "#,
         );
         assert_eq!(ext.interfaces.len(), 3);
-        assert!(ext
-            .interfaces
-            .iter()
-            .find(|i| i.path == "/health")
-            .unwrap()
-            .auth
-            .is_none());
-        assert!(ext
-            .interfaces
-            .iter()
-            .find(|i| i.path == "/api/payments")
-            .unwrap()
-            .auth
-            .is_some());
+        assert!(
+            ext.interfaces
+                .iter()
+                .find(|i| i.path == "/health")
+                .unwrap()
+                .auth
+                .is_none()
+        );
+        assert!(
+            ext.interfaces
+                .iter()
+                .find(|i| i.path == "/api/payments")
+                .unwrap()
+                .auth
+                .is_some()
+        );
         assert_eq!(ext.dependencies.len(), 1);
         assert_eq!(ext.sinks.len(), 3);
         assert!(ext.sinks.iter().any(|s| s.contains_pii));

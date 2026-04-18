@@ -1,10 +1,28 @@
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
 
 use crate::codex;
 use crate::error::LlmError;
 use crate::hermes;
 use crate::stream::{SseStream, StreamCollector, StreamDelta};
 use crate::types::*;
+
+/// Trait for resolving API keys dynamically per-request.
+///
+/// This supports short-lived OAuth tokens (e.g., GitHub Copilot tokens that
+/// expire during long tool execution phases). Called before each LLM request.
+///
+/// **Pi-mono ref:** `packages/agent/src/types.ts:152-157`
+pub trait ApiKeyResolver: Send + Sync {
+    /// Resolve the API key for the given provider.
+    /// Returns `Some(key)` to override the static key, or `None` to use the default.
+    fn resolve(
+        &self,
+        provider: &str,
+    ) -> Pin<Box<dyn Future<Output = Option<String>> + Send + '_>>;
+}
 
 /// Client for OpenAI-compatible chat completions API.
 ///
@@ -19,6 +37,8 @@ pub struct LlmClient {
     /// Extra headers sent with every request.
     extra_headers: HashMap<String, String>,
     http: reqwest::Client,
+    /// Optional dynamic API key resolver called per-request.
+    api_key_resolver: Option<Arc<dyn ApiKeyResolver>>,
 }
 
 impl LlmClient {
@@ -34,7 +54,16 @@ impl LlmClient {
             endpoint_override: None,
             extra_headers: HashMap::new(),
             http: reqwest::Client::new(),
+            api_key_resolver: None,
         }
+    }
+
+    /// Set a dynamic API key resolver called per-request.
+    /// The resolver can return `Some(key)` to override the static key,
+    /// or `None` to use the default key.
+    pub fn with_api_key_resolver(mut self, resolver: Arc<dyn ApiKeyResolver>) -> Self {
+        self.api_key_resolver = Some(resolver);
+        self
     }
 
     /// Set a full endpoint URL override.
@@ -71,9 +100,23 @@ impl LlmClient {
             .is_some_and(|u| u.contains("codex"))
     }
 
-    fn apply_auth(&self, builder: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+    /// Resolve the effective API key: dynamic resolver takes precedence over static.
+    async fn resolve_api_key(&self) -> Option<String> {
+        if let Some(ref resolver) = self.api_key_resolver {
+            if let Some(key) = resolver.resolve(&self.model).await {
+                return Some(key);
+            }
+        }
+        self.api_key.clone()
+    }
+
+    fn apply_auth_with_key(
+        &self,
+        builder: reqwest::RequestBuilder,
+        resolved_key: &Option<String>,
+    ) -> reqwest::RequestBuilder {
         let mut b = builder;
-        if let Some(ref key) = self.api_key {
+        if let Some(key) = resolved_key {
             b = b.header("Authorization", format!("Bearer {key}"));
         }
         for (k, v) in &self.extra_headers {
@@ -93,7 +136,8 @@ impl LlmClient {
             return self.chat_codex(request, &url).await;
         }
 
-        let builder = self.apply_auth(self.http.post(&url).json(request));
+        let resolved_key = self.resolve_api_key().await;
+        let builder = self.apply_auth_with_key(self.http.post(&url).json(request), &resolved_key);
 
         let response = builder.send().await?;
         let status = response.status().as_u16();
@@ -136,8 +180,8 @@ impl LlmClient {
     /// the full response from the `response.completed` event.
     async fn chat_codex(&self, request: &ChatRequest, url: &str) -> Result<ChatResponse, LlmError> {
         let body = codex::to_codex_body(request);
-
-        let builder = self.apply_auth(self.http.post(url).json(&body));
+        let resolved_key = self.resolve_api_key().await;
+        let builder = self.apply_auth_with_key(self.http.post(url).json(&body), &resolved_key);
 
         let response = builder.send().await?;
         let status = response.status().as_u16();
@@ -148,24 +192,27 @@ impl LlmClient {
         }
 
         // Read the full SSE stream and collect events
-        let full_body = response.text().await
+        let full_body = response
+            .text()
+            .await
             .map_err(|e| LlmError::Parse(format!("read stream: {e}")))?;
 
-        codex::from_codex_stream(&full_body)
-            .ok_or_else(|| LlmError::Parse(format!("failed to parse Codex stream response. Body start: {}", &full_body[..full_body.len().min(500)])))
+        codex::from_codex_stream(&full_body).ok_or_else(|| {
+            LlmError::Parse(format!(
+                "failed to parse Codex stream response. Body start: {}",
+                &full_body[..full_body.len().min(500)]
+            ))
+        })
     }
 
     /// Send a streaming chat completion request.
     /// Returns a stream of deltas that can be collected into a full response.
-    pub async fn chat_stream(
-        &self,
-        request: &ChatRequest,
-    ) -> Result<SseStream, LlmError> {
+    pub async fn chat_stream(&self, request: &ChatRequest) -> Result<SseStream, LlmError> {
         let url = self.url();
         let mut req = request.clone();
         req.stream = Some(true);
-
-        let builder = self.apply_auth(self.http.post(&url).json(&req));
+        let resolved_key = self.resolve_api_key().await;
+        let builder = self.apply_auth_with_key(self.http.post(&url).json(&req), &resolved_key);
 
         let response = builder.send().await?;
         let status = response.status().as_u16();
@@ -200,7 +247,8 @@ impl LlmClient {
             use futures::StreamExt;
 
             let body = codex::to_codex_body(request);
-            let builder = self.apply_auth(self.http.post(&url).json(&body));
+            let resolved_key = self.resolve_api_key().await;
+            let builder = self.apply_auth_with_key(self.http.post(&url).json(&body), &resolved_key);
             let response = builder.send().await?;
             let status = response.status().as_u16();
 
@@ -227,18 +275,23 @@ impl LlmClient {
 
                     if let Some(data) = line.strip_prefix("data: ") {
                         if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
-                            let event_type = json.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                            let event_type =
+                                json.get("type").and_then(|v| v.as_str()).unwrap_or("");
 
                             match event_type {
                                 // Reasoning/thinking deltas (real-time)
                                 "response.reasoning.delta" => {
-                                    if let Some(text) = json.pointer("/delta/text").and_then(|v| v.as_str()) {
+                                    if let Some(text) =
+                                        json.pointer("/delta/text").and_then(|v| v.as_str())
+                                    {
                                         on_delta(&StreamDelta::Reasoning(text.to_string()));
                                     }
                                 }
                                 // Content text deltas (real-time)
                                 "response.output_text.delta" => {
-                                    if let Some(text) = json.pointer("/delta").and_then(|v| v.as_str()) {
+                                    if let Some(text) =
+                                        json.pointer("/delta").and_then(|v| v.as_str())
+                                    {
                                         on_delta(&StreamDelta::Content(text.to_string()));
                                     }
                                 }
@@ -262,7 +315,8 @@ impl LlmClient {
 
             let mut req = request.clone();
             req.stream = Some(true);
-            let builder = self.apply_auth(self.http.post(&url).json(&req));
+            let resolved_key = self.resolve_api_key().await;
+            let builder = self.apply_auth_with_key(self.http.post(&url).json(&req), &resolved_key);
             let response = builder.send().await?;
             let status = response.status().as_u16();
 
@@ -378,7 +432,10 @@ mod tests {
     fn test_endpoint_override() {
         let client = LlmClient::new("https://api.openai.com", None, "gpt-4o")
             .with_endpoint("https://chatgpt.com/backend-api/codex/responses");
-        assert_eq!(client.url(), "https://chatgpt.com/backend-api/codex/responses");
+        assert_eq!(
+            client.url(),
+            "https://chatgpt.com/backend-api/codex/responses"
+        );
     }
 
     #[test]
@@ -472,5 +529,61 @@ mod tests {
         assert_eq!(json["tool_call_id"], "call_abc");
         assert_eq!(json["name"], "read_file");
         assert_eq!(json["content"], "file contents here");
+    }
+
+    // ── ApiKeyResolver tests ────────────────────────────────────
+
+    struct StaticResolver {
+        key: Option<String>,
+    }
+
+    impl ApiKeyResolver for StaticResolver {
+        fn resolve(
+            &self,
+            _provider: &str,
+        ) -> Pin<Box<dyn Future<Output = Option<String>> + Send + '_>> {
+            let key = self.key.clone();
+            Box::pin(async move { key })
+        }
+    }
+
+    #[test]
+    fn resolve_api_key_defaults_to_static() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let client = LlmClient::new("http://localhost", Some("static-key".into()), "m");
+
+        let resolved = rt.block_on(client.resolve_api_key());
+        assert_eq!(resolved, Some("static-key".to_string()));
+    }
+
+    #[test]
+    fn resolve_api_key_resolver_overrides_static() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let resolver = Arc::new(StaticResolver {
+            key: Some("dynamic-key".into()),
+        });
+        let client = LlmClient::new("http://localhost", Some("static-key".into()), "m")
+            .with_api_key_resolver(resolver);
+
+        let resolved = rt.block_on(client.resolve_api_key());
+        assert_eq!(resolved, Some("dynamic-key".to_string()));
+    }
+
+    #[test]
+    fn resolve_api_key_resolver_none_falls_back_to_static() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let resolver = Arc::new(StaticResolver { key: None });
+        let client = LlmClient::new("http://localhost", Some("static-key".into()), "m")
+            .with_api_key_resolver(resolver);
+        let resolved = rt.block_on(client.resolve_api_key());
+        assert_eq!(resolved, Some("static-key".to_string()));
+    }
+
+    #[test]
+    fn resolve_api_key_no_resolver_no_static_returns_none() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let client = LlmClient::new("http://localhost", None, "m");
+        let resolved = rt.block_on(client.resolve_api_key());
+        assert_eq!(resolved, None);
     }
 }

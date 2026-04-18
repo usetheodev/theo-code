@@ -61,12 +61,7 @@ impl CorrectionEngine {
     }
 
     /// Records the correction decision as an event.
-    pub fn record_correction(
-        &self,
-        entity_id: &str,
-        strategy: CorrectionStrategy,
-        reason: &str,
-    ) {
+    pub fn record_correction(&self, entity_id: &str, strategy: CorrectionStrategy, reason: &str) {
         self.event_bus.publish(DomainEvent::new(
             EventType::Error,
             entity_id,

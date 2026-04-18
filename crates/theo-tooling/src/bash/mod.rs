@@ -1,17 +1,17 @@
 use async_trait::async_trait;
+use std::path::{Path, PathBuf};
+use std::process::Stdio;
 use theo_domain::error::ToolError;
 use theo_domain::permission::{PermissionRequest, PermissionType};
 use theo_domain::tool::{
     PermissionCollector, Tool, ToolCategory, ToolContext, ToolOutput, ToolParam, ToolSchema,
     optional_string, optional_u64, require_string,
 };
-use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use tokio::process::Command;
 
 use crate::sandbox::executor::SandboxExecutor;
-use theo_domain::sandbox::SandboxConfig;
 use std::sync::Arc;
+use theo_domain::sandbox::SandboxConfig;
 
 pub struct BashTool {
     sandbox_executor: Option<Arc<dyn SandboxExecutor>>,
@@ -27,10 +27,7 @@ impl BashTool {
     }
 
     /// Create a BashTool with sandbox enabled.
-    pub fn with_sandbox(
-        executor: Arc<dyn SandboxExecutor>,
-        config: SandboxConfig,
-    ) -> Self {
+    pub fn with_sandbox(executor: Arc<dyn SandboxExecutor>, config: SandboxConfig) -> Self {
         Self {
             sandbox_executor: Some(executor),
             sandbox_config: Some(config),
@@ -223,8 +220,57 @@ impl Tool for BashTool {
                 sandbox_result.stderr,
                 sandbox_result.exit_code,
             )
+        } else if ctx.stdout_tx.is_some() {
+            // No sandbox + streaming enabled — stream stdout line by line
+            use tokio::io::{AsyncBufReadExt, BufReader};
+            use crate::sandbox::env_sanitizer::sanitize_stdout_line;
+
+            let mut child = Command::new("sh")
+                .arg("-c")
+                .arg(&command)
+                .current_dir(&cwd)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .map_err(|e| ToolError::Execution(format!("Failed to spawn command: {e}")))?;
+
+            let child_stdout = child.stdout.take();
+            let tx = ctx.stdout_tx.clone().expect("checked is_some above");
+
+            // Stream stdout lines
+            let mut all_stdout = String::new();
+            let mut total_bytes: usize = 0;
+            const MAX_LINE_BYTES: usize = 10_240; // 10KB per line
+            const MAX_TOTAL_BYTES: usize = 1_048_576; // 1MB total
+
+            if let Some(stdout_pipe) = child_stdout {
+                let reader = BufReader::new(stdout_pipe);
+                let mut lines = reader.lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    all_stdout.push_str(&line);
+                    all_stdout.push('\n');
+
+                    if total_bytes < MAX_TOTAL_BYTES {
+                        let display_line = if line.len() > MAX_LINE_BYTES {
+                            format!("{}[truncated]", &line[..MAX_LINE_BYTES])
+                        } else {
+                            sanitize_stdout_line(&line)
+                        };
+                        total_bytes += display_line.len();
+                        let _ = tx.send(display_line).await;
+                    }
+                }
+            }
+
+            let output = child.wait_with_output().await
+                .map_err(|e| ToolError::Execution(format!("Failed to wait for command: {e}")))?;
+
+            let stderr_str = String::from_utf8_lossy(&output.stderr).to_string();
+            let exit_code = output.status.code().unwrap_or(-1);
+
+            (all_stdout, stderr_str, exit_code)
         } else {
-            // No sandbox — execute directly (original path)
+            // No sandbox, no streaming — execute directly (original path)
             let output = Command::new("sh")
                 .arg("-c")
                 .arg(&command)
@@ -249,8 +295,7 @@ impl Tool for BashTool {
         };
 
         // Truncate output
-        let truncated_result =
-            theo_domain::truncate::truncate_output(&combined, None);
+        let truncated_result = theo_domain::truncate::truncate_output(&combined, None);
 
         Ok(ToolOutput {
             title: description,
@@ -321,7 +366,12 @@ mod tests {
             .iter()
             .find(|r| r.permission == PermissionType::Bash);
         assert!(bash_req.is_some());
-        assert!(bash_req.unwrap().patterns.contains(&"echo hello".to_string()));
+        assert!(
+            bash_req
+                .unwrap()
+                .patterns
+                .contains(&"echo hello".to_string())
+        );
     }
 
     #[tokio::test]
@@ -527,7 +577,11 @@ mod tests {
             .iter()
             .find(|r| r.permission == PermissionType::Bash)
             .unwrap();
-        assert!(bash_req.patterns.contains(&"cat > /tmp/output.txt".to_string()));
+        assert!(
+            bash_req
+                .patterns
+                .contains(&"cat > /tmp/output.txt".to_string())
+        );
     }
 
     #[tokio::test]
@@ -577,7 +631,11 @@ mod tests {
 
         assert_eq!(result.metadata["truncated"], true);
         assert!(result.output.contains("truncated"));
-        assert!(result.output.contains("The tool call succeeded but the output was truncated"));
+        assert!(
+            result
+                .output
+                .contains("The tool call succeeded but the output was truncated")
+        );
     }
 
     #[tokio::test]

@@ -58,7 +58,8 @@ impl Tool for ReflectTool {
                 ToolParam {
                     name: "should_stop".to_string(),
                     param_type: "boolean".to_string(),
-                    description: "Whether to give up and call done() with partial results".to_string(),
+                    description: "Whether to give up and call done() with partial results"
+                        .to_string(),
                     required: false,
                 },
             ],
@@ -88,7 +89,9 @@ impl Tool for ReflectTool {
         let confidence = args
             .get("confidence")
             .and_then(|v| v.as_u64())
-            .ok_or_else(|| ToolError::InvalidArgs("Missing or invalid 'confidence' field (0-100)".to_string()))?;
+            .ok_or_else(|| {
+                ToolError::InvalidArgs("Missing or invalid 'confidence' field (0-100)".to_string())
+            })?;
 
         let next_action = args
             .get("next_action")
@@ -115,7 +118,8 @@ impl Tool for ReflectTool {
         }
 
         if should_stop {
-            output.push_str("\n🛑 STOP REQUESTED — Consider calling done() with partial results.\n");
+            output
+                .push_str("\n🛑 STOP REQUESTED — Consider calling done() with partial results.\n");
         }
 
         Ok(ToolOutput {
@@ -260,7 +264,9 @@ mod tests {
     fn schema_has_required_fields() {
         let tool = ReflectTool::new();
         let schema = tool.schema();
-        let required: Vec<&str> = schema.params.iter()
+        let required: Vec<&str> = schema
+            .params
+            .iter()
             .filter(|p| p.required)
             .map(|p| p.name.as_str())
             .collect();

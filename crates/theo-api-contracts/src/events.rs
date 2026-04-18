@@ -7,9 +7,16 @@ pub enum FrontendEvent {
     #[serde(rename = "token")]
     Token { text: String },
     #[serde(rename = "tool_start")]
-    ToolStart { name: String, args: serde_json::Value },
+    ToolStart {
+        name: String,
+        args: serde_json::Value,
+    },
     #[serde(rename = "tool_end")]
-    ToolEnd { name: String, success: bool, output: String },
+    ToolEnd {
+        name: String,
+        success: bool,
+        output: String,
+    },
     #[serde(rename = "phase_change")]
     PhaseChange { from: String, to: String },
     #[serde(rename = "done")]

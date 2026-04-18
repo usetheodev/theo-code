@@ -1,0 +1,31 @@
+id = "08-multi-file-edit"
+category = "multi-file"
+description = "Update a constant referenced from two files"
+prompt = "The constant DEFAULT_PORT defined in src/config.rs is currently 8080. Change it to 9090 and update the comment in src/server.rs that says 'listens on 8080' to say 'listens on 9090'."
+mode = "agent"
+timeout_secs = 180
+
+success_check = '''
+grep -q "DEFAULT_PORT: u16 = 9090" src/config.rs && \
+  grep -q "listens on 9090" src/server.rs && \
+  ! grep -q "8080" src/config.rs && \
+  ! grep -q "8080" src/server.rs
+'''
+
+[[setup_files]]
+path = "src/config.rs"
+content = """
+pub const DEFAULT_PORT: u16 = 8080;
+"""
+
+[[setup_files]]
+path = "src/server.rs"
+content = """
+use crate::config::DEFAULT_PORT;
+
+// listens on 8080 by default
+pub fn start() {
+    println!("starting on {}", DEFAULT_PORT);
+}
+"""
+

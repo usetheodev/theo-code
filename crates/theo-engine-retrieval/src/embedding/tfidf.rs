@@ -2,7 +2,6 @@
 ///
 /// Generates sparse TF-IDF vectors, then converts to dense fixed-dimension
 /// vectors via random projection (Johnson-Lindenstrauss) for TurboQuant.
-
 use std::collections::HashMap;
 
 use crate::search::tokenise;

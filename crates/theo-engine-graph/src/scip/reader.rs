@@ -77,10 +77,11 @@ impl ScipIndex {
                     .push((file_path.clone(), line, role.clone()));
 
                 // File → symbols index
-                file_symbols
-                    .entry(file_path.clone())
-                    .or_default()
-                    .push((occ.symbol.clone(), line, role));
+                file_symbols.entry(file_path.clone()).or_default().push((
+                    occ.symbol.clone(),
+                    line,
+                    role,
+                ));
             }
 
             // Symbol information (for name resolution)
@@ -187,7 +188,9 @@ mod tests {
     #[test]
     fn extract_short_name_function() {
         assert_eq!(
-            extract_short_name("rust-analyzer cargo theo 0.1.0 graph_attention/propagate_attention()."),
+            extract_short_name(
+                "rust-analyzer cargo theo 0.1.0 graph_attention/propagate_attention()."
+            ),
             Some("propagate_attention".to_string())
         );
     }
@@ -240,14 +243,22 @@ mod tests {
         // graph_attention.rs defines propagate_attention
         index.file_symbols.insert(
             "src/graph_attention.rs".to_string(),
-            vec![("sym:propagate_attention".to_string(), 33, "definition".to_string())],
+            vec![(
+                "sym:propagate_attention".to_string(),
+                33,
+                "definition".to_string(),
+            )],
         );
 
         // search.rs references propagate_attention
         index.symbol_references.insert(
             "sym:propagate_attention".to_string(),
             vec![
-                ("src/graph_attention.rs".to_string(), 33, "definition".to_string()),
+                (
+                    "src/graph_attention.rs".to_string(),
+                    33,
+                    "definition".to_string(),
+                ),
                 ("src/search.rs".to_string(), 12, "import".to_string()),
                 ("src/search.rs".to_string(), 867, "read".to_string()),
             ],

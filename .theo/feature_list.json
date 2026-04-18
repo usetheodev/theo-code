@@ -1,0 +1,212 @@
+{
+  "features": [
+    {
+      "id": "fix-application-compile",
+      "priority": 1,
+      "layer": 1,
+      "status": "pending",
+      "description": "Fix 26 compile errors in theo-application lib test target",
+      "target_files": ["crates/theo-application/src/**"],
+      "acceptance": "cargo test -p theo-application --no-run exits 0",
+      "score_impact": "+3.08 L1 (compile_crates 12→13)"
+    },
+    {
+      "id": "fix-cargo-warnings",
+      "priority": 2,
+      "layer": 1,
+      "status": "pending",
+      "description": "Fix cargo warnings across workspace (unused imports, dead code, unused mut)",
+      "target_files": ["crates/*/src/**"],
+      "acceptance": "cargo_warnings = 0 in eval output",
+      "score_impact": "+3.0 L1 (warning penalty)"
+    },
+    {
+      "id": "add-api-contracts-tests",
+      "priority": 3,
+      "layer": 1,
+      "status": "pending",
+      "description": "Add tests to theo-api-contracts (currently 0 tests)",
+      "target_files": ["crates/theo-api-contracts/src/**"],
+      "acceptance": "5+ tests for DTO serialization roundtrips",
+      "score_impact": "+0.04 L1 (test_count)"
+    },
+    {
+      "id": "add-governance-tests",
+      "priority": 4,
+      "layer": 1,
+      "status": "pending",
+      "description": "Add tests to theo-governance (currently 41 tests, lowest after api-contracts)",
+      "target_files": ["crates/theo-governance/src/**"],
+      "acceptance": "10+ new tests for sandbox policy, impact analysis",
+      "score_impact": "+0.08 L1 (test_count)"
+    },
+    {
+      "id": "add-graph-engine-tests",
+      "priority": 5,
+      "layer": 1,
+      "status": "pending",
+      "description": "Add robustness tests to theo-engine-graph (currently 43 tests)",
+      "target_files": ["crates/theo-engine-graph/src/**"],
+      "acceptance": "5+ robustness tests (malformed files, empty graph, encoding)",
+      "score_impact": "+0.04 L1 (test_count)"
+    },
+    {
+      "id": "add-application-tests",
+      "priority": 6,
+      "layer": 1,
+      "status": "pending",
+      "description": "Add tests to theo-application once it compiles (currently 58 tests)",
+      "target_files": ["crates/theo-application/src/**"],
+      "acceptance": "10+ new tests for pipeline, extraction, context assembly",
+      "score_impact": "+0.08 L1 (test_count)"
+    },
+    {
+      "id": "add-convergence-tests",
+      "priority": 7,
+      "layer": 1,
+      "status": "pending",
+      "description": "Add edge case tests for convergence, agent loop, tool registry",
+      "target_files": ["crates/theo-agent-runtime/src/**", "crates/theo-tooling/src/**"],
+      "acceptance": "10+ new tests across convergence, agent loop, tool registry",
+      "score_impact": "+0.08 L1 (test_count)"
+    },
+    {
+      "id": "create-clippy-toml",
+      "priority": 8,
+      "layer": 2,
+      "status": "pending",
+      "description": "Create clippy.toml at workspace root with reasonable thresholds",
+      "target_files": ["clippy.toml"],
+      "acceptance": "clippy.toml exists with too-many-arguments-threshold and type-complexity-threshold",
+      "score_impact": "+3.0 L2 (doc_artifacts 0→1)"
+    },
+    {
+      "id": "create-agents-md",
+      "priority": 9,
+      "layer": 2,
+      "status": "pending",
+      "description": "Create .theo/AGENTS.md — navigation map for the agent (NOT a manual). Crate→responsibility, how to test, what NOT to touch",
+      "target_files": [".theo/AGENTS.md"],
+      "acceptance": ".theo/AGENTS.md exists, >500 bytes, covers all 13 crates",
+      "score_impact": "+3.0 L2 (doc_artifacts 1→2)"
+    },
+    {
+      "id": "create-quality-rules-md",
+      "priority": 10,
+      "layer": 2,
+      "status": "pending",
+      "description": "Create .theo/QUALITY_RULES.md — consolidated mechanical quality rules (no unwrap, no dead_code, clippy clean, boundary tests pass)",
+      "target_files": [".theo/QUALITY_RULES.md"],
+      "acceptance": ".theo/QUALITY_RULES.md exists, >500 bytes, lists all enforced rules",
+      "score_impact": "+3.0 L2 (doc_artifacts 2→3)"
+    },
+    {
+      "id": "create-quality-score-md",
+      "priority": 11,
+      "layer": 2,
+      "status": "pending",
+      "description": "Create .theo/QUALITY_SCORE.md — per-crate health dashboard (compiles, tests, warnings, unwraps)",
+      "target_files": [".theo/QUALITY_SCORE.md"],
+      "acceptance": ".theo/QUALITY_SCORE.md exists, >500 bytes, table with all 13 crates",
+      "score_impact": "+3.0 L2 (doc_artifacts 3→4)"
+    },
+    {
+      "id": "create-structural-hygiene-tests",
+      "priority": 12,
+      "layer": 2,
+      "status": "pending",
+      "description": "Create crates/theo-governance/tests/structural_hygiene.rs with 10+ structural code quality tests (no println in libs, no huge files, no circular deps, doc comments on public types)",
+      "target_files": ["crates/theo-governance/tests/structural_hygiene.rs"],
+      "acceptance": "structural_hygiene.rs exists with 10+ #[test] functions, all pass",
+      "score_impact": "+3.0 L2 (doc_artifacts 4→5) + structural_tests bonus"
+    },
+    {
+      "id": "expand-boundary-tests",
+      "priority": 13,
+      "layer": 2,
+      "status": "pending",
+      "description": "Expand boundary_test.rs from 5 to 15+ tests: add circular dep detection, benchmark isolation, engine-to-engine boundary checks",
+      "target_files": ["crates/theo-governance/tests/boundary_test.rs"],
+      "acceptance": "boundary_tests >= 15 in eval output",
+      "score_impact": "+10.0 L2 (boundary_tests 5→15)"
+    },
+    {
+      "id": "expand-structural-tests",
+      "priority": 14,
+      "layer": 2,
+      "status": "pending",
+      "description": "Expand structural_hygiene.rs to 30+ tests: file size limits, unwrap-free zones, doc comment coverage, no std::process::exit outside main",
+      "target_files": ["crates/theo-governance/tests/structural_hygiene.rs"],
+      "acceptance": "structural_tests >= 30 in eval output",
+      "score_impact": "+15.0 L2 (structural_tests 10→30)"
+    },
+    {
+      "id": "clippy-fix-leaf-crates",
+      "priority": 15,
+      "layer": 2,
+      "status": "pending",
+      "description": "Fix clippy warnings in leaf crates first (theo-domain, theo-governance, theo-api-contracts) to avoid cascading rebuilds",
+      "target_files": ["crates/theo-domain/src/**", "crates/theo-governance/src/**", "crates/theo-api-contracts/src/**"],
+      "acceptance": "cargo clippy -p theo-domain -p theo-governance -p theo-api-contracts reports 0 warnings",
+      "score_impact": "varies L2 (clippy_warnings reduction)"
+    },
+    {
+      "id": "clippy-fix-engines",
+      "priority": 16,
+      "layer": 2,
+      "status": "pending",
+      "description": "Fix clippy warnings in engine crates (theo-engine-parser, theo-engine-graph, theo-engine-retrieval)",
+      "target_files": ["crates/theo-engine-parser/src/**", "crates/theo-engine-graph/src/**", "crates/theo-engine-retrieval/src/**"],
+      "acceptance": "cargo clippy for engine crates reports 0 warnings",
+      "score_impact": "varies L2 (clippy_warnings reduction)"
+    },
+    {
+      "id": "clippy-fix-runtime-infra",
+      "priority": 17,
+      "layer": 2,
+      "status": "pending",
+      "description": "Fix clippy warnings in runtime and infra crates (theo-agent-runtime, theo-infra-llm, theo-tooling)",
+      "target_files": ["crates/theo-agent-runtime/src/**", "crates/theo-infra-llm/src/**", "crates/theo-tooling/src/**"],
+      "acceptance": "cargo clippy for runtime/infra crates reports 0 warnings",
+      "score_impact": "varies L2 (clippy_warnings reduction)"
+    },
+    {
+      "id": "unwrap-removal-leaf-crates",
+      "priority": 18,
+      "layer": 2,
+      "status": "pending",
+      "description": "Replace unwrap() with proper error handling in leaf crates (theo-domain, theo-governance). Use ? operator or explicit match.",
+      "target_files": ["crates/theo-domain/src/**", "crates/theo-governance/src/**"],
+      "acceptance": "unwrap_count in these crates reduced by 80%+",
+      "score_impact": "varies L2 (unwrap_count reduction)"
+    },
+    {
+      "id": "unwrap-removal-engines",
+      "priority": 19,
+      "layer": 2,
+      "status": "pending",
+      "description": "Replace unwrap() in engine crates. Focus on hot paths first.",
+      "target_files": ["crates/theo-engine-parser/src/**", "crates/theo-engine-graph/src/**", "crates/theo-engine-retrieval/src/**"],
+      "acceptance": "unwrap_count in engine crates reduced by 50%+",
+      "score_impact": "varies L2 (unwrap_count reduction)"
+    },
+    {
+      "id": "dead-code-removal",
+      "priority": 20,
+      "layer": 2,
+      "status": "pending",
+      "description": "Remove all #[allow(dead_code)] attributes. Either use the code or delete it.",
+      "target_files": ["crates/*/src/**"],
+      "acceptance": "dead_code_attrs = 0 in eval output",
+      "score_impact": "+6.0 L2 (dead_code_attrs 12→0)"
+    }
+  ],
+  "meta": {
+    "last_updated": "2026-04-16",
+    "total_features": 20,
+    "completed": 0,
+    "layer1_count": 7,
+    "layer2_count": 13,
+    "note": "Agent updates status to 'in_progress' or 'done'. Do NOT remove or rewrite entries. Do NOT edit acceptance criteria."
+  }
+}

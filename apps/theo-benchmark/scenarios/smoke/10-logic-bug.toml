@@ -1,0 +1,20 @@
+id = "10-logic-bug"
+category = "fix-bug"
+description = "Diagnose and fix an off-by-one bug"
+prompt = "The function `nth_even` in src/seq.rs is supposed to return the n-th even non-negative integer (0, 2, 4, 6, ...). For n=0 it should return 0, for n=1 it should return 2, etc. Right now it has a bug: it returns the wrong value. Find and fix it."
+mode = "agent"
+timeout_secs = 240
+
+success_check = '''
+! grep -q "n \* 2 + 2" src/seq.rs && \
+  grep -qE "n \* 2[[:space:]]*$" src/seq.rs
+'''
+
+[[setup_files]]
+path = "src/seq.rs"
+content = """
+pub fn nth_even(n: u32) -> u32 {
+    n * 2 + 2
+}
+"""
+

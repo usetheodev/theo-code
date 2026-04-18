@@ -1,6 +1,6 @@
+use std::path::Path;
 use theo_domain::permission::{PermissionRequest, PermissionType};
 use theo_domain::tool::PermissionCollector;
-use std::path::Path;
 
 #[derive(Debug, Default)]
 pub struct ExternalDirectoryOptions {
@@ -40,10 +40,7 @@ pub fn assert_external_directory(
     let dir = if opts.kind == Some(PathKind::Directory) {
         target.to_path_buf()
     } else {
-        target
-            .parent()
-            .unwrap_or(target)
-            .to_path_buf()
+        target.parent().unwrap_or(target).to_path_buf()
     };
 
     let pattern = format!("{}/*", dir.display()).replace('\\', "/");

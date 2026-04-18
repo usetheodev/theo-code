@@ -1,40 +1,42 @@
 {
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "permissions": {
     "allow": [
-      "Bash(cargo *)",
-      "Bash(npm *)",
+      "Bash(cargo build *)",
+      "Bash(cargo test *)",
+      "Bash(cargo check *)",
+      "Bash(cargo clippy *)",
+      "Bash(cargo fmt *)",
+      "Bash(cargo run *)",
+      "Bash(npm run *)",
+      "Bash(npm install *)",
       "Bash(npx *)",
-      "Bash(git status*)",
-      "Bash(git log*)",
-      "Bash(git diff*)",
-      "Bash(git branch*)",
-      "Bash(git show*)",
-      "Bash(git shortlog*)",
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git branch *)",
+      "Bash(git stash *)",
       "Bash(ls *)",
       "Bash(tree *)",
       "Bash(wc *)",
-      "Bash(cat *)",
       "Bash(head *)",
       "Bash(tail *)",
-      "Bash(mkdir *)",
-      "Bash(pwd)",
       "Read",
       "Glob",
-      "Grep",
-      "Edit",
-      "Write"
+      "Grep"
     ],
     "deny": [
-      "Bash(git checkout *)",
-      "Bash(git revert *)",
-      "Bash(git push --force*)",
-      "Bash(git reset --hard*)",
-      "Bash(rm -rf *)",
+      "Bash(rm -rf /)",
       "Bash(sudo *)",
-      "Edit(.env*)"
+      "Bash(git checkout main)",
+      "Bash(git revert *)",
+      "Bash(git push --force *)",
+      "Bash(git reset --hard *)",
+      "Read(.env*)",
+      "Read(*credentials*)",
+      "Read(*secret*)"
     ]
   },
-
   "hooks": {
     "PreToolUse": [
       {
@@ -42,8 +44,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash /home/paulo/Projetos/usetheo/theo-code/.claude/hooks/block-main-branch.sh",
-            "timeout": 5
+            "command": "bash .claude/hooks/validate-command.sh"
           }
         ]
       },
@@ -52,8 +53,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash /home/paulo/Projetos/usetheo/theo-code/.claude/hooks/meeting-gate.sh",
-            "timeout": 5
+            "command": "bash .claude/hooks/boundary-check.sh"
           }
         ]
       }
@@ -64,16 +64,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash /home/paulo/Projetos/usetheo/theo-code/.claude/hooks/post-edit-lint.sh",
-            "timeout": 30
+            "command": "bash .claude/hooks/post-edit-check.sh"
           }
         ]
       }
     ]
-  },
-
-  "env": {
-    "RUST_BACKTRACE": "1",
-    "CARGO_TERM_COLOR": "always"
   }
 }

@@ -19,9 +19,9 @@ use theo_engine_graph::model::{CodeGraph, NodeType};
 
 /// Version header: model name hash + embedding dimension.
 /// If the model changes, the cache auto-invalidates.
-const CACHE_VERSION: u32 = 2; // Bumped: Jina Code 768-dim + 2-hop imports
-const MODEL_NAME: &str = "JinaEmbeddingsV2BaseCode";
-const EMBEDDING_DIM: usize = 768;
+const CACHE_VERSION: u32 = 3; // Bumped: AllMiniLM default (384-dim), Jina opt-in
+const MODEL_NAME: &str = "AllMiniLML6V2"; // Default model
+const EMBEDDING_DIM: usize = 384; // Default dim (768 if Jina Code)
 
 #[derive(Serialize, Deserialize)]
 struct CacheHeader {
@@ -72,7 +72,9 @@ impl EmbeddingCache {
         let mut documents: Vec<String> = Vec::new();
 
         for node_id in graph.node_ids() {
-            let Some(node) = graph.get_node(node_id) else { continue };
+            let Some(node) = graph.get_node(node_id) else {
+                continue;
+            };
             if node.node_type != NodeType::File {
                 continue;
             }
@@ -113,9 +115,7 @@ impl EmbeddingCache {
         let data: CacheData = bincode::deserialize(&bytes).ok()?;
 
         // Validate header (version + graph hash, model-flexible for fallback)
-        if data.header.version != CACHE_VERSION
-            || data.header.graph_hash != expected_graph_hash
-        {
+        if data.header.version != CACHE_VERSION || data.header.graph_hash != expected_graph_hash {
             return None; // Stale or incompatible cache
         }
 

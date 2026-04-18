@@ -3,7 +3,6 @@
 /// Provides O(1) membership checking for files currently in context, and
 /// detects which community contains a missing file so the pipeline can
 /// suggest an expansion.
-
 use std::collections::{HashMap, HashSet};
 
 use theo_engine_graph::cluster::Community;
@@ -75,7 +74,11 @@ impl ContextMembership {
         // Two communities are neighbors if any node in one has an edge to any node in the other.
         let node_to_community: HashMap<&str, &str> = communities
             .iter()
-            .flat_map(|comm| comm.node_ids.iter().map(move |nid| (nid.as_str(), comm.id.as_str())))
+            .flat_map(|comm| {
+                comm.node_ids
+                    .iter()
+                    .map(move |nid| (nid.as_str(), comm.id.as_str()))
+            })
             .collect();
 
         let mut neighbor_communities: HashSet<String> = HashSet::new();

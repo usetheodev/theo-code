@@ -98,13 +98,17 @@ class EditRecord:
     file_path: str
     old_text: str
     new_text: str
+    offset: int = -1  # Character offset where new_text was placed (-1 = unknown)
     timestamp: float = 0.0
 
 
 class CheckpointManager:
     """Undo-stack based checkpoints. Zero dependencies — no git, no copies.
 
-    Tracks every edit_file call. Rollback = apply edits in reverse order.
+    Tracks every edit_file call WITH the offset where the edit was applied.
+    Rollback uses the offset to replace the correct occurrence, even when
+    the same text appears multiple times in the file.
+
     Each task gets its own edit stack. Rolling back a task undoes ONLY
     that task's edits, preserving edits from other tasks.
     """
@@ -122,37 +126,65 @@ class CheckpointManager:
         return task_id
 
     def record_edit(self, file_path: str, old_text: str, new_text: str):
-        """Record an edit for the current task."""
-        if self.current_task and self.current_task in self.task_edits:
-            self.task_edits[self.current_task].append(EditRecord(
-                file_path=file_path,
-                old_text=old_text,
-                new_text=new_text,
-                timestamp=time.time(),
-            ))
+        """Record an edit for the current task.
+
+        Reads the file to find the offset of new_text so rollback
+        can target the exact occurrence.
+        """
+        if not (self.current_task and self.current_task in self.task_edits):
+            return
+
+        # Find the offset of new_text in the current file content
+        offset = -1
+        full_path = os.path.join(self.repo_path, file_path)
+        try:
+            content = open(full_path).read()
+            offset = content.find(new_text)
+        except Exception:
+            pass
+
+        self.task_edits[self.current_task].append(EditRecord(
+            file_path=file_path,
+            old_text=old_text,
+            new_text=new_text,
+            offset=offset,
+            timestamp=time.time(),
+        ))
 
     def rollback(self, task_id: str) -> bool:
-        """Undo all edits made during a task, in reverse order."""
+        """Undo all edits made during a task, in reverse order.
+
+        Uses stored offsets to replace the correct occurrence when the
+        same text appears multiple times in a file.
+        """
         edits = self.task_edits.get(task_id, [])
         if not edits:
             return True
 
         success = True
-        # Apply edits in REVERSE order
         for edit in reversed(edits):
             full_path = os.path.join(self.repo_path, edit.file_path)
             try:
                 content = open(full_path).read()
-                if edit.new_text in content:
-                    # Undo: replace new_text back with old_text
-                    content = content.replace(edit.new_text, edit.old_text, 1)
+                if edit.new_text not in content:
+                    success = False
+                    continue
+
+                # Use offset for precise rollback when available
+                idx = content.find(edit.new_text, max(0, edit.offset)) if edit.offset >= 0 else -1
+
+                if idx == -1:
+                    # Offset stale (file changed) — find first occurrence
+                    idx = content.find(edit.new_text)
+
+                if idx >= 0:
+                    content = content[:idx] + edit.old_text + content[idx + len(edit.new_text):]
                     open(full_path, "w").write(content)
                 else:
-                    success = False  # Can't undo — file was modified further
+                    success = False
             except Exception:
                 success = False
 
-        # Clear the edit history for this task
         self.task_edits[task_id] = []
         return success
 

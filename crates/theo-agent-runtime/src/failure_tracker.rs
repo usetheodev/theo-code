@@ -52,7 +52,11 @@ impl FailurePatternTracker {
 
     /// Record a failure occurrence.
     pub fn record(&mut self, pattern_name: &str) {
-        let entry = self.data.patterns.entry(pattern_name.to_string()).or_default();
+        let entry = self
+            .data
+            .patterns
+            .entry(pattern_name.to_string())
+            .or_default();
         entry.count += 1;
         entry.last_seen = unix_now();
     }
@@ -80,7 +84,11 @@ impl FailurePatternTracker {
 
     /// Get the count for a specific pattern.
     pub fn count(&self, pattern_name: &str) -> u32 {
-        self.data.patterns.get(pattern_name).map(|e| e.count).unwrap_or(0)
+        self.data
+            .patterns
+            .get(pattern_name)
+            .map(|e| e.count)
+            .unwrap_or(0)
     }
 
     /// Get all patterns that have exceeded the threshold.

@@ -51,7 +51,10 @@ mod tests {
         // Code has many short tokens — chars/4 should dominate
         let code = "fn f(x: i32) -> bool { x > 0 }";
         let tokens = estimate_tokens(code);
-        assert!(tokens >= 5, "Expected at least 5 tokens for short code, got {tokens}");
+        assert!(
+            tokens >= 5,
+            "Expected at least 5 tokens for short code, got {tokens}"
+        );
     }
 
     #[test]
@@ -69,7 +72,10 @@ mod tests {
         // JSON has lots of punctuation — chars/4 should dominate
         let json = r#"{"key":"value","nested":{"a":1,"b":2}}"#;
         let tokens = estimate_tokens(json);
-        assert!(tokens >= 5, "Expected at least 5 tokens for JSON, got {tokens}");
+        assert!(
+            tokens >= 5,
+            "Expected at least 5 tokens for JSON, got {tokens}"
+        );
     }
 
     #[test]

@@ -2,20 +2,24 @@ pub mod agent_run;
 pub mod budget;
 pub mod capability;
 pub mod code_intel;
+pub mod episode;
 pub mod error;
 pub mod event;
+pub mod evolution;
 pub mod graph_context;
 pub mod identifiers;
+pub mod permission;
 pub mod priority;
 pub mod retry_policy;
-pub mod permission;
 pub mod sandbox;
 pub mod session;
 pub mod task;
-pub mod tool;
 pub mod tokens;
+pub mod tool;
 pub mod tool_call;
 pub mod truncate;
+pub mod wiki_backend;
+pub mod working_set;
 
 /// Trait for state machines with validated transitions.
 pub trait StateMachine: Copy + PartialEq + std::fmt::Debug {
@@ -51,42 +55,78 @@ mod property_tests {
     /// P1: Every terminal state rejects all transitions.
     #[test]
     fn p1_terminal_states_reject_all_transitions() {
-        let task_terminals = [TaskState::Completed, TaskState::Failed, TaskState::Cancelled];
+        let task_terminals = [
+            TaskState::Completed,
+            TaskState::Failed,
+            TaskState::Cancelled,
+        ];
         let task_all = [
-            TaskState::Pending, TaskState::Ready, TaskState::Running,
-            TaskState::WaitingTool, TaskState::WaitingInput, TaskState::Blocked,
-            TaskState::Completed, TaskState::Failed, TaskState::Cancelled,
+            TaskState::Pending,
+            TaskState::Ready,
+            TaskState::Running,
+            TaskState::WaitingTool,
+            TaskState::WaitingInput,
+            TaskState::Blocked,
+            TaskState::Completed,
+            TaskState::Failed,
+            TaskState::Cancelled,
         ];
         for t in &task_terminals {
             for target in &task_all {
-                assert!(!t.can_transition_to(*target), "TaskState::{:?} → {:?}", t, target);
+                assert!(
+                    !t.can_transition_to(*target),
+                    "TaskState::{:?} → {:?}",
+                    t,
+                    target
+                );
             }
         }
 
         let tc_terminals = [
-            ToolCallState::Succeeded, ToolCallState::Failed,
-            ToolCallState::Timeout, ToolCallState::Cancelled,
+            ToolCallState::Succeeded,
+            ToolCallState::Failed,
+            ToolCallState::Timeout,
+            ToolCallState::Cancelled,
         ];
         let tc_all = [
-            ToolCallState::Queued, ToolCallState::Dispatched, ToolCallState::Running,
-            ToolCallState::Succeeded, ToolCallState::Failed,
-            ToolCallState::Timeout, ToolCallState::Cancelled,
+            ToolCallState::Queued,
+            ToolCallState::Dispatched,
+            ToolCallState::Running,
+            ToolCallState::Succeeded,
+            ToolCallState::Failed,
+            ToolCallState::Timeout,
+            ToolCallState::Cancelled,
         ];
         for t in &tc_terminals {
             for target in &tc_all {
-                assert!(!t.can_transition_to(*target), "ToolCallState::{:?} → {:?}", t, target);
+                assert!(
+                    !t.can_transition_to(*target),
+                    "ToolCallState::{:?} → {:?}",
+                    t,
+                    target
+                );
             }
         }
 
         let run_terminals = [RunState::Converged, RunState::Aborted];
         let run_all = [
-            RunState::Initialized, RunState::Planning, RunState::Executing,
-            RunState::Evaluating, RunState::Converged, RunState::Replanning,
-            RunState::Waiting, RunState::Aborted,
+            RunState::Initialized,
+            RunState::Planning,
+            RunState::Executing,
+            RunState::Evaluating,
+            RunState::Converged,
+            RunState::Replanning,
+            RunState::Waiting,
+            RunState::Aborted,
         ];
         for t in &run_terminals {
             for target in &run_all {
-                assert!(!t.can_transition_to(*target), "RunState::{:?} → {:?}", t, target);
+                assert!(
+                    !t.can_transition_to(*target),
+                    "RunState::{:?} → {:?}",
+                    t,
+                    target
+                );
             }
         }
     }
@@ -95,13 +135,23 @@ mod property_tests {
     #[test]
     fn p2_non_terminal_states_have_at_least_one_valid_transition() {
         let task_non_terminals = [
-            TaskState::Pending, TaskState::Ready, TaskState::Running,
-            TaskState::WaitingTool, TaskState::WaitingInput, TaskState::Blocked,
+            TaskState::Pending,
+            TaskState::Ready,
+            TaskState::Running,
+            TaskState::WaitingTool,
+            TaskState::WaitingInput,
+            TaskState::Blocked,
         ];
         let task_all = [
-            TaskState::Pending, TaskState::Ready, TaskState::Running,
-            TaskState::WaitingTool, TaskState::WaitingInput, TaskState::Blocked,
-            TaskState::Completed, TaskState::Failed, TaskState::Cancelled,
+            TaskState::Pending,
+            TaskState::Ready,
+            TaskState::Running,
+            TaskState::WaitingTool,
+            TaskState::WaitingInput,
+            TaskState::Blocked,
+            TaskState::Completed,
+            TaskState::Failed,
+            TaskState::Cancelled,
         ];
         for s in &task_non_terminals {
             let has_valid = task_all.iter().any(|t| s.can_transition_to(*t));
@@ -109,12 +159,18 @@ mod property_tests {
         }
 
         let tc_non_terminals = [
-            ToolCallState::Queued, ToolCallState::Dispatched, ToolCallState::Running,
+            ToolCallState::Queued,
+            ToolCallState::Dispatched,
+            ToolCallState::Running,
         ];
         let tc_all = [
-            ToolCallState::Queued, ToolCallState::Dispatched, ToolCallState::Running,
-            ToolCallState::Succeeded, ToolCallState::Failed,
-            ToolCallState::Timeout, ToolCallState::Cancelled,
+            ToolCallState::Queued,
+            ToolCallState::Dispatched,
+            ToolCallState::Running,
+            ToolCallState::Succeeded,
+            ToolCallState::Failed,
+            ToolCallState::Timeout,
+            ToolCallState::Cancelled,
         ];
         for s in &tc_non_terminals {
             let has_valid = tc_all.iter().any(|t| s.can_transition_to(*t));
@@ -122,13 +178,22 @@ mod property_tests {
         }
 
         let run_non_terminals = [
-            RunState::Initialized, RunState::Planning, RunState::Executing,
-            RunState::Evaluating, RunState::Replanning, RunState::Waiting,
+            RunState::Initialized,
+            RunState::Planning,
+            RunState::Executing,
+            RunState::Evaluating,
+            RunState::Replanning,
+            RunState::Waiting,
         ];
         let run_all = [
-            RunState::Initialized, RunState::Planning, RunState::Executing,
-            RunState::Evaluating, RunState::Converged, RunState::Replanning,
-            RunState::Waiting, RunState::Aborted,
+            RunState::Initialized,
+            RunState::Planning,
+            RunState::Executing,
+            RunState::Evaluating,
+            RunState::Converged,
+            RunState::Replanning,
+            RunState::Waiting,
+            RunState::Aborted,
         ];
         for s in &run_non_terminals {
             let has_valid = run_all.iter().any(|t| s.can_transition_to(*t));
@@ -173,7 +238,15 @@ mod property_tests {
         let mut state = TaskState::Completed;
         let err = transition(&mut state, TaskState::Running).unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("Completed"), "error should contain 'from' state: {}", msg);
-        assert!(msg.contains("Running"), "error should contain 'to' state: {}", msg);
+        assert!(
+            msg.contains("Completed"),
+            "error should contain 'from' state: {}",
+            msg
+        );
+        assert!(
+            msg.contains("Running"),
+            "error should contain 'to' state: {}",
+            msg
+        );
     }
 }

@@ -180,8 +180,18 @@ pub struct ProcessPolicy {
 /// Note: LD_PRELOAD and LD_LIBRARY_PATH intentionally excluded — they break
 /// sandbox isolation by allowing preloading of arbitrary shared libraries.
 pub const DEFAULT_ALLOWED_ENV_VARS: &[&str] = &[
-    "PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "TERM", "SHELL",
-    "TMPDIR", "TMP", "TEMP", "XDG_RUNTIME_DIR",
+    "PATH",
+    "HOME",
+    "USER",
+    "LOGNAME",
+    "LANG",
+    "LC_ALL",
+    "TERM",
+    "SHELL",
+    "TMPDIR",
+    "TMP",
+    "TEMP",
+    "XDG_RUNTIME_DIR",
 ];
 
 /// Environment variable prefixes that are ALWAYS stripped.
@@ -209,7 +219,10 @@ impl Default for ProcessPolicy {
             max_memory_bytes: 512 * 1024 * 1024, // 512 MB
             max_cpu_seconds: 120,
             max_file_size_bytes: 100 * 1024 * 1024, // 100 MB
-            allowed_env_vars: DEFAULT_ALLOWED_ENV_VARS.iter().map(|s| s.to_string()).collect(),
+            allowed_env_vars: DEFAULT_ALLOWED_ENV_VARS
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
         }
     }
 }
@@ -312,7 +325,12 @@ pub struct SandboxResult {
 
 impl SandboxResult {
     /// Create a successful result (no violations).
-    pub fn success(exit_code: i32, stdout: String, stderr: String, audit_entries: Vec<AuditEntry>) -> Self {
+    pub fn success(
+        exit_code: i32,
+        stdout: String,
+        stderr: String,
+        audit_entries: Vec<AuditEntry>,
+    ) -> Self {
         Self {
             success: true,
             exit_code,
@@ -381,27 +399,44 @@ pub enum SandboxViolation {
     },
 
     /// Attempted to leak an environment variable.
-    EnvironmentLeak {
-        var_name: String,
-    },
+    EnvironmentLeak { var_name: String },
 
     /// Sandbox is unavailable on this platform.
-    Unavailable {
-        reason: String,
-    },
+    Unavailable { reason: String },
 }
 
 impl std::fmt::Display for SandboxViolation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::FilesystemAccess { path, operation, denied_by } => {
-                write!(f, "filesystem {operation} denied on '{path}' by {denied_by}")
+            Self::FilesystemAccess {
+                path,
+                operation,
+                denied_by,
+            } => {
+                write!(
+                    f,
+                    "filesystem {operation} denied on '{path}' by {denied_by}"
+                )
             }
-            Self::NetworkAccess { address, port, denied_by } => {
-                write!(f, "network access to {address}:{port} denied by {denied_by}")
+            Self::NetworkAccess {
+                address,
+                port,
+                denied_by,
+            } => {
+                write!(
+                    f,
+                    "network access to {address}:{port} denied by {denied_by}"
+                )
             }
-            Self::ResourceExceeded { resource, limit, attempted } => {
-                write!(f, "resource '{resource}' exceeded: limit={limit}, attempted={attempted}")
+            Self::ResourceExceeded {
+                resource,
+                limit,
+                attempted,
+            } => {
+                write!(
+                    f,
+                    "resource '{resource}' exceeded: limit={limit}, attempted={attempted}"
+                )
             }
             Self::EnvironmentLeak { var_name } => {
                 write!(f, "environment variable '{var_name}' leaked")
@@ -559,7 +594,10 @@ mod tests {
         let deserialized: SandboxConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(config.enabled, deserialized.enabled);
         assert_eq!(config.fail_if_unavailable, deserialized.fail_if_unavailable);
-        assert_eq!(config.network.allow_network, deserialized.network.allow_network);
+        assert_eq!(
+            config.network.allow_network,
+            deserialized.network.allow_network
+        );
     }
 
     #[test]

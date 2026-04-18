@@ -19,8 +19,8 @@ use std::path::Path;
 use tree_sitter::StreamingIterator;
 use tree_sitter::{Node, Tree};
 
-use crate::types::{Symbol, SymbolKind};
 use crate::tree_sitter::SupportedLanguage;
+use crate::types::{Symbol, SymbolKind};
 
 use super::common::anchor_from_node;
 use super::language_behavior::behavior_for;
@@ -125,7 +125,8 @@ pub fn extract_symbols(
     if tree.root_node().has_error() {
         log::debug!(
             "lang={}, file={}: tree-sitter produced parse errors — grammar may be outdated for this language version",
-            language, file_path.display()
+            language,
+            file_path.display()
         );
     }
 
@@ -140,7 +141,8 @@ pub fn extract_symbols(
         Err(e) => {
             log::debug!(
                 "lang={}, error={}: failed to compile symbol query, returning empty symbols",
-                language, e
+                language,
+                e
             );
             return Vec::new();
         }
@@ -197,7 +199,9 @@ pub fn extract_symbols(
     if symbols.is_empty() && source.lines().count() > 10 {
         log::debug!(
             "lang={}, file={}, lines={}: zero symbols extracted from non-trivial file — check grammar compatibility",
-            language, file_path.display(), source.lines().count()
+            language,
+            file_path.display(),
+            source.lines().count()
         );
     }
 
@@ -256,8 +260,8 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
-    use crate::types::Visibility;
     use crate::tree_sitter;
+    use crate::types::Visibility;
 
     fn symbols_for(source: &str, lang: SupportedLanguage, filename: &str) -> Vec<Symbol> {
         let path = PathBuf::from(filename);
@@ -289,15 +293,21 @@ class UserService {
         );
 
         assert_eq!(symbols.len(), 3, "1 class + 2 methods");
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "UserService" && s.kind == SymbolKind::Class));
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "getUser" && s.kind == SymbolKind::Method));
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "deleteUser" && s.kind == SymbolKind::Method));
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "UserService" && s.kind == SymbolKind::Class)
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "getUser" && s.kind == SymbolKind::Method)
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "deleteUser" && s.kind == SymbolKind::Method)
+        );
     }
 
     #[test]
@@ -322,15 +332,21 @@ enum Status {
             "types.ts",
         );
 
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "User" && s.kind == SymbolKind::Interface));
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "createUser" && s.kind == SymbolKind::Function));
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "Status" && s.kind == SymbolKind::Enum));
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "User" && s.kind == SymbolKind::Interface)
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "createUser" && s.kind == SymbolKind::Function)
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "Status" && s.kind == SymbolKind::Enum)
+        );
     }
 
     #[test]
@@ -366,19 +382,27 @@ class UserService:
             "service.py",
         );
 
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "UserService" && s.kind == SymbolKind::Class));
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "UserService" && s.kind == SymbolKind::Class)
+        );
         // Python functions inside a class are still function_definition nodes
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "__init__" && s.kind == SymbolKind::Function));
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "get_user" && s.kind == SymbolKind::Function));
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "create_user" && s.kind == SymbolKind::Function));
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "__init__" && s.kind == SymbolKind::Function)
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "get_user" && s.kind == SymbolKind::Function)
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "create_user" && s.kind == SymbolKind::Function)
+        );
         assert_eq!(symbols.len(), 4, "1 class + 3 functions");
     }
 
@@ -401,15 +425,21 @@ public class OrderService {
             "OrderService.java",
         );
 
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "OrderService" && s.kind == SymbolKind::Class));
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "createOrder" && s.kind == SymbolKind::Method));
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "cancelOrder" && s.kind == SymbolKind::Method));
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "OrderService" && s.kind == SymbolKind::Class)
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "createOrder" && s.kind == SymbolKind::Method)
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "cancelOrder" && s.kind == SymbolKind::Method)
+        );
         assert_eq!(symbols.len(), 3);
     }
 
@@ -431,12 +461,16 @@ public enum PaymentStatus {
             "Payment.java",
         );
 
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "PaymentGateway" && s.kind == SymbolKind::Interface));
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "PaymentStatus" && s.kind == SymbolKind::Enum));
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "PaymentGateway" && s.kind == SymbolKind::Interface)
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "PaymentStatus" && s.kind == SymbolKind::Enum)
+        );
     }
 
     // --- Go ---
@@ -459,12 +493,16 @@ func (s *Server) Start(port int) error {
             "main.go",
         );
 
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "main" && s.kind == SymbolKind::Function));
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "Start" && s.kind == SymbolKind::Method));
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "main" && s.kind == SymbolKind::Function)
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "Start" && s.kind == SymbolKind::Method)
+        );
     }
 
     // --- C# ---
@@ -487,15 +525,21 @@ public class UsersController : ControllerBase {
             "UsersController.cs",
         );
 
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "UsersController" && s.kind == SymbolKind::Class));
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "GetAll" && s.kind == SymbolKind::Method));
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "Create" && s.kind == SymbolKind::Method));
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "UsersController" && s.kind == SymbolKind::Class)
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "GetAll" && s.kind == SymbolKind::Method)
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "Create" && s.kind == SymbolKind::Method)
+        );
     }
 
     #[test]
@@ -555,18 +599,26 @@ fn helper() -> bool {
             "lib.rs",
         );
 
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "Config" && s.kind == SymbolKind::Struct));
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "AppError" && s.kind == SymbolKind::Enum));
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "Repository" && s.kind == SymbolKind::Trait));
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "helper" && s.kind == SymbolKind::Function));
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "Config" && s.kind == SymbolKind::Struct)
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "AppError" && s.kind == SymbolKind::Enum)
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "Repository" && s.kind == SymbolKind::Trait)
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "helper" && s.kind == SymbolKind::Function)
+        );
         assert_eq!(symbols.len(), 4);
     }
 
@@ -590,15 +642,21 @@ class UserController {
             "UserController.php",
         );
 
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "UserController" && s.kind == SymbolKind::Class));
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "index" && s.kind == SymbolKind::Method));
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "store" && s.kind == SymbolKind::Method));
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "UserController" && s.kind == SymbolKind::Class)
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "index" && s.kind == SymbolKind::Method)
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "store" && s.kind == SymbolKind::Method)
+        );
     }
 
     // --- Ruby ---
@@ -623,18 +681,26 @@ end
             "session.rb",
         );
 
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "Authentication" && s.kind == SymbolKind::Module));
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "SessionManager" && s.kind == SymbolKind::Class));
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "create_session" && s.kind == SymbolKind::Method));
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "destroy_session" && s.kind == SymbolKind::Method));
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "Authentication" && s.kind == SymbolKind::Module)
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "SessionManager" && s.kind == SymbolKind::Class)
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "create_session" && s.kind == SymbolKind::Method)
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "destroy_session" && s.kind == SymbolKind::Method)
+        );
     }
 
     // --- Edge cases ---
@@ -669,15 +735,21 @@ function middleware(req, res, next) {
             "router.js",
         );
 
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "Router" && s.kind == SymbolKind::Class));
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "handle" && s.kind == SymbolKind::Method));
-        assert!(symbols
-            .iter()
-            .any(|s| s.name == "middleware" && s.kind == SymbolKind::Function));
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "Router" && s.kind == SymbolKind::Class)
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "handle" && s.kind == SymbolKind::Method)
+        );
+        assert!(
+            symbols
+                .iter()
+                .any(|s| s.name == "middleware" && s.kind == SymbolKind::Function)
+        );
     }
 
     // =======================================================================
@@ -1026,11 +1098,12 @@ def process(data):
         );
         let sym = symbols.iter().find(|s| s.name == "process").unwrap();
         assert!(sym.doc.is_some(), "should extract docstring");
-        assert!(sym
-            .doc
-            .as_deref()
-            .unwrap()
-            .contains("Process the incoming data"));
+        assert!(
+            sym.doc
+                .as_deref()
+                .unwrap()
+                .contains("Process the incoming data")
+        );
     }
 
     #[test]
