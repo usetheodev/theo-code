@@ -1,0 +1,185 @@
+{
+  "schema": "theo.swe.v1",
+  "dataset": "lite",
+  "total": 5,
+  "with_patch": 5,
+  "errors": 0,
+  "results": [
+    {
+      "instance_id": "django__django-10914",
+      "repo": "django/django",
+      "model_patch": "diff --git a/django/conf/global_settings.py b/django/conf/global_settings.py\nindex acee9887d2..bdeec80610 100644\n--- a/django/conf/global_settings.py\n+++ b/django/conf/global_settings.py\n@@ -304,7 +304,7 @@ FILE_UPLOAD_TEMP_DIR = None\n \n # The numeric mode to set newly-uploaded files to. The value should be a mode\n # you'd pass directly to os.chmod; see https://docs.python.org/library/os.html#files-and-directories.\n-FILE_UPLOAD_PERMISSIONS = None\n+FILE_UPLOAD_PERMISSIONS = 0o644\n \n # The numeric mode to assign to newly-created directories, when uploading files.\n # The value should be a mode as you'd pass to os.chmod;\n",
+      "model_name_or_path": "theo-code",
+      "duration_secs": 93.5,
+      "error": null,
+      "headless": {
+        "duration_ms": 40858,
+        "files_edited": [
+          "django/conf/global_settings.py"
+        ],
+        "iterations": 13,
+        "llm": {
+          "calls": 13,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.3-codex",
+        "provider": "ChatGPT Codex (OAuth)",
+        "schema": "theo.headless.v1",
+        "success": true,
+        "summary": "Implemented a minimal one-line fix for the failing behavior by changing the default setting in `django/conf/global_settings.py`:\n- `FILE_UPLOAD_PERMISSIONS` from `None` to `0o644`.\n\nVerified the updated section in the file now reads `FILE_UPLOAD_PERMISSIONS = 0o644`.",
+        "tokens": {
+          "input": 125266,
+          "output": 1285,
+          "total": 126551
+        },
+        "tools": {
+          "success": 12,
+          "total": 12
+        }
+      },
+      "has_patch": true
+    },
+    {
+      "instance_id": "django__django-10924",
+      "repo": "django/django",
+      "model_patch": "diff --git a/django/forms/fields.py b/django/forms/fields.py\nindex a977256525..1016d461a2 100644\n--- a/django/forms/fields.py\n+++ b/django/forms/fields.py\n@@ -1078,6 +1078,8 @@ class MultiValueField(Field):\n class FilePathField(ChoiceField):\n     def __init__(self, path, *, match=None, recursive=False, allow_files=True,\n                  allow_folders=False, **kwargs):\n+        if callable(path):\n+            path = path()\n         self.path, self.match, self.recursive = path, match, recursive\n         self.allow_files, self.allow_folders = allow_files, allow_folders\n         super().__init__(choices=(), **kwargs)\n",
+      "model_name_or_path": "theo-code",
+      "duration_secs": 141.4,
+      "error": null,
+      "headless": {
+        "duration_ms": 96232,
+        "files_edited": [
+          "django/forms/fields.py"
+        ],
+        "iterations": 25,
+        "llm": {
+          "calls": 25,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.3-codex",
+        "provider": "ChatGPT Codex (OAuth)",
+        "schema": "theo.headless.v1",
+        "success": true,
+        "summary": "Implemented a minimal fix for callable `path` support in `FilePathField` forms handling.\n\n### Changed\n- **File:** `django/forms/fields.py`\n- **Class:** `FilePathField`\n- **Method:** `__init__`\n- Added callable evaluation at the start:\n  - `if callable(path): path = path()`\n\n### Why this fixes the bug\n`models.FilePathField(path=some_callable)` already preserves the callable for migration deconstruction. The failure occurred when the form field was instantiated and attempted filesystem operations (`os.scandir`, `str.replace`) with a function object instead of a path string. Evaluating callable `path` in the form field initializer ensures those operations receive a concrete path, fixing the `TypeError` behind `test_callable_path`.",
+        "tokens": {
+          "input": 299870,
+          "output": 3167,
+          "total": 303037
+        },
+        "tools": {
+          "success": 23,
+          "total": 31
+        }
+      },
+      "has_patch": true
+    },
+    {
+      "instance_id": "django__django-11001",
+      "repo": "django/django",
+      "model_patch": "diff --git a/django/db/models/sql/compiler.py b/django/db/models/sql/compiler.py\nindex 7649c39262..60073295ee 100644\n--- a/django/db/models/sql/compiler.py\n+++ b/django/db/models/sql/compiler.py\n@@ -353,7 +353,7 @@ class SQLCompiler:\n             # not taken into account so we strip it. When this entire method\n             # is refactored into expressions, then we can check each part as we\n             # generate it.\n-            without_ordering = self.ordering_parts.search(sql).group(1)\n+            without_ordering = self.ordering_parts.search(' '.join(sql.splitlines())).group(1)\n             params_hash = make_hashable(params)\n             if (without_ordering, params_hash) in seen:\n                 continue\n@@ -366,7 +366,7 @@ class SQLCompiler:\n         if self.query.distinct and not self.query.distinct_fields:\n             select_sql = [t[1] for t in select]\n             for expr, (sql, params, is_ref) in order_by:\n-                without_ordering = self.ordering_parts.search(sql).group(1)\n+                without_ordering = self.ordering_parts.search(' '.join(sql.splitlines())).group(1)\n                 if not is_ref and (without_ordering, params) not in select_sql:\n                     extra_select.append((expr, (without_ordering, params), None))\n         return extra_select\n",
+      "model_name_or_path": "theo-code",
+      "duration_secs": 133.7,
+      "error": null,
+      "headless": {
+        "duration_ms": 75976,
+        "files_edited": [
+          "django/db/models/sql/compiler.py"
+        ],
+        "iterations": 18,
+        "llm": {
+          "calls": 18,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.3-codex",
+        "provider": "ChatGPT Codex (OAuth)",
+        "schema": "theo.headless.v1",
+        "success": true,
+        "summary": "Implemented a minimal fix for multiline ORDER BY SQL deduplication in django/db/models/sql/compiler.py. In SQLCompiler.get_order_by() and get_extra_select(), ORDER BY SQL is now normalized to a single line before applying ordering_parts regex: self.ordering_parts.search(' '.join(sql.splitlines())).group(1). This prevents incorrect duplicate detection when RawSQL ORDER BY expressions span multiple lines and share similar trailing lines.",
+        "tokens": {
+          "input": 147252,
+          "output": 2439,
+          "total": 149691
+        },
+        "tools": {
+          "success": 20,
+          "total": 22
+        }
+      },
+      "has_patch": true
+    },
+    {
+      "instance_id": "django__django-11019",
+      "repo": "django/django",
+      "model_patch": "diff --git a/django/forms/widgets.py b/django/forms/widgets.py\nindex 02aa32b207..35efb8000d 100644\n--- a/django/forms/widgets.py\n+++ b/django/forms/widgets.py\n@@ -6,16 +6,19 @@ import copy\n import datetime\n import re\n import warnings\n+from collections import defaultdict\n from itertools import chain\n \n from django.conf import settings\n from django.forms.utils import to_current_timezone\n from django.templatetags.static import static\n from django.utils import datetime_safe, formats\n+from django.utils.datastructures import OrderedSet\n from django.utils.dates import MONTHS\n from django.utils.formats import get_format\n from django.utils.html import format_html, html_safe\n from django.utils.safestring import mark_safe\n+from django.utils.topological_sort import CyclicDependencyError, stable_topological_sort\n from django.utils.translation import gettext_lazy as _\n \n from .renderers import get_default_renderer\n@@ -59,22 +62,15 @@ class Media:\n \n     @property\n     def _css(self):\n-        css = self._css_lists[0]\n-        # filter(None, ...) avoids calling merge with empty dicts.\n-        for obj in filter(None, self._css_lists[1:]):\n-            css = {\n-                medium: self.merge(css.get(medium, []), obj.get(medium, []))\n-                for medium in css.keys() | obj.keys()\n-            }\n-        return css\n+        css = defaultdict(list)\n+        for css_list in self._css_lists:\n+            for medium, sublist in css_list.items():\n+                css[medium].append(sublist)\n+        return {medium: self.merge(*lists) for medium, lists in css.items()}\n \n     @property\n     def _js(self):\n-        js = self._js_lists[0]\n-        # filter(None, ...) avoids calling merge() with empty lists.\n-        for obj in filter(None, self._js_lists[1:]):\n-            js = self.merge(js, obj)\n-        return js\n+        return self.merge(*self._js_lists)\n \n     def render(self):\n         return mark_safe('\\n'.join(chain.from_iterable(getattr(self, 'render_' + name)() for name in MEDIA_TYPES)))\n@@ -115,44 +111,49 @@ class Media:\n         raise KeyError('Unknown media type \"%s\"' % name)\n \n     @staticmethod\n-    def merge(list_1, list_2):\n+    def merge(*lists):\n         \"\"\"\n-        Merge two lists while trying to keep the relative order of the elements.\n-        Warn if the lists have the same two elements in a different relative\n-        order.\n+        Merge lists while trying to keep the relative order of the elements.\n+        Warn if the lists have the same elements in a different relative order.\n \n         For static assets it can be important to have them included in the DOM\n         in a certain order. In JavaScript you may not be able to reference a\n         global or in CSS you might want to override a style.\n         \"\"\"\n-        # Start with a copy of list_1.\n-        combined_list = list(list_1)\n-        last_insert_index = len(list_1)\n-        # Walk list_2 in reverse, inserting each element into combined_list if\n-        # it doesn't already exist.\n-        for path in reversed(list_2):\n-            try:\n-                # Does path already exist in the list?\n-                index = combined_list.index(path)\n-            except ValueError:\n-                # Add path to combined_list since it doesn't exist.\n-                combined_list.insert(last_insert_index, path)\n-            else:\n-                if index > last_insert_index:\n-                    warnings.warn(\n-                        'Detected duplicate Media files in an opposite order:\\n'\n-                        '%s\\n%s' % (combined_list[last_insert_index], combined_list[index]),\n-                        MediaOrderConflictWarning,\n-                    )\n-                # path already exists in the list. Update last_insert_index so\n-                # that the following elements are inserted in front of this one.\n-                last_insert_index = index\n-        return combined_list\n+        dependency_graph = defaultdict(set)\n+        all_items = OrderedSet()\n+        for list_ in filter(None, lists):\n+            head = list_[0]\n+            # The first items depend on nothing but have to be part of the\n+            # dependency graph to be included in the result.\n+            dependency_graph.setdefault(head, set())\n+            for item in list_:\n+                all_items.add(item)\n+                # No self dependencies\n+                if head != item:\n+                    dependency_graph[item].add(head)\n+                head = item\n+        try:\n+            return stable_topological_sort(all_items, dependency_graph)\n+        except CyclicDependencyError:\n+            warnings.warn(\n+                'Detected duplicate Media files in an opposite order: {}'.format(\n+                    ', '.join(repr(list_) for list_ in lists)\n+                ),\n+                MediaOrderConflictWarning,\n+            )\n+            return list(all_items)\n \n     def __add__(self, other):\n         combined = Media()\n-        combined._css_lists = self._css_lists + other._css_lists\n-        combined._js_lists = self._js_lists + other._js_lists\n+        combined._css_lists = self._css_lists[:]\n+        combined._js_lists = self._js_lists[:]\n+        for item in other._css_lists:\n+            if item and item not in self._css_lists:\n+                combined._css_lists.append(item)\n+        for item in other._js_lists:\n+            if item and item not in self._js_lists:\n+                combined._js_lists.append(item)\n         return combined\n \n \n",
+      "model_name_or_path": "theo-code",
+      "duration_secs": 239.0,
+      "error": null,
+      "headless": {
+        "duration_ms": 194997,
+        "files_edited": [
+          "django/forms/widgets.py"
+        ],
+        "iterations": 28,
+        "llm": {
+          "calls": 28,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.3-codex",
+        "provider": "ChatGPT Codex (OAuth)",
+        "schema": "theo.headless.v1",
+        "success": true,
+        "summary": "Implemented a minimal, targeted fix in `django/forms/widgets.py` to avoid spurious 3-way media ordering conflicts by merging all media sublists together (instead of sequential pairwise merging), while preserving declared order constraints and deduplication semantics.\n\n### What changed\n- Switched media resolution to merge all pending lists at once:\n  - `_js` now returns `self.merge(*self._js_lists)`\n  - `_css` now groups per media type and merges all sublists per type via `self.merge(*lists)`\n- Replaced pairwise `Media.merge(list_1, list_2)` algorithm with a dependency-graph-based multi-list merge:\n  - Builds dependency edges from each sublist\u2019s local ordering\n  - Uses `stable_topological_sort()` to preserve first-seen order where unconstrained\n  - On cycles, emits `MediaOrderConflictWarning` and falls back to stable deduplicated order\n- Updated `Media.__add__` to avoid re-adding identical media sublists, preserving original list granularity and preventing artificial constraints from duplicated intermediate aggregates.\n- Added required imports:\n  - `defaultdict` from `collections`\n  - `OrderedSet` from `django.utils.datastructures`\n  - `CyclicDependencyError`, `stable_topological_sort` from `django.utils.topological_sort`\n\n### Why this fixes the bug\nThe original sequential merging introduced accidental ordering constraints from intermediate merged lists, which could trigger false conflict warnings and break legitimate dependencies in 3+ media object merges. Merging all original sublists at once prevents those artificial constraints and resolves the reported case correctly.\n\n### Verification performed\n- Re-read updated `Media` methods and imports to confirm consistency.\n- Ran syntax validation:\n  - `python3 -m py_compile django/forms/widgets.py` (passed).",
+        "tokens": {
+          "input": 703683,
+          "output": 7911,
+          "total": 711594
+        },
+        "tools": {
+          "success": 48,
+          "total": 52
+        }
+      },
+      "has_patch": true
+    },
+    {
+      "instance_id": "django__django-11039",
+      "repo": "django/django",
+      "model_patch": "diff --git a/django/core/management/commands/sqlmigrate.py b/django/core/management/commands/sqlmigrate.py\nindex f0b663222a..896924af44 100644\n--- a/django/core/management/commands/sqlmigrate.py\n+++ b/django/core/management/commands/sqlmigrate.py\n@@ -56,7 +56,8 @@ class Command(BaseCommand):\n         targets = [(app_label, migration.name)]\n \n         # Show begin/end around output only for atomic migrations\n-        self.output_transaction = migration.atomic\n+        # and if the database supports transactional DDL.\n+        self.output_transaction = migration.atomic and connection.features.can_rollback_ddl\n \n         # Make a plan that represents just the requested migrations and show SQL\n         # for it\n",
+      "model_name_or_path": "theo-code",
+      "duration_secs": 106.8,
+      "error": null,
+      "headless": {
+        "duration_ms": 64102,
+        "files_edited": [
+          "django/core/management/commands/sqlmigrate.py"
+        ],
+        "iterations": 17,
+        "llm": {
+          "calls": 17,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.3-codex",
+        "provider": "ChatGPT Codex (OAuth)",
+        "schema": "theo.headless.v1",
+        "success": true,
+        "summary": "Implemented a minimal fix for sqlmigrate transaction wrapping behavior in `django/core/management/commands/sqlmigrate.py`. Updated `self.output_transaction` to require both `migration.atomic` and `connection.features.can_rollback_ddl`, so BEGIN/COMMIT are only emitted when transactional DDL is supported. Verified the exact changed lines in the file.",
+        "tokens": {
+          "input": 142355,
+          "output": 1800,
+          "total": 144155
+        },
+        "tools": {
+          "success": 15,
+          "total": 18
+        }
+      },
+      "has_patch": true
+    }
+  ],
+  "timestamp": 1776286400
+}

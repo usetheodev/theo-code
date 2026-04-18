@@ -132,11 +132,13 @@ pub fn validate_command(command: &str, config: &ValidatorConfig) -> ValidationRe
     if config.check_exfil_pipes {
         for pattern in EXFIL_PIPE_PATTERNS {
             if lower.contains(pattern) {
-                return ValidationResult::Blocked(theo_domain::sandbox::SandboxViolation::FilesystemAccess {
-                    path: pattern.to_string(),
-                    operation: theo_domain::sandbox::FilesystemOp::Execute,
-                    denied_by: "command_validator: pipe-to-shell pattern blocked".to_string(),
-                });
+                return ValidationResult::Blocked(
+                    theo_domain::sandbox::SandboxViolation::FilesystemAccess {
+                        path: pattern.to_string(),
+                        operation: theo_domain::sandbox::FilesystemOp::Execute,
+                        denied_by: "command_validator: pipe-to-shell pattern blocked".to_string(),
+                    },
+                );
             }
         }
     }
@@ -156,27 +158,42 @@ mod tests {
 
     #[test]
     fn allows_cargo_build() {
-        assert_eq!(validate_command("cargo build", &default_config()), ValidationResult::Allowed);
+        assert_eq!(
+            validate_command("cargo build", &default_config()),
+            ValidationResult::Allowed
+        );
     }
 
     #[test]
     fn allows_git_status() {
-        assert_eq!(validate_command("git status", &default_config()), ValidationResult::Allowed);
+        assert_eq!(
+            validate_command("git status", &default_config()),
+            ValidationResult::Allowed
+        );
     }
 
     #[test]
     fn allows_ls_tmp() {
-        assert_eq!(validate_command("ls /tmp", &default_config()), ValidationResult::Allowed);
+        assert_eq!(
+            validate_command("ls /tmp", &default_config()),
+            ValidationResult::Allowed
+        );
     }
 
     #[test]
     fn allows_echo_foo() {
-        assert_eq!(validate_command("echo foo", &default_config()), ValidationResult::Allowed);
+        assert_eq!(
+            validate_command("echo foo", &default_config()),
+            ValidationResult::Allowed
+        );
     }
 
     #[test]
     fn allows_cat_readme() {
-        assert_eq!(validate_command("cat README.md", &default_config()), ValidationResult::Allowed);
+        assert_eq!(
+            validate_command("cat README.md", &default_config()),
+            ValidationResult::Allowed
+        );
     }
 
     // ── Dangerous commands (should block) ──────────────────────
@@ -225,7 +242,10 @@ mod tests {
 
     #[test]
     fn blocks_python_c_escape() {
-        let result = validate_command("python3 -c 'import os; os.system(\"rm -rf /\")'", &default_config());
+        let result = validate_command(
+            "python3 -c 'import os; os.system(\"rm -rf /\")'",
+            &default_config(),
+        );
         assert!(matches!(result, ValidationResult::Blocked(_)));
     }
 
@@ -245,7 +265,10 @@ mod tests {
 
     #[test]
     fn blocks_node_e() {
-        let result = validate_command("node -e 'require(\"child_process\").exec(\"ls\")'", &default_config());
+        let result = validate_command(
+            "node -e 'require(\"child_process\").exec(\"ls\")'",
+            &default_config(),
+        );
         assert!(matches!(result, ValidationResult::Blocked(_)));
     }
 
@@ -267,28 +290,43 @@ mod tests {
 
     #[test]
     fn allows_git_clean_fd() {
-        assert_eq!(validate_command("git clean -fd", &default_config()), ValidationResult::Allowed);
+        assert_eq!(
+            validate_command("git clean -fd", &default_config()),
+            ValidationResult::Allowed
+        );
     }
 
     #[test]
     fn allows_find_delete() {
-        assert_eq!(validate_command("find . -name '*.tmp' -delete", &default_config()), ValidationResult::Allowed);
+        assert_eq!(
+            validate_command("find . -name '*.tmp' -delete", &default_config()),
+            ValidationResult::Allowed
+        );
     }
 
     #[test]
     fn allows_cargo_clean() {
-        assert_eq!(validate_command("cargo clean", &default_config()), ValidationResult::Allowed);
+        assert_eq!(
+            validate_command("cargo clean", &default_config()),
+            ValidationResult::Allowed
+        );
     }
 
     #[test]
     fn allows_rm_rf_in_project_dir() {
         // rm -rf on a specific project path is NOT blocked — landlock handles this
-        assert_eq!(validate_command("rm -rf target/debug", &default_config()), ValidationResult::Allowed);
+        assert_eq!(
+            validate_command("rm -rf target/debug", &default_config()),
+            ValidationResult::Allowed
+        );
     }
 
     #[test]
     fn allows_npm_install() {
-        assert_eq!(validate_command("npm install", &default_config()), ValidationResult::Allowed);
+        assert_eq!(
+            validate_command("npm install", &default_config()),
+            ValidationResult::Allowed
+        );
     }
 
     // ── Allowlist ──────────────────────────────────────────────
@@ -300,7 +338,10 @@ mod tests {
             ..Default::default()
         };
         // This would normally be blocked, but it's in the allowlist
-        assert_eq!(validate_command("rm -rf /tmp/test", &config), ValidationResult::Allowed);
+        assert_eq!(
+            validate_command("rm -rf /tmp/test", &config),
+            ValidationResult::Allowed
+        );
     }
 
     // ── Extra denied patterns ──────────────────────────────────

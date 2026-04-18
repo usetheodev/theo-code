@@ -72,14 +72,17 @@ pub fn to_codex_body(request: &ChatRequest) -> serde_json::Value {
 
     // Convert tools
     let tools: Option<Vec<serde_json::Value>> = request.tools.as_ref().map(|tools| {
-        tools.iter().map(|t| {
-            serde_json::json!({
-                "type": "function",
-                "name": t.function.name,
-                "description": t.function.description,
-                "parameters": t.function.parameters,
+        tools
+            .iter()
+            .map(|t| {
+                serde_json::json!({
+                    "type": "function",
+                    "name": t.function.name,
+                    "description": t.function.description,
+                    "parameters": t.function.parameters,
+                })
             })
-        }).collect()
+            .collect()
     });
 
     let mut body = serde_json::json!({
@@ -118,7 +121,10 @@ pub fn from_codex_response(body: &serde_json::Value) -> Option<ChatResponse> {
     let mut tool_calls: Vec<ToolCall> = Vec::new();
 
     for item in output {
-        let item_type = item.get("type").and_then(|t| t.as_str()).unwrap_or_default();
+        let item_type = item
+            .get("type")
+            .and_then(|t| t.as_str())
+            .unwrap_or_default();
 
         match item_type {
             "message" => {
@@ -133,15 +139,27 @@ pub fn from_codex_response(body: &serde_json::Value) -> Option<ChatResponse> {
                 }
             }
             "function_call" => {
-                let id = item.get("id")
+                let id = item
+                    .get("id")
                     .or_else(|| item.get("call_id"))
                     .and_then(|i| i.as_str())
                     .unwrap_or_default()
                     .to_string();
-                let name = item.get("name").and_then(|n| n.as_str()).unwrap_or_default().to_string();
-                let arguments = item.get("arguments").map(|a| {
-                    if let Some(s) = a.as_str() { s.to_string() } else { a.to_string() }
-                }).unwrap_or_else(|| "{}".to_string());
+                let name = item
+                    .get("name")
+                    .and_then(|n| n.as_str())
+                    .unwrap_or_default()
+                    .to_string();
+                let arguments = item
+                    .get("arguments")
+                    .map(|a| {
+                        if let Some(s) = a.as_str() {
+                            s.to_string()
+                        } else {
+                            a.to_string()
+                        }
+                    })
+                    .unwrap_or_else(|| "{}".to_string());
 
                 tool_calls.push(ToolCall::new(id, name, arguments));
             }
@@ -149,15 +167,26 @@ pub fn from_codex_response(body: &serde_json::Value) -> Option<ChatResponse> {
         }
     }
 
-    let content = if content_parts.is_empty() { None } else { Some(content_parts.join("")) };
-    let tool_calls_opt = if tool_calls.is_empty() { None } else { Some(tool_calls) };
+    let content = if content_parts.is_empty() {
+        None
+    } else {
+        Some(content_parts.join(""))
+    };
+    let tool_calls_opt = if tool_calls.is_empty() {
+        None
+    } else {
+        Some(tool_calls)
+    };
 
-    let finish_reason = body.get("stop_reason").and_then(|r| r.as_str()).map(|r| match r {
-        "stop" => "stop",
-        "tool_call" | "tool_calls" => "tool_calls",
-        "max_output_tokens" | "length" => "length",
-        other => other,
-    }.to_string());
+    let finish_reason = body.get("stop_reason").and_then(|r| r.as_str()).map(|r| {
+        match r {
+            "stop" => "stop",
+            "tool_call" | "tool_calls" => "tool_calls",
+            "max_output_tokens" | "length" => "length",
+            other => other,
+        }
+        .to_string()
+    });
 
     Some(ChatResponse {
         id: body.get("id").and_then(|i| i.as_str()).map(String::from),
@@ -173,9 +202,11 @@ pub fn from_codex_response(body: &serde_json::Value) -> Option<ChatResponse> {
         usage: body.get("usage").and_then(|u| {
             Some(Usage {
                 prompt_tokens: u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
-                completion_tokens: u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
+                completion_tokens: u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0)
+                    as u32,
                 total_tokens: (u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0)
-                    + u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0)) as u32,
+                    + u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0))
+                    as u32,
             })
         }),
     })
@@ -205,31 +236,55 @@ pub fn from_codex_stream(stream_body: &str) -> Option<ChatResponse> {
         let event_line = lines.iter().find(|l| l.starts_with("event: "));
         let data_line = lines.iter().find(|l| l.starts_with("data: "));
 
-        let Some(event) = event_line.and_then(|l| l.strip_prefix("event: ")) else { continue };
-        let Some(data) = data_line.and_then(|l| l.strip_prefix("data: ")) else { continue };
+        let Some(event) = event_line.and_then(|l| l.strip_prefix("event: ")) else {
+            continue;
+        };
+        let Some(data) = data_line.and_then(|l| l.strip_prefix("data: ")) else {
+            continue;
+        };
 
         if event.trim() == "response.completed" {
             let json: serde_json::Value = serde_json::from_str(data).ok()?;
             // The completed event has a "response" field with the full response
             let response = json.get("response").unwrap_or(&json);
-            return from_codex_response(response);
+            // Some Codex responses ship an empty `output` array in the completed
+            // event even when the stream emitted message/function_call items via
+            // delta events. In that case we must fall through to the delta
+            // accumulator instead of returning an empty response.
+            let output_empty = response
+                .get("output")
+                .and_then(|o| o.as_array())
+                .map(|a| a.is_empty())
+                .unwrap_or(true);
+            if !output_empty {
+                return from_codex_response(response);
+            }
+            // else: fall through to delta accumulation below
+            break;
         }
     }
 
-    // Fallback: accumulate text and tool call deltas
+    // Fallback: accumulate text and tool call deltas.
+    // Also extract usage from response.completed even though output was empty.
     let mut text = String::new();
     let mut tool_calls: Vec<ToolCall> = Vec::new();
     let mut current_tc_name: Option<String> = None;
     let mut current_tc_id: Option<String> = None;
     let mut current_tc_args = String::new();
+    let mut usage: Option<Usage> = None;
+    let mut response_id: Option<String> = None;
 
     for chunk in stream_body.split("\n\n") {
         let lines: Vec<&str> = chunk.lines().collect();
         let event_line = lines.iter().find(|l| l.starts_with("event: "));
         let data_line = lines.iter().find(|l| l.starts_with("data: "));
 
-        let Some(event) = event_line.and_then(|l| l.strip_prefix("event: ")) else { continue };
-        let Some(data) = data_line.and_then(|l| l.strip_prefix("data: ")) else { continue };
+        let Some(event) = event_line.and_then(|l| l.strip_prefix("event: ")) else {
+            continue;
+        };
+        let Some(data) = data_line.and_then(|l| l.strip_prefix("data: ")) else {
+            continue;
+        };
         let event = event.trim();
 
         let json: serde_json::Value = match serde_json::from_str(data) {
@@ -244,7 +299,6 @@ pub fn from_codex_stream(stream_body: &str) -> Option<ChatResponse> {
                 }
             }
             "response.output_item.added" => {
-                // Flush previous tool call if any
                 if let Some(name) = current_tc_name.take() {
                     tool_calls.push(ToolCall::new(
                         current_tc_id.take().unwrap_or_default(),
@@ -255,7 +309,8 @@ pub fn from_codex_stream(stream_body: &str) -> Option<ChatResponse> {
 
                 if let Some(item) = json.get("item") {
                     if item.get("type").and_then(|t| t.as_str()) == Some("function_call") {
-                        current_tc_name = item.get("name").and_then(|n| n.as_str()).map(String::from);
+                        current_tc_name =
+                            item.get("name").and_then(|n| n.as_str()).map(String::from);
                         current_tc_id = item.get("id").and_then(|i| i.as_str()).map(String::from);
                         current_tc_args.clear();
                     }
@@ -265,6 +320,19 @@ pub fn from_codex_stream(stream_body: &str) -> Option<ChatResponse> {
                 if let Some(d) = json.get("delta").and_then(|d| d.as_str()) {
                     current_tc_args.push_str(d);
                 }
+            }
+            "response.completed" => {
+                let resp = json.get("response").unwrap_or(&json);
+                if let Some(u) = resp.get("usage") {
+                    let inp = u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                    let out = u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                    usage = Some(Usage {
+                        prompt_tokens: inp,
+                        completion_tokens: out,
+                        total_tokens: inp + out,
+                    });
+                }
+                response_id = resp.get("id").and_then(|i| i.as_str()).map(String::from);
             }
             _ => {}
         }
@@ -285,17 +353,21 @@ pub fn from_codex_stream(stream_body: &str) -> Option<ChatResponse> {
 
     let has_tool_calls = !tool_calls.is_empty();
     Some(ChatResponse {
-        id: None,
+        id: response_id,
         choices: vec![Choice {
             index: 0,
             message: ChoiceMessage {
                 role: Role::Assistant,
                 content: if text.is_empty() { None } else { Some(text) },
-                tool_calls: if tool_calls.is_empty() { None } else { Some(tool_calls) },
+                tool_calls: if tool_calls.is_empty() {
+                    None
+                } else {
+                    Some(tool_calls)
+                },
             },
             finish_reason: Some(if has_tool_calls { "tool_calls" } else { "stop" }.to_string()),
         }],
-        usage: None,
+        usage,
     })
 }
 
@@ -305,10 +377,11 @@ mod tests {
 
     #[test]
     fn test_to_codex_body_basic() {
-        let req = ChatRequest::new("gpt-5.3-codex", vec![
-            Message::system("You are helpful."),
-            Message::user("Hello"),
-        ]).with_max_tokens(1024);
+        let req = ChatRequest::new(
+            "gpt-5.3-codex",
+            vec![Message::system("You are helpful."), Message::user("Hello")],
+        )
+        .with_max_tokens(1024);
 
         let body = to_codex_body(&req);
 
@@ -324,15 +397,18 @@ mod tests {
 
     #[test]
     fn test_to_codex_body_with_tool_calls() {
-        let req = ChatRequest::new("gpt-5.3-codex", vec![
-            Message::system("Be helpful"),
-            Message::user("Read main.py"),
-            Message::assistant_with_tool_calls(
-                None,
-                vec![ToolCall::new("call_1", "read", r#"{"filePath":"main.py"}"#)],
-            ),
-            Message::tool_result("call_1", "read", "print('hello')"),
-        ]);
+        let req = ChatRequest::new(
+            "gpt-5.3-codex",
+            vec![
+                Message::system("Be helpful"),
+                Message::user("Read main.py"),
+                Message::assistant_with_tool_calls(
+                    None,
+                    vec![ToolCall::new("call_1", "read", r#"{"filePath":"main.py"}"#)],
+                ),
+                Message::tool_result("call_1", "read", "print('hello')"),
+            ],
+        );
 
         let body = to_codex_body(&req);
         let input = body["input"].as_array().unwrap();

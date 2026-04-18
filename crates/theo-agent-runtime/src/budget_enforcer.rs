@@ -89,8 +89,14 @@ impl BudgetEnforcer {
         Budget {
             max_time_secs: self.budget.max_time_secs.saturating_sub(usage.elapsed_secs),
             max_tokens: self.budget.max_tokens.saturating_sub(usage.tokens_used),
-            max_iterations: self.budget.max_iterations.saturating_sub(usage.iterations_used),
-            max_tool_calls: self.budget.max_tool_calls.saturating_sub(usage.tool_calls_used),
+            max_iterations: self
+                .budget
+                .max_iterations
+                .saturating_sub(usage.iterations_used),
+            max_tool_calls: self
+                .budget
+                .max_tool_calls
+                .saturating_sub(usage.tool_calls_used),
         }
     }
 }
@@ -116,36 +122,63 @@ mod tests {
 
     #[test]
     fn check_fails_iterations_exceeded() {
-        let budget = Budget { max_iterations: 2, ..Budget::default() };
+        let budget = Budget {
+            max_iterations: 2,
+            ..Budget::default()
+        };
         let (mut enforcer, _) = setup(budget);
         enforcer.record_iteration();
         enforcer.record_iteration();
         assert!(enforcer.check().is_ok()); // 2 == limit, not exceeded
         enforcer.record_iteration();
         let err = enforcer.check().unwrap_err();
-        assert!(matches!(err, BudgetViolation::IterationsExceeded { limit: 2, actual: 3 }));
+        assert!(matches!(
+            err,
+            BudgetViolation::IterationsExceeded {
+                limit: 2,
+                actual: 3
+            }
+        ));
     }
 
     #[test]
     fn check_fails_tokens_exceeded() {
-        let budget = Budget { max_tokens: 100, ..Budget::default() };
+        let budget = Budget {
+            max_tokens: 100,
+            ..Budget::default()
+        };
         let (mut enforcer, _) = setup(budget);
         enforcer.record_tokens(50);
         assert!(enforcer.check().is_ok());
         enforcer.record_tokens(60);
         let err = enforcer.check().unwrap_err();
-        assert!(matches!(err, BudgetViolation::TokensExceeded { limit: 100, actual: 110 }));
+        assert!(matches!(
+            err,
+            BudgetViolation::TokensExceeded {
+                limit: 100,
+                actual: 110
+            }
+        ));
     }
 
     #[test]
     fn check_fails_tool_calls_exceeded() {
-        let budget = Budget { max_tool_calls: 1, ..Budget::default() };
+        let budget = Budget {
+            max_tool_calls: 1,
+            ..Budget::default()
+        };
         let (mut enforcer, _) = setup(budget);
         enforcer.record_tool_call();
         assert!(enforcer.check().is_ok());
         enforcer.record_tool_call();
         let err = enforcer.check().unwrap_err();
-        assert!(matches!(err, BudgetViolation::ToolCallsExceeded { limit: 1, actual: 2 }));
+        assert!(matches!(
+            err,
+            BudgetViolation::ToolCallsExceeded {
+                limit: 1,
+                actual: 2
+            }
+        ));
     }
 
     #[test]
@@ -153,7 +186,10 @@ mod tests {
         // Use max_time_secs=0 to guarantee immediate violation.
         // elapsed().as_secs() rounds down, so sleep 1.1s to guarantee > 0.
         // Instead, we test via BudgetUsage directly (deterministic).
-        let budget = Budget { max_time_secs: 5, ..Budget::default() };
+        let budget = Budget {
+            max_time_secs: 5,
+            ..Budget::default()
+        };
         let usage = BudgetUsage {
             elapsed_secs: 6,
             tokens_used: 0,
@@ -161,7 +197,13 @@ mod tests {
             tool_calls_used: 0,
         };
         let violation = usage.exceeds(&budget).unwrap();
-        assert!(matches!(violation, BudgetViolation::TimeExceeded { limit: 5, actual: 6 }));
+        assert!(matches!(
+            violation,
+            BudgetViolation::TimeExceeded {
+                limit: 5,
+                actual: 6
+            }
+        ));
     }
 
     #[test]
@@ -190,7 +232,11 @@ mod tests {
 
     #[test]
     fn remaining_clamps_to_zero() {
-        let budget = Budget { max_tokens: 100, max_iterations: 5, ..Budget::default() };
+        let budget = Budget {
+            max_tokens: 100,
+            max_iterations: 5,
+            ..Budget::default()
+        };
         let (mut enforcer, _) = setup(budget);
         enforcer.record_tokens(150); // over limit
         enforcer.record_iteration();
@@ -201,18 +247,27 @@ mod tests {
 
     #[test]
     fn budget_exceeded_event_published_on_violation() {
-        let budget = Budget { max_iterations: 1, ..Budget::default() };
+        let budget = Budget {
+            max_iterations: 1,
+            ..Budget::default()
+        };
         let (mut enforcer, listener) = setup(budget);
         enforcer.record_iteration();
         enforcer.record_iteration();
         let _ = enforcer.check();
 
         let events = listener.captured();
-        let exceeded: Vec<_> = events.iter()
+        let exceeded: Vec<_> = events
+            .iter()
             .filter(|e| e.event_type == EventType::BudgetExceeded)
             .collect();
         assert_eq!(exceeded.len(), 1);
         assert_eq!(exceeded[0].entity_id, "test-run");
-        assert!(exceeded[0].payload["violation"].as_str().unwrap().contains("iterations exceeded"));
+        assert!(
+            exceeded[0].payload["violation"]
+                .as_str()
+                .unwrap()
+                .contains("iterations exceeded")
+        );
     }
 }

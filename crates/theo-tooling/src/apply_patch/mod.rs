@@ -10,9 +10,18 @@ pub struct ApplyPatchTool;
 
 #[derive(Debug, Clone)]
 enum PatchOp {
-    Add { path: String, content: String },
-    Delete { path: String },
-    Update { path: String, hunks: Vec<Hunk>, move_to: Option<String> },
+    Add {
+        path: String,
+        content: String,
+    },
+    Delete {
+        path: String,
+    },
+    Update {
+        path: String,
+        hunks: Vec<Hunk>,
+        move_to: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -73,7 +82,9 @@ impl ApplyPatchTool {
             i += 1;
         }
         if i >= lines.len() {
-            return Err(ToolError::Validation("apply_patch verification failed: no Begin Patch marker".to_string()));
+            return Err(ToolError::Validation(
+                "apply_patch verification failed: no Begin Patch marker".to_string(),
+            ));
         }
         i += 1;
 
@@ -110,7 +121,13 @@ impl ApplyPatchTool {
                     i += 1;
                 }
                 let mut hunks = Vec::new();
-                while i < lines.len() && (lines[i].starts_with("@@") || lines[i].starts_with(' ') || lines[i].starts_with('+') || lines[i].starts_with('-') || lines[i].starts_with("*** End of File")) {
+                while i < lines.len()
+                    && (lines[i].starts_with("@@")
+                        || lines[i].starts_with(' ')
+                        || lines[i].starts_with('+')
+                        || lines[i].starts_with('-')
+                        || lines[i].starts_with("*** End of File"))
+                {
                     if lines[i].starts_with("@@") {
                         let ctx_header = if lines[i].len() > 2 {
                             Some(lines[i][2..].trim().to_string())
@@ -120,7 +137,10 @@ impl ApplyPatchTool {
                         i += 1;
                         let mut hunk_lines = Vec::new();
                         let mut eof_anchor = false;
-                        while i < lines.len() && !lines[i].starts_with("@@") && !lines[i].starts_with("***") {
+                        while i < lines.len()
+                            && !lines[i].starts_with("@@")
+                            && !lines[i].starts_with("***")
+                        {
                             let l = lines[i];
                             if l.starts_with('+') {
                                 hunk_lines.push(HunkLine::Add(l[1..].to_string()));
@@ -145,16 +165,26 @@ impl ApplyPatchTool {
                     }
                 }
                 if hunks.is_empty() {
-                    return Err(ToolError::Validation("apply_patch verification failed: empty hunks".to_string()));
+                    return Err(ToolError::Validation(
+                        "apply_patch verification failed: empty hunks".to_string(),
+                    ));
                 }
-                ops.push(PatchOp::Update { path, hunks, move_to });
+                ops.push(PatchOp::Update {
+                    path,
+                    hunks,
+                    move_to,
+                });
             } else {
-                return Err(ToolError::Validation(format!("apply_patch verification failed: unexpected line: {line}")));
+                return Err(ToolError::Validation(format!(
+                    "apply_patch verification failed: unexpected line: {line}"
+                )));
             }
         }
 
         if ops.is_empty() {
-            return Err(ToolError::Validation("patch rejected: empty patch".to_string()));
+            return Err(ToolError::Validation(
+                "patch rejected: empty patch".to_string(),
+            ));
         }
 
         Ok(ops)
@@ -164,25 +194,39 @@ impl ApplyPatchTool {
         let mut file_lines: Vec<String> = content.lines().map(|l| l.to_string()).collect();
 
         for hunk in hunks {
-            let context_lines: Vec<&str> = hunk.lines.iter().filter_map(|l| match l {
-                HunkLine::Context(s) => Some(s.as_str()),
-                HunkLine::Remove(s) => Some(s.as_str()),
-                _ => None,
-            }).collect();
+            let context_lines: Vec<&str> = hunk
+                .lines
+                .iter()
+                .filter_map(|l| match l {
+                    HunkLine::Context(s) => Some(s.as_str()),
+                    HunkLine::Remove(s) => Some(s.as_str()),
+                    _ => None,
+                })
+                .collect();
 
-            if context_lines.is_empty() && hunk.lines.iter().all(|l| matches!(l, HunkLine::Add(_))) {
+            if context_lines.is_empty() && hunk.lines.iter().all(|l| matches!(l, HunkLine::Add(_)))
+            {
                 // Insert-only hunk: find context from surrounding Context lines
                 // For now, append at end if no context
-                let add_lines: Vec<&str> = hunk.lines.iter().filter_map(|l| match l {
-                    HunkLine::Add(s) => Some(s.as_str()),
-                    _ => None,
-                }).collect();
+                let add_lines: Vec<&str> = hunk
+                    .lines
+                    .iter()
+                    .filter_map(|l| match l {
+                        HunkLine::Add(s) => Some(s.as_str()),
+                        _ => None,
+                    })
+                    .collect();
                 file_lines.extend(add_lines.iter().map(|s| s.to_string()));
                 continue;
             }
 
             // Find match position
-            let match_pos = Self::find_match_position(&file_lines, &context_lines, hunk.eof_anchor, hunk.context_header.as_deref())?;
+            let match_pos = Self::find_match_position(
+                &file_lines,
+                &context_lines,
+                hunk.eof_anchor,
+                hunk.context_header.as_deref(),
+            )?;
 
             // Apply changes at match position
             let mut new_lines = Vec::new();
@@ -258,7 +302,9 @@ impl ApplyPatchTool {
         }
 
         if candidates.is_empty() {
-            return Err(ToolError::Validation("apply_patch verification failed: context not found in file".to_string()));
+            return Err(ToolError::Validation(
+                "apply_patch verification failed: context not found in file".to_string(),
+            ));
         }
 
         // If header context, filter candidates
@@ -328,7 +374,8 @@ impl Tool for ApplyPatchTool {
                     let full = ctx.project_dir.join(path);
                     if !full.exists() {
                         return Err(ToolError::Validation(
-                            "apply_patch verification failed: Failed to read file to update".to_string(),
+                            "apply_patch verification failed: Failed to read file to update"
+                                .to_string(),
                         ));
                     }
                 }
@@ -369,14 +416,18 @@ impl Tool for ApplyPatchTool {
                 PatchOp::Add { path, content } => {
                     let full = ctx.project_dir.join(path);
                     if let Some(parent) = full.parent() {
-                        tokio::fs::create_dir_all(parent).await.map_err(|e| ToolError::Execution(format!("{e}")))?;
+                        tokio::fs::create_dir_all(parent)
+                            .await
+                            .map_err(|e| ToolError::Execution(format!("{e}")))?;
                     }
                     let before = if full.exists() {
                         tokio::fs::read_to_string(&full).await.unwrap_or_default()
                     } else {
                         String::new()
                     };
-                    tokio::fs::write(&full, content).await.map_err(|e| ToolError::Execution(format!("{e}")))?;
+                    tokio::fs::write(&full, content)
+                        .await
+                        .map_err(|e| ToolError::Execution(format!("{e}")))?;
                     summary.push(format!("A {}", path.replace('\\', "/")));
                     files_info.push(serde_json::json!({
                         "filePath": full.display().to_string(),
@@ -388,7 +439,9 @@ impl Tool for ApplyPatchTool {
                 }
                 PatchOp::Delete { path } => {
                     let full = ctx.project_dir.join(path);
-                    tokio::fs::remove_file(&full).await.map_err(|e| ToolError::Execution(format!("{e}")))?;
+                    tokio::fs::remove_file(&full)
+                        .await
+                        .map_err(|e| ToolError::Execution(format!("{e}")))?;
                     summary.push(format!("D {}", path.replace('\\', "/")));
                     files_info.push(serde_json::json!({
                         "filePath": full.display().to_string(),
@@ -396,20 +449,36 @@ impl Tool for ApplyPatchTool {
                         "type": "delete",
                     }));
                 }
-                PatchOp::Update { path, hunks, move_to } => {
+                PatchOp::Update {
+                    path,
+                    hunks,
+                    move_to,
+                } => {
                     let full = ctx.project_dir.join(path);
-                    let content = tokio::fs::read_to_string(&full).await.map_err(|e| ToolError::Execution(format!("{e}")))?;
+                    let content = tokio::fs::read_to_string(&full)
+                        .await
+                        .map_err(|e| ToolError::Execution(format!("{e}")))?;
                     let before = content.clone();
                     let new_content = Self::apply_hunks(&content, hunks)?;
 
                     if let Some(dest) = move_to {
                         let dest_full = ctx.project_dir.join(dest);
                         if let Some(parent) = dest_full.parent() {
-                            tokio::fs::create_dir_all(parent).await.map_err(|e| ToolError::Execution(format!("{e}")))?;
+                            tokio::fs::create_dir_all(parent)
+                                .await
+                                .map_err(|e| ToolError::Execution(format!("{e}")))?;
                         }
-                        tokio::fs::write(&dest_full, &new_content).await.map_err(|e| ToolError::Execution(format!("{e}")))?;
-                        tokio::fs::remove_file(&full).await.map_err(|e| ToolError::Execution(format!("{e}")))?;
-                        summary.push(format!("M {} -> {}", path.replace('\\', "/"), dest.replace('\\', "/")));
+                        tokio::fs::write(&dest_full, &new_content)
+                            .await
+                            .map_err(|e| ToolError::Execution(format!("{e}")))?;
+                        tokio::fs::remove_file(&full)
+                            .await
+                            .map_err(|e| ToolError::Execution(format!("{e}")))?;
+                        summary.push(format!(
+                            "M {} -> {}",
+                            path.replace('\\', "/"),
+                            dest.replace('\\', "/")
+                        ));
                         files_info.push(serde_json::json!({
                             "filePath": full.display().to_string(),
                             "relativePath": dest.replace('\\', "/"),
@@ -419,7 +488,9 @@ impl Tool for ApplyPatchTool {
                             "after": new_content,
                         }));
                     } else {
-                        tokio::fs::write(&full, &new_content).await.map_err(|e| ToolError::Execution(format!("{e}")))?;
+                        tokio::fs::write(&full, &new_content)
+                            .await
+                            .map_err(|e| ToolError::Execution(format!("{e}")))?;
                         summary.push(format!("M {}", path.replace('\\', "/")));
                         files_info.push(serde_json::json!({
                             "filePath": full.display().to_string(),
@@ -433,7 +504,10 @@ impl Tool for ApplyPatchTool {
             }
         }
 
-        let output = format!("Success. Updated the following files:\n{}", summary.join("\n"));
+        let output = format!(
+            "Success. Updated the following files:\n{}",
+            summary.join("\n")
+        );
 
         // Record permission
         permissions.record(PermissionRequest {
@@ -447,7 +521,10 @@ impl Tool for ApplyPatchTool {
         });
 
         Ok(ToolOutput {
-            title: format!("Success. Updated the following files: {}", summary.join(", ")),
+            title: format!(
+                "Success. Updated the following files: {}",
+                summary.join(", ")
+            ),
             output,
             metadata: serde_json::json!({
                 "diff": "Index: patch",
@@ -472,8 +549,15 @@ mod tests {
         let tmp = TestDir::new();
         let ctx = test_context(tmp.path());
         let mut perms = PermissionCollector::new();
-        let result = patch().execute(serde_json::json!({"patchText": ""}), &ctx, &mut perms).await;
-        assert!(result.unwrap_err().to_string().contains("patchText is required"));
+        let result = patch()
+            .execute(serde_json::json!({"patchText": ""}), &ctx, &mut perms)
+            .await;
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("patchText is required")
+        );
     }
 
     #[tokio::test]
@@ -481,8 +565,19 @@ mod tests {
         let tmp = TestDir::new();
         let ctx = test_context(tmp.path());
         let mut perms = PermissionCollector::new();
-        let result = patch().execute(serde_json::json!({"patchText": "invalid patch"}), &ctx, &mut perms).await;
-        assert!(result.unwrap_err().to_string().contains("apply_patch verification failed"));
+        let result = patch()
+            .execute(
+                serde_json::json!({"patchText": "invalid patch"}),
+                &ctx,
+                &mut perms,
+            )
+            .await;
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("apply_patch verification failed")
+        );
     }
 
     #[tokio::test]
@@ -490,7 +585,13 @@ mod tests {
         let tmp = TestDir::new();
         let ctx = test_context(tmp.path());
         let mut perms = PermissionCollector::new();
-        let result = patch().execute(serde_json::json!({"patchText": "*** Begin Patch\n*** End Patch"}), &ctx, &mut perms).await;
+        let result = patch()
+            .execute(
+                serde_json::json!({"patchText": "*** Begin Patch\n*** End Patch"}),
+                &ctx,
+                &mut perms,
+            )
+            .await;
         assert!(result.unwrap_err().to_string().contains("empty patch"));
     }
 
@@ -503,9 +604,20 @@ mod tests {
         let mut perms = PermissionCollector::new();
 
         let patch_text = "*** Begin Patch\n*** Add File: nested/new.txt\n+created\n*** Delete File: delete.txt\n*** Update File: modify.txt\n@@\n-line2\n+changed\n*** End Patch";
-        let result = patch().execute(serde_json::json!({"patchText": patch_text}), &ctx, &mut perms).await.unwrap();
+        let result = patch()
+            .execute(
+                serde_json::json!({"patchText": patch_text}),
+                &ctx,
+                &mut perms,
+            )
+            .await
+            .unwrap();
 
-        assert!(result.title.contains("Success. Updated the following files"));
+        assert!(
+            result
+                .title
+                .contains("Success. Updated the following files")
+        );
         assert!(result.output.contains("A nested/new.txt"));
         assert!(result.output.contains("D delete.txt"));
         assert!(result.output.contains("M modify.txt"));
@@ -523,9 +635,19 @@ mod tests {
         let mut perms = PermissionCollector::new();
 
         let patch_text = "*** Begin Patch\n*** Update File: multi.txt\n@@\n-line2\n+changed2\n@@\n-line4\n+changed4\n*** End Patch";
-        patch().execute(serde_json::json!({"patchText": patch_text}), &ctx, &mut perms).await.unwrap();
+        patch()
+            .execute(
+                serde_json::json!({"patchText": patch_text}),
+                &ctx,
+                &mut perms,
+            )
+            .await
+            .unwrap();
 
-        assert_eq!(tmp.read_file("multi.txt"), "line1\nchanged2\nline3\nchanged4\n");
+        assert_eq!(
+            tmp.read_file("multi.txt"),
+            "line1\nchanged2\nline3\nchanged4\n"
+        );
     }
 
     #[tokio::test]
@@ -536,7 +658,14 @@ mod tests {
         let mut perms = PermissionCollector::new();
 
         let patch_text = "*** Begin Patch\n*** Update File: old/name.txt\n*** Move to: renamed/dir/name.txt\n@@\n-old content\n+new content\n*** End Patch";
-        patch().execute(serde_json::json!({"patchText": patch_text}), &ctx, &mut perms).await.unwrap();
+        patch()
+            .execute(
+                serde_json::json!({"patchText": patch_text}),
+                &ctx,
+                &mut perms,
+            )
+            .await
+            .unwrap();
 
         assert!(!tmp.file_exists("old/name.txt"));
         assert_eq!(tmp.read_file("renamed/dir/name.txt"), "new content\n");
@@ -548,9 +677,21 @@ mod tests {
         let ctx = test_context(tmp.path());
         let mut perms = PermissionCollector::new();
 
-        let patch_text = "*** Begin Patch\n*** Update File: missing.txt\n@@\n-nope\n+better\n*** End Patch";
-        let result = patch().execute(serde_json::json!({"patchText": patch_text}), &ctx, &mut perms).await;
-        assert!(result.unwrap_err().to_string().contains("Failed to read file to update"));
+        let patch_text =
+            "*** Begin Patch\n*** Update File: missing.txt\n@@\n-nope\n+better\n*** End Patch";
+        let result = patch()
+            .execute(
+                serde_json::json!({"patchText": patch_text}),
+                &ctx,
+                &mut perms,
+            )
+            .await;
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Failed to read file to update")
+        );
     }
 
     #[tokio::test]
@@ -560,7 +701,13 @@ mod tests {
         let mut perms = PermissionCollector::new();
 
         let patch_text = "*** Begin Patch\n*** Delete File: missing.txt\n*** End Patch";
-        let result = patch().execute(serde_json::json!({"patchText": patch_text}), &ctx, &mut perms).await;
+        let result = patch()
+            .execute(
+                serde_json::json!({"patchText": patch_text}),
+                &ctx,
+                &mut perms,
+            )
+            .await;
         assert!(result.is_err());
     }
 
@@ -572,7 +719,13 @@ mod tests {
         let mut perms = PermissionCollector::new();
 
         let patch_text = "*** Begin Patch\n*** Delete File: dir\n*** End Patch";
-        let result = patch().execute(serde_json::json!({"patchText": patch_text}), &ctx, &mut perms).await;
+        let result = patch()
+            .execute(
+                serde_json::json!({"patchText": patch_text}),
+                &ctx,
+                &mut perms,
+            )
+            .await;
         assert!(result.is_err());
     }
 
@@ -584,7 +737,13 @@ mod tests {
 
         // Add file succeeds but Update fails - nothing should be written
         let patch_text = "*** Begin Patch\n*** Add File: created.txt\n+hello\n*** Update File: missing.txt\n@@\n-old\n+new\n*** End Patch";
-        let result = patch().execute(serde_json::json!({"patchText": patch_text}), &ctx, &mut perms).await;
+        let result = patch()
+            .execute(
+                serde_json::json!({"patchText": patch_text}),
+                &ctx,
+                &mut perms,
+            )
+            .await;
         assert!(result.is_err());
         assert!(!tmp.file_exists("created.txt"));
     }
@@ -596,7 +755,14 @@ mod tests {
         let mut perms = PermissionCollector::new();
 
         let patch_text = "cat <<'EOF'\n*** Begin Patch\n*** Add File: heredoc_test.txt\n+heredoc content\n*** End Patch\nEOF";
-        patch().execute(serde_json::json!({"patchText": patch_text}), &ctx, &mut perms).await.unwrap();
+        patch()
+            .execute(
+                serde_json::json!({"patchText": patch_text}),
+                &ctx,
+                &mut perms,
+            )
+            .await
+            .unwrap();
         assert_eq!(tmp.read_file("heredoc_test.txt"), "heredoc content\n");
     }
 
@@ -607,9 +773,20 @@ mod tests {
         let ctx = test_context(tmp.path());
         let mut perms = PermissionCollector::new();
 
-        let patch_text = "*** Begin Patch\n*** Update File: multi_ctx.txt\n@@ fn b\n-x=10\n+x=11\n*** End Patch";
-        patch().execute(serde_json::json!({"patchText": patch_text}), &ctx, &mut perms).await.unwrap();
-        assert_eq!(tmp.read_file("multi_ctx.txt"), "fn a\nx=10\ny=2\nfn b\nx=11\ny=20\n");
+        let patch_text =
+            "*** Begin Patch\n*** Update File: multi_ctx.txt\n@@ fn b\n-x=10\n+x=11\n*** End Patch";
+        patch()
+            .execute(
+                serde_json::json!({"patchText": patch_text}),
+                &ctx,
+                &mut perms,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            tmp.read_file("multi_ctx.txt"),
+            "fn a\nx=10\ny=2\nfn b\nx=11\ny=20\n"
+        );
     }
 
     #[tokio::test]
@@ -620,7 +797,17 @@ mod tests {
         let mut perms = PermissionCollector::new();
 
         let patch_text = "*** Begin Patch\n*** Update File: eof_anchor.txt\n@@\n-marker\n-end\n+marker-changed\n+end\n*** End of File\n*** End Patch";
-        patch().execute(serde_json::json!({"patchText": patch_text}), &ctx, &mut perms).await.unwrap();
-        assert_eq!(tmp.read_file("eof_anchor.txt"), "start\nmarker\nmiddle\nmarker-changed\nend\n");
+        patch()
+            .execute(
+                serde_json::json!({"patchText": patch_text}),
+                &ctx,
+                &mut perms,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            tmp.read_file("eof_anchor.txt"),
+            "start\nmarker\nmiddle\nmarker-changed\nend\n"
+        );
     }
 }

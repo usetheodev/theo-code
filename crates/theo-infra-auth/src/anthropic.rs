@@ -108,8 +108,12 @@ struct DeviceCodeResponse {
     interval: u64,
 }
 
-fn default_expires() -> u64 { 600 }
-fn default_interval() -> u64 { 5 }
+fn default_expires() -> u64 {
+    600
+}
+fn default_interval() -> u64 {
+    5
+}
 
 #[derive(Deserialize)]
 struct TokenResponse {
@@ -224,8 +228,8 @@ impl AnthropicAuth {
         device_code: &AnthropicDeviceCode,
     ) -> Result<AnthropicTokens, AuthError> {
         let mut interval_ms = device_code.interval * 1000 + POLLING_SAFETY_MARGIN_MS;
-        let deadline = std::time::Instant::now()
-            + std::time::Duration::from_secs(device_code.expires_in);
+        let deadline =
+            std::time::Instant::now() + std::time::Duration::from_secs(device_code.expires_in);
 
         loop {
             if std::time::Instant::now() >= deadline {
@@ -289,12 +293,12 @@ impl AnthropicAuth {
                     }
                     "expired_token" => return Err(AuthError::DeviceExpired),
                     "access_denied" => {
-                        return Err(AuthError::OAuth("access denied by user".to_string()))
+                        return Err(AuthError::OAuth("access denied by user".to_string()));
                     }
                     _ => {
                         return Err(AuthError::OAuth(format!(
                             "Anthropic device flow error: {error}"
-                        )))
+                        )));
                     }
                 }
             }
@@ -540,7 +544,12 @@ mod tests {
     fn anthropic_coexists_with_copilot_and_openai() {
         let (store, _dir) = temp_store();
         store
-            .set("openai", AuthEntry::ApiKey { key: "sk-openai".to_string() })
+            .set(
+                "openai",
+                AuthEntry::ApiKey {
+                    key: "sk-openai".to_string(),
+                },
+            )
             .unwrap();
         store
             .set(
@@ -568,9 +577,22 @@ mod tests {
             .unwrap();
 
         // All three coexist
-        assert_eq!(store.get("openai").unwrap().unwrap().bearer_token(), "sk-openai");
-        assert_eq!(store.get("github-copilot").unwrap().unwrap().bearer_token(), "gho_copilot");
-        assert_eq!(store.get("anthropic-console").unwrap().unwrap().bearer_token(), "sk-ant-test");
+        assert_eq!(
+            store.get("openai").unwrap().unwrap().bearer_token(),
+            "sk-openai"
+        );
+        assert_eq!(
+            store.get("github-copilot").unwrap().unwrap().bearer_token(),
+            "gho_copilot"
+        );
+        assert_eq!(
+            store
+                .get("anthropic-console")
+                .unwrap()
+                .unwrap()
+                .bearer_token(),
+            "sk-ant-test"
+        );
     }
 
     #[test]

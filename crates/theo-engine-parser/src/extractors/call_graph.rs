@@ -9,8 +9,8 @@ use std::path::Path;
 
 use tree_sitter::{Node, Tree};
 
-use crate::types::{Reference, ReferenceKind, ResolutionMethod, Symbol};
 use crate::tree_sitter::SupportedLanguage;
+use crate::types::{Reference, ReferenceKind, ResolutionMethod, Symbol};
 
 use super::common::{node_text, node_text_ref};
 use super::language_behavior::behavior_for;

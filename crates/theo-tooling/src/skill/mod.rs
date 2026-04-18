@@ -1,11 +1,11 @@
 use async_trait::async_trait;
+use std::path::PathBuf;
 use theo_domain::error::ToolError;
 use theo_domain::permission::{PermissionRequest, PermissionType};
 use theo_domain::tool::{
     PermissionCollector, Tool, ToolCategory, ToolContext, ToolOutput, ToolParam, ToolSchema,
     require_string,
 };
-use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
 pub struct SkillInfo {
@@ -83,7 +83,10 @@ impl Tool for SkillTool {
         // Read skill files
         let mut files = Vec::new();
         if skill.dir.exists() {
-            for entry in walkdir::WalkDir::new(&skill.dir).into_iter().filter_map(|e| e.ok()) {
+            for entry in walkdir::WalkDir::new(&skill.dir)
+                .into_iter()
+                .filter_map(|e| e.ok())
+            {
                 if entry.file_type().is_file() && entry.file_name() != "SKILL.md" {
                     files.push(entry.path().display().to_string());
                 }
@@ -121,9 +124,21 @@ mod tests {
     #[test]
     fn description_sorts_skills_by_name_and_is_stable() {
         let skills = vec![
-            SkillInfo { name: "zeta-skill".to_string(), description: "Zeta skill.".to_string(), dir: PathBuf::from("/tmp") },
-            SkillInfo { name: "alpha-skill".to_string(), description: "Alpha skill.".to_string(), dir: PathBuf::from("/tmp") },
-            SkillInfo { name: "middle-skill".to_string(), description: "Middle skill.".to_string(), dir: PathBuf::from("/tmp") },
+            SkillInfo {
+                name: "zeta-skill".to_string(),
+                description: "Zeta skill.".to_string(),
+                dir: PathBuf::from("/tmp"),
+            },
+            SkillInfo {
+                name: "alpha-skill".to_string(),
+                description: "Alpha skill.".to_string(),
+                dir: PathBuf::from("/tmp"),
+            },
+            SkillInfo {
+                name: "middle-skill".to_string(),
+                description: "Middle skill.".to_string(),
+                dir: PathBuf::from("/tmp"),
+            },
         ];
 
         let tool1 = SkillTool::new(skills.clone());
@@ -171,11 +186,22 @@ mod tests {
 
         assert_eq!(perms.requests.len(), 1);
         assert_eq!(perms.requests[0].permission, PermissionType::Skill);
-        assert!(perms.requests[0].patterns.contains(&"tool-skill".to_string()));
+        assert!(
+            perms.requests[0]
+                .patterns
+                .contains(&"tool-skill".to_string())
+        );
         assert!(perms.requests[0].always.contains(&"tool-skill".to_string()));
 
-        assert_eq!(result.metadata["dir"].as_str().unwrap(), skill_dir.display().to_string());
-        assert!(result.output.contains("<skill_content name=\"tool-skill\">"));
+        assert_eq!(
+            result.metadata["dir"].as_str().unwrap(),
+            skill_dir.display().to_string()
+        );
+        assert!(
+            result
+                .output
+                .contains("<skill_content name=\"tool-skill\">")
+        );
         let demo_path = skill_dir.join("scripts/demo.txt").display().to_string();
         assert!(result.output.contains(&format!("<file>{demo_path}</file>")));
     }

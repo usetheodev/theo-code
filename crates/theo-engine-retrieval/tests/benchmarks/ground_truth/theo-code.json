@@ -1,0 +1,431 @@
+{
+  "schema": "graphctx-benchmark-v1",
+  "repo": {
+    "name": "theo-code",
+    "language": "rust",
+    "category": "developer-tools"
+  },
+  "queries": [
+    {
+      "id": "theo-sym-001",
+      "query": "assemble_greedy",
+      "category": "symbol",
+      "difficulty": "easy",
+      "expected_files": [
+        "crates/theo-engine-retrieval/src/assembly.rs",
+        "crates/theo-application/src/use_cases/pipeline.rs",
+        "crates/theo-application/src/use_cases/graph_context_service.rs"
+      ],
+      "dependencies": [
+        {"source": "crates/theo-engine-retrieval/src/assembly.rs", "target": "crates/theo-engine-graph/src/cluster.rs", "edge_type": "Imports"},
+        {"source": "crates/theo-engine-retrieval/src/assembly.rs", "target": "crates/theo-engine-graph/src/model.rs", "edge_type": "Imports"}
+      ]
+    },
+    {
+      "id": "theo-sym-002",
+      "query": "propagate_attention",
+      "category": "symbol",
+      "difficulty": "easy",
+      "expected_files": [
+        "crates/theo-engine-retrieval/src/graph_attention.rs",
+        "crates/theo-engine-retrieval/src/search.rs"
+      ],
+      "dependencies": [
+        {"source": "crates/theo-engine-retrieval/src/search.rs", "target": "crates/theo-engine-retrieval/src/graph_attention.rs", "edge_type": "Calls"}
+      ]
+    },
+    {
+      "id": "theo-sym-003",
+      "query": "louvain_phase1",
+      "category": "symbol",
+      "difficulty": "easy",
+      "expected_files": [
+        "crates/theo-engine-graph/src/cluster.rs"
+      ],
+      "dependencies": []
+    },
+    {
+      "id": "theo-sym-004",
+      "query": "AgentRunEngine execute",
+      "category": "symbol",
+      "difficulty": "medium",
+      "expected_files": [
+        "crates/theo-agent-runtime/src/run_engine.rs",
+        "crates/theo-agent-runtime/src/agent_loop.rs"
+      ],
+      "dependencies": [
+        {"source": "crates/theo-agent-runtime/src/agent_loop.rs", "target": "crates/theo-agent-runtime/src/run_engine.rs", "edge_type": "Calls"}
+      ]
+    },
+    {
+      "id": "theo-sym-005",
+      "query": "TurboQuantizer quantize",
+      "category": "symbol",
+      "difficulty": "easy",
+      "expected_files": [
+        "crates/theo-engine-retrieval/src/embedding/turboquant.rs",
+        "crates/theo-engine-retrieval/src/search.rs"
+      ],
+      "dependencies": [
+        {"source": "crates/theo-engine-retrieval/src/search.rs", "target": "crates/theo-engine-retrieval/src/embedding/turboquant.rs", "edge_type": "Calls"}
+      ]
+    },
+    {
+      "id": "theo-mod-001",
+      "query": "sandbox bwrap bubblewrap executor",
+      "category": "module",
+      "difficulty": "easy",
+      "expected_files": [
+        "crates/theo-tooling/src/sandbox/bwrap.rs",
+        "crates/theo-tooling/src/sandbox/executor.rs",
+        "crates/theo-tooling/src/sandbox/probe.rs"
+      ],
+      "dependencies": [
+        {"source": "crates/theo-tooling/src/sandbox/executor.rs", "target": "crates/theo-tooling/src/sandbox/bwrap.rs", "edge_type": "Calls"}
+      ]
+    },
+    {
+      "id": "theo-mod-002",
+      "query": "community detection clustering algorithm",
+      "category": "module",
+      "difficulty": "medium",
+      "expected_files": [
+        "crates/theo-engine-graph/src/cluster.rs",
+        "crates/theo-engine-graph/src/model.rs",
+        "crates/theo-engine-graph/src/bridge.rs",
+        "crates/theo-application/src/use_cases/graph_context_service.rs"
+      ],
+      "dependencies": [
+        {"source": "crates/theo-engine-graph/src/cluster.rs", "target": "crates/theo-engine-graph/src/model.rs", "edge_type": "Imports"}
+      ]
+    },
+    {
+      "id": "theo-mod-003",
+      "query": "LLM provider registry strategy",
+      "category": "module",
+      "difficulty": "hard",
+      "expected_files": [
+        "crates/theo-infra-llm/src/provider/registry.rs",
+        "crates/theo-infra-llm/src/provider/mod.rs",
+        "crates/theo-infra-llm/src/provider/spec.rs",
+        "crates/theo-infra-llm/src/providers/mod.rs",
+        "crates/theo-infra-llm/src/lib.rs"
+      ],
+      "dependencies": [
+        {"source": "crates/theo-infra-llm/src/provider/registry.rs", "target": "crates/theo-infra-llm/src/provider/spec.rs", "edge_type": "Imports"}
+      ]
+    },
+    {
+      "id": "theo-mod-004",
+      "query": "tool registry schema category",
+      "category": "module",
+      "difficulty": "medium",
+      "expected_files": [
+        "crates/theo-tooling/src/registry/mod.rs",
+        "crates/theo-domain/src/tool.rs"
+      ],
+      "dependencies": [
+        {"source": "crates/theo-tooling/src/registry/mod.rs", "target": "crates/theo-domain/src/tool.rs", "edge_type": "Imports"}
+      ]
+    },
+    {
+      "id": "theo-mod-005",
+      "query": "agent loop state machine transitions",
+      "category": "module",
+      "difficulty": "medium",
+      "expected_files": [
+        "crates/theo-agent-runtime/src/run_engine.rs",
+        "crates/theo-agent-runtime/src/agent_loop.rs",
+        "crates/theo-agent-runtime/src/state.rs",
+        "crates/theo-agent-runtime/src/convergence.rs",
+        "crates/theo-agent-runtime/src/pilot.rs"
+      ],
+      "dependencies": [
+        {"source": "crates/theo-agent-runtime/src/run_engine.rs", "target": "crates/theo-agent-runtime/src/state.rs", "edge_type": "Imports"},
+        {"source": "crates/theo-agent-runtime/src/run_engine.rs", "target": "crates/theo-agent-runtime/src/convergence.rs", "edge_type": "Calls"}
+      ]
+    },
+    {
+      "id": "theo-sem-001",
+      "query": "error handling recovery retry",
+      "category": "semantic",
+      "difficulty": "hard",
+      "expected_files": [
+        "crates/theo-agent-runtime/src/retry.rs",
+        "crates/theo-agent-runtime/src/failure_tracker.rs",
+        "crates/theo-agent-runtime/src/dlq.rs",
+        "crates/theo-domain/src/error.rs"
+      ],
+      "dependencies": [
+        {"source": "crates/theo-agent-runtime/src/retry.rs", "target": "crates/theo-domain/src/error.rs", "edge_type": "Imports"}
+      ]
+    },
+    {
+      "id": "theo-sem-002",
+      "query": "token budget enforcement truncation",
+      "category": "semantic",
+      "difficulty": "medium",
+      "expected_files": [
+        "crates/theo-agent-runtime/src/budget_enforcer.rs",
+        "crates/theo-engine-retrieval/src/budget.rs",
+        "crates/theo-domain/src/budget.rs",
+        "crates/theo-engine-retrieval/src/assembly.rs"
+      ],
+      "dependencies": [
+        {"source": "crates/theo-engine-retrieval/src/assembly.rs", "target": "crates/theo-engine-retrieval/src/budget.rs", "edge_type": "Imports"}
+      ]
+    },
+    {
+      "id": "theo-sem-003",
+      "query": "OAuth authentication device flow",
+      "category": "semantic",
+      "difficulty": "medium",
+      "expected_files": [
+        "crates/theo-infra-auth/src/lib.rs",
+        "crates/theo-infra-auth/src/openai.rs",
+        "crates/theo-infra-auth/src/pkce.rs",
+        "crates/theo-infra-auth/src/copilot.rs",
+        "crates/theo-infra-auth/src/anthropic.rs"
+      ],
+      "dependencies": [
+        {"source": "crates/theo-infra-auth/src/openai.rs", "target": "crates/theo-infra-auth/src/pkce.rs", "edge_type": "Calls"}
+      ]
+    },
+    {
+      "id": "theo-sem-004",
+      "query": "semantic search embeddings TF-IDF",
+      "category": "semantic",
+      "difficulty": "medium",
+      "expected_files": [
+        "crates/theo-engine-retrieval/src/embedding/tfidf.rs",
+        "crates/theo-engine-retrieval/src/embedding/neural.rs",
+        "crates/theo-engine-retrieval/src/search.rs"
+      ],
+      "dependencies": [
+        {"source": "crates/theo-engine-retrieval/src/search.rs", "target": "crates/theo-engine-retrieval/src/embedding/tfidf.rs", "edge_type": "Calls"},
+        {"source": "crates/theo-engine-retrieval/src/search.rs", "target": "crates/theo-engine-retrieval/src/embedding/neural.rs", "edge_type": "Calls"}
+      ]
+    },
+    {
+      "id": "theo-sem-005",
+      "query": "governance policy impact analysis",
+      "category": "semantic",
+      "difficulty": "medium",
+      "expected_files": [
+        "crates/theo-governance/src/sandbox_policy.rs",
+        "crates/theo-governance/src/impact.rs",
+        "crates/theo-governance/src/sandbox_audit.rs"
+      ],
+      "dependencies": [
+        {"source": "crates/theo-governance/src/sandbox_audit.rs", "target": "crates/theo-governance/src/sandbox_policy.rs", "edge_type": "Imports"}
+      ]
+    },
+    {
+      "id": "theo-xcut-001",
+      "query": "sandbox security tests",
+      "category": "cross-cutting",
+      "difficulty": "hard",
+      "expected_files": [
+        "crates/theo-tooling/src/sandbox/bwrap.rs",
+        "crates/theo-tooling/src/sandbox/executor.rs",
+        "crates/theo-governance/src/sandbox_audit.rs",
+        "crates/theo-governance/src/sandbox_policy.rs",
+        "crates/theo-tooling/src/sandbox/command_validator.rs",
+        "crates/theo-tooling/src/sandbox/env_sanitizer.rs",
+        "crates/theo-tooling/src/sandbox/probe.rs"
+      ],
+      "dependencies": []
+    },
+    {
+      "id": "theo-xcut-002",
+      "query": "BM25 scoring tokenization",
+      "category": "cross-cutting",
+      "difficulty": "medium",
+      "expected_files": [
+        "crates/theo-engine-retrieval/src/search.rs",
+        "crates/theo-engine-retrieval/src/embedding/tfidf.rs",
+        "crates/theo-engine-retrieval/src/code_tokenizer.rs",
+        "crates/theo-engine-retrieval/src/tantivy_search.rs"
+      ],
+      "dependencies": [
+        {"source": "crates/theo-engine-retrieval/src/search.rs", "target": "crates/theo-engine-retrieval/src/embedding/tfidf.rs", "edge_type": "Calls"}
+      ]
+    },
+    {
+      "id": "theo-xcut-003",
+      "query": "error types defined across crates",
+      "category": "cross-cutting",
+      "difficulty": "hard",
+      "expected_files": [
+        "crates/theo-domain/src/error.rs",
+        "crates/theo-engine-parser/src/error.rs",
+        "crates/theo-infra-llm/src/error.rs",
+        "crates/theo-infra-auth/src/error.rs"
+      ],
+      "dependencies": []
+    },
+    {
+      "id": "theo-xcut-004",
+      "query": "streaming LLM response parsing",
+      "category": "cross-cutting",
+      "difficulty": "medium",
+      "expected_files": [
+        "crates/theo-infra-llm/src/stream.rs",
+        "crates/theo-infra-llm/src/client.rs",
+        "crates/theo-infra-llm/src/provider/client.rs"
+      ],
+      "dependencies": [
+        {"source": "crates/theo-infra-llm/src/client.rs", "target": "crates/theo-infra-llm/src/stream.rs", "edge_type": "Calls"}
+      ]
+    },
+    {
+      "id": "theo-xcut-005",
+      "query": "compaction context window management",
+      "category": "cross-cutting",
+      "difficulty": "medium",
+      "expected_files": [
+        "crates/theo-agent-runtime/src/compaction.rs",
+        "crates/theo-agent-runtime/src/run_engine.rs",
+        "crates/theo-domain/src/tokens.rs"
+      ],
+      "dependencies": [
+        {"source": "crates/theo-agent-runtime/src/compaction.rs", "target": "crates/theo-domain/src/tokens.rs", "edge_type": "Imports"}
+      ]
+    },
+    {
+      "id": "theo-sym-006",
+      "query": "NeuralEmbedder embed",
+      "category": "symbol",
+      "difficulty": "easy",
+      "expected_files": [
+        "crates/theo-engine-retrieval/src/embedding/neural.rs",
+        "crates/theo-engine-retrieval/src/embedding/cache.rs",
+        "crates/theo-engine-retrieval/src/search.rs"
+      ],
+      "dependencies": [
+        {"source": "crates/theo-engine-retrieval/src/search.rs", "target": "crates/theo-engine-retrieval/src/embedding/neural.rs", "edge_type": "Calls"}
+      ]
+    },
+    {
+      "id": "theo-sym-007",
+      "query": "hierarchical_cluster FileLeiden",
+      "category": "symbol",
+      "difficulty": "easy",
+      "expected_files": [
+        "crates/theo-engine-graph/src/cluster.rs",
+        "crates/theo-application/src/use_cases/graph_context_service.rs"
+      ],
+      "dependencies": []
+    },
+    {
+      "id": "theo-mod-006",
+      "query": "tree-sitter parser extractor symbols",
+      "category": "module",
+      "difficulty": "medium",
+      "expected_files": [
+        "crates/theo-engine-parser/src/tree_sitter.rs",
+        "crates/theo-engine-parser/src/lib.rs",
+        "crates/theo-engine-parser/src/extractors/symbols.rs"
+      ],
+      "dependencies": [
+        {"source": "crates/theo-engine-parser/src/tree_sitter.rs", "target": "crates/theo-engine-parser/src/extractors/symbols.rs", "edge_type": "Calls"}
+      ]
+    },
+    {
+      "id": "theo-mod-007",
+      "query": "Copilot GitHub device flow authentication",
+      "category": "module",
+      "difficulty": "medium",
+      "expected_files": [
+        "crates/theo-infra-auth/src/copilot.rs",
+        "crates/theo-infra-auth/src/lib.rs"
+      ],
+      "dependencies": []
+    },
+    {
+      "id": "theo-sem-006",
+      "query": "file changed git cochange temporal decay",
+      "category": "semantic",
+      "difficulty": "medium",
+      "expected_files": [
+        "crates/theo-engine-graph/src/cochange.rs",
+        "crates/theo-engine-graph/src/model.rs"
+      ],
+      "dependencies": [
+        {"source": "crates/theo-engine-graph/src/cochange.rs", "target": "crates/theo-engine-graph/src/model.rs", "edge_type": "Imports"}
+      ]
+    },
+    {
+      "id": "theo-sem-007",
+      "query": "dead letter queue failed tasks retry backoff",
+      "category": "semantic",
+      "difficulty": "hard",
+      "expected_files": [
+        "crates/theo-agent-runtime/src/dlq.rs",
+        "crates/theo-agent-runtime/src/retry.rs",
+        "crates/theo-domain/src/retry_policy.rs"
+      ],
+      "dependencies": []
+    },
+    {
+      "id": "theo-xcut-006",
+      "query": "domain types shared across crates traits",
+      "category": "cross-cutting",
+      "difficulty": "medium",
+      "expected_files": [
+        "crates/theo-domain/src/lib.rs",
+        "crates/theo-domain/src/graph_context.rs",
+        "crates/theo-domain/src/tool.rs",
+        "crates/theo-domain/src/budget.rs"
+      ],
+      "dependencies": []
+    },
+    {
+      "id": "theo-xcut-007",
+      "query": "embedding model vector cosine similarity search",
+      "category": "cross-cutting",
+      "difficulty": "medium",
+      "expected_files": [
+        "crates/theo-engine-retrieval/src/embedding/neural.rs",
+        "crates/theo-engine-retrieval/src/embedding/turboquant.rs",
+        "crates/theo-engine-retrieval/src/dense_search.rs",
+        "crates/theo-engine-retrieval/src/search.rs"
+      ],
+      "dependencies": [
+        {"source": "crates/theo-engine-retrieval/src/search.rs", "target": "crates/theo-engine-retrieval/src/embedding/neural.rs", "edge_type": "Calls"},
+        {"source": "crates/theo-engine-retrieval/src/search.rs", "target": "crates/theo-engine-retrieval/src/embedding/turboquant.rs", "edge_type": "Calls"}
+      ]
+    },
+    {
+      "id": "theo-sem-008",
+      "query": "Bash shell command executor sandbox security",
+      "category": "semantic",
+      "difficulty": "medium",
+      "expected_files": [
+        "crates/theo-tooling/src/sandbox/executor.rs",
+        "crates/theo-tooling/src/sandbox/bwrap.rs",
+        "crates/theo-tooling/src/sandbox/command_validator.rs",
+        "crates/theo-tooling/src/shell_tool.rs"
+      ],
+      "dependencies": [
+        {"source": "crates/theo-tooling/src/sandbox/executor.rs", "target": "crates/theo-tooling/src/sandbox/bwrap.rs", "edge_type": "Calls"},
+        {"source": "crates/theo-tooling/src/shell_tool.rs", "target": "crates/theo-tooling/src/sandbox/executor.rs", "edge_type": "Calls"}
+      ]
+    },
+    {
+      "id": "theo-mod-008",
+      "query": "RRF reciprocal rank fusion hybrid search",
+      "category": "module",
+      "difficulty": "easy",
+      "expected_files": [
+        "crates/theo-engine-retrieval/src/tantivy_search.rs",
+        "crates/theo-engine-retrieval/src/search.rs",
+        "crates/theo-engine-retrieval/src/dense_search.rs"
+      ],
+      "dependencies": [
+        {"source": "crates/theo-engine-retrieval/src/tantivy_search.rs", "target": "crates/theo-engine-retrieval/src/search.rs", "edge_type": "Calls"},
+        {"source": "crates/theo-engine-retrieval/src/tantivy_search.rs", "target": "crates/theo-engine-retrieval/src/dense_search.rs", "edge_type": "Calls"}
+      ]
+    }
+  ]
+}

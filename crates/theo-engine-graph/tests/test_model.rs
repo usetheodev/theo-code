@@ -240,3 +240,276 @@ fn edge_type_default_weights() {
     let w = EdgeType::CoChanges.default_weight();
     assert!(w >= 0.0);
 }
+
+// --- S3-T1: Symbol-level hashing tests ---
+
+#[test]
+fn symbol_content_hash_deterministic() {
+    let node = Node {
+        id: "sym:foo".into(),
+        node_type: NodeType::Symbol,
+        name: "foo".into(),
+        file_path: None,
+        signature: Some("pub fn foo(x: i32) -> i32".into()),
+        kind: Some(SymbolKind::Function),
+        line_start: Some(1),
+        line_end: Some(5),
+        last_modified: 0.0,
+        doc: Some("Adds one".into()),
+    };
+    let h1 = CodeGraph::symbol_content_hash(&node);
+    let h2 = CodeGraph::symbol_content_hash(&node);
+    assert_eq!(h1, h2, "Same node must produce same hash");
+}
+
+#[test]
+fn symbol_content_hash_changes_when_signature_changes() {
+    let mut node = Node {
+        id: "sym:foo".into(),
+        node_type: NodeType::Symbol,
+        name: "foo".into(),
+        file_path: None,
+        signature: Some("pub fn foo(x: i32) -> i32".into()),
+        kind: Some(SymbolKind::Function),
+        line_start: Some(1),
+        line_end: Some(5),
+        last_modified: 0.0,
+        doc: None,
+    };
+    let h1 = CodeGraph::symbol_content_hash(&node);
+    node.signature = Some("pub fn foo(x: i32, y: i32) -> i32".into());
+    let h2 = CodeGraph::symbol_content_hash(&node);
+    assert_ne!(h1, h2, "Hash must change when signature changes");
+}
+
+#[test]
+fn symbol_content_hash_ignores_line_numbers() {
+    let mut node = Node {
+        id: "sym:foo".into(),
+        node_type: NodeType::Symbol,
+        name: "foo".into(),
+        file_path: None,
+        signature: Some("pub fn foo()".into()),
+        kind: Some(SymbolKind::Function),
+        line_start: Some(1),
+        line_end: Some(5),
+        last_modified: 0.0,
+        doc: None,
+    };
+    let h1 = CodeGraph::symbol_content_hash(&node);
+    node.line_start = Some(100);
+    node.line_end = Some(200);
+    let h2 = CodeGraph::symbol_content_hash(&node);
+    assert_eq!(h1, h2, "Line number changes should not affect hash");
+}
+
+#[test]
+fn compute_symbol_hashes_only_symbols() {
+    let mut g = CodeGraph::new();
+    g.add_node(make_file_node("file:a.rs", "a.rs"));
+    g.add_node(make_symbol_node("sym:foo", "foo", SymbolKind::Function));
+    g.add_node(make_symbol_node("sym:bar", "bar", SymbolKind::Struct));
+
+    let hashes = g.compute_symbol_hashes();
+    assert_eq!(hashes.len(), 2, "Should only hash Symbol nodes");
+    assert!(hashes.contains_key("sym:foo"));
+    assert!(hashes.contains_key("sym:bar"));
+    assert!(
+        !hashes.contains_key("file:a.rs"),
+        "File nodes should not be hashed"
+    );
+}
+
+#[test]
+fn community_content_hash_deterministic() {
+    let mut g = CodeGraph::new();
+    g.add_node(make_symbol_node("sym:a", "a", SymbolKind::Function));
+    g.add_node(make_symbol_node("sym:b", "b", SymbolKind::Function));
+
+    let ids = vec!["sym:a".into(), "sym:b".into()];
+    let h1 = g.community_content_hash(&ids);
+    let h2 = g.community_content_hash(&ids);
+    assert_eq!(h1, h2);
+}
+
+#[test]
+fn community_content_hash_order_independent() {
+    let mut g = CodeGraph::new();
+    g.add_node(make_symbol_node("sym:a", "a", SymbolKind::Function));
+    g.add_node(make_symbol_node("sym:b", "b", SymbolKind::Function));
+
+    let h1 = g.community_content_hash(&["sym:a".into(), "sym:b".into()]);
+    let h2 = g.community_content_hash(&["sym:b".into(), "sym:a".into()]);
+    assert_eq!(h1, h2, "Order of node_ids should not affect hash");
+}
+
+#[test]
+fn community_content_hash_none_for_no_symbols() {
+    let mut g = CodeGraph::new();
+    g.add_node(make_file_node("file:a.rs", "a.rs"));
+
+    let h = g.community_content_hash(&["file:a.rs".into()]);
+    assert!(h.is_none(), "Community with no symbols should return None");
+}
+
+// --- File Retriever support: file_neighbors + test_files_for ---
+
+fn make_symbol_with_file(id: &str, name: &str, file_path: &str) -> Node {
+    Node {
+        id: id.to_string(),
+        node_type: NodeType::Symbol,
+        name: name.to_string(),
+        file_path: Some(file_path.to_string()),
+        signature: Some(format!("fn {}()", name)),
+        kind: Some(SymbolKind::Function),
+        line_start: Some(1),
+        line_end: Some(10),
+        last_modified: 0.0,
+        doc: None,
+    }
+}
+
+#[test]
+fn file_neighbors_via_calls() {
+    let mut g = CodeGraph::new();
+    g.add_node(make_file_node("file:a.rs", "a.rs"));
+    g.add_node(make_file_node("file:b.rs", "b.rs"));
+    g.add_node(make_symbol_with_file("sym:foo", "foo", "a.rs"));
+    g.add_node(make_symbol_with_file("sym:bar", "bar", "b.rs"));
+
+    g.add_edge(Edge {
+        source: "file:a.rs".into(),
+        target: "sym:foo".into(),
+        edge_type: EdgeType::Contains,
+        weight: 1.0,
+    });
+    g.add_edge(Edge {
+        source: "file:b.rs".into(),
+        target: "sym:bar".into(),
+        edge_type: EdgeType::Contains,
+        weight: 1.0,
+    });
+    g.add_edge(Edge {
+        source: "sym:foo".into(),
+        target: "sym:bar".into(),
+        edge_type: EdgeType::Calls,
+        weight: 1.0,
+    });
+
+    let neighbors = g.file_neighbors("file:a.rs", &[EdgeType::Calls], 10);
+    assert!(
+        neighbors.contains(&"b.rs".to_string()),
+        "b.rs should be reachable via Calls from a.rs"
+    );
+    assert!(
+        !neighbors.contains(&"a.rs".to_string()),
+        "Self should not be in neighbors"
+    );
+}
+
+#[test]
+fn file_neighbors_excludes_non_matching_edges() {
+    let mut g = CodeGraph::new();
+    g.add_node(make_file_node("file:a.rs", "a.rs"));
+    g.add_node(make_file_node("file:b.rs", "b.rs"));
+    g.add_node(make_symbol_with_file("sym:foo", "foo", "a.rs"));
+    g.add_node(make_symbol_with_file("sym:bar", "bar", "b.rs"));
+
+    g.add_edge(Edge {
+        source: "file:a.rs".into(),
+        target: "sym:foo".into(),
+        edge_type: EdgeType::Contains,
+        weight: 1.0,
+    });
+    g.add_edge(Edge {
+        source: "file:b.rs".into(),
+        target: "sym:bar".into(),
+        edge_type: EdgeType::Contains,
+        weight: 1.0,
+    });
+    // Only Inherits edge, but we'll query for Calls
+    g.add_edge(Edge {
+        source: "sym:foo".into(),
+        target: "sym:bar".into(),
+        edge_type: EdgeType::Inherits,
+        weight: 1.0,
+    });
+
+    let neighbors = g.file_neighbors("file:a.rs", &[EdgeType::Calls], 10);
+    assert!(neighbors.is_empty(), "No Calls edge → no neighbors");
+}
+
+#[test]
+fn file_neighbors_respects_max() {
+    let mut g = CodeGraph::new();
+    g.add_node(make_file_node("file:hub.rs", "hub.rs"));
+    g.add_node(make_symbol_with_file("sym:hub_fn", "hub_fn", "hub.rs"));
+    g.add_edge(Edge {
+        source: "file:hub.rs".into(),
+        target: "sym:hub_fn".into(),
+        edge_type: EdgeType::Contains,
+        weight: 1.0,
+    });
+
+    for i in 0..20 {
+        let fname = format!("f{}.rs", i);
+        let fid = format!("file:{}", fname);
+        let sid = format!("sym:fn{}", i);
+        g.add_node(make_file_node(&fid, &fname));
+        g.add_node(make_symbol_with_file(&sid, &format!("fn{}", i), &fname));
+        g.add_edge(Edge {
+            source: fid.clone(),
+            target: sid.clone(),
+            edge_type: EdgeType::Contains,
+            weight: 1.0,
+        });
+        g.add_edge(Edge {
+            source: "sym:hub_fn".into(),
+            target: sid.clone(),
+            edge_type: EdgeType::Calls,
+            weight: 1.0,
+        });
+    }
+
+    let neighbors = g.file_neighbors("file:hub.rs", &[EdgeType::Calls], 5);
+    assert!(
+        neighbors.len() <= 5,
+        "Must respect max, got {}",
+        neighbors.len()
+    );
+}
+
+#[test]
+fn test_files_for_finds_tests() {
+    let mut g = CodeGraph::new();
+    g.add_node(make_file_node("file:src/auth.rs", "src/auth.rs"));
+    g.add_node(make_symbol_with_file("sym:verify", "verify", "src/auth.rs"));
+    g.add_edge(Edge {
+        source: "file:src/auth.rs".into(),
+        target: "sym:verify".into(),
+        edge_type: EdgeType::Contains,
+        weight: 1.0,
+    });
+
+    g.add_node(Node {
+        id: "test:t1".into(),
+        node_type: NodeType::Test,
+        name: "test_verify".into(),
+        file_path: Some("tests/auth_test.rs".into()),
+        signature: None,
+        kind: Some(SymbolKind::Function),
+        line_start: Some(1),
+        line_end: Some(5),
+        last_modified: 0.0,
+        doc: None,
+    });
+    g.add_edge(Edge {
+        source: "test:t1".into(),
+        target: "sym:verify".into(),
+        edge_type: EdgeType::Tests,
+        weight: 0.7,
+    });
+
+    let tests = g.test_files_for("file:src/auth.rs");
+    assert!(tests.contains(&"tests/auth_test.rs".to_string()));
+}

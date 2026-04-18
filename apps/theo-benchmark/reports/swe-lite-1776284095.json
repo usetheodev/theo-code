@@ -1,0 +1,122 @@
+{
+  "schema": "theo.swe.v1",
+  "dataset": "lite",
+  "total": 3,
+  "with_patch": 3,
+  "errors": 0,
+  "results": [
+    {
+      "instance_id": "pylint-dev__pylint-5859",
+      "repo": "pylint-dev/pylint",
+      "model_patch": "diff --git a/pylint/checkers/misc.py b/pylint/checkers/misc.py\nindex 69149e61a..a9e9912bd 100644\n--- a/pylint/checkers/misc.py\n+++ b/pylint/checkers/misc.py\n@@ -121,9 +121,9 @@ class EncodingChecker(BaseChecker):\n \n         notes = \"|\".join(re.escape(note) for note in self.config.notes)\n         if self.config.notes_rgx:\n-            regex_string = rf\"#\\s*({notes}|{self.config.notes_rgx})\\b\"\n+            regex_string = rf\"#\\s*({notes}|{self.config.notes_rgx})(?!\\w)\"\n         else:\n-            regex_string = rf\"#\\s*({notes})\\b\"\n+            regex_string = rf\"#\\s*({notes})(?!\\w)\"\n \n         self._fixme_pattern = re.compile(regex_string, re.I)\n \n",
+      "model_name_or_path": "theo-code",
+      "duration_secs": 174.2,
+      "error": null,
+      "headless": {
+        "duration_ms": 163880,
+        "files_edited": [
+          "pylint/checkers/misc.py"
+        ],
+        "iterations": 29,
+        "llm": {
+          "calls": 29,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.3-codex",
+        "provider": "ChatGPT Codex (OAuth)",
+        "schema": "theo.headless.v1",
+        "success": true,
+        "summary": "Implemented a **minimal fix** for the `--notes` punctuation-tag bug in:\n\n- `pylint/checkers/misc.py`\n\n### Change made\n\nIn `EncodingChecker.open()`, I changed the regex suffix from `\\b` to `(?!\\w)` for both branches:\n\n```diff\n- regex_string = rf\"#\\s*({notes}|{self.config.notes_rgx})\\b\"\n+ regex_string = rf\"#\\s*({notes}|{self.config.notes_rgx})(?!\\w)\"\n\n- regex_string = rf\"#\\s*({notes})\\b\"\n+ regex_string = rf\"#\\s*({notes})(?!\\w)\"\n```\n\n### Why this fixes it\n\n- `\\b` only matches a transition between \u201cword\u201d and \u201cnon-word\u201d chars.\n- For tags like `???`, the final char is non-word and is followed by `:`, also non-word, so `\\b` fails.\n- `(?!\\w)` correctly enforces \u201cnot followed by a word character\u201d, which:\n  - matches `# ???: no` \u2705\n  - still prevents matching inside longer identifiers (e.g. `YESabc`) \u2705\n\n### Verification performed\n\n- Syntax check passed:\n  - `python3 -m py_compile pylint/checkers/misc.py`\n- I could **not** run full tests in this sandbox because required Python deps/tools are unavailable (`pip/ensurepip/venv`, plus missing runtime deps like `astroid` and `dill`).\n\nThis is a one-file, minimal behavioral fix with no test modifications, per your instructions.",
+        "tokens": {
+          "input": 384467,
+          "output": 6068,
+          "total": 390535
+        },
+        "tools": {
+          "success": 29,
+          "total": 32
+        }
+      },
+      "has_patch": true
+    },
+    {
+      "instance_id": "pylint-dev__pylint-6506",
+      "repo": "pylint-dev/pylint",
+      "model_patch": "diff --git a/pylint/lint/run.py b/pylint/lint/run.py\nindex 778e64441..e2ef2f2f9 100644\n--- a/pylint/lint/run.py\n+++ b/pylint/lint/run.py\n@@ -13,7 +13,10 @@ from typing import Any\n \n from pylint import config\n from pylint.config.config_initialization import _config_initialization\n-from pylint.config.exceptions import ArgumentPreprocessingError\n+from pylint.config.exceptions import (\n+    ArgumentPreprocessingError,\n+    _UnrecognizedOptionError,\n+)\n from pylint.config.utils import _preprocess_options\n from pylint.constants import full_version\n from pylint.lint.base_options import _make_run_options\n@@ -132,9 +135,16 @@ group are mutually exclusive.\",\n         linter.disable(\"I\")\n         linter.enable(\"c-extension-no-member\")\n \n-        args = _config_initialization(\n-            linter, args, reporter, config_file=self._rcfile, verbose_mode=self.verbose\n-        )\n+        try:\n+            args = _config_initialization(\n+                linter,\n+                args,\n+                reporter,\n+                config_file=self._rcfile,\n+                verbose_mode=self.verbose,\n+            )\n+        except _UnrecognizedOptionError:\n+            sys.exit(32)\n \n         if linter.config.jobs < 0:\n             print(\n",
+      "model_name_or_path": "theo-code",
+      "duration_secs": 153.3,
+      "error": null,
+      "headless": {
+        "duration_ms": 143724,
+        "files_edited": [
+          "pylint/__init__.py",
+          "pylint/__init__.py",
+          "pylint/__init__.py",
+          "pylint/__init__.py",
+          "pylint/lint/run.py",
+          "pylint/lint/run.py",
+          "pylint/__init__.py",
+          "pylint/lint/run.py"
+        ],
+        "iterations": 30,
+        "llm": {
+          "calls": 30,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.3-codex",
+        "provider": "ChatGPT Codex (OAuth)",
+        "schema": "theo.headless.v1",
+        "success": true,
+        "summary": "Implemented a minimal fix for the unrecognized-option traceback by handling `_UnrecognizedOptionError` in `pylint/lint/run.py`.\n\n### What changed\n- **File modified:** `pylint/lint/run.py`\n  - Imported `_UnrecognizedOptionError` from `pylint.config.exceptions`.\n  - Wrapped `_config_initialization(...)` in a `try/except` block.\n  - On `_UnrecognizedOptionError`, now exits cleanly with `sys.exit(32)` instead of letting the exception propagate and print a traceback.\n\n### Why this fixes the bug\n`_config_initialization` already emits the user-facing `unrecognized-option` message (`E0015`). The uncaught exception was only causing an additional Python traceback. Catching it at the CLI run layer preserves the useful lint message while suppressing the traceback, yielding user-friendly behavior.\n\n### Scope\n- No tests were added or modified.\n- No unrelated refactoring was done.\n- Final diff is limited to the run path handling for this specific exception.",
+        "tokens": {
+          "input": 350552,
+          "output": 4872,
+          "total": 355424
+        },
+        "tools": {
+          "success": 43,
+          "total": 44
+        }
+      },
+      "has_patch": true
+    },
+    {
+      "instance_id": "pylint-dev__pylint-7080",
+      "repo": "pylint-dev/pylint",
+      "model_patch": "diff --git a/pylint/lint/pylinter.py b/pylint/lint/pylinter.py\nindex e2bbf061e..65b57b8b6 100644\n--- a/pylint/lint/pylinter.py\n+++ b/pylint/lint/pylinter.py\n@@ -597,8 +597,9 @@ class PyLinter(\n                         # Skip subtree of already discovered package.\n                         continue\n \n+                    root_path = os.path.normpath(root)\n                     if _is_ignored_file(\n-                        root,\n+                        root_path,\n                         self.config.ignore,\n                         self.config.ignore_patterns,\n                         self.config.ignore_paths,\n",
+      "model_name_or_path": "theo-code",
+      "duration_secs": 181.6,
+      "error": null,
+      "headless": {
+        "duration_ms": 172224,
+        "files_edited": [
+          "pylint/lint/pylinter.py"
+        ],
+        "iterations": 29,
+        "llm": {
+          "calls": 28,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.3-codex",
+        "provider": "ChatGPT Codex (OAuth)",
+        "schema": "theo.headless.v1",
+        "success": true,
+        "summary": "Budget exceeded: tokens exceeded: 1035287 > 1000000 limit. Edits succeeded: 1. Files: pylint/lint/pylinter.py",
+        "tokens": {
+          "input": 1029465,
+          "output": 5822,
+          "total": 1035287
+        },
+        "tools": {
+          "success": 33,
+          "total": 35
+        }
+      },
+      "has_patch": true
+    }
+  ],
+  "timestamp": 1776284095
+}

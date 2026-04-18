@@ -1,0 +1,24 @@
+id = "04-fix-return"
+category = "fix-bug"
+description = "Fix a function returning the wrong value"
+prompt = "The function `double` in src/math.rs is supposed to return n * 2 but is currently returning n + 2. Fix it."
+mode = "agent"
+timeout_secs = 120
+
+success_check = '''
+grep -q "n \* 2" src/math.rs && \
+  ! grep -q "n + 2" src/math.rs
+'''
+
+[[setup_files]]
+path = "src/math.rs"
+content = """
+pub fn double(n: i32) -> i32 {
+    n + 2
+}
+
+pub fn triple(n: i32) -> i32 {
+    n * 3
+}
+"""
+

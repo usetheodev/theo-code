@@ -1,0 +1,83 @@
+[
+  {
+    "id": "think_skip",
+    "status": "accepted",
+    "score_delta": "+0.3",
+    "description": "Skip think for tasks where user tells exactly what to change"
+  },
+  {
+    "id": "verify_done_combo",
+    "status": "rejected",
+    "score_delta": "-2.4",
+    "description": "Combine verify+done in same turn — model got confused"
+  },
+  {
+    "id": "codebase_context_skip",
+    "status": "rejected",
+    "score_delta": "-2.6",
+    "description": "Skip codebase_context for small repos — model needs it"
+  },
+  {
+    "id": "done_without_test",
+    "status": "rejected",
+    "score_delta": "-1.5",
+    "description": "Relax done gate — convergence gate is necessary"
+  },
+  {
+    "id": "batch_usage",
+    "status": "rejected",
+    "score_delta": "-14.5",
+    "description": "Encourage batch calls — broke prompt formatting"
+  },
+  {
+    "id": "swe_fast",
+    "status": "rejected_manual",
+    "score_delta": "-33%_resolve",
+    "description": "SWE prompt 'be FAST' — iteration reduction but quality loss (5/6→3/6)"
+  },
+  {
+    "id": "swe_fail_to_pass",
+    "status": "accepted_manual",
+    "score_delta": "better_targeting",
+    "description": "Include FAIL_TO_PASS test names in SWE prompt — agent reads tests first"
+  },
+  {
+    "id": "lean_headless_prompt",
+    "status": "accepted_manual",
+    "score_delta": "-27%_tokens",
+    "description": "Strip Task Management, Skills, Memory sections in headless mode"
+  },
+  {
+    "id": "rpi_sensor_removal",
+    "status": "accepted_manual",
+    "score_delta": "-2_iterations_per_edit",
+    "description": "Remove RPI warning injection — cost extra iterations for explicit tasks"
+  },
+
+  {"id": "NEXT_MUTATIONS", "status": "pending", "description": "--- Queue for next evolve run ---"},
+
+  {
+    "id": "edit_then_done",
+    "status": "pending",
+    "description": "After edit tool succeeds, tell model 'edit succeeded, call done now'",
+    "hypothesis": "Many iterations are wasted on post-edit verification. If we tell the model the edit worked, it can skip re-reading.",
+    "find": "ACT — use `edit`, `write`, `bash` to make changes.",
+    "replace": "ACT — use `edit`, `write`, `bash` to make changes. When an edit succeeds, the harness confirms it. You can trust the confirmation and call `done` without re-reading."
+  },
+  {
+    "id": "grep_before_read",
+    "status": "pending",
+    "description": "Use grep to find the line, then read only that section",
+    "hypothesis": "Reading whole files wastes tokens. grep→read(offset) is more efficient.",
+    "find": "Use `batch` to read multiple files in one call.",
+    "replace": "Use `grep` first to find the exact line, then `read` with offset/limit to see only the relevant section. This saves tokens. Use `batch` to combine multiple searches."
+  },
+  {
+    "id": "direct_edit_simple",
+    "status": "pending",
+    "description": "For tasks with explicit instructions, skip read and edit directly",
+    "hypothesis": "When user says 'change X to Y in file Z', no need to read first.",
+    "find": "Start by reading relevant files to understand the codebase, then make changes.",
+    "replace": "If the task tells you exactly what to change (file, old text, new text), edit directly. Only read first when you need to discover what to change."
+  }
+]

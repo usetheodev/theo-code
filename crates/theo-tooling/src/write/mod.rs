@@ -1,11 +1,11 @@
 use async_trait::async_trait;
+use std::path::{Path, PathBuf};
 use theo_domain::error::ToolError;
 use theo_domain::permission::{PermissionRequest, PermissionType};
 use theo_domain::tool::{
     PermissionCollector, Tool, ToolCategory, ToolContext, ToolOutput, ToolParam, ToolSchema,
     require_string,
 };
-use std::path::{Path, PathBuf};
 
 pub struct WriteTool;
 
@@ -101,7 +101,11 @@ impl Tool for WriteTool {
 
         Ok(ToolOutput {
             title,
-            output: "Wrote file successfully".to_string(),
+            output: format!(
+                "Wrote file successfully ({} bytes). \
+                 The file is on disk. You can call `done` if the task is complete.",
+                content.len()
+            ),
             metadata: serde_json::json!({
                 "filepath": resolved.display().to_string(),
                 "exists": exists,

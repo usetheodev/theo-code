@@ -3,12 +3,18 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use theo_agent_runtime::AgentConfig;
 use theo_agent_runtime::event_bus::EventBus;
 use theo_agent_runtime::pilot::{PilotConfig, PilotLoop, PilotResult, load_promise};
-use theo_agent_runtime::AgentConfig;
 use theo_domain::graph_context::GraphContextProvider;
 
+use crate::render::style::{StyleCaps, accent, bold, dim, error, success, warn};
 use crate::renderer::CliRenderer;
+use crate::tty::TtyCaps;
+
+fn caps() -> StyleCaps {
+    TtyCaps::detect().style_caps()
+}
 
 /// Run the pilot loop with CLI rendering.
 pub async fn run_pilot(
@@ -19,13 +25,17 @@ pub async fn run_pilot(
     complete: Option<String>,
 ) -> PilotResult {
     // Print banner
-    eprintln!("\x1b[1m✈  Theo Pilot\x1b[0m — autonomous mode");
-    eprintln!("  Promise: \x1b[36m{}\x1b[0m", truncate(&promise, 80));
+    let c = caps();
+    eprintln!("{} — autonomous mode", bold("✈  Theo Pilot", c));
+    eprintln!("  Promise: {}", accent(truncate(&promise, 80), c));
     if let Some(ref dod) = complete {
-        eprintln!("  Done when: \x1b[33m{}\x1b[0m", truncate(dod, 80));
+        eprintln!("  Done when: {}", warn(truncate(dod, 80), c));
     }
     eprintln!("  Project: {}", project_dir.display());
-    eprintln!("  Limits: {} max calls, {}/hour", pilot_config.max_total_calls, pilot_config.max_loops_per_hour);
+    eprintln!(
+        "  Limits: {} max calls, {}/hour",
+        pilot_config.max_total_calls, pilot_config.max_loops_per_hour
+    );
     eprintln!();
 
     // Create parent EventBus with renderer
@@ -53,7 +63,14 @@ pub async fn run_pilot(
         };
 
     // Create pilot loop
-    let mut pilot = PilotLoop::new(config, pilot_config, project_dir, promise, complete, event_bus);
+    let mut pilot = PilotLoop::new(
+        config,
+        pilot_config,
+        project_dir,
+        promise,
+        complete,
+        event_bus,
+    );
     if let Some(gc) = graph_context {
         pilot = pilot.with_graph_context(gc);
     }
@@ -63,7 +80,10 @@ pub async fn run_pilot(
     tokio::spawn(async move {
         if tokio::signal::ctrl_c().await.is_ok() {
             interrupt.store(true, std::sync::atomic::Ordering::Release);
-            eprintln!("\n\x1b[33m⚠  Ctrl+C — finishing current loop then stopping...\x1b[0m");
+            eprintln!(
+                "\n{}",
+                warn("⚠  Ctrl+C — finishing current loop then stopping...", caps())
+            );
         }
     });
 
@@ -72,7 +92,11 @@ pub async fn run_pilot(
         let tasks = theo_agent_runtime::roadmap::parse_roadmap(rmap).unwrap_or_default();
         let pending = tasks.iter().filter(|t| !t.completed).count();
         if pending > 0 {
-            eprintln!("  Roadmap: \x1b[36m{}\x1b[0m ({} pending tasks)", rmap.display(), pending);
+            eprintln!(
+                "  Roadmap: {} ({} pending tasks)",
+                accent(rmap.display().to_string(), caps()),
+                pending
+            );
             eprintln!();
             pilot.run_from_roadmap(rmap).await
         } else {
@@ -92,7 +116,8 @@ pub async fn run_pilot(
 /// Resolve the promise from CLI args or .theo/PROMPT.md.
 pub fn resolve_promise(args: &[String], project_dir: &std::path::Path) -> Option<String> {
     // Collect non-flag args as promise
-    let promise_parts: Vec<&str> = args.iter()
+    let promise_parts: Vec<&str> = args
+        .iter()
         .filter(|a| !a.starts_with("--"))
         .map(|s| s.as_str())
         .collect();
@@ -105,10 +130,11 @@ pub fn resolve_promise(args: &[String], project_dir: &std::path::Path) -> Option
 }
 
 fn print_pilot_summary(result: &PilotResult) {
+    let c = caps();
     let status = if result.success {
-        "\x1b[32m✓ Pilot Complete\x1b[0m"
+        success("✓ Pilot Complete", c).to_string()
     } else {
-        "\x1b[31m✗ Pilot Stopped\x1b[0m"
+        error("✗ Pilot Stopped", c).to_string()
     };
 
     eprintln!("{} — {}", status, result.reason);
@@ -170,12 +196,20 @@ impl EventListener for PilotRenderer {
     fn on_event(&self, event: &DomainEvent) {
         match event.event_type {
             EventType::LlmCallStart => {
-                let iteration = event.payload.get("iteration")
+                let iteration = event
+                    .payload
+                    .get("iteration")
                     .and_then(|v| v.as_u64())
                     .unwrap_or(0);
                 if iteration == 1 {
-                    let loop_num = self.loop_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-                    eprintln!("\n\x1b[1m── Pilot Loop {} ──\x1b[0m", loop_num);
+                    let loop_num = self
+                        .loop_count
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                        + 1;
+                    eprintln!(
+                        "\n{}",
+                        bold(format!("── Pilot Loop {loop_num} ──"), caps())
+                    );
                 }
             }
             EventType::RunStateChanged => {
@@ -189,8 +223,17 @@ impl EventListener for PilotRenderer {
                             let tokens = parts[2].parse::<u64>().unwrap_or(0);
                             let iters = parts[3];
                             eprintln!(
-                                "\x1b[90m── Loop {} complete: {} files, {} tokens, {} iterations ──\x1b[0m",
-                                loop_n, files, format_tokens(tokens), iters
+                                "{}",
+                                dim(
+                                    format!(
+                                        "── Loop {} complete: {} files, {} tokens, {} iterations ──",
+                                        loop_n,
+                                        files,
+                                        format_tokens(tokens),
+                                        iters
+                                    ),
+                                    caps()
+                                )
                             );
                         }
                     }

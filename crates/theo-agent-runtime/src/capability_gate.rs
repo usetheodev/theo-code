@@ -36,7 +36,10 @@ impl CapabilityGate {
         } else {
             let denied = CapabilityDenied {
                 tool_name: tool_name.to_string(),
-                reason: format!("tool '{}' (category {:?}) not allowed by capability set", tool_name, tool_category),
+                reason: format!(
+                    "tool '{}' (category {:?}) not allowed by capability set",
+                    tool_name, tool_category
+                ),
             };
 
             self.event_bus.publish(DomainEvent::new(
@@ -109,7 +112,9 @@ mod tests {
     #[test]
     fn check_tool_denied_returns_error() {
         let (gate, _) = setup(CapabilitySet::read_only());
-        let err = gate.check_tool("bash", ToolCategory::Execution).unwrap_err();
+        let err = gate
+            .check_tool("bash", ToolCategory::Execution)
+            .unwrap_err();
         assert_eq!(err.tool_name, "bash");
         assert!(err.reason.contains("not allowed"));
     }
@@ -141,7 +146,8 @@ mod tests {
         let _ = gate.check_tool("bash", ToolCategory::Execution);
 
         let events = listener.captured();
-        let denied_events: Vec<_> = events.iter()
+        let denied_events: Vec<_> = events
+            .iter()
             .filter(|e| {
                 e.event_type == EventType::Error
                     && e.payload.get("type").and_then(|v| v.as_str()) == Some("capability_denied")
@@ -161,10 +167,9 @@ mod tests {
         let _ = gate.check_path_write("/dangerous/file.txt");
 
         let events = listener.captured();
-        let denied_events: Vec<_> = events.iter()
-            .filter(|e| {
-                e.payload.get("type").and_then(|v| v.as_str()) == Some("capability_denied")
-            })
+        let denied_events: Vec<_> = events
+            .iter()
+            .filter(|e| e.payload.get("type").and_then(|v| v.as_str()) == Some("capability_denied"))
             .collect();
         assert_eq!(denied_events.len(), 1);
         assert_eq!(denied_events[0].payload["path"], "/dangerous/file.txt");

@@ -1,0 +1,63 @@
+{
+  "schema": "theo.smoke.v1",
+  "scenarios_total": 1,
+  "scenarios_passed": 1,
+  "pass_rate": 1.0,
+  "totals": {
+    "input_tokens": 15407,
+    "output_tokens": 435,
+    "iterations": 5,
+    "tool_calls": 4,
+    "llm_calls": 5,
+    "retries": 0,
+    "duration_ms": 14149
+  },
+  "by_category": {
+    "fix-bug": {
+      "total": 1,
+      "passed": 1
+    }
+  },
+  "results": [
+    {
+      "id": "11-python-fix",
+      "category": "fix-bug",
+      "mode": "agent",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 14.65,
+      "check_passed": true,
+      "check_stderr": "rc=0 stdout='' stderr=''",
+      "headless": {
+        "duration_ms": 14149,
+        "files_edited": [
+          "src/stats.py"
+        ],
+        "iterations": 5,
+        "llm": {
+          "calls": 5,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.3-codex",
+        "provider": "ChatGPT Codex (OAuth)",
+        "schema": "theo.headless.v1",
+        "success": true,
+        "summary": "Fixed `avg` in `src/stats.py` to safely handle empty lists by returning `0.0` before division. Verified behavior with `python3` assertions: `avg([]) == 0.0` and `avg([1,2,3]) == 2.0`.",
+        "tokens": {
+          "input": 15407,
+          "output": 435,
+          "total": 15842
+        },
+        "tools": {
+          "success": 4,
+          "total": 4
+        }
+      },
+      "stderr_tail": "[theo] Auto-initialized .theo/theo.md \u2014 run `theo init` for detailed context\n",
+      "workdir": null
+    }
+  ],
+  "timestamp": 1776286409,
+  "theo_bin": "/home/paulo/theo-code/target/release/theo"
+}

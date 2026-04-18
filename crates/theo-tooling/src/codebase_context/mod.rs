@@ -78,10 +78,7 @@ impl Tool for CodebaseContextTool {
         ctx: &ToolContext,
         _perms: &mut PermissionCollector,
     ) -> Result<ToolOutput, ToolError> {
-        let query = args
-            .get("query")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
 
         let budget = args
             .get("budget_tokens")
@@ -94,10 +91,7 @@ impl Tool for CodebaseContextTool {
             .and_then(|v| v.as_str())
             .unwrap_or("search");
 
-        let symbol = args
-            .get("symbol")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let symbol = args.get("symbol").and_then(|v| v.as_str()).unwrap_or("");
 
         // Check if graph context provider is available.
         let provider = match &ctx.graph_context {
@@ -132,9 +126,8 @@ impl Tool for CodebaseContextTool {
             _ => None, // "search" or default
         };
 
-        let result = tokio::time::timeout(
-            std::time::Duration::from_secs(QUERY_TIMEOUT_SECS),
-            async {
+        let result =
+            tokio::time::timeout(std::time::Duration::from_secs(QUERY_TIMEOUT_SECS), async {
                 if let Some(nav) = nav_mode {
                     // Navigation mode: traverse graph from symbol
                     let sym = if symbol.is_empty() { query } else { symbol };
@@ -143,9 +136,8 @@ impl Tool for CodebaseContextTool {
                     // Search mode: BM25 + multi-signal ranking (default)
                     provider.query_context(query, budget).await
                 }
-            },
-        )
-        .await;
+            })
+            .await;
 
         match result {
             Ok(Ok(ctx_result)) => {
@@ -154,7 +146,9 @@ impl Tool for CodebaseContextTool {
                     // Paper "Navigation Paradox" shows graph resolves 99.4% of cases
                     // where retrieval fails.
                     match provider.query_by_symbol(query, budget).await {
-                        Ok(fallback) if !fallback.blocks.is_empty() => (fallback, "symbol_fallback"),
+                        Ok(fallback) if !fallback.blocks.is_empty() => {
+                            (fallback, "symbol_fallback")
+                        }
                         _ => (ctx_result, "empty"),
                     }
                 } else {
@@ -178,24 +172,33 @@ impl Tool for CodebaseContextTool {
 
                 // Build typed attachments: structured data for runtime/tracing.
                 // The LLM reads `output` (markdown). The runtime reads `attachments` (JSON).
-                let typed_blocks: Vec<serde_json::Value> = ctx_result.blocks.iter().map(|b| {
-                    // Extract file paths from content (lines starting with "## ")
-                    let file_paths: Vec<&str> = b.content.lines()
-                        .filter(|l| l.starts_with("## "))
-                        .map(|l| l.trim_start_matches("## ").trim())
-                        .collect();
+                let typed_blocks: Vec<serde_json::Value> = ctx_result
+                    .blocks
+                    .iter()
+                    .map(|b| {
+                        // Extract file paths from content (lines starting with "## ")
+                        let file_paths: Vec<&str> = b
+                            .content
+                            .lines()
+                            .filter(|l| l.starts_with("## "))
+                            .map(|l| l.trim_start_matches("## ").trim())
+                            .collect();
 
-                    serde_json::json!({
-                        "source_id": b.source_id,
-                        "score": b.score,
-                        "token_count": b.token_count,
-                        "file_paths": file_paths,
+                        serde_json::json!({
+                            "source_id": b.source_id,
+                            "score": b.score,
+                            "token_count": b.token_count,
+                            "file_paths": file_paths,
+                        })
                     })
-                }).collect();
+                    .collect();
 
                 let budget_used_pct = if ctx_result.budget_tokens > 0 {
-                    (ctx_result.total_tokens as f64 / ctx_result.budget_tokens as f64 * 100.0) as u32
-                } else { 0 };
+                    (ctx_result.total_tokens as f64 / ctx_result.budget_tokens as f64 * 100.0)
+                        as u32
+                } else {
+                    0
+                };
 
                 Ok(ToolOutput {
                     title: format!("Codebase Context ({} tokens)", ctx_result.total_tokens),
@@ -249,7 +252,11 @@ mod tests {
         let query_param = schema.params.iter().find(|p| p.name == "query").unwrap();
         assert!(query_param.required);
 
-        let budget_param = schema.params.iter().find(|p| p.name == "budget_tokens").unwrap();
+        let budget_param = schema
+            .params
+            .iter()
+            .find(|p| p.name == "budget_tokens")
+            .unwrap();
         assert!(!budget_param.required);
     }
 

@@ -14,8 +14,8 @@ use std::path::Path;
 use tree_sitter::{Node, Tree};
 
 use crate::patterns;
-use crate::types::*;
 use crate::tree_sitter::SupportedLanguage;
+use crate::types::*;
 
 use super::common::{
     self, anchor_from_node, extract_string_value, node_text, node_text_ref, truncate_call_text,
@@ -624,7 +624,8 @@ mod tests {
 
     fn extract_php(source: &str) -> FileExtraction {
         let path = PathBuf::from("routes.php");
-        let parsed = crate::tree_sitter::parse_source(&path, source, SupportedLanguage::Php, None).unwrap();
+        let parsed =
+            crate::tree_sitter::parse_source(&path, source, SupportedLanguage::Php, None).unwrap();
         extract(&path, source, &parsed.tree, SupportedLanguage::Php)
     }
 

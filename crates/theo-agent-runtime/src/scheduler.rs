@@ -96,12 +96,15 @@ impl Scheduler {
         let sequence = *seq;
         *seq += 1;
 
-        self.queue.lock().expect("queue lock poisoned").push(ScheduledTask {
-            task_id,
-            priority,
-            enqueued_at: Instant::now(),
-            sequence,
-        });
+        self.queue
+            .lock()
+            .expect("queue lock poisoned")
+            .push(ScheduledTask {
+                task_id,
+                priority,
+                enqueued_at: Instant::now(),
+                sequence,
+            });
     }
 
     /// Pops the highest-priority task from the queue.
@@ -110,7 +113,10 @@ impl Scheduler {
     /// Moves the task to the active set.
     pub fn run_next(&self) -> Option<TaskId> {
         let task = self.queue.lock().expect("queue lock poisoned").pop()?;
-        self.active.lock().expect("active lock poisoned").push(task.task_id.clone());
+        self.active
+            .lock()
+            .expect("active lock poisoned")
+            .push(task.task_id.clone());
         Some(task.task_id)
     }
 
@@ -274,7 +280,10 @@ mod tests {
     #[test]
     fn semaphore_has_correct_permits() {
         let bus = Arc::new(EventBus::new());
-        let config = SchedulerConfig { max_concurrent_runs: 3, ..Default::default() };
+        let config = SchedulerConfig {
+            max_concurrent_runs: 3,
+            ..Default::default()
+        };
         let sched = Scheduler::new(config, bus);
         assert_eq!(sched.semaphore().available_permits(), 3);
     }

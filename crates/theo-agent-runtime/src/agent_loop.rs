@@ -1,7 +1,6 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use theo_domain::event::DomainEvent;
 use theo_domain::session::SessionId;
 use theo_domain::task::AgentType;
 use theo_infra_llm::LlmClient;
@@ -10,18 +9,12 @@ use theo_tooling::registry::ToolRegistry;
 use crate::capability_gate::CapabilityGate;
 use crate::config::AgentConfig;
 use crate::event_bus::{EventBus, EventListener};
-#[allow(deprecated)]
-use crate::events::{AgentEvent, EventSink};
 use crate::run_engine::AgentRunEngine;
 use crate::task_manager::TaskManager;
 use crate::tool_call_manager::ToolCallManager;
 
-// Keep these imports for backward compat of existing tests
-#[allow(deprecated)]
-use crate::state::{AgentState, Phase};
-
 /// Result of an agent loop execution.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct AgentResult {
     pub success: bool,
     pub summary: String,
@@ -34,13 +27,26 @@ pub struct AgentResult {
     /// Total tokens consumed during this run (LLM input + output).
     /// Collected by MetricsCollector, surfaced for display.
     pub tokens_used: u64,
+    /// Input (prompt) tokens consumed during this run.
+    pub input_tokens: u64,
+    /// Output (completion) tokens consumed during this run.
+    pub output_tokens: u64,
+    /// Total tool calls dispatched during this run.
+    pub tool_calls_total: u64,
+    /// Tool calls that returned without error.
+    pub tool_calls_success: u64,
+    /// Total LLM API calls during this run.
+    pub llm_calls: u64,
+    /// Total LLM retries triggered during this run.
+    pub retries: u64,
+    /// Wall-clock duration of the run, milliseconds. Filled by the caller.
+    pub duration_ms: u64,
 }
 
 /// The main agent loop that orchestrates LLM ↔ tool execution.
 ///
 /// This is now a thin facade over `AgentRunEngine`. All execution logic
-/// lives in `run_engine.rs`. This struct preserves the original API
-/// for backward compatibility with CLI and desktop binaries.
+/// lives in `run_engine.rs`.
 pub struct AgentLoop {
     client_base_url: String,
     client_api_key: Option<String>,
@@ -50,31 +56,34 @@ pub struct AgentLoop {
     #[allow(dead_code)] // Stored for backward compat; runtime uses create_default_registry()
     registry: ToolRegistry,
     config: AgentConfig,
-    #[allow(deprecated)]
-    event_sink: Arc<dyn EventSink>,
+    listeners: Vec<Arc<dyn EventListener>>,
     graph_context: Option<Arc<dyn theo_domain::graph_context::GraphContextProvider>>,
 }
 
 impl AgentLoop {
-    #[allow(deprecated)]
-    pub fn new(
-        config: AgentConfig,
-        registry: ToolRegistry,
-        event_sink: Arc<dyn EventSink>,
-    ) -> Self {
+    pub fn new(config: AgentConfig, registry: ToolRegistry) -> Self {
         Self {
             client_base_url: config.base_url.clone(),
             client_api_key: config.api_key.clone(),
             client_model: config.model.clone(),
             client_endpoint_override: config.endpoint_override.clone(),
-            client_extra_headers: config.extra_headers.iter()
+            client_extra_headers: config
+                .extra_headers
+                .iter()
                 .map(|(k, v)| (k.clone(), v.clone()))
                 .collect(),
             registry,
             config,
-            event_sink,
+            listeners: Vec::new(),
             graph_context: None,
         }
+    }
+
+    /// Attach a native domain-event listener to the loop.
+    #[must_use]
+    pub fn with_event_listener(mut self, listener: Arc<dyn EventListener>) -> Self {
+        self.listeners.push(listener);
+        self
     }
 
     /// Set the graph context provider for code intelligence injection.
@@ -89,12 +98,9 @@ impl AgentLoop {
     /// Run the agent loop on a task.
     ///
     /// Delegates entirely to `AgentRunEngine::execute()`.
-    #[allow(deprecated)]
     pub async fn run(&self, task: &str, project_dir: &Path) -> AgentResult {
-        // Create EventBus and bridge old EventSink
         let event_bus = Arc::new(EventBus::new());
-        let bridge = Arc::new(EventSinkBridge::new(self.event_sink.clone()));
-        event_bus.subscribe(bridge);
+        self.attach_listeners(&event_bus);
 
         // Create managers
         let task_manager = Arc::new(TaskManager::new(event_bus.clone()));
@@ -107,11 +113,8 @@ impl AgentLoop {
         });
 
         // Create task
-        let task_id = task_manager.create_task(
-            SessionId::new("agent"),
-            AgentType::Coder,
-            task.to_string(),
-        );
+        let task_id =
+            task_manager.create_task(SessionId::new("agent"), AgentType::Coder, task.to_string());
 
         // Build LLM client (same logic as old AgentLoop::new)
         let mut client = LlmClient::new(
@@ -151,9 +154,7 @@ impl AgentLoop {
     /// Run with session history and external EventBus.
     ///
     /// The caller provides an EventBus with listeners already subscribed
-    /// (e.g., CliRenderer for real-time output). The EventSinkBridge is
-    /// also subscribed for backward compat.
-    #[allow(deprecated)]
+    /// (e.g., CliRenderer for real-time output).
     pub async fn run_with_history(
         &self,
         task: &str,
@@ -162,8 +163,7 @@ impl AgentLoop {
         external_bus: Option<Arc<EventBus>>,
     ) -> AgentResult {
         let event_bus = external_bus.unwrap_or_else(|| Arc::new(EventBus::new()));
-        let bridge = Arc::new(EventSinkBridge::new(self.event_sink.clone()));
-        event_bus.subscribe(bridge);
+        self.attach_listeners(&event_bus);
 
         let task_manager = Arc::new(TaskManager::new(event_bus.clone()));
         let tcm = ToolCallManager::new(event_bus.clone());
@@ -174,11 +174,8 @@ impl AgentLoop {
             tcm
         });
 
-        let task_id = task_manager.create_task(
-            SessionId::new("agent"),
-            AgentType::Coder,
-            task.to_string(),
-        );
+        let task_id =
+            task_manager.create_task(SessionId::new("agent"), AgentType::Coder, task.to_string());
 
         let mut client = LlmClient::new(
             &self.client_base_url,
@@ -212,58 +209,10 @@ impl AgentLoop {
 
         engine.execute_with_history(history).await
     }
-}
 
-/// Bridge that maps DomainEvent → AgentEvent for backward compatibility.
-///
-/// Implements EventListener (new system) and forwards to EventSink (old system).
-#[allow(deprecated)]
-struct EventSinkBridge {
-    sink: Arc<dyn EventSink>,
-}
-
-#[allow(deprecated)]
-impl EventSinkBridge {
-    fn new(sink: Arc<dyn EventSink>) -> Self {
-        Self { sink }
-    }
-}
-
-#[allow(deprecated)]
-impl EventListener for EventSinkBridge {
-    fn on_event(&self, event: &DomainEvent) {
-        // Map DomainEvent to AgentEvent for backward compat
-        let agent_event = match event.event_type {
-            theo_domain::event::EventType::LlmCallStart => {
-                let iteration = event.payload.get("iteration")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0) as usize;
-                Some(AgentEvent::LlmCallStart { iteration })
-            }
-            theo_domain::event::EventType::LlmCallEnd => {
-                let iteration = event.payload.get("iteration")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0) as usize;
-                Some(AgentEvent::LlmCallEnd { iteration })
-            }
-            theo_domain::event::EventType::RunStateChanged => {
-                // Map to PhaseChange for display purposes
-                None // RunState changes don't map 1:1 to old Phase changes
-            }
-            theo_domain::event::EventType::Error => {
-                let msg = event.payload.get("error")
-                    .or(event.payload.get("reason"))
-                    .or(event.payload.get("violation"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown error")
-                    .to_string();
-                Some(AgentEvent::Error(msg))
-            }
-            _ => None, // Other domain events don't have AgentEvent equivalents
-        };
-
-        if let Some(ae) = agent_event {
-            self.sink.emit(ae);
+    fn attach_listeners(&self, event_bus: &Arc<EventBus>) {
+        for listener in &self.listeners {
+            event_bus.subscribe(listener.clone());
         }
     }
 }
@@ -276,15 +225,22 @@ fn load_plugin_tools(registry: &mut theo_tooling::registry::ToolRegistry, projec
     let mut tool_specs = Vec::new();
     for plugin in &plugins {
         for (spec, script_path) in &plugin.tool_scripts {
-            let params: Vec<theo_domain::tool::ToolParam> = spec.params.iter().map(|p| {
-                theo_domain::tool::ToolParam {
+            let params: Vec<theo_domain::tool::ToolParam> = spec
+                .params
+                .iter()
+                .map(|p| theo_domain::tool::ToolParam {
                     name: p.name.clone(),
                     param_type: p.param_type.clone(),
                     description: p.description.clone(),
                     required: p.required,
-                }
-            }).collect();
-            tool_specs.push((spec.name.clone(), spec.description.clone(), script_path.clone(), params));
+                })
+                .collect();
+            tool_specs.push((
+                spec.name.clone(),
+                spec.description.clone(),
+                script_path.clone(),
+                params,
+            ));
         }
     }
     if !tool_specs.is_empty() {
@@ -311,15 +267,19 @@ async fn has_real_changes(project_dir: &Path) -> bool {
 
 /// Generate a phase-specific nudge message if appropriate.
 /// Kept as free function for backward compatibility with existing tests.
-#[allow(deprecated, dead_code)]
-fn phase_nudge(state: &AgentState, iteration: usize, max_iterations: usize) -> Option<String> {
+#[allow(dead_code)]
+fn phase_nudge(
+    state: &crate::loop_state::ContextLoopState,
+    iteration: usize,
+    max_iterations: usize,
+) -> Option<String> {
     let two_thirds = (max_iterations * 2) / 3;
 
     match state.phase {
-        Phase::Edit if iteration >= two_thirds && state.edits_succeeded == 0 => {
+        crate::loop_state::LoopPhase::Edit if iteration >= two_thirds && state.edits_succeeded == 0 => {
             Some("URGENT: You have very few iterations left and NO successful edits. Stop reading/searching and EDIT a file NOW.".to_string())
         }
-        Phase::Edit if state.edit_attempts > 3 && state.edits_succeeded == 0 => {
+        crate::loop_state::LoopPhase::Edit if state.edit_attempts > 3 && state.edits_succeeded == 0 => {
             Some("Your edits keep failing. Read the target file again carefully, then try a different edit approach.".to_string())
         }
         _ => None,
@@ -335,58 +295,48 @@ mod tests {
         let result = AgentResult {
             success: false,
             summary: "test".to_string(),
-            files_edited: vec![],
-            iterations_used: 0,
-            was_streamed: false,
-            tokens_used: 0,
+            ..Default::default()
         };
         assert!(!result.success);
     }
 
-    #[allow(deprecated)]
     #[test]
     fn test_phase_nudge_urgent() {
-        let mut state = AgentState::new();
-        state.phase = Phase::Edit;
+        let mut state = crate::loop_state::ContextLoopState::new();
+        state.phase = crate::loop_state::LoopPhase::Edit;
         let nudge = phase_nudge(&state, 10, 15);
         assert!(nudge.is_some());
         assert!(nudge.unwrap().contains("URGENT"));
     }
 
-    #[allow(deprecated)]
     #[test]
     fn test_phase_nudge_none_in_explore() {
-        let state = AgentState::new();
+        let state = crate::loop_state::ContextLoopState::new();
         let nudge = phase_nudge(&state, 1, 15);
         assert!(nudge.is_none());
     }
 
-    #[allow(deprecated)]
     #[test]
-    fn test_agent_loop_new_backward_compat() {
-        use crate::events::NullEventSink;
+    fn test_agent_loop_new_preserves_constructor_fields() {
         let config = AgentConfig::default();
         let registry = theo_tooling::registry::create_default_registry();
-        let sink: Arc<dyn EventSink> = Arc::new(NullEventSink);
-        let agent_loop = AgentLoop::new(config.clone(), registry, sink);
+        let agent_loop = AgentLoop::new(config.clone(), registry);
 
         // Verify constructor propagates config correctly
         assert_eq!(agent_loop.client_model, config.model);
-        assert!(agent_loop.graph_context.is_none(), "graph_context should be None by default");
+        assert!(
+            agent_loop.graph_context.is_none(),
+            "graph_context should be None by default"
+        );
+        assert!(agent_loop.listeners.is_empty());
     }
 
     #[test]
-    fn test_event_sink_bridge_does_not_panic() {
-        use crate::events::NullEventSink;
-        use theo_domain::event::{EventType, ALL_EVENT_TYPES};
-
-        let sink: Arc<dyn EventSink> = Arc::new(NullEventSink);
-        let bridge = EventSinkBridge::new(sink);
-
-        // All event types should not panic
-        for et in &ALL_EVENT_TYPES {
-            let event = DomainEvent::new(*et, "test", serde_json::Value::Null);
-            bridge.on_event(&event);
-        }
+    fn test_with_event_listener_registers_listener() {
+        let config = AgentConfig::default();
+        let registry = theo_tooling::registry::create_default_registry();
+        let loop_ = AgentLoop::new(config, registry)
+            .with_event_listener(Arc::new(crate::event_bus::NullEventListener));
+        assert_eq!(loop_.listeners.len(), 1);
     }
 }

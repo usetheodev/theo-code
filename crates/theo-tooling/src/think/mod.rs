@@ -84,7 +84,10 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(result.output, "I need to read main.rs first, then edit the function.");
+        assert_eq!(
+            result.output,
+            "I need to read main.rs first, then edit the function."
+        );
         assert_eq!(result.title, "Thought recorded");
     }
 
@@ -95,9 +98,7 @@ mod tests {
         let mut perms = PermissionCollector::new();
 
         let tool = ThinkTool::new();
-        let result = tool
-            .execute(serde_json::json!({}), &ctx, &mut perms)
-            .await;
+        let result = tool.execute(serde_json::json!({}), &ctx, &mut perms).await;
 
         assert!(result.is_err());
     }

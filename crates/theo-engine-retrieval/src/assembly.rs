@@ -3,7 +3,6 @@
 /// Converts scored communities into a `ContextPayload` that fits within a
 /// token budget. Items are ranked by value density (score / token_count) and
 /// filled greedily until the budget is exhausted.
-
 use std::collections::HashSet;
 use std::path::Path;
 
@@ -138,7 +137,11 @@ pub fn assemble_greedy(
     // Sort descending by SCORE (relevance first, not token-efficiency).
     // Previous: sorted by density (score/tokens) which caused small irrelevant
     // communities to beat large relevant ones. Now: most relevant first.
-    candidates.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    candidates.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     let mut items: Vec<ContextItem> = Vec::new();
     let mut total_tokens = 0usize;
@@ -214,7 +217,11 @@ pub fn assemble_with_summaries(
         })
         .collect();
 
-    candidates.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    candidates.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     let mut items: Vec<ContextItem> = Vec::new();
     let mut total_tokens = 0usize;
@@ -559,8 +566,12 @@ fn build_code_content_filtered(
                         for edge in graph.all_edges() {
                             if edge.edge_type == EdgeType::Contains && edge.source == *node_id {
                                 if let Some(child) = graph.get_node(&edge.target) {
-                                    let name_tokens: HashSet<String> = crate::search::tokenise(&child.name).into_iter().collect();
-                                    match_count += query_tokens.iter().filter(|qt| name_tokens.contains(*qt)).count();
+                                    let name_tokens: HashSet<String> =
+                                        crate::search::tokenise(&child.name).into_iter().collect();
+                                    match_count += query_tokens
+                                        .iter()
+                                        .filter(|qt| name_tokens.contains(*qt))
+                                        .count();
                                 }
                             }
                         }
@@ -569,7 +580,10 @@ fn build_code_content_filtered(
             }
             // Also check the file name itself
             let path_tokens: HashSet<String> = crate::search::tokenise(path).into_iter().collect();
-            match_count += query_tokens.iter().filter(|qt| path_tokens.contains(*qt)).count();
+            match_count += query_tokens
+                .iter()
+                .filter(|qt| path_tokens.contains(*qt))
+                .count();
 
             (path, ranges, match_count)
         })
@@ -577,15 +591,29 @@ fn build_code_content_filtered(
 
     // Sort by match count descending, take top 3 files
     file_scores.sort_by(|a, b| b.2.cmp(&a.2));
-    let top_files: Vec<_> = file_scores.into_iter().filter(|(_, _, score)| *score > 0).take(3).collect();
+    let top_files: Vec<_> = file_scores
+        .into_iter()
+        .filter(|(_, _, score)| *score > 0)
+        .take(3)
+        .collect();
 
     if top_files.is_empty() {
         // Fallback: return summary only
-        return format!("## {} -- {} files\n{}", community.name, file_symbols.len(), summary_text);
+        return format!(
+            "## {} -- {} files\n{}",
+            community.name,
+            file_symbols.len(),
+            summary_text
+        );
     }
 
     let mut lines: Vec<String> = Vec::new();
-    lines.push(format!("## {} -- {} relevant files (of {})", community.name, top_files.len(), file_symbols.len()));
+    lines.push(format!(
+        "## {} -- {} relevant files (of {})",
+        community.name,
+        top_files.len(),
+        file_symbols.len()
+    ));
 
     let summary_first_lines: Vec<&str> = summary_text
         .lines()
@@ -726,15 +754,28 @@ pub fn assemble_with_code(
                     .unwrap_or("");
 
                 if s.community.node_ids.len() > 5 {
-                    build_code_content_filtered(&s.community, summary_text, graph, repo_root, &query_tokens)
+                    build_code_content_filtered(
+                        &s.community,
+                        summary_text,
+                        graph,
+                        repo_root,
+                        &query_tokens,
+                    )
                 } else {
                     build_code_content(&s.community, summary_text, graph, repo_root)
                 }
             } else if rank < 4 {
                 // Rank 2-3: use compressed representations for large communities
-                let symbol_count = s.community.node_ids.iter().filter(|id| {
-                    graph.get_node(id).map_or(false, |n| n.node_type == NodeType::Symbol)
-                }).count();
+                let symbol_count = s
+                    .community
+                    .node_ids
+                    .iter()
+                    .filter(|id| {
+                        graph
+                            .get_node(id)
+                            .map_or(false, |n| n.node_type == NodeType::Symbol)
+                    })
+                    .count();
                 let file_count = collect_file_symbols(&s.community, graph).len();
 
                 if symbol_count > symbol_count_threshold || file_count > file_count_threshold {
@@ -745,7 +786,13 @@ pub fn assemble_with_code(
                         .map(|sum| sum.text.as_str())
                         .unwrap_or("");
                     if s.community.node_ids.len() > 5 {
-                        build_code_content_filtered(&s.community, summary_text, graph, repo_root, &query_tokens)
+                        build_code_content_filtered(
+                            &s.community,
+                            summary_text,
+                            graph,
+                            repo_root,
+                            &query_tokens,
+                        )
                     } else {
                         build_code_content(&s.community, summary_text, graph, repo_root)
                     }
@@ -903,9 +950,7 @@ pub fn assemble_by_symbol(
 
         // Build content: file header + all symbol signatures in this file
         let mut lines = vec![format!("## {}", file_path)];
-        let children = graph.contains_children(
-            &format!("file:{}", file_path),
-        );
+        let children = graph.contains_children(&format!("file:{}", file_path));
         if children.is_empty() {
             // No contains relationship — just show the matching symbol
             if let Some(node) = graph.get_node(node_id) {
@@ -980,7 +1025,8 @@ pub fn assemble_files_direct(
     }
 
     // Build file → community lookup
-    let mut file_to_community: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
+    let mut file_to_community: std::collections::HashMap<&str, &str> =
+        std::collections::HashMap::new();
     for comm in communities {
         for nid in &comm.node_ids {
             if let Some(node) = graph.get_node(nid) {
@@ -1001,11 +1047,17 @@ pub fn assemble_files_direct(
             // Penalty: test/benchmark/example files get 1/10 score (Zoekt pattern).
             // These files mention symbols (because they test them) but aren't source.
             let lp = p.to_lowercase();
-            let is_test = lp.contains("/tests/") || lp.contains("/test_") || lp.contains("_test.")
-                || lp.contains(".test.") || lp.contains("_spec.") || lp.contains(".spec.")
+            let is_test = lp.contains("/tests/")
+                || lp.contains("/test_")
+                || lp.contains("_test.")
+                || lp.contains(".test.")
+                || lp.contains("_spec.")
+                || lp.contains(".spec.")
                 || lp.starts_with("tests/");
-            let is_benchmark = lp.contains("/examples/") || lp.contains("/benchmark")
-                || lp.contains("benchmark.") || lp.contains("theo-benchmark")
+            let is_benchmark = lp.contains("/examples/")
+                || lp.contains("/benchmark")
+                || lp.contains("benchmark.")
+                || lp.contains("theo-benchmark")
                 || lp.contains("/benches/");
             let is_eval = lp.contains("eval_suite") || lp.contains("eval_");
 
@@ -1038,9 +1090,8 @@ pub fn assemble_files_direct(
     let is_hub_file = |p: &str| HUB_SUFFIXES.iter().any(|s| p.ends_with(s));
 
     // Only expand from top-3 BM25 seeds
-    let mut seeds_for_reverse: Vec<(&str, f64)> = adjusted_scores.iter()
-        .map(|(&p, &s)| (p, s))
-        .collect();
+    let mut seeds_for_reverse: Vec<(&str, f64)> =
+        adjusted_scores.iter().map(|(&p, &s)| (p, s)).collect();
     seeds_for_reverse.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
     let mut reverse_boost: std::collections::HashMap<&str, f64> = std::collections::HashMap::new();
@@ -1050,20 +1101,35 @@ pub fn assemble_files_direct(
 
         // For each symbol DEFINED in this seed file
         for sym_id in graph.contains_children(&file_id) {
-            let Some(sym) = graph.get_node(sym_id) else { continue };
+            let Some(sym) = graph.get_node(sym_id) else {
+                continue;
+            };
 
             // Only functions/methods — types and traits have too many implementers
-            let is_fn = matches!(sym.kind, Some(SymbolKind::Function) | Some(SymbolKind::Method));
-            if !is_fn { continue; }
+            let is_fn = matches!(
+                sym.kind,
+                Some(SymbolKind::Function) | Some(SymbolKind::Method)
+            );
+            if !is_fn {
+                continue;
+            }
 
             // Find CALLERS of this symbol (reverse edge traversal)
             for caller_id in graph.reverse_neighbors(sym_id) {
-                let Some(caller) = graph.get_node(caller_id) else { continue };
-                let Some(caller_file) = caller.file_path.as_deref() else { continue };
+                let Some(caller) = graph.get_node(caller_id) else {
+                    continue;
+                };
+                let Some(caller_file) = caller.file_path.as_deref() else {
+                    continue;
+                };
 
                 // Skip self-references and hub files
-                if caller_file == *seed_path { continue; }
-                if is_hub_file(caller_file) { continue; }
+                if caller_file == *seed_path {
+                    continue;
+                }
+                if is_hub_file(caller_file) {
+                    continue;
+                }
 
                 *reverse_boost.entry(caller_file).or_insert(0.0) += REVERSE_BOOST_PER_CALLER;
             }
@@ -1087,7 +1153,8 @@ pub fn assemble_files_direct(
     // Apply capped boost
     for (&path, &boost) in &reverse_boost {
         let capped = boost.min(MAX_REVERSE_BOOST);
-        adjusted_scores.entry(path)
+        adjusted_scores
+            .entry(path)
             .and_modify(|s| *s += capped)
             .or_insert(capped);
     }
@@ -1167,7 +1234,7 @@ pub fn assemble_files_direct(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::summary::{CommunitySummary, CommunityStructuredData};
+    use crate::summary::{CommunityStructuredData, CommunitySummary};
     use std::collections::HashMap;
     use std::io::Write;
     use theo_engine_graph::cluster::Community;
@@ -1195,7 +1262,11 @@ mod tests {
         .unwrap();
 
         let mut f2 = std::fs::File::create(src_dir.join("handler.rs")).unwrap();
-        writeln!(f2, "fn handle(req: Request) -> Response {{\n    todo!()\n}}").unwrap();
+        writeln!(
+            f2,
+            "fn handle(req: Request) -> Response {{\n    todo!()\n}}"
+        )
+        .unwrap();
 
         // Build graph
         let mut graph = CodeGraph::new();
@@ -1326,9 +1397,19 @@ mod tests {
     fn test_assemble_with_code_includes_source() {
         let (scored, summaries, graph, tmp_dir) = setup_code_test();
 
-        let payload = assemble_with_code(&scored, &summaries, &graph, tmp_dir.path(), 50_000, "test query");
+        let payload = assemble_with_code(
+            &scored,
+            &summaries,
+            &graph,
+            tmp_dir.path(),
+            50_000,
+            "test query",
+        );
 
-        assert!(!payload.items.is_empty(), "should produce at least one item");
+        assert!(
+            !payload.items.is_empty(),
+            "should produce at least one item"
+        );
 
         let content = &payload.items[0].content;
 
@@ -1372,7 +1453,14 @@ mod tests {
 
         // Use a very small budget — should cap the total tokens
         let tiny_budget = 10;
-        let payload = assemble_with_code(&scored, &summaries, &graph, tmp_dir.path(), tiny_budget, "test query");
+        let payload = assemble_with_code(
+            &scored,
+            &summaries,
+            &graph,
+            tmp_dir.path(),
+            tiny_budget,
+            "test query",
+        );
 
         assert!(
             payload.total_tokens <= tiny_budget,
@@ -1471,11 +1559,24 @@ mod tests {
                 name: "big/module".into(),
                 text: "## big/module".into(),
                 token_count: 5,
-                structured: CommunityStructuredData { top_functions: vec![], edge_types_present: vec![], cross_community_deps: vec![], file_count: 0, primary_language: String::new() },
+                structured: CommunityStructuredData {
+                    top_functions: vec![],
+                    edge_types_present: vec![],
+                    cross_community_deps: vec![],
+                    file_count: 0,
+                    primary_language: String::new(),
+                },
             },
         );
 
-        let payload = assemble_with_code(&scored, &summaries, &graph, tmp_dir.path(), 50_000, "test query");
+        let payload = assemble_with_code(
+            &scored,
+            &summaries,
+            &graph,
+            tmp_dir.path(),
+            50_000,
+            "test query",
+        );
 
         assert!(!payload.items.is_empty());
         let content = &payload.items[0].content;

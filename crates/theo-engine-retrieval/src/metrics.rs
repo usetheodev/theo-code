@@ -153,9 +153,12 @@ pub fn dep_coverage(expected_deps: &[DepEdge], retrieved_files: &[String]) -> f6
         return 1.0; // No deps expected → fully covered
     }
     let retrieved: HashSet<&str> = retrieved_files.iter().map(|s| s.as_str()).collect();
-    let covered = expected_deps.iter().filter(|dep| {
-        retrieved.contains(dep.source.as_str()) && retrieved.contains(dep.target.as_str())
-    }).count();
+    let covered = expected_deps
+        .iter()
+        .filter(|dep| {
+            retrieved.contains(dep.source.as_str()) && retrieved.contains(dep.target.as_str())
+        })
+        .count();
     covered as f64 / expected_deps.len() as f64
 }
 
@@ -245,9 +248,17 @@ impl RetrievalMetrics {
     pub fn summary(&self) -> String {
         format!(
             "R@5={:.3} R@10={:.3} P@5={:.3} MRR={:.3} Hit@5={:.3} Hit@10={:.3} nDCG@5={:.3} nDCG@10={:.3} MAP={:.3} DepCov={:.3} MissDep={:.3}",
-            self.recall_at_5, self.recall_at_10, self.precision_at_5, self.mrr,
-            self.hit_rate_at_5, self.hit_rate_at_10, self.ndcg_at_5, self.ndcg_at_10,
-            self.average_precision, self.dep_coverage, self.missing_dep_rate,
+            self.recall_at_5,
+            self.recall_at_10,
+            self.precision_at_5,
+            self.mrr,
+            self.hit_rate_at_5,
+            self.hit_rate_at_10,
+            self.ndcg_at_5,
+            self.ndcg_at_10,
+            self.average_precision,
+            self.dep_coverage,
+            self.missing_dep_rate,
         )
     }
 }
@@ -434,9 +445,11 @@ mod tests {
 
     #[test]
     fn dep_coverage_full() {
-        let deps = vec![
-            DepEdge { source: "a.rs".into(), target: "b.rs".into(), edge_type: "Imports".into() },
-        ];
+        let deps = vec![DepEdge {
+            source: "a.rs".into(),
+            target: "b.rs".into(),
+            edge_type: "Imports".into(),
+        }];
         let retrieved = files(&["a.rs", "b.rs", "c.rs"]);
         assert!((dep_coverage(&deps, &retrieved) - 1.0).abs() < 0.001);
     }
@@ -444,8 +457,16 @@ mod tests {
     #[test]
     fn dep_coverage_partial() {
         let deps = vec![
-            DepEdge { source: "a.rs".into(), target: "b.rs".into(), edge_type: "Imports".into() },
-            DepEdge { source: "a.rs".into(), target: "c.rs".into(), edge_type: "Calls".into() },
+            DepEdge {
+                source: "a.rs".into(),
+                target: "b.rs".into(),
+                edge_type: "Imports".into(),
+            },
+            DepEdge {
+                source: "a.rs".into(),
+                target: "c.rs".into(),
+                edge_type: "Calls".into(),
+            },
         ];
         // Only a.rs and b.rs retrieved, not c.rs → 1/2 = 0.5
         let retrieved = files(&["a.rs", "b.rs"]);
@@ -454,9 +475,11 @@ mod tests {
 
     #[test]
     fn dep_coverage_zero() {
-        let deps = vec![
-            DepEdge { source: "a.rs".into(), target: "b.rs".into(), edge_type: "Imports".into() },
-        ];
+        let deps = vec![DepEdge {
+            source: "a.rs".into(),
+            target: "b.rs".into(),
+            edge_type: "Imports".into(),
+        }];
         let retrieved = files(&["x.rs"]);
         assert!((dep_coverage(&deps, &retrieved) - 0.0).abs() < 0.001);
     }
@@ -471,18 +494,22 @@ mod tests {
 
     #[test]
     fn missing_dep_rate_zero() {
-        let deps = vec![
-            DepEdge { source: "a.rs".into(), target: "b.rs".into(), edge_type: "Imports".into() },
-        ];
+        let deps = vec![DepEdge {
+            source: "a.rs".into(),
+            target: "b.rs".into(),
+            edge_type: "Imports".into(),
+        }];
         let retrieved = files(&["a.rs", "b.rs"]);
         assert!((missing_dep_rate(&deps, &retrieved) - 0.0).abs() < 0.001);
     }
 
     #[test]
     fn missing_dep_rate_full() {
-        let deps = vec![
-            DepEdge { source: "a.rs".into(), target: "b.rs".into(), edge_type: "Imports".into() },
-        ];
+        let deps = vec![DepEdge {
+            source: "a.rs".into(),
+            target: "b.rs".into(),
+            edge_type: "Imports".into(),
+        }];
         let retrieved = files(&["x.rs"]);
         assert!((missing_dep_rate(&deps, &retrieved) - 1.0).abs() < 0.001);
     }
@@ -493,9 +520,11 @@ mod tests {
     fn metrics_compute() {
         let returned = files(&["a.rs", "x.rs", "b.rs"]);
         let expected = &["a.rs", "b.rs"];
-        let deps = vec![
-            DepEdge { source: "a.rs".into(), target: "b.rs".into(), edge_type: "Imports".into() },
-        ];
+        let deps = vec![DepEdge {
+            source: "a.rs".into(),
+            target: "b.rs".into(),
+            edge_type: "Imports".into(),
+        }];
         let m = RetrievalMetrics::compute(&returned, expected, &deps);
         assert!(m.recall_at_5 > 0.9); // both found in top-3
         assert!(m.hit_rate_at_5 > 0.9); // at least 1 found
@@ -505,8 +534,16 @@ mod tests {
 
     #[test]
     fn metrics_average() {
-        let m1 = RetrievalMetrics { recall_at_5: 1.0, mrr: 1.0, ..Default::default() };
-        let m2 = RetrievalMetrics { recall_at_5: 0.5, mrr: 0.5, ..Default::default() };
+        let m1 = RetrievalMetrics {
+            recall_at_5: 1.0,
+            mrr: 1.0,
+            ..Default::default()
+        };
+        let m2 = RetrievalMetrics {
+            recall_at_5: 0.5,
+            mrr: 0.5,
+            ..Default::default()
+        };
         let avg = RetrievalMetrics::average(&[m1, m2]);
         assert!((avg.recall_at_5 - 0.75).abs() < 0.001);
         assert!((avg.mrr - 0.75).abs() < 0.001);

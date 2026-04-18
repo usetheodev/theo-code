@@ -1,4 +1,54 @@
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::Arc;
+
+use theo_infra_llm::types::Message;
+
+// ---------------------------------------------------------------------------
+// Steering & Follow-up Message Queues
+// ---------------------------------------------------------------------------
+
+/// Async closure type for message queue resolution.
+/// Returns `Vec<Message>` — empty vec means "nothing queued".
+///
+/// **Pi-mono ref:** `packages/agent/src/types.ts:163-183`
+pub type MessageQueueFn =
+    Arc<dyn Fn() -> Pin<Box<dyn Future<Output = Vec<Message>> + Send>> + Send + Sync>;
+
+/// Message queues for steering (mid-run) and follow-up (post-convergence).
+///
+/// Steering messages are checked after each tool execution batch and injected
+/// as user messages before the next LLM call. Follow-up messages are checked
+/// when the agent would otherwise converge; if present, the agent continues.
+///
+/// Both queues are optional — when absent, behavior is unchanged.
+///
+/// **Pi-mono ref:** `packages/agent/src/agent-loop.ts:165-229`
+pub struct MessageQueues {
+    /// Messages injected mid-run between turns (e.g., user types while agent works).
+    pub steering: Option<MessageQueueFn>,
+    /// Messages checked after natural convergence (extends the run if present).
+    pub follow_up: Option<MessageQueueFn>,
+}
+
+impl Default for MessageQueues {
+    fn default() -> Self {
+        Self {
+            steering: None,
+            follow_up: None,
+        }
+    }
+}
+
+impl std::fmt::Debug for MessageQueues {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MessageQueues")
+            .field("steering", &self.steering.as_ref().map(|_| "Some(Fn)"))
+            .field("follow_up", &self.follow_up.as_ref().map(|_| "Some(Fn)"))
+            .finish()
+    }
+}
 
 // ---------------------------------------------------------------------------
 // AgentMode — interaction style
@@ -54,97 +104,65 @@ impl std::fmt::Display for AgentMode {
 pub fn system_prompt_for_mode(mode: AgentMode) -> String {
     match mode {
         AgentMode::Agent => default_system_prompt().to_string(),
-        AgentMode::Plan => format!(
-            r#"{}
+        AgentMode::Plan => String::from(
+            r#"You are an expert software architect operating in PLAN MODE inside the Theo harness.
 
-## MODE: PLAN (Governance-First)
-You are in PLAN mode. Every task goes through a governance process before execution.
+## Harness Context
+You operate inside the Theo harness — a runtime with sandbox, state machine, and feedback loops designed to help you succeed.
+- **Clean state contract**: Only call `done` after presenting a complete plan as visible markdown text. Calling `done` with no visible plan is unacceptable.
+- **Read-only exploration**: Use `read`, `grep`, `glob`, `codebase_context` to gather context. Source edits are blocked.
+- **Plan persistence**: The only writable destination is `.theo/plans/`.
 
-CRITICAL RULES:
-- You MUST call the `write` tool to create a roadmap file in `.theo/plans/`. This is MANDATORY.
-- Do NOT present the roadmap as text. WRITE IT TO THE FILE using the `write` tool.
-- Do NOT edit source code until the user approves.
-- A text-only response WITHOUT writing the roadmap file is a FAILURE.
-- Be FAST. Read only what matters. Do NOT explore exhaustively. Aim for 10-15 iterations total.
+In Plan Mode you are NOT a silent tool runner — you are a planner who communicates with the user through visible markdown text in your assistant messages. The user is reading your messages directly. If you only call tools and never produce assistant text, the user sees nothing and the session is a failure.
 
-### PHASE 1 — ENTENDIMENTO (3-5 iterations)
-1. Use `think` to analyze the task: O que, Por que, Escopo, Risco.
-2. Read key files with `read`, `grep`, `glob`. Focus on structure, not every file.
-3. Identify existing patterns, dependencies, and risks.
-4. Do this YOURSELF — do not delegate to sub-agents for small/medium projects.
+## ABSOLUTE RULES
 
-For LARGE projects only (10+ modules, 50+ files), you MAY use `subagent_parallel` with Explorer + Reviewer. For smaller projects, analyze directly — it's faster.
+1. **WRITE ASSISTANT TEXT.** Every response must contain markdown content in the assistant message channel. Tool calls are supplementary, never a substitute for text.
+2. **DO NOT call the `think` tool.** Reasoning belongs in your visible assistant message, not hidden in `think`. The `think` tool is forbidden in plan mode.
+3. **DO NOT edit source code.** Only these tools are allowed: `read`, `grep`, `glob`, `codebase_context`, `task_create`, `task_update`, `done`. The `write` tool is allowed ONLY for files under `.theo/plans/`.
+4. **DO NOT call `done` on the first turn.** First produce a plan as visible text. Only call `done` after you have presented the plan to the user.
+5. **NEVER reply with an empty message.** If you have nothing to ask a tool for, write the plan.
 
-### PHASE 2 — WRITE THE ROADMAP FILE (1-2 iterations)
-This is the most important phase. You MUST:
-1. Check `.theo/plans/` for existing files to determine next number (01, 02, etc.)
-2. Call `write` with filePath `.theo/plans/NN-slug.md` using the EXACT template below.
-3. Do NOT skip this step. Do NOT present text instead. CALL THE WRITE TOOL.
+## WORKFLOW
 
-TEMPLATE — copy this structure exactly, fill in the brackets:
+**Step 1 — Acknowledge & Explore (visible text + read-only tools)**
+- Open with one or two sentences in markdown explaining what you understood from the request.
+- Use `read`, `grep`, `glob`, `codebase_context` to gather context as needed.
+- After exploring, write a short markdown summary of what you found.
 
----BEGIN TEMPLATE---
-# Roadmap: [Title]
+**Step 2 — Present the Plan (visible markdown)**
+Write a complete plan in your assistant message using this structure:
 
-## Entendimento
-- **O que**: [objective]
-- **Por que**: [motivation]
-- **Escopo**: [files/modules affected]
-- **Risco**: [what could go wrong]
+```markdown
+# Plan: <title>
 
-## Análises
-### Explorer
-[findings]
+## Objective
+<what we are achieving and why>
 
-### Reviewer
-[findings]
+## Scope
+- Files/modules affected
+- Out of scope
 
-## Conflitos
-[disagreements or risks — ALWAYS list at least one]
+## Tasks
+1. <task> — file: `path/to/file.rs` — acceptance: <criterion>
+2. ...
 
-## Microtasks
+## Risks
+- <risk> → <mitigation>
 
-### Task 1: [title]
-- **Arquivo(s)**: [file paths]
-- **O que fazer**: [concrete description — what to create/change]
-- **Critério de aceite**: [how to verify — specific command or check]
-- **DoD**: [definition of done — measurable, not vague]
+## Validation
+- <how we verify success: tests, builds, manual checks>
+```
 
-### Task 2: [title]
-- **Arquivo(s)**: [file paths]
-- **O que fazer**: [description]
-- **Critério de aceite**: [verification]
-- **DoD**: [measurable]
+**Step 3 — Save & Hand Off (MANDATORY tool calls)**
+After writing the plan as visible markdown text in your assistant message, you MUST do BOTH of the following in the same response or the next iteration:
+1. Call the `write` tool to persist the plan to `.theo/plans/NN-slug.md` (use a sensible NN like `01`, `02`, etc., and a kebab-case slug). The file content must match the markdown plan you wrote.
+2. Call `done` with a one-line summary like: "Plan saved to .theo/plans/NN-slug.md. Switch to agent mode to implement."
 
-[repeat for all tasks — aim for 3-10 tasks]
+Producing the plan text without calling `write` is a failure — the user explicitly needs the file on disk. Producing `write` without `done` is a failure — the harness needs to know you finished.
 
-## Riscos
-| # | Risco | Severidade | Mitigação |
-|---|-------|-----------|-----------|
-| 1 | [risk] | low/medium/high | [mitigation] |
-
-## Verificação Final
-- [ ] Todos os testes passam (`cargo test`)
-- [ ] Nenhum warning novo (`cargo check`)
-- [ ] Código revisado
----END TEMPLATE---
-
-Rules for microtasks:
-- ATOMIC: one focused change per task, not a grab bag
-- ORDERED: by dependency (task 2 may depend on task 1)
-- DoD is SPECIFIC: "cargo test passes" not "tests work"
-- Critério is HOW TO VERIFY: "run cargo test", "read file X, confirm function Y exists"
-- 3-10 tasks. Fewer = too vague. More = over-engineered.
-
-### PHASE 3 — PRESENT SUMMARY & WAIT
-After the `write` tool succeeds, call `done` with a brief summary:
-- How many microtasks
-- Key files affected
-- Path to the roadmap file
-- Say: "Roadmap salvo. Use `theo pilot` para executar."
-
-Do NOT execute any source code changes. Your job in Plan mode is ONLY the roadmap."#,
-            default_system_prompt()
+## REMEMBER
+The user sees your assistant text. They do not see tool internals. Speak to them in markdown. Plans are documents, not silent tool sequences."#,
         ),
         AgentMode::Ask => format!(
             r#"{}
@@ -160,6 +178,60 @@ You are in ASK mode. Before doing ANY work:
 Ask questions that matter — don't ask about things you can determine by reading the code."#,
             default_system_prompt()
         ),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ToolExecutionMode — parallel vs sequential tool execution
+// ---------------------------------------------------------------------------
+
+/// How tool calls within a single LLM response are executed.
+///
+/// **Sequential** (default): tools execute one at a time in the order the LLM
+/// returned them. Each tool sees the side-effects of the previous one.
+///
+/// **Parallel**: all tool calls are prepared sequentially (argument parsing,
+/// `prepare_arguments` hook, schema validation, doom-loop check), then executed
+/// concurrently via `join_all`. Results are collected in original request order,
+/// not completion order. Meta-tools (`done`, `subagent`, `subagent_parallel`,
+/// `batch`, `skill`, `reflect`, `think`) are still executed sequentially before
+/// the parallel batch — they cannot be parallelised safely.
+///
+/// **Integration point in `run_engine.rs`:** the `for call in tool_calls` loop
+/// (around line 1421) that dispatches regular tools via `ToolCallManager`. In
+/// `Parallel` mode, regular tool calls would be collected into a `Vec<Future>`
+/// after preparation and dispatched with `futures::future::join_all`, mirroring
+/// the existing `batch` tool implementation (lines 1270-1282).
+///
+/// **Pi-mono ref:** `packages/agent/src/agent-loop.ts:390-438`
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum ToolExecutionMode {
+    /// Execute tool calls one at a time in order (current behavior).
+    #[default]
+    Sequential,
+    /// Prepare all sequentially (validation, hooks), then execute concurrently.
+    /// Results are collected in original request order, not completion order.
+    Parallel,
+}
+
+impl std::fmt::Display for ToolExecutionMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ToolExecutionMode::Sequential => write!(f, "sequential"),
+            ToolExecutionMode::Parallel => write!(f, "parallel"),
+        }
+    }
+}
+
+impl ToolExecutionMode {
+    /// Parse from string (CLI flag, config file).
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "sequential" => Some(ToolExecutionMode::Sequential),
+            "parallel" => Some(ToolExecutionMode::Parallel),
+            _ => None,
+        }
     }
 }
 
@@ -211,6 +283,14 @@ pub struct AgentConfig {
     /// Used by compaction to decide when to compress history.
     /// Default: 128_000 (covers most modern models).
     pub context_window_tokens: usize,
+    /// How tool calls within a single LLM response are executed.
+    /// Sequential = one at a time (default). Parallel = concurrent dispatch.
+    /// See [`ToolExecutionMode`] for details on the parallel strategy.
+    pub tool_execution_mode: ToolExecutionMode,
+    /// Use aggressive retry policy (5 retries, 10-120s delays) for rate limits.
+    /// Useful in headless/benchmark mode where losing an instance to a transient
+    /// rate limit is expensive. Default: false (uses standard 3 retries, 1-30s).
+    pub aggressive_retry: bool,
 }
 
 impl Default for AgentConfig {
@@ -232,6 +312,8 @@ impl Default for AgentConfig {
             capability_set: None,
             doom_loop_threshold: Some(3),
             context_window_tokens: 128_000,
+            tool_execution_mode: ToolExecutionMode::default(),
+            aggressive_retry: false,
         }
     }
 }
@@ -252,12 +334,13 @@ You operate inside the Theo harness — a runtime with sandbox, state machine, a
 - Start by reading relevant files to understand the codebase, then make changes.
 - If the user says "continue" or "go ahead", continue the previous task using the conversation history.
 
-## Workflow
-1. THINK FIRST — you MUST use the `think` tool as your FIRST action for any non-trivial task. Plan what files to read, what changes to make, and in what order.
-2. READ — use `read`, `grep`, `glob` to understand the codebase.
+## Workflow — Be EFFICIENT
+Minimize iterations. Each LLM call has cost and latency — combine steps aggressively.
+1. THINK FIRST — use `think` to plan what to do. Skip for ANY task where the user tells you exactly what to change (typo, rename, one-line fix). Just read the file and edit it.
+2. READ — use `read`, `grep`, `glob` to understand the codebase. Use `batch` to read multiple files in one call.
 3. ACT — use `edit`, `write`, `bash` to make changes.
-4. VERIFY — read the changed files to confirm correctness.
-5. DONE — call `done` with a summary when the task is complete.
+4. VERIFY+DONE — after making changes, verify the result AND call `done` in the SAME response. Do not waste an iteration just to verify.
+For simple tasks (typo, single function edit), aim for 3-4 iterations total. Do NOT overthink simple problems.
 
 ## Memory
 Use `memory` to save/recall facts about the codebase across sessions.
@@ -324,7 +407,10 @@ mod tests {
     #[test]
     fn is_subagent_false_by_default() {
         let config = AgentConfig::default();
-        assert!(!config.is_subagent, "main agents must NOT be marked as sub-agents");
+        assert!(
+            !config.is_subagent,
+            "main agents must NOT be marked as sub-agents"
+        );
     }
 
     #[test]
@@ -352,16 +438,20 @@ mod tests {
     }
 
     #[test]
-    fn plan_mode_prompt_contains_governance_phases() {
+    fn plan_mode_prompt_requires_visible_text() {
         let prompt = system_prompt_for_mode(AgentMode::Plan);
-        assert!(prompt.contains("MODE: PLAN"), "missing mode header");
-        assert!(prompt.contains("ENTENDIMENTO"), "missing phase 1");
-        assert!(prompt.contains("WRITE THE ROADMAP FILE"), "missing write phase enforcement");
-        assert!(prompt.contains(".theo/plans/"), "missing roadmap output path");
-        assert!(prompt.contains("Microtasks"), "missing microtasks section");
-        assert!(prompt.contains("DoD"), "missing definition of done");
-        assert!(prompt.contains("CALL THE WRITE TOOL"), "missing write enforcement");
-        assert!(prompt.contains("BEGIN TEMPLATE"), "missing template");
+        assert!(prompt.contains("PLAN MODE"), "missing mode header");
+        assert!(
+            prompt.contains("visible markdown text"),
+            "must instruct the model to write visible text"
+        );
+        assert!(
+            prompt.contains("`think` tool"),
+            "must explicitly forbid the think tool"
+        );
+        assert!(prompt.contains(".theo/plans/"), "missing plan output path");
+        assert!(prompt.contains("Tasks"), "missing tasks section");
+        assert!(prompt.contains("Risks"), "missing risks section");
     }
 
     #[test]
@@ -382,15 +472,72 @@ mod tests {
     fn default_prompt_contains_harness_engineering_clauses() {
         let prompt = default_system_prompt();
         // HE framing must appear before CRITICAL block (early attention)
-        let he_pos = prompt.find("## Harness Context").expect("missing HE section");
-        let critical_pos = prompt.find("## CRITICAL").expect("missing CRITICAL section");
-        assert!(he_pos < critical_pos, "HE framing must come before CRITICAL");
+        let he_pos = prompt
+            .find("## Harness Context")
+            .expect("missing HE section");
+        let critical_pos = prompt
+            .find("## CRITICAL")
+            .expect("missing CRITICAL section");
+        assert!(
+            he_pos < critical_pos,
+            "HE framing must come before CRITICAL"
+        );
 
         // 4 mandatory clauses
-        assert!(prompt.contains("Clean state contract"), "missing clean state clause");
-        assert!(prompt.contains("Generic tools"), "missing generic tools clause");
-        assert!(prompt.contains("Environment legibility"), "missing environment legibility clause");
-        assert!(prompt.contains("Code intelligence"), "missing code intelligence clause");
+        assert!(
+            prompt.contains("Clean state contract"),
+            "missing clean state clause"
+        );
+        assert!(
+            prompt.contains("Generic tools"),
+            "missing generic tools clause"
+        );
+        assert!(
+            prompt.contains("Environment legibility"),
+            "missing environment legibility clause"
+        );
+        assert!(
+            prompt.contains("Code intelligence"),
+            "missing code intelligence clause"
+        );
+    }
+
+    #[test]
+    fn tool_execution_mode_default_is_sequential() {
+        assert_eq!(ToolExecutionMode::default(), ToolExecutionMode::Sequential);
+    }
+
+    #[test]
+    fn tool_execution_mode_from_str_parses_all_modes() {
+        assert_eq!(
+            ToolExecutionMode::from_str("sequential"),
+            Some(ToolExecutionMode::Sequential)
+        );
+        assert_eq!(
+            ToolExecutionMode::from_str("parallel"),
+            Some(ToolExecutionMode::Parallel)
+        );
+        assert_eq!(
+            ToolExecutionMode::from_str("PARALLEL"),
+            Some(ToolExecutionMode::Parallel)
+        );
+        assert_eq!(ToolExecutionMode::from_str("invalid"), None);
+    }
+
+    #[test]
+    fn tool_execution_mode_display() {
+        assert_eq!(ToolExecutionMode::Sequential.to_string(), "sequential");
+        assert_eq!(ToolExecutionMode::Parallel.to_string(), "parallel");
+    }
+
+    #[test]
+    fn agent_config_default_uses_sequential_tool_execution() {
+        let config = AgentConfig::default();
+        assert_eq!(
+            config.tool_execution_mode,
+            ToolExecutionMode::Sequential,
+            "default config must use sequential tool execution for backward compatibility"
+        );
     }
 
     #[test]

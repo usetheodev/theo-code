@@ -1,6 +1,5 @@
 /// Integration tests for the risk alert system.
-
-use theo_governance::alerts::{check_untested_modifications, generate_alerts, RiskLevel};
+use theo_governance::alerts::{RiskLevel, check_untested_modifications, generate_alerts};
 use theo_governance::impact::ImpactReport;
 
 fn s(v: &str) -> String {
@@ -36,7 +35,9 @@ fn test_three_plus_communities_generates_critical_alert() {
         vec![],
     );
     let alerts = generate_alerts(&report);
-    let has_critical = alerts.iter().any(|a| matches!(a.level, RiskLevel::Critical));
+    let has_critical = alerts
+        .iter()
+        .any(|a| matches!(a.level, RiskLevel::Critical));
     assert!(
         has_critical,
         "Expected Critical alert for 3+ affected communities, got: {:?}",
@@ -48,7 +49,7 @@ fn test_three_plus_communities_generates_critical_alert() {
 fn test_untested_symbols_generates_warning_alert() {
     let report = make_report(
         vec!["comm_a"],
-        vec![],              // no tests covering the edit
+        vec![], // no tests covering the edit
         vec![],
         vec!["Untested modification: login has no test coverage"],
     );
@@ -66,7 +67,7 @@ fn test_co_changes_generates_info_alert() {
     let report = make_report(
         vec!["comm_a"],
         vec!["test_foo"],
-        vec!["api.py"],     // co-change candidate
+        vec!["api.py"], // co-change candidate
         vec![],
     );
     let alerts = generate_alerts(&report);
@@ -94,7 +95,9 @@ fn test_two_communities_does_not_generate_critical() {
     // Only 2 communities affected — should be Warning at most, not Critical
     let report = make_report(vec!["comm_a", "comm_b"], vec!["test_a"], vec![], vec![]);
     let alerts = generate_alerts(&report);
-    let has_critical = alerts.iter().any(|a| matches!(a.level, RiskLevel::Critical));
+    let has_critical = alerts
+        .iter()
+        .any(|a| matches!(a.level, RiskLevel::Critical));
     assert!(
         !has_critical,
         "Should NOT have Critical alert for only 2 communities"
@@ -146,12 +149,7 @@ fn test_check_untested_empty_symbols_no_alerts() {
 #[test]
 fn test_alert_has_file_path_or_community_id() {
     // generate_alerts with co-change should carry file_path in the alert
-    let report = make_report(
-        vec!["comm_a"],
-        vec!["test_foo"],
-        vec!["db.py"],
-        vec![],
-    );
+    let report = make_report(vec!["comm_a"], vec!["test_foo"], vec!["db.py"], vec![]);
     let alerts = generate_alerts(&report);
     let info_alerts: Vec<_> = alerts
         .iter()
@@ -160,5 +158,8 @@ fn test_alert_has_file_path_or_community_id() {
     assert!(!info_alerts.is_empty(), "Expected at least one Info alert");
     // The co-change Info alert should mention the file path
     let has_file = info_alerts.iter().any(|a| a.file_path.is_some());
-    assert!(has_file, "Info alert for co-change should have file_path set");
+    assert!(
+        has_file,
+        "Info alert for co-change should have file_path set"
+    );
 }

@@ -1,0 +1,14 @@
+# Clippy configuration for theo-code workspace
+# Thresholds adjusted for the codebase's complexity profile
+
+# Functions with many parameters are common in builder/config patterns
+too-many-arguments-threshold = 10
+
+# Complex types arise from nested generics in async Rust
+type-complexity-threshold = 300
+
+# Some cognitive complexity is inherent in state machine transitions
+cognitive-complexity-threshold = 30
+
+# Allow longer enum variant names (common in domain types)
+enum-variant-name-threshold = 5

@@ -1,0 +1,16 @@
+id = "01-read-answer"
+category = "read"
+description = "Read a file and answer a factual question"
+prompt = "What integer value does the constant MAX_RETRIES hold in src/config.rs? Reply with just the number."
+mode = "agent"
+timeout_secs = 90
+success_check = '''
+echo "$THEO_SUMMARY" | grep -q "7"
+'''
+
+[[setup_files]]
+path = "src/config.rs"
+content = """
+pub const MAX_RETRIES: u32 = 7;
+pub const TIMEOUT_MS: u64 = 1500;
+"""

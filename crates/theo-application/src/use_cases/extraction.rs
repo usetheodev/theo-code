@@ -7,12 +7,10 @@ use std::time::Instant;
 
 use rayon::prelude::*;
 use theo_engine_graph::bridge::{
-    DataModelData, FileData, ImportData, ReferenceData, ReferenceKindDto, SymbolData,
-    SymbolKindDto,
+    DataModelData, FileData, ImportData, ReferenceData, SymbolData,
 };
 use theo_engine_parser::extractors;
 use theo_engine_parser::tree_sitter::{detect_language, parse_source};
-use theo_engine_parser::types::{ReferenceKind, SymbolKind};
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -45,14 +43,14 @@ pub fn extract_repo(repo_root: &Path) -> (Vec<FileData>, ExtractionStats) {
     // Custom ignore: projects can add .theoignore for graph-specific exclusions
     walker_builder.add_custom_ignore_filename(".theoignore");
     walker_builder.filter_entry(|entry| {
-            // Skip excluded directories (but not files with those names, e.g. build.rs)
-            if entry.file_type().is_some_and(|ft| ft.is_dir()) {
-                if let Some(name) = entry.file_name().to_str() {
-                    return !theo_domain::graph_context::EXCLUDED_DIRS.contains(&name);
-                }
+        // Skip excluded directories (but not files with those names, e.g. build.rs)
+        if entry.file_type().is_some_and(|ft| ft.is_dir()) {
+            if let Some(name) = entry.file_name().to_str() {
+                return !theo_domain::graph_context::EXCLUDED_DIRS.contains(&name);
             }
-            true
-        });
+        }
+        true
+    });
     let walker = walker_builder.build();
 
     let mut source_files: Vec<(String, String)> = Vec::new(); // (rel_path, abs_path)
@@ -79,9 +77,7 @@ pub fn extract_repo(repo_root: &Path) -> (Vec<FileData>, ExtractionStats) {
     // Parallel extraction
     let results: Vec<Option<(FileData, usize, usize)>> = source_files
         .par_iter()
-        .map(|(rel_path, abs_path)| {
-            extract_single_file(rel_path, abs_path)
-        })
+        .map(|(rel_path, abs_path)| extract_single_file(rel_path, abs_path))
         .collect();
 
     // Collect results
@@ -151,13 +147,9 @@ fn extract_single_file(rel_path: &str, abs_path: &str) -> Option<(FileData, usiz
         .symbols
         .iter()
         .map(|s| SymbolData {
-            qualified_name: format!(
-                "{}::{}",
-                s.parent.as_deref().unwrap_or(""),
-                s.name
-            )
-            .trim_start_matches("::")
-            .to_string(),
+            qualified_name: format!("{}::{}", s.parent.as_deref().unwrap_or(""), s.name)
+                .trim_start_matches("::")
+                .to_string(),
             name: s.name.clone(),
             kind: convert_symbol_kind(&s.kind),
             line_start: s.anchor.line,
@@ -186,7 +178,10 @@ fn extract_single_file(rel_path: &str, abs_path: &str) -> Option<(FileData, usiz
             source_symbol: r.source_symbol.clone(),
             source_file: r.source_file.to_string_lossy().to_string(),
             target_symbol: r.target_symbol.clone(),
-            target_file: r.target_file.as_ref().map(|p| p.to_string_lossy().to_string()),
+            target_file: r
+                .target_file
+                .as_ref()
+                .map(|p| p.to_string_lossy().to_string()),
             kind: convert_reference_kind(&r.reference_kind),
         })
         .collect();
@@ -227,4 +222,4 @@ fn extract_single_file(rel_path: &str, abs_path: &str) -> Option<(FileData, usiz
 // Type conversions
 // ---------------------------------------------------------------------------
 
-use crate::use_cases::conversion::{convert_symbol_kind, convert_reference_kind};
+use crate::use_cases::conversion::{convert_reference_kind, convert_symbol_kind};

@@ -16,8 +16,8 @@ use std::path::Path;
 
 use tree_sitter::{Node, Tree};
 
-use crate::types::{Reference, ReferenceKind, ResolutionMethod};
 use crate::tree_sitter::SupportedLanguage;
+use crate::types::{Reference, ReferenceKind, ResolutionMethod};
 
 use super::common::node_text;
 

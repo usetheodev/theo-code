@@ -1,0 +1,38 @@
+id = "02-grep-pattern"
+category = "search"
+description = "Find which file contains a specific function definition"
+prompt = "In which file is the function `compute_hash` defined? Reply with just the file path relative to the repo root."
+mode = "agent"
+timeout_secs = 240
+
+success_check = '''
+echo "$THEO_SUMMARY" | grep -q "src/hash.rs"
+'''
+
+[[setup_files]]
+path = "src/lib.rs"
+content = """
+pub mod hash;
+pub mod util;
+"""
+
+[[setup_files]]
+path = "src/hash.rs"
+content = """
+pub fn compute_hash(input: &str) -> u64 {
+    let mut h = 0u64;
+    for b in input.bytes() {
+        h = h.wrapping_mul(31).wrapping_add(b as u64);
+    }
+    h
+}
+"""
+
+[[setup_files]]
+path = "src/util.rs"
+content = """
+pub fn slugify(s: &str) -> String {
+    s.to_lowercase().replace(' ', "-")
+}
+"""
+

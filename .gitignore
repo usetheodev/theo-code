@@ -18,6 +18,15 @@
 provider
 ralph-loop.local.md
 review-output
+wiki/
+wiki-site/
+referencias
+!crates/theo-infra-llm/src/provider
+!crates/theo-engine-retrieval/src/wiki
+
+# Python
+__pycache__/
+*.pyc
 
 # Cargo lock — keep for binaries, ignore for libraries
 # (we keep it: this is a binary workspace)
@@ -212,6 +221,8 @@ embeddings/
 !.claude/agents/
 !.claude/hooks/
 !.claude/skills/
+!.claude/meetings/
+!.claude/settings.json
 
 # ----------------------------------------------------------------------------
 # Docker
@@ -273,3 +284,11 @@ benches/target/
 *.patch
 .sass-cache/
 .claude/review-loop.local.md
+referencias/
+
+# ----------------------------------------------------------------------------
+# Autoresearch experiment logs
+# ----------------------------------------------------------------------------
+results.tsv
+eval.log
+eval_detail.json

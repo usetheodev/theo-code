@@ -298,6 +298,43 @@ max_iterations = 50
     }
 
     #[test]
+    fn env_override_temperature_applied_to_agent_config() {
+        // This test proves the P0 bug fix: THEO_TEMPERATURE env var must
+        // propagate through ProjectConfig → apply_to → AgentConfig.temperature
+        unsafe { std::env::set_var("THEO_TEMPERATURE", "0.0") };
+
+        let project = ProjectConfig::default().with_env_overrides();
+        assert_eq!(project.temperature, Some(0.0), "env var should set temperature");
+
+        let mut config = AgentConfig::default();
+        assert_eq!(config.temperature, 0.1, "default should be 0.1");
+
+        project.apply_to(&mut config);
+        assert_eq!(
+            config.temperature, 0.0,
+            "after apply_to, temperature should be 0.0 from env var"
+        );
+
+        // Cleanup
+        unsafe { std::env::remove_var("THEO_TEMPERATURE") };
+    }
+
+    #[test]
+    fn env_override_does_not_affect_unset_fields() {
+        unsafe { std::env::remove_var("THEO_TEMPERATURE") };
+        unsafe { std::env::remove_var("THEO_MODEL") };
+
+        let project = ProjectConfig::default().with_env_overrides();
+        assert!(project.temperature.is_none());
+        assert!(project.model.is_none());
+
+        let mut config = AgentConfig::default();
+        let original_temp = config.temperature;
+        project.apply_to(&mut config);
+        assert_eq!(config.temperature, original_temp, "should remain unchanged");
+    }
+
+    #[test]
     fn merge_with_empty_project_config_equals_base_config() {
         let project = ProjectConfig::default();
         let mut config = AgentConfig::default();

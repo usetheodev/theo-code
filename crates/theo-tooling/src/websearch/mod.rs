@@ -46,6 +46,8 @@ impl Tool for WebSearchTool {
     ) -> Result<ToolOutput, ToolError> {
         let query = require_string(&args, "query")?;
         // TODO: Implement web search via external API
-        Err(ToolError::Execution(format!("Web search not yet implemented for query: {query}")))
+        Err(ToolError::Execution(format!(
+            "Web search not yet implemented for query: {query}"
+        )))
     }
 }

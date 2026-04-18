@@ -134,10 +134,7 @@ impl McpAuth {
         self.get_tokens(server_name)
             .ok()
             .flatten()
-            .is_some_and(|t| {
-                t.expires_at
-                    .map_or(true, |exp| exp > now_secs())
-            })
+            .is_some_and(|t| t.expires_at.map_or(true, |exp| exp > now_secs()))
     }
 
     /// Store tokens for an MCP server.
@@ -153,7 +150,11 @@ impl McpAuth {
     }
 
     /// Store client registration info for an MCP server.
-    pub fn save_client_info(&self, server_name: &str, info: McpClientInfo) -> Result<(), AuthError> {
+    pub fn save_client_info(
+        &self,
+        server_name: &str,
+        info: McpClientInfo,
+    ) -> Result<(), AuthError> {
         let mut auth = self.store.get(server_name)?.unwrap_or(McpServerAuth {
             tokens: None,
             client_info: None,
@@ -212,21 +213,26 @@ mod tests {
     #[test]
     fn mcp_store_set_and_get() {
         let (store, _dir) = temp_store();
-        store.set("my-mcp", McpServerAuth {
-            tokens: Some(McpTokens {
-                access_token: "mcp-token".to_string(),
-                refresh_token: Some("mcp-refresh".to_string()),
-                expires_at: Some(9999999999),
-                scope: Some("read write".to_string()),
-            }),
-            client_info: Some(McpClientInfo {
-                client_id: "client-123".to_string(),
-                client_secret: Some("secret".to_string()),
-                client_secret_expires_at: None,
-            }),
-            code_verifier: None,
-            server_url: Some("https://mcp.example.com".to_string()),
-        }).unwrap();
+        store
+            .set(
+                "my-mcp",
+                McpServerAuth {
+                    tokens: Some(McpTokens {
+                        access_token: "mcp-token".to_string(),
+                        refresh_token: Some("mcp-refresh".to_string()),
+                        expires_at: Some(9999999999),
+                        scope: Some("read write".to_string()),
+                    }),
+                    client_info: Some(McpClientInfo {
+                        client_id: "client-123".to_string(),
+                        client_secret: Some("secret".to_string()),
+                        client_secret_expires_at: None,
+                    }),
+                    code_verifier: None,
+                    server_url: Some("https://mcp.example.com".to_string()),
+                },
+            )
+            .unwrap();
 
         let auth = store.get("my-mcp").unwrap().unwrap();
         assert_eq!(auth.tokens.unwrap().access_token, "mcp-token");
@@ -237,12 +243,16 @@ mod tests {
     fn mcp_auth_save_and_retrieve_tokens() {
         let (store, _dir) = temp_store();
         let auth = McpAuth::new(store);
-        auth.save_tokens("server1", McpTokens {
-            access_token: "tk1".to_string(),
-            refresh_token: None,
-            expires_at: Some(9999999999),
-            scope: None,
-        }).unwrap();
+        auth.save_tokens(
+            "server1",
+            McpTokens {
+                access_token: "tk1".to_string(),
+                refresh_token: None,
+                expires_at: Some(9999999999),
+                scope: None,
+            },
+        )
+        .unwrap();
 
         assert!(auth.has_valid_tokens("server1"));
         let tokens = auth.get_tokens("server1").unwrap().unwrap();
@@ -253,12 +263,16 @@ mod tests {
     fn mcp_auth_expired_tokens() {
         let (store, _dir) = temp_store();
         let auth = McpAuth::new(store);
-        auth.save_tokens("server1", McpTokens {
-            access_token: "expired".to_string(),
-            refresh_token: None,
-            expires_at: Some(1),
-            scope: None,
-        }).unwrap();
+        auth.save_tokens(
+            "server1",
+            McpTokens {
+                access_token: "expired".to_string(),
+                refresh_token: None,
+                expires_at: Some(1),
+                scope: None,
+            },
+        )
+        .unwrap();
 
         assert!(!auth.has_valid_tokens("server1"));
     }
@@ -267,12 +281,16 @@ mod tests {
     fn mcp_auth_logout() {
         let (store, _dir) = temp_store();
         let auth = McpAuth::new(store);
-        auth.save_tokens("server1", McpTokens {
-            access_token: "tk".to_string(),
-            refresh_token: None,
-            expires_at: None,
-            scope: None,
-        }).unwrap();
+        auth.save_tokens(
+            "server1",
+            McpTokens {
+                access_token: "tk".to_string(),
+                refresh_token: None,
+                expires_at: None,
+                scope: None,
+            },
+        )
+        .unwrap();
 
         assert!(auth.has_valid_tokens("server1"));
         auth.logout("server1").unwrap();
@@ -283,8 +301,26 @@ mod tests {
     fn mcp_auth_multiple_servers() {
         let (store, _dir) = temp_store();
         let auth = McpAuth::new(store);
-        auth.save_tokens("s1", McpTokens { access_token: "a".to_string(), refresh_token: None, expires_at: None, scope: None }).unwrap();
-        auth.save_tokens("s2", McpTokens { access_token: "b".to_string(), refresh_token: None, expires_at: None, scope: None }).unwrap();
+        auth.save_tokens(
+            "s1",
+            McpTokens {
+                access_token: "a".to_string(),
+                refresh_token: None,
+                expires_at: None,
+                scope: None,
+            },
+        )
+        .unwrap();
+        auth.save_tokens(
+            "s2",
+            McpTokens {
+                access_token: "b".to_string(),
+                refresh_token: None,
+                expires_at: None,
+                scope: None,
+            },
+        )
+        .unwrap();
 
         let mut servers = auth.servers().unwrap();
         servers.sort();
@@ -293,7 +329,10 @@ mod tests {
 
     #[test]
     fn mcp_redirect_uri() {
-        assert_eq!(McpAuth::redirect_uri(), "http://127.0.0.1:19876/mcp/oauth/callback");
+        assert_eq!(
+            McpAuth::redirect_uri(),
+            "http://127.0.0.1:19876/mcp/oauth/callback"
+        );
     }
 
     #[test]

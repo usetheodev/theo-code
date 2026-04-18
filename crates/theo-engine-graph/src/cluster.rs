@@ -35,11 +35,15 @@ pub struct ClusterResult {
 #[derive(Debug, Clone)]
 pub enum ClusterAlgorithm {
     Louvain,
-    Leiden { resolution: f64 },
+    Leiden {
+        resolution: f64,
+    },
     /// File-level clustering: groups files (not symbols) based on the
     /// aggregated weight of symbol-level edges between them.
     /// Produces 10-30 domains of 3-15 files each — matches how devs think.
-    FileLeiden { resolution: f64 },
+    FileLeiden {
+        resolution: f64,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -182,7 +186,10 @@ fn louvain_phase1(
     }
 
     // Pre-compute degrees: sum of weights per node.
-    let degrees: Vec<f64> = adj.iter().map(|neighbors| neighbors.iter().map(|(_, w)| w).sum()).collect();
+    let degrees: Vec<f64> = adj
+        .iter()
+        .map(|neighbors| neighbors.iter().map(|(_, w)| w).sum())
+        .collect();
 
     // Community total degree: sum of degrees of all nodes in each community.
     // Maintained incrementally when a node moves.
@@ -370,7 +377,10 @@ fn compute_modularity_resolution(
         }
     }
 
-    let degrees: Vec<f64> = adj.iter().map(|nb| nb.iter().map(|(_, w)| w).sum()).collect();
+    let degrees: Vec<f64> = adj
+        .iter()
+        .map(|nb| nb.iter().map(|(_, w)| w).sum())
+        .collect();
 
     // Compute modularity Q — O(E) by iterating edges, not node pairs.
     let mut q = 0.0;
@@ -548,8 +558,7 @@ fn refine_partition(
         for &candidate in &neighbor_comms {
             let k_i_cand =
                 weight_to_community(node_id, candidate, assignment, node_ids, weight_map);
-            let sigma_cand =
-                total_degree_of_community(candidate, assignment, node_ids, weight_map);
+            let sigma_cand = total_degree_of_community(candidate, assignment, node_ids, weight_map);
             let gain = k_i_cand - resolution * sigma_cand * ki / m2;
             let net = gain - loss;
 
@@ -637,8 +646,7 @@ pub fn leiden_communities(
         *a = remap[a];
     }
 
-    let modularity =
-        compute_modularity_resolution(&assignment, &node_ids, &weight_map, resolution);
+    let modularity = compute_modularity_resolution(&assignment, &node_ids, &weight_map, resolution);
 
     // Group by community id.
     let num_comms = assignment.iter().max().map(|&m| m + 1).unwrap_or(0);
@@ -805,7 +813,8 @@ pub fn dir_seed_labels(node_ids: &[String]) -> HashMap<String, usize> {
             parts[1].to_string()
         } else if parts.len() >= 2 {
             // Use the first non-trivial directory
-            parts.iter()
+            parts
+                .iter()
                 .find(|p| !["src", "lib", ".", ""].contains(p) && !p.contains('.'))
                 .unwrap_or(&parts[0])
                 .to_string()
@@ -843,8 +852,7 @@ pub fn subdivide_community(
     }
 
     // Build a local weight map restricted to community members.
-    let member_set: std::collections::HashSet<&str> =
-        members.iter().map(String::as_str).collect();
+    let member_set: std::collections::HashSet<&str> = members.iter().map(String::as_str).collect();
 
     let mut local_weights: HashMap<(String, String), f64> = HashMap::new();
     for edge in graph.all_edges() {
@@ -1435,7 +1443,11 @@ fn subdivide_file_community(graph: &CodeGraph, community: &Community) -> Vec<Com
             if s == t || !file_set.contains(s.as_str()) || !file_set.contains(t.as_str()) {
                 continue;
             }
-            let (lo, hi) = if s < t { (s.clone(), t.clone()) } else { (t.clone(), s.clone()) };
+            let (lo, hi) = if s < t {
+                (s.clone(), t.clone())
+            } else {
+                (t.clone(), s.clone())
+            };
             *sub_weights.entry((lo, hi)).or_insert(0.0) += edge.weight;
         }
     }
@@ -1566,10 +1578,7 @@ fn extract_meaningful_name(prefix: &str, paths: &[&str], member_count: usize) ->
     }
 
     // Last resort: count distinct top-level dirs
-    let mut top_dirs: Vec<&str> = paths
-        .iter()
-        .filter_map(|p| p.split('/').next())
-        .collect();
+    let mut top_dirs: Vec<&str> = paths.iter().filter_map(|p| p.split('/').next()).collect();
     top_dirs.sort();
     top_dirs.dedup();
     if top_dirs.len() <= 3 {

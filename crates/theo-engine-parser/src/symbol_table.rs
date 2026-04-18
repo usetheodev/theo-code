@@ -596,9 +596,11 @@ mod tests {
         let fs = make_file_symbols();
         let table = SymbolTable::from_file_symbols(&fs);
 
-        assert!(table
-            .resolve_in_file(Path::new("src/handler.ts"), "nonexistent")
-            .is_none());
+        assert!(
+            table
+                .resolve_in_file(Path::new("src/handler.ts"), "nonexistent")
+                .is_none()
+        );
     }
 
     #[test]

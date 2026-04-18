@@ -10,7 +10,9 @@ const ANTHROPIC_MODELS: &[&str] = &[
 ];
 
 #[tauri::command]
-pub async fn anthropic_start_device_flow(server: Option<String>) -> Result<serde_json::Value, String> {
+pub async fn anthropic_start_device_flow(
+    server: Option<String>,
+) -> Result<serde_json::Value, String> {
     let auth = make_auth(server);
     let dc = auth.start_device_flow().await.map_err(|e| e.to_string())?;
     Ok(serde_json::json!({
@@ -80,7 +82,10 @@ pub async fn anthropic_logout() -> Result<(), String> {
 
 /// Apply Anthropic Console token to agent config.
 #[tauri::command]
-pub async fn anthropic_apply_to_config(state: State<'_, AppState>, model: Option<String>) -> Result<bool, String> {
+pub async fn anthropic_apply_to_config(
+    state: State<'_, AppState>,
+    model: Option<String>,
+) -> Result<bool, String> {
     let auth = AnthropicAuth::with_default_store();
 
     let tokens = match auth.get_or_refresh_tokens().await {
@@ -102,10 +107,9 @@ pub async fn anthropic_apply_to_config(state: State<'_, AppState>, model: Option
 
     // Anthropic-specific headers
     config.extra_headers.clear();
-    config.extra_headers.insert(
-        "anthropic-version".to_string(),
-        "2023-06-01".to_string(),
-    );
+    config
+        .extra_headers
+        .insert("anthropic-version".to_string(), "2023-06-01".to_string());
 
     Ok(true)
 }

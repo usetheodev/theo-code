@@ -1,163 +1,87 @@
 # Theo Code
 
-Governance-first autonomous code agent. Rust workspace + Tauri v2 desktop app.
+AI coding assistant with deep code understanding. CLI + Desktop (Tauri v2).
 
-## Arquitetura
+## What is Theo Code?
 
-Monorepo com 4 bounded contexts:
+Standalone AI coding assistant — same category as Claude Code, Codex, Cursor. Differentiators: **GRAPHCTX** (structural code intelligence) and **Code Wiki** (Obsidian-like knowledge base auto-generated from code).
+
+**Theo** (the platform) is the Vercel for developers who have a backend. Theo Code helps users build applications on the Theo platform.
+
+## Architecture
+
+Rust workspace with 11 crates in 4 bounded contexts:
 
 ```
 crates/
-  theo-domain          # Tipos puros, traits, erros (zero infra)
-  theo-engine-graph    # Code graph via Tree-Sitter (9 full + 5 basic linguagens)
-  theo-engine-parser   # AST parser multi-linguagem, extração de símbolos
-  theo-engine-retrieval # Semantic search, embeddings, TF-IDF, graph attention
-  theo-governance      # Policy engine, impact analysis, métricas
-  theo-agent-runtime   # Agent loop async, decision control plane
-  theo-infra-llm       # LLM client + provider registry (25 providers, Strategy/Registry/Factory)
-  theo-infra-auth      # OAuth PKCE, device flow, token management (OpenAI + GitHub Copilot)
-  theo-tooling         # Tool registry (20 tools com schema/category) + sandbox (bwrap/landlock)
-  theo-api-contracts   # DTOs e eventos para surfaces
-  theo-application     # Camada de casos de uso
+  theo-domain          # Pure types, traits, errors (ZERO dependencies)
+  theo-engine-graph    # Code graph via Tree-Sitter (16 languages)
+  theo-engine-parser   # AST parser, symbol extraction
+  theo-engine-retrieval # Semantic search, RRF 3-ranker, embeddings
+  theo-governance      # Policy engine (simplified)
+  theo-agent-runtime   # Agent loop, state machine, streaming, sub-agents
+  theo-infra-llm       # 25 LLM providers (OA-compatible internally)
+  theo-infra-auth      # OAuth PKCE, device flow, token management
+  theo-tooling         # 21 tools + sandbox (bwrap/landlock)
+  theo-api-contracts   # DTOs and events
+  theo-application     # Use cases layer
 
 apps/
-  theo-cli             # CLI binary
+  theo-cli             # CLI binary (primary interface)
   theo-desktop         # Tauri v2 (Rust backend + React frontend)
   theo-ui              # React 18 + TypeScript + Tailwind + Radix UI
-  theo-benchmark       # Benchmark runner (isolado)
+  theo-benchmark       # Benchmark runner (isolated)
 ```
 
 ## Build & Test
 
 ```bash
-# Build workspace
-cargo build
-
-# Rodar todos os testes
-cargo test
-
-# Rodar testes de um crate específico
-cargo test -p theo-engine-graph
-
-# Desktop app (dev)
-cd apps/theo-desktop && cargo tauri dev
-
-# Frontend isolado
-cd apps/theo-ui && npm run dev
+cargo build                          # Build workspace
+cargo test                           # All tests
+cargo test -p theo-engine-graph      # Specific crate
+cd apps/theo-desktop && cargo tauri dev  # Desktop dev
+cd apps/theo-ui && npm run dev       # Frontend dev
 ```
 
-## Convenções
+## Dependency Rules
 
-- **Linguagem do código**: Inglês (variáveis, funções, tipos, comentários técnicos)
-- **Comunicação**: Português Brasil
+```
+theo-domain         → (nothing — pure types)
+theo-engine-*       → theo-domain
+theo-governance     → theo-domain
+theo-infra-*        → theo-domain
+theo-tooling        → theo-domain
+theo-agent-runtime  → theo-domain, theo-governance
+theo-api-contracts  → theo-domain
+theo-application    → all crates above
+apps/*              → theo-application, theo-api-contracts
+```
+
+## Conventions
+
+- **Code language**: English (variables, functions, types, technical comments)
+- **Communication**: Portugues Brasil
 - **Rust edition**: 2024
-- **Testes**: Obrigatórios para lógica de negócio. Padrão Arrange-Act-Assert.
-- **Erros**: Tipados com `thiserror`. Nunca engolir erros silenciosamente.
-- **Dependências workspace**: Declarar em `[workspace.dependencies]` no root `Cargo.toml`
-- **Imports**: Usar `theo-domain` como fonte de tipos compartilhados
+- **TDD**: RED-GREEN-REFACTOR obrigatorio. Teste primeiro, codigo depois. Sem excecoes.
+- **Tests**: Required for business logic. Arrange-Act-Assert pattern.
+- **Errors**: Typed with `thiserror`. Never swallow errors silently.
+- **Workspace deps**: Declared in root `Cargo.toml` `[workspace.dependencies]`
+- **Shared types**: Import from `theo-domain`
+- **LLM protocol**: Everything OA-compatible internally. Providers convert at boundary.
 
-## Regras Arquiteturais
+## Key Invariants
 
-- `theo-domain` NÃO depende de nenhum outro crate (tipos puros)
-- Apps NUNCA importam engines diretamente — falam com `theo-application`
-- Governance é obrigatória no caminho crítico, não pós-processo opcional
-- Todo tool call passa pelo Decision Control Plane antes de execução
-- State Machine governa transições de fase: LOCATE → EDIT → VERIFY → DONE
-- Internamente tudo é OA-compatible — providers convertem na fronteira
-- Sandbox é obrigatório para BashTool: bwrap > landlock > noop (cascata)
-- Tool Registry: cada tool declara schema() e category() — registry valida e gera LLM definitions
+- `theo-domain` NEVER depends on other crates
+- Apps NEVER import engine/infra crates directly — go through `theo-application`
+- Circular dependencies are forbidden
+- Sandbox is mandatory for bash: bwrap > landlock > noop cascade
+- Every tool declares `schema()` and `category()`
+- Benchmark/research code stays isolated from production runtime
 
-## REGRA #0 — Meeting Obrigatoria (Gate Inquebravel)
+## Important Directories
 
-TODA alteracao no sistema DEVE ser precedida de `/meeting`. Sem excecoes.
-
-- Feature nova → `/meeting` primeiro
-- Bug fix → `/meeting` primeiro
-- Refatoracao → `/meeting` primeiro
-- Mudanca de dependencia → `/meeting` primeiro
-
-**O hook `meeting-gate.sh` BLOQUEIA Edit/Write** ate que `/meeting` produza APPROVED.
-
-Se o veredito for REJECTED → revise a proposta e rode `/meeting` novamente.
-Se nao houver meeting → nenhum arquivo do projeto pode ser alterado.
-
-"E so uma mudanca pequena" NAO e excecao. "Ja sei o que fazer" NAO e excecao.
-
-## Agent Core: GRAPHCTX + State Machine + Context Loops
-
-Três mecanismos não-negociáveis:
-1. **GRAPHCTX** — dá ao modelo alvos de arquivo corretos (o contexto)
-2. **State Machine** — bloqueia done() até git diff mostrar mudanças reais (promise gate)
-3. **Context Loops** — a cada N iterações resume o que foi feito/falhou/próximos passos
-
-## Sistema Multi-Agente
-
-Time de agentes especializados disponíveis em `.claude/agents/`:
-
-| Agente | Papel | Model | Quando usar |
-|---|---|---|---|
-| `governance` | Principal Engineer | opus | Toda mudança significativa — veto absoluto |
-| `runtime` | Staff AI Engineer | sonnet | Mudanças no agent loop, state machine, async |
-| `graphctx` | Compiler Engineer | sonnet | Mudanças em parsers, graph, dependências |
-| `qa` | QA Staff Engineer | sonnet | Validação de testes e cobertura |
-| `tooling` | Systems Engineer | haiku | Segurança de tool execution |
-| `infra` | SRE | haiku | Performance, resiliência, custo |
-| `frontend` | UX Engineer | sonnet | Interface, microinterações, feedback visual |
-
-### Skills de Decisão
-
-- `/review-council` — Reunião FAANG completa: convoca agentes, debate com conflito obrigatório, decisão final
-- `/consensus` — Decisão rápida: Governance + QA + Runtime em paralelo, sem debate
-
-### Regra de Consenso (Consensus Engine)
-
-```
-SE Governance = REJECT → REJECT (veto absoluto)
-SE QA.validated = false → REJECT (sem prova, sem aprovação)
-SE Runtime.risk_level = CRITICAL → REJECT
-SENÃO → APPROVE
-```
-
-### Skills de Desenvolvimento
-
-- `/build [crate|ui|desktop|check]` — Build com diagnóstico
-- `/test [crate|nome|changed]` — Testes com análise de falhas
-- `/add-crate theo-xxx "desc"` — Scaffolding de crate
-- `/agent-check` — Health check completo
-- `/changelog [N]` — Atualiza CHANGELOG.md
-
-## Diretórios Importantes
-
-- `docs/current/` — Documentação do que ESTÁ implementado
-- `docs/target/` — Documentação do que é planejado (futuro)
+- `docs/current/` — What IS implemented
+- `docs/target/` — What is planned (future)
 - `docs/adr/` — Architecture Decision Records
-- `docs/roadmap/` — Roadmap do produto
-- `docs/adr/` — Architecture Decision Records (001: bounded contexts, 002: sandbox)
-- `research/` — Papers, experimentos, referências (isolado do runtime)
-
-## Sandbox
-
-Execução segura de comandos via BashTool. Cascata: bwrap > landlock > noop.
-
-- **bwrap** (bubblewrap): PID ns, net ns, mount isolation, cap drop, auto-cleanup
-- **landlock**: filesystem isolation (fallback se bwrap indisponível)
-- **rlimits**: CPU, memória, file size, nproc
-- **env sanitizer**: whitelist de vars, strip tokens (AWS, GitHub, OpenAI)
-- **command validator**: rejeita patterns perigosos antes de fork
-- **governance policy**: risk assessment por comando, sequence analyzer
-
-## LLM Providers
-
-Princípio: internamente tudo é OA-compatible. Providers convertem na fronteira.
-
-- `LlmProvider` trait (DIP) — agent-runtime depende de abstração
-- `ProviderSpec` — declaração const (12 linhas por provider OA-compatible)
-- 25 providers no catálogo: OpenAI, Anthropic, Copilot, Groq, Mistral, etc.
-- Backend é fonte de verdade para modelos — frontend busca via `provider_models`
-
-## Auth
-
-- **OpenAI**: OAuth PKCE (browser) + Device Flow (headless)
-- **GitHub Copilot**: Device Flow RFC 8628 + Enterprise support
-- Token storage: `~/.config/theo/auth.json` (0o600)
-- Copilot endpoint: `api.githubcopilot.com/chat/completions` (sem /v1/)
+- `docs/roadmap/` — Product roadmap
+- `research/` — Papers, experiments, references (isolated)

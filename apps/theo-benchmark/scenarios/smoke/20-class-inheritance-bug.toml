@@ -1,0 +1,53 @@
+id = "20-class-inheritance-bug"
+category = "fix-bug"
+description = "Fix a bug where child class doesn't call super().__init__"
+prompt = "The AdminUser class in src/users.py inherits from User but doesn't call super().__init__(), so self.email and self.created_at are never set. Fix AdminUser.__init__ to properly call the parent constructor while keeping the admin-specific attributes."
+mode = "agent"
+timeout_secs = 120
+
+success_check = '''
+python3 -c "
+import sys; sys.path.insert(0, '.')
+from src.users import AdminUser
+from datetime import datetime
+
+admin = AdminUser('admin@test.com', 'Admin', ['users', 'billing'])
+assert admin.email == 'admin@test.com', f'email not set: {getattr(admin, \"email\", \"MISSING\")}'
+assert admin.name == 'Admin'
+assert admin.permissions == ['users', 'billing']
+assert isinstance(admin.created_at, datetime), 'created_at not set'
+assert admin.is_admin is True
+print('OK')
+"
+'''
+
+[[setup_files]]
+path = "src/__init__.py"
+content = ""
+
+[[setup_files]]
+path = "src/users.py"
+content = """
+from datetime import datetime
+
+
+class User:
+    def __init__(self, email: str, name: str):
+        self.email = email
+        self.name = name
+        self.created_at = datetime.now()
+        self.is_admin = False
+
+    def display_name(self) -> str:
+        return f\"{self.name} <{self.email}>\"
+
+
+class AdminUser(User):
+    # BUG: doesn't call super().__init__()
+    def __init__(self, email: str, name: str, permissions: list[str]):
+        self.permissions = permissions
+        self.is_admin = True
+
+    def has_permission(self, perm: str) -> bool:
+        return perm in self.permissions
+"""

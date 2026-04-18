@@ -81,9 +81,11 @@ pub fn load_progress(project_dir: &Path) -> Option<SessionProgress> {
     serde_json::from_str(&content).ok()
 }
 
-/// Save progress to disk with advisory file locking.
+/// Save progress to disk with atomic replace semantics.
 ///
-/// Best-effort: silently returns on I/O errors. Never blocks the agent.
+/// This implementation does not take an advisory lock; it writes a temp file
+/// and renames it into place on a best-effort basis. I/O errors are ignored so
+/// session progress persistence never blocks the agent.
 pub fn save_progress(project_dir: &Path, progress: &SessionProgress) {
     let path = progress_file_path(project_dir);
 
@@ -117,12 +119,7 @@ pub fn boot_message(project_dir: &Path) -> Option<String> {
     ));
 
     if !progress.tasks_completed.is_empty() {
-        let recent: Vec<&CompletedTask> = progress
-            .tasks_completed
-            .iter()
-            .rev()
-            .take(5)
-            .collect();
+        let recent: Vec<&CompletedTask> = progress.tasks_completed.iter().rev().take(5).collect();
         parts.push("Recent completed tasks:".to_string());
         for task in recent {
             parts.push(format!(

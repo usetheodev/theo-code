@@ -113,12 +113,24 @@ pub trait CodeIntelProvider: Send + Sync {
 pub struct NullCodeIntelProvider;
 
 impl CodeIntelProvider for NullCodeIntelProvider {
-    fn is_available(&self) -> bool { false }
-    fn is_precise(&self) -> bool { false }
-    fn resolve_references(&self, _: &str) -> Vec<SymbolReference> { vec![] }
-    fn find_definitions(&self, _: &str) -> Vec<SourceLocation> { vec![] }
-    fn find_implementations(&self, _: &str) -> Vec<SourceLocation> { vec![] }
-    fn find_dependents(&self, _: &str) -> Vec<String> { vec![] }
+    fn is_available(&self) -> bool {
+        false
+    }
+    fn is_precise(&self) -> bool {
+        false
+    }
+    fn resolve_references(&self, _: &str) -> Vec<SymbolReference> {
+        vec![]
+    }
+    fn find_definitions(&self, _: &str) -> Vec<SourceLocation> {
+        vec![]
+    }
+    fn find_implementations(&self, _: &str) -> Vec<SourceLocation> {
+        vec![]
+    }
+    fn find_dependents(&self, _: &str) -> Vec<String> {
+        vec![]
+    }
 }
 
 #[cfg(test)]

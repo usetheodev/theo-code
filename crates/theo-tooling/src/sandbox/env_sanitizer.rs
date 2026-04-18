@@ -3,7 +3,7 @@
 //! Uses a whitelist approach: only explicitly allowed vars pass through.
 //! ALWAYS_STRIPPED_ENV_PREFIXES are removed regardless of whitelist.
 
-use theo_domain::sandbox::{ProcessPolicy, ALWAYS_STRIPPED_ENV_PREFIXES};
+use theo_domain::sandbox::{ALWAYS_STRIPPED_ENV_PREFIXES, ProcessPolicy};
 
 /// Compute the set of env vars to pass to the sandboxed process.
 ///
@@ -17,7 +17,11 @@ pub fn sanitized_env(policy: &ProcessPolicy) -> Vec<(String, String)> {
 
     for (key, value) in std::env::vars() {
         // Check if variable is in the allowed list
-        if !policy.allowed_env_vars.iter().any(|allowed| allowed == &key) {
+        if !policy
+            .allowed_env_vars
+            .iter()
+            .any(|allowed| allowed == &key)
+        {
             continue;
         }
 
@@ -39,13 +43,25 @@ fn is_always_stripped(var_name: &str) -> bool {
         .any(|prefix| var_name.starts_with(prefix) || var_name == *prefix)
 }
 
+/// Redact known secret patterns from a stdout line before streaming to TUI.
+///
+/// Scans current env vars that match ALWAYS_STRIPPED_ENV_PREFIXES. If any
+/// of their values (length >= 8) appear in the line, replaces with [REDACTED].
+/// Short values (<8 chars) are skipped to avoid false positives.
+pub fn sanitize_stdout_line(line: &str) -> String {
+    let mut result = line.to_string();
+    for (key, value) in std::env::vars() {
+        if is_always_stripped(&key) && value.len() >= 8 {
+            result = result.replace(&value, "[REDACTED]");
+        }
+    }
+    result
+}
+
 /// Apply sanitized environment to a Command.
 ///
 /// Clears all env vars and sets only the allowed ones.
-pub fn apply_to_command(
-    cmd: &mut std::process::Command,
-    policy: &ProcessPolicy,
-) {
+pub fn apply_to_command(cmd: &mut std::process::Command, policy: &ProcessPolicy) {
     let allowed = sanitized_env(policy);
     cmd.env_clear();
     for (key, value) in allowed {
@@ -56,7 +72,6 @@ pub fn apply_to_command(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use theo_domain::sandbox::DEFAULT_ALLOWED_ENV_VARS;
 
     fn default_policy() -> ProcessPolicy {
         ProcessPolicy::default()
@@ -91,7 +106,9 @@ mod tests {
     fn sanitized_env_strips_aws_even_if_in_whitelist() {
         // Even if someone adds AWS_ to allowed, ALWAYS_STRIPPED takes precedence
         let mut policy = default_policy();
-        policy.allowed_env_vars.push("AWS_SECRET_ACCESS_KEY".to_string());
+        policy
+            .allowed_env_vars
+            .push("AWS_SECRET_ACCESS_KEY".to_string());
 
         unsafe { std::env::set_var("AWS_SECRET_ACCESS_KEY", "AKIAIOSFODNN7EXAMPLE") };
         let env = sanitized_env(&policy);
@@ -165,5 +182,36 @@ mod tests {
         apply_to_command(&mut cmd, &policy);
         // We can't easily verify the internal state of Command,
         // but we can verify it doesn't panic
+    }
+
+    // -----------------------------------------------------------------------
+    // sanitize_stdout_line
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn sanitize_stdout_line_redacts_secret() {
+        unsafe { std::env::set_var("AWS_SECRET_ACCESS_KEY", "wJalrXUtnFEMI/K7MDENG/bPxRfiCY") };
+        let line = "key is wJalrXUtnFEMI/K7MDENG/bPxRfiCY here";
+        let sanitized = sanitize_stdout_line(line);
+        assert!(!sanitized.contains("wJalrXUtnFEMI"), "secret should be redacted");
+        assert!(sanitized.contains("[REDACTED]"), "should contain [REDACTED]");
+        unsafe { std::env::remove_var("AWS_SECRET_ACCESS_KEY") };
+    }
+
+    #[test]
+    fn sanitize_stdout_line_preserves_normal() {
+        let line = "Compiling theo v0.1.0 (/home/user/theo)";
+        let sanitized = sanitize_stdout_line(line);
+        assert_eq!(sanitized, line, "normal lines should be unchanged");
+    }
+
+    #[test]
+    fn sanitize_stdout_line_skips_short_values() {
+        unsafe { std::env::set_var("AWS_REGION", "us-east") };
+        let line = "region is us-east here";
+        let sanitized = sanitize_stdout_line(line);
+        // "us-east" is 7 chars (< 8), should NOT be redacted to avoid false positives
+        assert_eq!(sanitized, line, "short values should not be redacted");
+        unsafe { std::env::remove_var("AWS_REGION") };
     }
 }
