@@ -259,6 +259,7 @@ impl GraphContextProvider for GraphContextService {
             total_tokens: 0,
             budget_tokens,
             exploration_hints: String::new(),
+            budget_report: None,
         });
 
         match &*state {
@@ -352,6 +353,7 @@ impl GraphContextProvider for GraphContextService {
                                     top.page_kind
                                 ),
                                 blocks,
+                                budget_report: None,
                             });
                         }
                     }
@@ -477,6 +479,7 @@ impl GraphContextProvider for GraphContextService {
             budget_tokens,
             exploration_hints: String::new(),
             blocks,
+            budget_report: None,
         })
     }
 
