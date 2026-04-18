@@ -472,6 +472,7 @@ mod tests {
             total_tokens: blocks.iter().map(|(_, t)| t).sum(),
             budget_tokens: 4000,
             exploration_hints: String::new(),
+            budget_report: None,
         }
     }
 
@@ -669,6 +670,7 @@ mod tests {
             total_tokens: blocks.iter().map(|(_, _, t, _)| t).sum(),
             budget_tokens: 4000,
             exploration_hints: String::new(),
+            budget_report: None,
         }
     }
 
