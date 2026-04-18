@@ -82,6 +82,53 @@ pub struct ContextBlock {
     pub score: f64,
 }
 
+/// Why a context block was excluded from the assembled result.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DropReason {
+    /// Block was scored but didn't fit within remaining token budget.
+    BudgetExhausted,
+    /// Block's relevance score was below the inclusion threshold.
+    LowScore,
+    /// Block's source community was already well-represented.
+    CommunityOverlap,
+}
+
+/// Budget utilization report for a single context assembly pass.
+///
+/// Inspired by OpenDev's staged compaction accounting: track not just what
+/// was included, but what was excluded and why. This enables the feedback
+/// loop to distinguish "irrelevant context" from "relevant but budget-limited".
+#[derive(Debug, Clone, Default)]
+pub struct BudgetReport {
+    /// Token budget that was requested.
+    pub budget_tokens: usize,
+    /// Tokens actually used by included blocks.
+    pub tokens_used: usize,
+    /// Number of candidate blocks that were evaluated.
+    pub candidates_evaluated: usize,
+    /// Number of blocks included in the result.
+    pub blocks_included: usize,
+    /// Number of blocks excluded with reasons.
+    pub blocks_skipped: usize,
+    /// Per-reason skip counts for diagnostics.
+    pub skip_reasons: Vec<(DropReason, usize)>,
+}
+
+impl BudgetReport {
+    /// Fraction of budget actually consumed (0.0 – 1.0).
+    pub fn utilization(&self) -> f64 {
+        if self.budget_tokens == 0 {
+            return 0.0;
+        }
+        self.tokens_used as f64 / self.budget_tokens as f64
+    }
+
+    /// Tokens remaining unused in the budget.
+    pub fn tokens_remaining(&self) -> usize {
+        self.budget_tokens.saturating_sub(self.tokens_used)
+    }
+}
+
 /// The assembled graph context result, ready for LLM injection.
 #[derive(Debug, Clone)]
 pub struct GraphContextResult {
@@ -93,6 +140,8 @@ pub struct GraphContextResult {
     pub budget_tokens: usize,
     /// Comma-separated names of excluded communities (exploration hints).
     pub exploration_hints: String,
+    /// Budget utilization report (populated when available).
+    pub budget_report: Option<BudgetReport>,
 }
 
 impl GraphContextResult {
@@ -182,6 +231,7 @@ pub trait GraphContextProvider: Send + Sync {
             total_tokens: 0,
             budget_tokens,
             exploration_hints: String::new(),
+            budget_report: None,
         })
     }
 
@@ -199,6 +249,7 @@ pub trait GraphContextProvider: Send + Sync {
             total_tokens: 0,
             budget_tokens,
             exploration_hints: String::new(),
+            budget_report: None,
         })
     }
 }
@@ -251,6 +302,7 @@ mod tests {
             total_tokens: 0,
             budget_tokens: 4000,
             exploration_hints: String::new(),
+            budget_report: None,
         };
         assert!(result.to_prompt_text().is_empty());
     }
@@ -277,6 +329,7 @@ mod tests {
             total_tokens: 18,
             budget_tokens: 4000,
             exploration_hints: "logging, metrics".into(),
+            budget_report: None,
         };
         let text = result.to_prompt_text();
         assert!(text.contains("Auth module"));
@@ -302,5 +355,36 @@ mod tests {
     fn trait_is_object_safe() {
         fn _assert_object_safe(_: &dyn GraphContextProvider) {}
         fn _assert_arc(_: std::sync::Arc<dyn GraphContextProvider>) {}
+    }
+
+    #[test]
+    fn budget_report_utilization_tracks_usage() {
+        let report = BudgetReport {
+            budget_tokens: 1000,
+            tokens_used: 750,
+            candidates_evaluated: 10,
+            blocks_included: 5,
+            blocks_skipped: 5,
+            skip_reasons: vec![
+                (DropReason::BudgetExhausted, 3),
+                (DropReason::LowScore, 2),
+            ],
+        };
+        assert!((report.utilization() - 0.75).abs() < f64::EPSILON);
+        assert_eq!(report.tokens_remaining(), 250);
+    }
+
+    #[test]
+    fn budget_report_zero_budget_returns_zero_utilization() {
+        let report = BudgetReport::default();
+        assert!((report.utilization() - 0.0).abs() < f64::EPSILON);
+        assert_eq!(report.tokens_remaining(), 0);
+    }
+
+    #[test]
+    fn drop_reason_variants_are_distinct() {
+        assert_ne!(DropReason::BudgetExhausted, DropReason::LowScore);
+        assert_ne!(DropReason::LowScore, DropReason::CommunityOverlap);
+        assert_eq!(DropReason::BudgetExhausted, DropReason::BudgetExhausted);
     }
 }
