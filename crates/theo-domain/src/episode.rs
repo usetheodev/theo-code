@@ -301,6 +301,85 @@ impl Hypothesis {
     }
 }
 
+/// Outcome of a causal link between assembled context and a tool call.
+///
+/// Tracks whether context that was assembled actually contributed to
+/// a successful tool call. Reference: CausalTrace pattern.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub enum CausalOutcome {
+    /// Tool call succeeded and referenced this context.
+    Used,
+    /// Tool call succeeded but did not reference this context.
+    Unused,
+    /// Tool call failed.
+    Failed,
+}
+
+/// A link between assembled context and a tool call outcome.
+///
+/// Tracks which community's context was assembled before a tool call
+/// and whether it contributed to the outcome.
+/// Reference: AgentRx trajectory normalization [Microsoft].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CausalLink {
+    pub community_id: String,
+    pub tool_call_id: String,
+    pub outcome: CausalOutcome,
+    pub iteration: usize,
+}
+
+/// Classification of agent errors for failure fingerprinting.
+///
+/// Reference: AgentDebug [ICLR 2026, arxiv 2509.25370].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[non_exhaustive]
+pub enum ErrorClass {
+    /// Error in memory/context management.
+    Memory,
+    /// Error in planning or reasoning.
+    Planning,
+    /// Error in tool execution or action.
+    Action,
+    /// System-level error (timeout, resource limit).
+    System,
+}
+
+/// Fingerprint of a recurring failure pattern.
+///
+/// Tracks tool name + error class + argument hash for cycle detection.
+/// When a fingerprint recurs ≥ threshold times, auto-generates a constraint.
+/// Reference: AgentAssay behavioral fingerprinting [arxiv 2603.02601],
+/// OpenDev DoomLoopDetector fingerprint pattern.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct FailureFingerprint {
+    pub error_class: ErrorClass,
+    pub tool_name: String,
+    pub args_hash: u64,
+}
+
+impl FailureFingerprint {
+    pub fn new(error_class: ErrorClass, tool_name: &str, args: &str) -> Self {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut hasher = DefaultHasher::new();
+        args.hash(&mut hasher);
+        Self {
+            error_class,
+            tool_name: tool_name.to_string(),
+            args_hash: hasher.finish(),
+        }
+    }
+
+    /// Generate a constraint message from this fingerprint.
+    pub fn to_constraint(&self, count: usize) -> String {
+        format!(
+            "Avoid {:?} error with tool '{}' (seen {} times)",
+            self.error_class, self.tool_name, count
+        )
+    }
+}
+
 /// Time-to-live policy for episode summaries.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum TtlPolicy {
