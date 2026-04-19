@@ -1,11 +1,10 @@
 #!/bin/bash
-# Reject commits that contain AI co-authorship trailers or attribution footers.
+# Reject commits that contain ANY co-authorship trailer or generated-attribution footer.
 #
-# Blocks any of:
-#   - `Co-Authored-By: Claude ...`
-#   - `Co-Authored-By: <any AI model>`
-#   - `🤖 Generated with ...`
-#   - `Generated with [Claude Code]...`
+# This repo forbids:
+#   - ANY `Co-Authored-By:` trailer (human or AI — no exceptions)
+#   - `🤖 Generated with ...` footers
+#   - `Generated with [Claude Code]...` footers
 #
 # Install (once per clone):
 #   git config core.hooksPath .githooks
@@ -17,18 +16,18 @@ if [ ! -f "$MSG_FILE" ]; then
     exit 0
 fi
 
-# Ignore comment lines (#) — those are stripped anyway.
+# Ignore comment lines (#) — git strips those anyway.
 EFFECTIVE=$(grep -v '^\s*#' "$MSG_FILE" || true)
 
 FAIL=0
 
 if echo "$EFFECTIVE" | grep -qiE '^[[:space:]]*Co-Authored-By:'; then
-    echo "[commit-msg] BLOCKED: 'Co-Authored-By' trailer is forbidden in this repo."
+    echo "[commit-msg] BLOCKED: Co-Authored-By trailers are forbidden in this repo (any co-authorship — human or AI)."
     FAIL=1
 fi
 
 if echo "$EFFECTIVE" | grep -qE '🤖[[:space:]]*Generated with'; then
-    echo "[commit-msg] BLOCKED: '🤖 Generated with' footer is forbidden."
+    echo "[commit-msg] BLOCKED: robot-emoji 'Generated with' footer is forbidden."
     FAIL=1
 fi
 
