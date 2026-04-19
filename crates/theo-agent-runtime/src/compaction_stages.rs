@@ -14,6 +14,30 @@ use theo_infra_llm::types::{Message, Role};
 /// Sentinel substituted for the content of a pruned tool message.
 pub const PRUNED_SENTINEL: &str = "[pruned]";
 
+/// Prefix of the Mask-stage sentinel that preserves tool_call_id for audit.
+/// Format: `"[ref: tool result {id} — see history]"`.
+pub const MASK_SENTINEL_PREFIX: &str = "[ref: tool result ";
+
+/// Tool categories that must NEVER be masked/pruned (opendev
+/// `PROTECTED_TOOL_TYPES`). These results carry irreducible signal.
+pub const PROTECTED_TOOL_NAMES: &[&str] =
+    &["read_file", "graph_context", "skill", "invoke_skill", "present_plan"];
+
+/// Build the canonical Mask sentinel for a tool result.
+pub fn mask_sentinel(tool_call_id: &str) -> String {
+    format!("{MASK_SENTINEL_PREFIX}{tool_call_id} — see history]")
+}
+
+/// Return true when the tool message is protected from masking/pruning.
+pub fn is_protected(name: Option<&str>) -> bool {
+    matches!(name, Some(n) if PROTECTED_TOOL_NAMES.contains(&n))
+}
+
+/// Return true when `content` already carries a Mask sentinel (idempotence check).
+pub fn is_already_masked(content: Option<&str>) -> bool {
+    matches!(content, Some(c) if c.starts_with(MASK_SENTINEL_PREFIX))
+}
+
 /// How many recent tool results to preserve integrally during Prune.
 const PRUNE_KEEP_RECENT: usize = 3;
 
@@ -283,5 +307,29 @@ mod tests {
             .filter(|m| m.content.as_deref() == Some(PRUNED_SENTINEL))
             .count();
         assert!(pruned >= 3, "expected >=3 pruned, got {pruned}");
+    }
+
+    #[test]
+    fn mask_sentinel_format_is_canonical() {
+        let s = mask_sentinel("call_42");
+        assert!(s.starts_with(MASK_SENTINEL_PREFIX));
+        assert!(s.contains("call_42"));
+        assert!(s.ends_with("— see history]"));
+    }
+
+    #[test]
+    fn is_already_masked_detects_sentinel() {
+        let s = mask_sentinel("c1");
+        assert!(is_already_masked(Some(&s)));
+        assert!(!is_already_masked(Some("normal content")));
+        assert!(!is_already_masked(None));
+    }
+
+    #[test]
+    fn protected_names_covered() {
+        assert!(is_protected(Some("read_file")));
+        assert!(is_protected(Some("skill")));
+        assert!(!is_protected(Some("bash")));
+        assert!(!is_protected(None));
     }
 }
