@@ -152,6 +152,7 @@ impl Tool for WebFetchTool {
                     mime: Some(mime),
                     url: format!("data:{};base64,{b64}", Self::extract_mime(&content_type)),
                 }]),
+                llm_suffix: None,
             });
         }
 
@@ -166,6 +167,7 @@ impl Tool for WebFetchTool {
             output: text,
             metadata: serde_json::json!({}),
             attachments: None,
+            llm_suffix: None,
         })
     }
 }

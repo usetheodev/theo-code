@@ -59,6 +59,7 @@ impl Tool for ThinkTool {
             output: thought.to_string(),
             metadata: serde_json::json!({"type": "think"}),
             attachments: None,
+            llm_suffix: None,
         })
     }
 }

@@ -531,6 +531,7 @@ impl Tool for ApplyPatchTool {
                 "files": files_info,
             }),
             attachments: None,
+            llm_suffix: None,
         })
     }
 }

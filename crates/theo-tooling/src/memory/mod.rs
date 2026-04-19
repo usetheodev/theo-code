@@ -257,6 +257,7 @@ impl Tool for MemoryTool {
                     output: format!("Memory saved: {} = {}", key, value),
                     metadata: serde_json::json!({"action": "save", "key": key}),
                     attachments: None,
+                    llm_suffix: None,
                 })
             }
             "recall" => {
@@ -271,12 +272,14 @@ impl Tool for MemoryTool {
                         output: entry.value,
                         metadata: serde_json::json!({"action": "recall", "key": key, "found": true}),
                         attachments: None,
+                        llm_suffix: None,
                     }),
                     None => Ok(ToolOutput {
                         title: format!("Memory not found: {key}"),
                         output: format!("No memory found for key '{key}'"),
                         metadata: serde_json::json!({"action": "recall", "key": key, "found": false}),
                         attachments: None,
+                        llm_suffix: None,
                     }),
                 }
             }
@@ -297,6 +300,7 @@ impl Tool for MemoryTool {
                     output,
                     metadata: serde_json::json!({"action": "list", "count": entries.len()}),
                     attachments: None,
+                    llm_suffix: None,
                 })
             }
             "search" => {
@@ -321,6 +325,7 @@ impl Tool for MemoryTool {
                     output,
                     metadata: serde_json::json!({"action": "search", "query": query, "count": results.len()}),
                     attachments: None,
+                    llm_suffix: None,
                 })
             }
             "delete" => {
@@ -341,6 +346,7 @@ impl Tool for MemoryTool {
                     output,
                     metadata: serde_json::json!({"action": "delete", "key": key, "deleted": deleted}),
                     attachments: None,
+                    llm_suffix: None,
                 })
             }
             other => Err(ToolError::InvalidArgs(format!(

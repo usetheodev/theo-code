@@ -70,6 +70,7 @@ impl Tool for EnvInfoTool {
             output: info,
             metadata: serde_json::json!({"os": std::env::consts::OS, "arch": std::env::consts::ARCH}),
             attachments: None,
+            llm_suffix: None,
         })
     }
 }

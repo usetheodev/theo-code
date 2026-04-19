@@ -41,6 +41,7 @@ impl Tool for PlanExitTool {
             output: "Switching to build agent...".to_string(),
             metadata: serde_json::json!({}),
             attachments: None,
+            llm_suffix: None,
         })
     }
 }

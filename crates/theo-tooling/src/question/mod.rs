@@ -95,6 +95,7 @@ impl Tool for QuestionTool {
             output: output_parts.join("\n"),
             metadata: serde_json::json!({"answers": answers}),
             attachments: None,
+            llm_suffix: None,
         })
     }
 }

@@ -297,6 +297,23 @@ impl Tool for BashTool {
         // Truncate output
         let truncated_result = theo_domain::truncate::truncate_output(&combined, None);
 
+        // Coach the model when we had to truncate: tell it where the full
+        // output lives and how to narrow the next invocation.
+        // Anthropic "Writing tools for agents" principle 10 (truncate with guidance).
+        let llm_suffix = if truncated_result.truncated {
+            let path_hint = truncated_result
+                .output_path
+                .as_deref()
+                .map(|p| format!(" Full output saved to: {p}."))
+                .unwrap_or_default();
+            Some(format!(
+                "[output truncated]{path_hint} To reduce output, pipe through `head`/`tail`, \
+                 add a filter (e.g. `grep`), or narrow the command to a specific file or range."
+            ))
+        } else {
+            None
+        };
+
         Ok(ToolOutput {
             title: description,
             output: truncated_result.content,
@@ -308,6 +325,7 @@ impl Tool for BashTool {
                 "outputPath": truncated_result.output_path,
             }),
             attachments: None,
+            llm_suffix,
         })
     }
 }

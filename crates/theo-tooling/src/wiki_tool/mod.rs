@@ -79,6 +79,7 @@ impl Tool for WikiQueryTool {
                 output: format!("No wiki pages found for: \"{}\"", query),
                 metadata: serde_json::json!({"query": query, "results": 0}),
                 attachments: None,
+                llm_suffix: None,
             });
         }
 
@@ -115,6 +116,7 @@ impl Tool for WikiQueryTool {
                 "top_confidence": results.first().map(|r| r.confidence).unwrap_or(0.0),
             }),
             attachments: None,
+            llm_suffix: None,
         })
     }
 }
@@ -232,6 +234,7 @@ impl Tool for WikiIngestTool {
                         "total_insights": result.total_insights,
                     }),
                     attachments: None,
+                    llm_suffix: None,
                 })
             }
             Err(e) => Err(ToolError::Execution(format!("Wiki ingest failed: {}", e))),
@@ -304,6 +307,7 @@ impl Tool for WikiGenerateTool {
                         "wiki_dir": result.wiki_dir,
                     }),
                     attachments: None,
+                    llm_suffix: None,
                 })
             }
             Err(e) => Err(ToolError::Execution(format!(

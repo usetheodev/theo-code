@@ -102,6 +102,7 @@ impl Tool for GlobTool {
                 "truncated": truncated,
             }),
             attachments: None,
+            llm_suffix: None,
         })
     }
 }

@@ -200,6 +200,7 @@ impl Tool for ReadTool {
                     mime: Some(mime.clone()),
                     url: format!("data:{mime};base64,{b64}"),
                 }]),
+                llm_suffix: None,
             });
         }
 
@@ -248,6 +249,7 @@ impl Tool for ReadTool {
                 output: "\nEnd of file - total 0 lines".to_string(),
                 metadata: serde_json::json!({"truncated": false}),
                 attachments: None,
+                llm_suffix: None,
             });
         }
 
@@ -284,11 +286,23 @@ impl Tool for ReadTool {
             output.push_str(&format!("\nEnd of file - total {total_lines} lines"));
         }
 
+        // When a read is truncated, coach the model on how to resume with
+        // a precise `offset`. Anthropic principle 10 (truncate with guidance).
+        let llm_suffix = if truncated {
+            Some(format!(
+                "[read truncated] File has more content. Continue with `read(filePath, offset={}, limit=...)` to read the next window.",
+                start + shown
+            ))
+        } else {
+            None
+        };
+
         Ok(ToolOutput {
             title: file_path_str,
             output,
             metadata: serde_json::json!({"truncated": truncated}),
             attachments: None,
+            llm_suffix,
         })
     }
 }
@@ -336,6 +350,7 @@ impl ReadTool {
             output,
             metadata: serde_json::json!({"truncated": truncated}),
             attachments: None,
+            llm_suffix: None,
         })
     }
 }

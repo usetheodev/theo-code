@@ -131,6 +131,7 @@ impl Tool for ReflectTool {
                 "should_stop": should_stop,
             }),
             attachments: None,
+            llm_suffix: None,
         })
     }
 }

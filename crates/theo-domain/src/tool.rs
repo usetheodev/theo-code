@@ -7,7 +7,13 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-/// Result of a tool execution
+/// Result of a tool execution.
+///
+/// The optional `llm_suffix` field carries text appended to the output only
+/// when the result is serialized for the model (hidden from the user UI).
+/// Tools use it to coach the agent on retries or follow-up actions — see
+/// Anthropic "Writing tools for agents" principle 8 (actionable errors)
+/// and opendev `ToolResult::with_llm_suffix` (traits.rs:128-176).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolOutput {
     pub title: String,
@@ -15,6 +21,65 @@ pub struct ToolOutput {
     pub metadata: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attachments: Option<Vec<FileAttachment>>,
+    /// Model-only trailing text (hidden from UI). Used for retry hints and
+    /// truncation guidance. `None` by default; populate via `with_llm_suffix`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub llm_suffix: Option<String>,
+}
+
+impl Default for ToolOutput {
+    fn default() -> Self {
+        Self {
+            title: String::new(),
+            output: String::new(),
+            metadata: serde_json::Value::Null,
+            attachments: None,
+            llm_suffix: None,
+        }
+    }
+}
+
+impl ToolOutput {
+    /// Create a minimal `ToolOutput` with title and textual output.
+    pub fn new(title: impl Into<String>, output: impl Into<String>) -> Self {
+        Self {
+            title: title.into(),
+            output: output.into(),
+            ..Self::default()
+        }
+    }
+
+    /// Attach structured metadata.
+    #[must_use]
+    pub fn with_metadata(mut self, metadata: serde_json::Value) -> Self {
+        self.metadata = metadata;
+        self
+    }
+
+    /// Attach files (images, PDFs) for downstream rendering.
+    #[must_use]
+    pub fn with_attachments(mut self, attachments: Vec<FileAttachment>) -> Self {
+        self.attachments = Some(attachments);
+        self
+    }
+
+    /// Attach a trailing suffix visible only to the model.
+    /// Used to coach retries, document truncation, and name follow-up tools.
+    #[must_use]
+    pub fn with_llm_suffix(mut self, suffix: impl Into<String>) -> Self {
+        self.llm_suffix = Some(suffix.into());
+        self
+    }
+
+    /// Render for the model: `output` followed by a blank line and
+    /// `llm_suffix` when present. Users see only `output` (via `title`/UI).
+    #[must_use]
+    pub fn model_text(&self) -> String {
+        match &self.llm_suffix {
+            Some(suffix) if !suffix.is_empty() => format!("{}\n\n{}", self.output, suffix),
+            _ => self.output.clone(),
+        }
+    }
 }
 
 /// Partial result emitted during tool execution.
@@ -575,6 +640,67 @@ mod tests {
     fn supports_streaming_default_returns_false() {
         let tool = IdentityTool;
         assert!(!tool.supports_streaming());
+    }
+
+    // ── llm_suffix / ToolOutput builder tests ────────────────────
+
+    #[test]
+    fn tool_output_new_leaves_suffix_none() {
+        let out = ToolOutput::new("title", "body");
+        assert_eq!(out.title, "title");
+        assert_eq!(out.output, "body");
+        assert!(out.llm_suffix.is_none());
+    }
+
+    #[test]
+    fn tool_output_with_llm_suffix_sets_field() {
+        let out = ToolOutput::new("title", "body")
+            .with_llm_suffix("Try grep with a narrower pattern.");
+        assert_eq!(
+            out.llm_suffix.as_deref(),
+            Some("Try grep with a narrower pattern.")
+        );
+    }
+
+    #[test]
+    fn tool_output_model_text_appends_suffix() {
+        let out =
+            ToolOutput::new("t", "line1\nline2").with_llm_suffix("Use read_file with offset.");
+        assert_eq!(
+            out.model_text(),
+            "line1\nline2\n\nUse read_file with offset."
+        );
+    }
+
+    #[test]
+    fn tool_output_model_text_without_suffix_is_output() {
+        let out = ToolOutput::new("t", "hello");
+        assert_eq!(out.model_text(), "hello");
+    }
+
+    #[test]
+    fn tool_output_llm_suffix_skipped_when_none_in_serde() {
+        let out = ToolOutput::new("t", "o");
+        let json = serde_json::to_value(&out).unwrap();
+        assert!(
+            json.get("llm_suffix").is_none(),
+            "serde should omit llm_suffix when None"
+        );
+    }
+
+    #[test]
+    fn tool_output_llm_suffix_roundtrips_through_serde() {
+        let out = ToolOutput::new("t", "o").with_llm_suffix("coach");
+        let json = serde_json::to_string(&out).unwrap();
+        let back: ToolOutput = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.llm_suffix.as_deref(), Some("coach"));
+    }
+
+    #[test]
+    fn tool_output_default_deserializes_without_llm_suffix_field() {
+        let json = r#"{"title":"t","output":"o","metadata":null}"#;
+        let out: ToolOutput = serde_json::from_str(json).unwrap();
+        assert!(out.llm_suffix.is_none());
     }
 
     #[test]

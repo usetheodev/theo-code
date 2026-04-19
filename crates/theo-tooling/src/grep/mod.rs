@@ -104,6 +104,7 @@ impl Tool for GrepTool {
                 output: "No files found".to_string(),
                 metadata: serde_json::json!({"matches": 0, "truncated": false}),
                 attachments: None,
+                llm_suffix: None,
             });
         }
 
@@ -143,6 +144,7 @@ impl Tool for GrepTool {
                 "truncated": truncated,
             }),
             attachments: None,
+            llm_suffix: None,
         })
     }
 }

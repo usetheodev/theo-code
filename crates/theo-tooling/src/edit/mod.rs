@@ -181,6 +181,13 @@ impl Tool for EditTool {
                     },
                 }),
                 attachments: None,
+                // Coach the model: new files often need to be wired into the
+                // build (module decl, import, Cargo.toml). Follow-up reminder.
+                llm_suffix: Some(
+                    "New file created. If this is Rust source, add the `pub mod` line \
+                     in the parent `lib.rs` / `mod.rs` so it participates in the build."
+                        .to_string(),
+                ),
             });
         }
 
@@ -242,6 +249,7 @@ impl Tool for EditTool {
                 },
             }),
             attachments: None,
+            llm_suffix: None,
         })
     }
 }

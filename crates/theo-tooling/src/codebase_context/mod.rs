@@ -102,6 +102,7 @@ impl Tool for CodebaseContextTool {
                     output: "Code intelligence is not available for this project. Use grep and glob to explore the codebase manually.".into(),
                     metadata: serde_json::json!({"status": "unavailable"}),
                     attachments: None,
+                    llm_suffix: None,
                 });
             }
         };
@@ -113,6 +114,7 @@ impl Tool for CodebaseContextTool {
                 output: "Code graph is being built in the background. Try again in a few seconds, or use grep/glob to explore manually while waiting.".into(),
                 metadata: serde_json::json!({"status": "building"}),
                 attachments: None,
+                llm_suffix: None,
             });
         }
 
@@ -167,6 +169,7 @@ impl Tool for CodebaseContextTool {
                             "budget_tokens": budget,
                         }),
                         attachments: None,
+                        llm_suffix: None,
                     });
                 }
 
@@ -215,6 +218,7 @@ impl Tool for CodebaseContextTool {
                         "query": query,
                     }),
                     attachments: None,
+                    llm_suffix: None,
                 })
             }
             Ok(Err(e)) => Ok(ToolOutput {
@@ -224,6 +228,7 @@ impl Tool for CodebaseContextTool {
                 ),
                 metadata: serde_json::json!({"status": "error", "error": e.to_string()}),
                 attachments: None,
+                llm_suffix: None,
             }),
             Err(_timeout) => Ok(ToolOutput {
                 title: "Codebase Context (timeout)".into(),
@@ -232,6 +237,7 @@ impl Tool for CodebaseContextTool {
                 ),
                 metadata: serde_json::json!({"status": "timeout", "timeout_secs": QUERY_TIMEOUT_SECS}),
                 attachments: None,
+                llm_suffix: None,
             }),
         }
     }

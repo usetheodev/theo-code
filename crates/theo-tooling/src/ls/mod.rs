@@ -75,6 +75,7 @@ impl Tool for LsTool {
             output: entries.join("\n"),
             metadata: serde_json::json!({"count": entries.len()}),
             attachments: None,
+            llm_suffix: None,
         })
     }
 }

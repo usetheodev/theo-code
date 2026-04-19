@@ -112,6 +112,7 @@ impl Tool for SkillTool {
                 "dir": skill.dir.display().to_string(),
             }),
             attachments: None,
+            llm_suffix: None,
         })
     }
 }

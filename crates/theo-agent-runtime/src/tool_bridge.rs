@@ -212,14 +212,20 @@ pub async fn execute_tool_call(
     let mut permissions = PermissionCollector::new();
     match tool.execute(args, ctx, &mut permissions).await {
         Ok(output) => {
-            let result = if output.output.len() > 8000 {
+            // Truncate the body independently of the model-only suffix so that
+            // coaching text (opendev `with_llm_suffix` pattern) is never cut off.
+            let body = if output.output.len() > 8000 {
                 format!(
                     "{}...\n[truncated, {} chars total]",
                     &output.output[..8000],
                     output.output.len()
                 )
             } else {
-                output.output
+                output.output.clone()
+            };
+            let result = match output.llm_suffix.as_deref() {
+                Some(suffix) if !suffix.is_empty() => format!("{body}\n\n{suffix}"),
+                _ => body,
             };
             (Message::tool_result(&call.id, name, result), true)
         }
@@ -233,7 +239,12 @@ pub async fn execute_tool_call(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use theo_tooling::registry::create_default_registry;
+    use async_trait::async_trait;
+    use std::path::PathBuf;
+    use theo_domain::error::ToolError;
+    use theo_domain::tool::{Tool, ToolOutput};
+    use theo_infra_llm::types::FunctionCall;
+    use theo_tooling::registry::{ToolRegistry, create_default_registry};
 
     #[test]
     fn test_registry_to_definitions() {
@@ -305,6 +316,86 @@ mod tests {
         assert!(names.contains(&"bash"), "sub-agents must have 'bash'");
         assert!(names.contains(&"edit"), "sub-agents must have 'edit'");
         assert!(names.contains(&"grep"), "sub-agents must have 'grep'");
+    }
+
+    struct SuffixCoachTool {
+        suffix: Option<String>,
+        body: String,
+    }
+
+    #[async_trait]
+    impl Tool for SuffixCoachTool {
+        fn id(&self) -> &str {
+            "suffix_coach"
+        }
+        fn description(&self) -> &str {
+            "test-only tool that emits body + llm_suffix"
+        }
+        async fn execute(
+            &self,
+            _args: serde_json::Value,
+            _ctx: &ToolContext,
+            _perm: &mut PermissionCollector,
+        ) -> Result<ToolOutput, ToolError> {
+            let mut out = ToolOutput::new("coach", self.body.clone());
+            if let Some(s) = &self.suffix {
+                out = out.with_llm_suffix(s.clone());
+            }
+            Ok(out)
+        }
+    }
+
+    fn suffix_call() -> ToolCall {
+        ToolCall {
+            id: "call-1".to_string(),
+            call_type: "function".to_string(),
+            function: FunctionCall {
+                name: "suffix_coach".to_string(),
+                arguments: "{}".to_string(),
+            },
+        }
+    }
+
+    fn test_ctx() -> ToolContext {
+        ToolContext::test_context(PathBuf::from("."))
+    }
+
+    #[tokio::test]
+    async fn execute_tool_call_appends_llm_suffix_to_result() {
+        let mut registry = ToolRegistry::new();
+        registry
+            .register(Box::new(SuffixCoachTool {
+                body: "main output".to_string(),
+                suffix: Some("Try grep with a narrower pattern.".to_string()),
+            }))
+            .unwrap();
+
+        let (msg, ok) = execute_tool_call(&registry, &suffix_call(), &test_ctx()).await;
+
+        assert!(ok);
+        let content = msg.content.expect("tool_result has content");
+        assert!(content.contains("main output"), "body must be present");
+        assert!(
+            content.contains("Try grep with a narrower pattern."),
+            "llm_suffix must be appended for the model: got `{content}`"
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_tool_call_without_suffix_emits_body_only() {
+        let mut registry = ToolRegistry::new();
+        registry
+            .register(Box::new(SuffixCoachTool {
+                body: "just the body".to_string(),
+                suffix: None,
+            }))
+            .unwrap();
+
+        let (msg, ok) = execute_tool_call(&registry, &suffix_call(), &test_ctx()).await;
+
+        assert!(ok);
+        let content = msg.content.expect("tool_result has content");
+        assert_eq!(content, "just the body");
     }
 
     #[test]

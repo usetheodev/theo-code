@@ -61,6 +61,7 @@ impl Tool for GitStatusTool {
             output,
             metadata: serde_json::json!({}),
             attachments: None,
+            llm_suffix: None,
         })
     }
 }
@@ -126,6 +127,7 @@ impl Tool for GitDiffTool {
             output,
             metadata: serde_json::json!({}),
             attachments: None,
+            llm_suffix: None,
         })
     }
 }
@@ -176,6 +178,7 @@ impl Tool for GitLogTool {
             output,
             metadata: serde_json::json!({}),
             attachments: None,
+            llm_suffix: None,
         })
     }
 }
@@ -254,6 +257,7 @@ impl Tool for GitCommitTool {
             output,
             metadata: serde_json::json!({"message": message}),
             attachments: None,
+            llm_suffix: None,
         })
     }
 }

@@ -180,6 +180,7 @@ impl Tool for TaskCreateTool {
                 "content": content,
             }),
             attachments: None,
+            llm_suffix: None,
         })
     }
 }
@@ -274,6 +275,7 @@ impl Tool for TaskUpdateTool {
                 "status": status_str,
             }),
             attachments: None,
+            llm_suffix: None,
         })
     }
 }

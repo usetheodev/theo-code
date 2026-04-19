@@ -111,6 +111,7 @@ impl Tool for WriteTool {
                 "exists": exists,
             }),
             attachments: None,
+            llm_suffix: None,
         })
     }
 }

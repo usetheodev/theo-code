@@ -101,6 +101,7 @@ impl Tool for ShellTool {
                         output: stdout,
                         metadata: serde_json::json!({"plugin_tool": self.name}),
                         attachments: None,
+                        llm_suffix: None,
                     })
                 } else {
                     let msg = if stderr.is_empty() { stdout } else { stderr };
