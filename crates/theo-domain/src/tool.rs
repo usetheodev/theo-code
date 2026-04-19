@@ -410,6 +410,27 @@ pub trait Tool: Send + Sync {
         false
     }
 
+    /// If `true`, this tool is omitted from the default tool definitions
+    /// shown to the agent — the agent discovers it by calling the
+    /// `tool_search` meta-tool with a keyword that matches `search_hint`.
+    ///
+    /// Use sparingly: a deferred tool costs one extra round-trip to surface,
+    /// so defer only tools that are rarely needed AND have expensive schemas.
+    /// Default `false` (tool is always visible). Anthropic principle 12
+    /// (minimize context overhead). Ref: opendev `should_defer`
+    /// (traits.rs:547-575).
+    fn should_defer(&self) -> bool {
+        false
+    }
+
+    /// Short keyword phrase used by `tool_search` to match deferred tools.
+    /// Should contain the verbs an agent would use when describing the task
+    /// (e.g. "apply multi-file patch diff", "fetch web url contents").
+    /// Returning `None` means the tool is only matched by its id.
+    fn search_hint(&self) -> Option<&str> {
+        None
+    }
+
     /// Per-tool truncation rule enforced by the agent-runtime sanitizer.
     ///
     /// Return `Some(TruncationRule)` to cap the output length for this tool —
@@ -729,6 +750,53 @@ mod tests {
     fn supports_streaming_default_returns_false() {
         let tool = IdentityTool;
         assert!(!tool.supports_streaming());
+    }
+
+    // ── should_defer / search_hint tests ─────────────────────────
+
+    #[test]
+    fn should_defer_default_is_false() {
+        let tool = IdentityTool;
+        assert!(!tool.should_defer());
+    }
+
+    #[test]
+    fn search_hint_default_is_none() {
+        let tool = IdentityTool;
+        assert!(tool.search_hint().is_none());
+    }
+
+    struct DeferredTool;
+
+    #[async_trait]
+    impl Tool for DeferredTool {
+        fn id(&self) -> &str {
+            "deferred"
+        }
+        fn description(&self) -> &str {
+            "rarely-used tool, only surfaced via tool_search"
+        }
+        fn should_defer(&self) -> bool {
+            true
+        }
+        fn search_hint(&self) -> Option<&str> {
+            Some("wiki knowledge base lookup")
+        }
+        async fn execute(
+            &self,
+            _args: serde_json::Value,
+            _ctx: &ToolContext,
+            _perm: &mut PermissionCollector,
+        ) -> Result<ToolOutput, ToolError> {
+            unreachable!()
+        }
+    }
+
+    #[test]
+    fn deferred_tool_overrides_defaults() {
+        let tool = DeferredTool;
+        assert!(tool.should_defer());
+        assert_eq!(tool.search_hint(), Some("wiki knowledge base lookup"));
     }
 
     // ── TruncationRule tests ─────────────────────────────────────

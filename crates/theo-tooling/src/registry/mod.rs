@@ -64,6 +64,47 @@ impl ToolRegistry {
         defs
     }
 
+    /// Generate ToolDefinitions for tools that are NOT deferred.
+    ///
+    /// Deferred tools (those with `should_defer() == true`) are hidden from
+    /// the default system prompt and must be discovered via `tool_search`.
+    /// Anthropic principle 12; ref: opendev `should_defer` (traits.rs:547-575).
+    pub fn visible_definitions(&self) -> Vec<ToolDefinition> {
+        let mut defs: Vec<ToolDefinition> = self
+            .tools
+            .values()
+            .filter(|t| !t.should_defer())
+            .map(|t| t.definition())
+            .collect();
+        defs.sort_by(|a, b| a.id.cmp(&b.id));
+        defs
+    }
+
+    /// Search deferred tools whose id or `search_hint` contains `query`
+    /// (case-insensitive). Returns `(id, hint)` pairs sorted by id so the
+    /// agent gets a deterministic shortlist from a `tool_search` call.
+    pub fn search_deferred(&self, query: &str) -> Vec<(String, String)> {
+        let q = query.to_lowercase();
+        let mut hits: Vec<(String, String)> = self
+            .tools
+            .values()
+            .filter(|t| t.should_defer())
+            .filter_map(|t| {
+                let id = t.id().to_string();
+                let hint = t.search_hint().unwrap_or("").to_string();
+                let id_match = id.to_lowercase().contains(&q);
+                let hint_match = !hint.is_empty() && hint.to_lowercase().contains(&q);
+                if id_match || hint_match {
+                    Some((id, hint))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        hits.sort_by(|a, b| a.0.cmp(&b.0));
+        hits
+    }
+
     /// Generate ToolDefinitions filtered by category.
     pub fn definitions_by_category(&self, category: ToolCategory) -> Vec<ToolDefinition> {
         let mut defs: Vec<ToolDefinition> = self
@@ -249,6 +290,106 @@ mod tests {
         assert!(ids.contains(&"glob".to_string()));
         assert!(ids.contains(&"apply_patch".to_string()));
         assert!(ids.contains(&"webfetch".to_string()));
+    }
+
+    // ── Deferred-tool discovery tests (P5) ─────────────────────────
+
+    use async_trait::async_trait;
+    use theo_domain::error::ToolError;
+    use theo_domain::tool::{
+        PermissionCollector, Tool as DomainTool, ToolContext, ToolOutput as DomainOutput,
+    };
+
+    struct DeferredStub {
+        id: &'static str,
+        hint: &'static str,
+    }
+
+    #[async_trait]
+    impl DomainTool for DeferredStub {
+        fn id(&self) -> &str {
+            self.id
+        }
+        fn description(&self) -> &str {
+            "deferred test tool"
+        }
+        fn should_defer(&self) -> bool {
+            true
+        }
+        fn search_hint(&self) -> Option<&str> {
+            Some(self.hint)
+        }
+        async fn execute(
+            &self,
+            _args: serde_json::Value,
+            _ctx: &ToolContext,
+            _perm: &mut PermissionCollector,
+        ) -> Result<DomainOutput, ToolError> {
+            unreachable!()
+        }
+    }
+
+    #[test]
+    fn visible_definitions_excludes_deferred_tools() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Box::new(BashTool::new())).unwrap();
+        registry
+            .register(Box::new(DeferredStub {
+                id: "wiki_search",
+                hint: "search wiki pages",
+            }))
+            .unwrap();
+
+        let visible: Vec<String> = registry.visible_definitions().into_iter().map(|d| d.id).collect();
+        assert!(visible.contains(&"bash".to_string()));
+        assert!(!visible.contains(&"wiki_search".to_string()));
+    }
+
+    #[test]
+    fn search_deferred_matches_on_hint() {
+        let mut registry = ToolRegistry::new();
+        registry
+            .register(Box::new(DeferredStub {
+                id: "wiki_search",
+                hint: "search wiki pages and knowledge base",
+            }))
+            .unwrap();
+        registry
+            .register(Box::new(DeferredStub {
+                id: "patch_apply",
+                hint: "apply multi-file diff patch",
+            }))
+            .unwrap();
+
+        let hits = registry.search_deferred("wiki");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].0, "wiki_search");
+    }
+
+    #[test]
+    fn search_deferred_matches_on_id_case_insensitive() {
+        let mut registry = ToolRegistry::new();
+        registry
+            .register(Box::new(DeferredStub {
+                id: "wiki_search",
+                hint: "irrelevant",
+            }))
+            .unwrap();
+
+        let hits = registry.search_deferred("WIKI");
+        assert_eq!(hits.len(), 1);
+    }
+
+    #[test]
+    fn search_deferred_ignores_non_deferred_tools() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Box::new(BashTool::new())).unwrap();
+
+        let hits = registry.search_deferred("bash");
+        assert!(
+            hits.is_empty(),
+            "non-deferred tools must not appear in deferred search results"
+        );
     }
 
     /// Guard: the top-5 tools must have onboarding-style descriptions with
