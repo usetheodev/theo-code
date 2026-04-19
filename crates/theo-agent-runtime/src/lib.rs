@@ -16,6 +16,7 @@ pub mod evolution;
 pub mod extension;
 pub mod failure_tracker;
 pub mod hooks;
+pub mod jit_instructions;
 pub mod loop_state;
 pub mod metrics;
 #[doc(hidden)] // Dead code: exported but never instantiated externally
