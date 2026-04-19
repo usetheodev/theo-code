@@ -7,7 +7,7 @@
 //! Mask already lives in `compaction::compact_if_needed`.
 //! Warning/Aggressive/Compact are future iterations.
 
-use crate::compaction::estimate_total_tokens;
+use crate::compaction::{CompactionContext, compact_if_needed_with_context, estimate_total_tokens};
 use crate::sanitizer::sanitize_tool_pairs;
 use theo_infra_llm::types::{Message, Role};
 
@@ -69,13 +69,31 @@ pub fn check_usage(messages: &[Message], context_window_tokens: usize) -> Optimi
     }
 }
 
-/// Prune stage: replace content of old tool results with `[pruned]`.
+/// Warning stage: log (once) that context pressure is approaching threshold.
 ///
-/// Differs from Mask: content is fully replaced (no character preservation).
-/// `tool_call_id` kept so pairs remain intact. Most recent
-/// `PRUNE_KEEP_RECENT` tool results are untouched. Idempotent.
-/// Calls `sanitize_tool_pairs` for post-mutation integrity.
+/// Non-mutating. Caller is expected to dedupe per-session via the
+/// `warned_70` style flag (see opendev `ContextCompactor`). Here we just emit
+/// a structured log line; dedupe lives in the caller to keep this pure.
+pub fn apply_warning(used: usize, limit: usize) {
+    let ratio = (used as f64 * 100.0 / limit as f64) as u32;
+    eprintln!(
+        "context_pressure: stage=warning ratio={ratio}% used={used} limit={limit}"
+    );
+}
+
+/// Prune stage: replace content of old tool results with `[pruned]`,
+/// preserving the last `PRUNE_KEEP_RECENT=3` results integrally.
 pub fn apply_prune(messages: &mut Vec<Message>) {
+    apply_prune_with_keep(messages, PRUNE_KEEP_RECENT);
+}
+
+/// Aggressive stage: same as Prune but keeps only 1 recent tool result.
+pub fn apply_aggressive(messages: &mut Vec<Message>) {
+    apply_prune_with_keep(messages, 1);
+}
+
+/// Internal: parametrized prune.
+fn apply_prune_with_keep(messages: &mut Vec<Message>, keep: usize) {
     if messages.is_empty() {
         return;
     }
@@ -87,11 +105,11 @@ pub fn apply_prune(messages: &mut Vec<Message>) {
         .map(|(i, _)| i)
         .collect();
 
-    if tool_indices.len() <= PRUNE_KEEP_RECENT {
+    if tool_indices.len() <= keep {
         return;
     }
 
-    let cutoff = tool_indices.len() - PRUNE_KEEP_RECENT;
+    let cutoff = tool_indices.len() - keep;
     tool_indices.truncate(cutoff);
 
     for idx in tool_indices {
@@ -102,6 +120,47 @@ pub fn apply_prune(messages: &mut Vec<Message>) {
     }
 
     sanitize_tool_pairs(messages);
+}
+
+/// Staged dispatcher — the single entry point the agent loop should use.
+///
+/// Checks pressure via `check_usage`, then invokes the appropriate stage:
+/// - None    → no-op
+/// - Warning → log only
+/// - Mask    → `compact_if_needed_with_context` (existing truncation logic)
+/// - Prune   → `apply_prune` (keep=3)
+/// - Aggressive → `apply_aggressive` (keep=1)
+/// - Compact → `apply_aggressive` + Mask pass (LLM summary deferred)
+///
+/// Returns the level that was applied so callers can observe/metric it.
+pub fn compact_staged(
+    messages: &mut Vec<Message>,
+    context_window_tokens: usize,
+    ctx: Option<&CompactionContext>,
+) -> OptimizationLevel {
+    let level = check_usage(messages, context_window_tokens);
+    match level {
+        OptimizationLevel::None => {}
+        OptimizationLevel::Warning => {
+            apply_warning(estimate_total_tokens(messages), context_window_tokens);
+        }
+        OptimizationLevel::Mask => {
+            compact_if_needed_with_context(messages, context_window_tokens, ctx);
+        }
+        OptimizationLevel::Prune => {
+            apply_prune(messages);
+        }
+        OptimizationLevel::Aggressive => {
+            apply_aggressive(messages);
+        }
+        OptimizationLevel::Compact => {
+            // LLM summarization is a future iteration. For now fall back to
+            // aggressive pruning + masking on whatever survives.
+            apply_aggressive(messages);
+            compact_if_needed_with_context(messages, context_window_tokens, ctx);
+        }
+    }
+    level
 }
 
 #[cfg(test)]
@@ -186,5 +245,43 @@ mod tests {
         let snap = msgs.clone();
         apply_prune(&mut msgs);
         assert_eq!(msgs, snap);
+    }
+
+    #[test]
+    fn aggressive_keeps_only_one_recent_tool_result() {
+        let mut msgs = build_four_tool_turns();
+        apply_aggressive(&mut msgs);
+        assert_eq!(msgs[1].content.as_deref(), Some(PRUNED_SENTINEL));
+        assert_eq!(msgs[3].content.as_deref(), Some(PRUNED_SENTINEL));
+        assert_eq!(msgs[5].content.as_deref(), Some(PRUNED_SENTINEL));
+        assert_eq!(msgs[7].content.as_deref(), Some("content4"));
+    }
+
+    #[test]
+    fn compact_staged_returns_none_below_warning_threshold() {
+        let mut msgs = user_of(100);
+        let level = compact_staged(&mut msgs, 10_000, None);
+        assert_eq!(level, OptimizationLevel::None);
+    }
+
+    #[test]
+    fn compact_staged_returns_level_applied() {
+        let mut msgs = user_of(3500);
+        let level = compact_staged(&mut msgs, 1000, None);
+        assert_eq!(level, OptimizationLevel::Prune);
+    }
+
+    #[test]
+    fn compact_staged_applies_aggressive_at_95_percent() {
+        let mut msgs = build_four_tool_turns();
+        // Force at least Aggressive level by using tiny window.
+        let level = compact_staged(&mut msgs, 20, None);
+        assert!(level >= OptimizationLevel::Aggressive);
+        // At least 3 tool results pruned (keeping 1).
+        let pruned = msgs
+            .iter()
+            .filter(|m| m.content.as_deref() == Some(PRUNED_SENTINEL))
+            .count();
+        assert!(pruned >= 3, "expected >=3 pruned, got {pruned}");
     }
 }
