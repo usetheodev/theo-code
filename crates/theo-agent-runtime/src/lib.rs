@@ -38,6 +38,7 @@ pub mod session_bootstrap;
 pub mod state_manager;
 pub mod system_prompt_composer;
 pub mod skill;
+pub mod skill_catalog;
 pub mod snapshot;
 pub mod subagent;
 pub mod task_manager;
