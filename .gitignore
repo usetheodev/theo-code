@@ -292,3 +292,7 @@ referencias/
 results.tsv
 eval.log
 eval_detail.json
+
+# Evolution loop output
+evolution-output/
+.theo/evolution_log.jsonl

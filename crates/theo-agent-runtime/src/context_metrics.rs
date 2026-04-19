@@ -12,6 +12,13 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
+use theo_domain::episode::{CausalLink, CausalOutcome, FailureFingerprint};
+
+/// Maximum number of failure fingerprints to retain in the ring buffer.
+const FAILURE_RING_CAPACITY: usize = 50;
+
+/// Threshold: fingerprint recurring this many times triggers auto-constraint.
+const FAILURE_CONSTRAINT_THRESHOLD: usize = 3;
 
 /// Context-specific metrics collected during an agent run.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -28,6 +35,12 @@ pub struct ContextMetrics {
     assembled_chunks: HashMap<String, Vec<String>>,
     /// Files that the agent actually referenced via tool calls.
     tool_references: Vec<String>,
+    /// Causal links between assembled context and tool call outcomes.
+    #[serde(default)]
+    causal_links: Vec<CausalLink>,
+    /// Ring buffer of recent failure fingerprints for cycle detection.
+    #[serde(default)]
+    failure_fingerprints: Vec<FailureFingerprint>,
 }
 
 impl ContextMetrics {
@@ -178,6 +191,75 @@ impl ContextMetrics {
         self.assembled_chunks.keys().cloned().collect()
     }
 
+    // --- Gap 3: Causal usefulness tracking ---
+
+    /// Record a causal link between assembled context and a tool call.
+    pub fn record_causal_link(
+        &mut self,
+        community_id: &str,
+        tool_call_id: &str,
+        outcome: CausalOutcome,
+        iteration: usize,
+    ) {
+        self.causal_links.push(CausalLink {
+            community_id: community_id.to_string(),
+            tool_call_id: tool_call_id.to_string(),
+            outcome,
+            iteration,
+        });
+    }
+
+    /// Compute causal usefulness per community: successful_uses / total_assemblies.
+    pub fn causal_usefulness(&self) -> HashMap<String, f64> {
+        let mut total: HashMap<String, usize> = HashMap::new();
+        let mut used: HashMap<String, usize> = HashMap::new();
+        for link in &self.causal_links {
+            *total.entry(link.community_id.clone()).or_default() += 1;
+            if link.outcome == CausalOutcome::Used {
+                *used.entry(link.community_id.clone()).or_default() += 1;
+            }
+        }
+        total
+            .into_iter()
+            .map(|(id, t)| {
+                let u = used.get(&id).copied().unwrap_or(0);
+                (id, u as f64 / t as f64)
+            })
+            .collect()
+    }
+
+    // --- Gap 4: Failure learning loop ---
+
+    /// Record a failure fingerprint. Auto-evicts oldest when capacity exceeded.
+    pub fn record_failure(&mut self, fingerprint: FailureFingerprint) {
+        self.failure_fingerprints.push(fingerprint);
+        if self.failure_fingerprints.len() > FAILURE_RING_CAPACITY {
+            self.failure_fingerprints
+                .drain(..self.failure_fingerprints.len() - FAILURE_RING_CAPACITY);
+        }
+    }
+
+    /// Check for recurring failure patterns and generate constraints.
+    pub fn synthesize_failure_constraints(&self) -> Vec<String> {
+        let mut counts: HashMap<&FailureFingerprint, usize> = HashMap::new();
+        for fp in &self.failure_fingerprints {
+            *counts.entry(fp).or_default() += 1;
+        }
+        counts
+            .into_iter()
+            .filter(|(_, count)| *count >= FAILURE_CONSTRAINT_THRESHOLD)
+            .map(|(fp, count)| fp.to_constraint(count))
+            .collect()
+    }
+
+    /// Count occurrences of a specific fingerprint in the ring buffer.
+    pub fn failure_count(&self, fingerprint: &FailureFingerprint) -> usize {
+        self.failure_fingerprints
+            .iter()
+            .filter(|fp| *fp == fingerprint)
+            .count()
+    }
+
     // --- Citation extraction (P2.5) ---
 
     /// Record a shadow citation for feedback (alpha=0.1, lower than production).
@@ -206,6 +288,8 @@ impl ContextMetrics {
             top_refetched: self.top_refetched(5),
             repeated_actions: self.repeated_actions(),
             usefulness_scores: self.compute_usefulness(),
+            causal_usefulness: self.causal_usefulness(),
+            failure_constraints: self.synthesize_failure_constraints(),
         }
     }
 
@@ -254,6 +338,12 @@ pub struct ContextMetricsReport {
     pub repeated_actions: Vec<String>,
     /// Per-community usefulness score (0.0 = not used, 1.0 = fully used).
     pub usefulness_scores: HashMap<String, f64>,
+    /// Per-community causal usefulness (successful_uses / total_assemblies).
+    #[serde(default)]
+    pub causal_usefulness: HashMap<String, f64>,
+    /// Constraints auto-generated from recurring failure patterns.
+    #[serde(default)]
+    pub failure_constraints: Vec<String>,
 }
 
 #[cfg(test)]
@@ -486,5 +576,120 @@ mod tests {
         let block_map = HashMap::from([("blk-1".to_string(), vec!["src/auth.rs".to_string()])]);
         let cited = extract_citations(&tool_args, &block_map);
         assert!(cited.is_empty());
+    }
+
+    // --- Gap 3: Causal usefulness tests ---
+
+    #[test]
+    fn causal_link_records_and_computes_usefulness() {
+        let mut m = ContextMetrics::new();
+        m.record_causal_link("c:auth", "tc-1", CausalOutcome::Used, 1);
+        m.record_causal_link("c:auth", "tc-2", CausalOutcome::Used, 2);
+        m.record_causal_link("c:auth", "tc-3", CausalOutcome::Unused, 3);
+        let scores = m.causal_usefulness();
+        let score = *scores.get("c:auth").unwrap_or(&0.0);
+        // 2 Used / 3 total = 0.667
+        assert!(
+            (score - 2.0 / 3.0).abs() < 0.001,
+            "Expected ~0.667, got {}",
+            score
+        );
+    }
+
+    #[test]
+    fn causal_usefulness_zero_when_all_unused() {
+        let mut m = ContextMetrics::new();
+        m.record_causal_link("c:db", "tc-1", CausalOutcome::Unused, 1);
+        m.record_causal_link("c:db", "tc-2", CausalOutcome::Failed, 2);
+        let scores = m.causal_usefulness();
+        assert_eq!(*scores.get("c:db").unwrap_or(&1.0), 0.0);
+    }
+
+    #[test]
+    fn causal_usefulness_empty_when_no_links() {
+        let m = ContextMetrics::new();
+        assert!(m.causal_usefulness().is_empty());
+    }
+
+    #[test]
+    fn causal_usefulness_in_report() {
+        let mut m = ContextMetrics::new();
+        m.record_causal_link("c:auth", "tc-1", CausalOutcome::Used, 1);
+        let report = m.to_report();
+        assert!(!report.causal_usefulness.is_empty());
+    }
+
+    // --- Gap 4: Failure learning loop tests ---
+
+    #[test]
+    fn failure_fingerprint_recorded_and_counted() {
+        use theo_domain::episode::ErrorClass;
+        let mut m = ContextMetrics::new();
+        let fp = FailureFingerprint::new(ErrorClass::Action, "edit", "src/auth.rs");
+        m.record_failure(fp.clone());
+        m.record_failure(fp.clone());
+        assert_eq!(m.failure_count(&fp), 2);
+    }
+
+    #[test]
+    fn failure_constraint_synthesized_at_threshold() {
+        use theo_domain::episode::ErrorClass;
+        let mut m = ContextMetrics::new();
+        let fp = FailureFingerprint::new(ErrorClass::Action, "edit", "src/auth.rs");
+        m.record_failure(fp.clone());
+        m.record_failure(fp.clone());
+        assert!(
+            m.synthesize_failure_constraints().is_empty(),
+            "Should not trigger below threshold"
+        );
+        m.record_failure(fp.clone());
+        let constraints = m.synthesize_failure_constraints();
+        assert!(
+            !constraints.is_empty(),
+            "Should trigger at threshold"
+        );
+        assert!(constraints[0].contains("edit"));
+    }
+
+    #[test]
+    fn failure_ring_buffer_evicts_oldest() {
+        use theo_domain::episode::ErrorClass;
+        let mut m = ContextMetrics::new();
+        // Fill beyond capacity
+        for i in 0..60 {
+            let fp = FailureFingerprint::new(ErrorClass::System, "bash", &format!("arg-{}", i));
+            m.record_failure(fp);
+        }
+        // Ring buffer should have capped at FAILURE_RING_CAPACITY
+        assert!(
+            m.failure_fingerprints.len() <= 50,
+            "Ring buffer should cap at {}",
+            50
+        );
+    }
+
+    #[test]
+    fn failure_constraints_in_report() {
+        use theo_domain::episode::ErrorClass;
+        let mut m = ContextMetrics::new();
+        let fp = FailureFingerprint::new(ErrorClass::Planning, "search", "auth");
+        for _ in 0..3 {
+            m.record_failure(fp.clone());
+        }
+        let report = m.to_report();
+        assert!(!report.failure_constraints.is_empty());
+    }
+
+    #[test]
+    fn different_fingerprints_dont_interfere() {
+        use theo_domain::episode::ErrorClass;
+        let mut m = ContextMetrics::new();
+        let fp1 = FailureFingerprint::new(ErrorClass::Action, "edit", "src/a.rs");
+        let fp2 = FailureFingerprint::new(ErrorClass::Action, "edit", "src/b.rs");
+        m.record_failure(fp1.clone());
+        m.record_failure(fp1.clone());
+        m.record_failure(fp2.clone());
+        assert_eq!(m.failure_count(&fp1), 2);
+        assert_eq!(m.failure_count(&fp2), 1);
     }
 }
