@@ -14,6 +14,7 @@ pub mod priority;
 pub mod retry_policy;
 pub mod sandbox;
 pub mod session;
+pub mod session_summary;
 pub mod task;
 pub mod tokens;
 pub mod tool;
