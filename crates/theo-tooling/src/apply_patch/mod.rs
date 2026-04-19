@@ -531,7 +531,14 @@ impl Tool for ApplyPatchTool {
                 "files": files_info,
             }),
             attachments: None,
-            llm_suffix: None,
+            // Large patches often leave the build in a half-applied state.
+            // Coach the model to verify before claiming done.
+            llm_suffix: Some(
+                "Patch applied across multiple files. Run the relevant test suite or build \
+                 (`cargo test -p <crate>` / `cargo check`) before calling `done` to catch \
+                 compile errors early."
+                    .to_string(),
+            ),
         })
     }
 }

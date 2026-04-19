@@ -139,7 +139,12 @@ impl Tool for GrepTool {
                 output: "No files found".to_string(),
                 metadata: serde_json::json!({"matches": 0, "truncated": false}),
                 attachments: None,
-                llm_suffix: None,
+                // Coach the model to broaden / check case / widen path.
+                llm_suffix: Some(
+                    "Zero matches. Consider: (1) removing `path` to search the whole repo, \
+                     (2) loosening the regex, (3) using `codebase_context` for symbol lookup."
+                        .to_string(),
+                ),
             });
         }
 
