@@ -89,7 +89,17 @@ impl Tool for BashTool {
     }
 
     fn description(&self) -> &str {
-        "Execute a shell command"
+        concat!(
+            "Run a shell command. Returns combined stdout+stderr, exit code, and truncation info. ",
+            "Use this for tasks the dedicated tools don't cover: running tests, builds, git ops, package management, one-off scripts. ",
+            "Use `grep` instead of the `grep` CLI (preserves token budget). ",
+            "Use `glob` instead of `find`. ",
+            "Use `read` instead of `cat`/`head`/`tail`. ",
+            "Use `edit`/`write` instead of `sed`/`echo >`. ",
+            "Always pass a short `description` so the tool log is readable. Chain multi-step work with `&&` rather than dispatching multiple bash calls. ",
+            "Output over ~8KB is truncated and the full log path is reported in the model-only suffix. ",
+            "Example: bash({command: 'cargo test -p theo-domain', description: 'Run domain tests'})."
+        )
     }
 
     fn schema(&self) -> ToolSchema {

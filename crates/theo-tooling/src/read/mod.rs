@@ -106,7 +106,17 @@ impl Tool for ReadTool {
     }
 
     fn description(&self) -> &str {
-        "Read a file or directory"
+        concat!(
+            "Read a file (with line numbers) or list a directory. ",
+            "Use this when you need the exact contents of a known file: source, config, lock file, docs. ",
+            "Supports partial reads via `offset` (1-based line number) and `limit`. ",
+            "Images (PNG/JPG) return as inline attachments. ",
+            "Use `glob` instead to find files by NAME pattern. ",
+            "Use `grep` instead to SEARCH file contents; do NOT read every matching file to scan it yourself. ",
+            "For long files, pass offset/limit to avoid large token spend; the tool will tell you how to resume. ",
+            "Example: read({filePath: 'Cargo.toml'}). ",
+            "Example: read({filePath: 'src/lib.rs', offset: 200, limit: 100})."
+        )
     }
 
     fn schema(&self) -> ToolSchema {

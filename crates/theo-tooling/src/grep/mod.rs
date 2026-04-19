@@ -26,7 +26,15 @@ impl Tool for GrepTool {
     }
 
     fn description(&self) -> &str {
-        "Search file contents using regex patterns"
+        concat!(
+            "Search file contents with a regex pattern. Returns file:line:match for each hit. ",
+            "Use this when you know part of the text (symbol name, error string, literal constant) and want every occurrence. ",
+            "Use `glob` instead when searching by FILENAME pattern (e.g. '**/*.rs'). ",
+            "Use `read` instead when you already know the file path and want its full contents. ",
+            "Use `codebase_context` for structural relationships (callers, callees, definitions) rather than text matches. ",
+            "Scope with `path` to a subdir and `glob` to a filename filter — a broad regex over the whole workspace can easily truncate; narrow first. ",
+            "Example: grep({pattern: 'fn main', path: 'crates/theo-cli', glob: '*.rs'})."
+        )
     }
 
     fn schema(&self) -> ToolSchema {

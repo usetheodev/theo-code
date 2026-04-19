@@ -251,6 +251,42 @@ mod tests {
         assert!(ids.contains(&"webfetch".to_string()));
     }
 
+    /// Guard: the top-5 tools must have onboarding-style descriptions with
+    /// NOT-usage rules and at least one concrete example.
+    /// Anthropic "Writing tools for agents", principles 3 and 11.
+    /// fff-mcp `server.rs:388-502` models the decision-tree format.
+    #[test]
+    fn top_tools_have_decision_tree_descriptions() {
+        let registry = create_default_registry();
+        for tool_id in ["read", "grep", "glob", "bash", "edit"] {
+            let tool = registry
+                .get(tool_id)
+                .unwrap_or_else(|| panic!("tool `{tool_id}` missing from default registry"));
+            let desc = tool.description();
+
+            assert!(
+                desc.len() >= 200,
+                "description for `{tool_id}` is too short ({} chars) — \
+                 onboarding-style descriptions should explain when to use and when NOT to use the tool",
+                desc.len()
+            );
+            assert!(
+                desc.len() <= 1200,
+                "description for `{tool_id}` is too long ({} chars) — keep under 1200 to preserve token budget",
+                desc.len()
+            );
+            assert!(
+                desc.contains("instead"),
+                "description for `{tool_id}` must steer the model away from overlapping tools \
+                 (use the word `instead` to name an alternative)"
+            );
+            assert!(
+                desc.to_lowercase().contains("example"),
+                "description for `{tool_id}` must include at least one concrete `Example: ...` usage"
+            );
+        }
+    }
+
     #[test]
     fn empty_registry() {
         let registry = ToolRegistry::new();

@@ -96,7 +96,16 @@ impl Tool for EditTool {
     }
 
     fn description(&self) -> &str {
-        "Replace text in a file"
+        concat!(
+            "Replace `oldString` with `newString` in `filePath`. ",
+            "The match must be exact (whitespace and punctuation included) and unique unless `replaceAll: true`. ",
+            "Use this for small, surgical changes where you know the exact current text. ",
+            "Use `write` instead when creating a new file from scratch or fully overwriting one. ",
+            "Use `apply_patch` instead when a change spans many files or a large diff. ",
+            "Pass an empty `oldString` to CREATE a new file with `newString` as its contents. ",
+            "If the match is not unique, add more surrounding context to `oldString` OR set `replaceAll: true` deliberately. ",
+            "Example: edit({filePath: 'src/lib.rs', oldString: 'pub mod old;', newString: 'pub mod new;'})."
+        )
     }
 
     fn schema(&self) -> ToolSchema {

@@ -24,7 +24,15 @@ impl Tool for GlobTool {
     }
 
     fn description(&self) -> &str {
-        "Find files matching a glob pattern"
+        concat!(
+            "Find files by path/name pattern. Returns a list of matching paths. ",
+            "Use this when you need to locate files by their NAME or PATH — wildcards like `**/*.rs`, `src/**/mod.rs`, `*.toml`. ",
+            "Use `grep` instead to match FILE CONTENT. ",
+            "Use `read` instead if you already know the file and want its contents. ",
+            "Default root is the project directory; pass `path` to narrow. Broad patterns (`**/*`) on large repos are expensive — prefer narrower patterns. ",
+            "Example: glob({pattern: 'crates/**/Cargo.toml'}). ",
+            "Example: glob({pattern: '**/README*.md'})."
+        )
     }
 
     fn schema(&self) -> ToolSchema {
