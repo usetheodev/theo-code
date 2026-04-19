@@ -41,7 +41,7 @@ Principles 2 (consolidation), 4 (namespacing — already prefixed: git_*, task_*
 
 ## Out of Scope for This Pass
 
-- **P5 should_defer + search_hint**: requires a `ToolSearch` tool / registry discovery mechanism not yet present. Adding the trait methods alone would be scaffolding without consumers. Captured as backlog.
+- **P5 should_defer + search_hint**: trait surface + registry discovery helpers landed in commit 2b4682e after initial convergence. Trait methods + `visible_definitions()` + `search_deferred(query)` with 7 new tests. No default-registry tool is deferred yet — the high-cost candidates (wiki, skill, lsp, codesearch) are already ExperimentalModule and outside the default registry. Future work: add a `tool_search` meta-tool in tool_bridge once a real deferral candidate graduates.
 
 ## Hygiene
 
