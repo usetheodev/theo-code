@@ -1,0 +1,48 @@
+#!/bin/bash
+# Reject commits that contain AI co-authorship trailers or attribution footers.
+#
+# Blocks any of:
+#   - `Co-Authored-By: Claude ...`
+#   - `Co-Authored-By: <any AI model>`
+#   - `🤖 Generated with ...`
+#   - `Generated with [Claude Code]...`
+#
+# Install (once per clone):
+#   git config core.hooksPath .githooks
+set -euo pipefail
+
+MSG_FILE="${1:?missing commit message file path}"
+
+if [ ! -f "$MSG_FILE" ]; then
+    exit 0
+fi
+
+# Ignore comment lines (#) — those are stripped anyway.
+EFFECTIVE=$(grep -v '^\s*#' "$MSG_FILE" || true)
+
+FAIL=0
+
+if echo "$EFFECTIVE" | grep -qiE '^[[:space:]]*Co-Authored-By:'; then
+    echo "[commit-msg] BLOCKED: 'Co-Authored-By' trailer is forbidden in this repo."
+    FAIL=1
+fi
+
+if echo "$EFFECTIVE" | grep -qE '🤖[[:space:]]*Generated with'; then
+    echo "[commit-msg] BLOCKED: '🤖 Generated with' footer is forbidden."
+    FAIL=1
+fi
+
+if echo "$EFFECTIVE" | grep -qiE 'Generated with \[?Claude Code'; then
+    echo "[commit-msg] BLOCKED: 'Generated with Claude Code' attribution is forbidden."
+    FAIL=1
+fi
+
+if [ "$FAIL" -ne 0 ]; then
+    echo ""
+    echo "Remove the offending line(s) and commit again."
+    echo "To amend the current commit message in-place, run:"
+    echo "  git commit --amend"
+    exit 1
+fi
+
+exit 0
