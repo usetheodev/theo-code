@@ -8,6 +8,7 @@ pub mod event;
 pub mod evolution;
 pub mod graph_context;
 pub mod identifiers;
+pub mod memory;
 pub mod permission;
 pub mod priority;
 pub mod retry_policy;
