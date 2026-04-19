@@ -144,6 +144,44 @@ impl Tool for EditTool {
         ToolCategory::FileOps
     }
 
+    /// Coach the agent when a common edit-call mistake shows up.
+    /// Anthropic principle 8; ref: opendev `BaseTool::format_validation_error`.
+    fn format_validation_error(
+        &self,
+        error: &ToolError,
+        _args: &serde_json::Value,
+    ) -> Option<String> {
+        let msg = error.to_string();
+        if msg.contains("filePath") {
+            Some(
+                "Provide `filePath` as a string (absolute or project-relative). \
+                 Example: edit({filePath: 'src/lib.rs', oldString: 'pub mod old;', newString: 'pub mod new;'})."
+                    .to_string(),
+            )
+        } else if msg.contains("oldString") || msg.contains("newString") {
+            Some(
+                "`oldString` and `newString` are both required strings and must differ. \
+                 To CREATE a new file, pass oldString: '' and put the file content in newString. \
+                 Example: edit({filePath: 'src/new.rs', oldString: '', newString: 'pub fn hello() {}'})."
+                    .to_string(),
+            )
+        } else if msg.contains("old_string and new_string are identical") {
+            Some(
+                "`oldString` equals `newString` — no change would happen. \
+                 If you intended to insert without removing, include the surrounding context in both so the diff is non-empty."
+                    .to_string(),
+            )
+        } else if msg.contains("not found in the file") {
+            Some(
+                "The exact `oldString` is not present. Re-read the file to copy the text verbatim (whitespace, tabs, quotes matter). \
+                 If the pattern appears multiple times and you want them all, set replaceAll: true."
+                    .to_string(),
+            )
+        } else {
+            None
+        }
+    }
+
     async fn execute(
         &self,
         args: serde_json::Value,

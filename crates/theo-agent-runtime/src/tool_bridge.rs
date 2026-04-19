@@ -230,7 +230,14 @@ pub async fn execute_tool_call(
             (Message::tool_result(&call.id, name, result), true)
         }
         Err(e) => {
-            let error_msg = format!("Tool error: {e}");
+            // Give the tool a chance to coach the agent on how to fix the
+            // call: named parameter, expected type, concrete example.
+            // Anthropic principle 8 (actionable errors).
+            let coached = tool.format_validation_error(&e, &args);
+            let error_msg = match coached {
+                Some(guidance) => format!("Tool error: {e}\n\n{guidance}"),
+                None => format!("Tool error: {e}"),
+            };
             (Message::tool_result(&call.id, name, error_msg), false)
         }
     }
@@ -378,6 +385,62 @@ mod tests {
         assert!(
             content.contains("Try grep with a narrower pattern."),
             "llm_suffix must be appended for the model: got `{content}`"
+        );
+    }
+
+    struct CoachingErrorTool;
+
+    #[async_trait]
+    impl Tool for CoachingErrorTool {
+        fn id(&self) -> &str {
+            "coaching_error"
+        }
+        fn description(&self) -> &str {
+            "test tool that fails validation with coaching"
+        }
+        fn format_validation_error(
+            &self,
+            _error: &ToolError,
+            _args: &serde_json::Value,
+        ) -> Option<String> {
+            Some(
+                "Missing `filePath`. Example: coaching_error({filePath: 'src/lib.rs'}).".to_string(),
+            )
+        }
+        async fn execute(
+            &self,
+            _args: serde_json::Value,
+            _ctx: &ToolContext,
+            _perm: &mut PermissionCollector,
+        ) -> Result<ToolOutput, ToolError> {
+            Err(ToolError::InvalidArgs(
+                "Missing required field: filePath".to_string(),
+            ))
+        }
+    }
+
+    #[tokio::test]
+    async fn execute_tool_call_appends_validation_coaching_to_error() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Box::new(CoachingErrorTool)).unwrap();
+
+        let call = ToolCall {
+            id: "c-err".to_string(),
+            call_type: "function".to_string(),
+            function: FunctionCall {
+                name: "coaching_error".to_string(),
+                arguments: "{}".to_string(),
+            },
+        };
+
+        let (msg, ok) = execute_tool_call(&registry, &call, &test_ctx()).await;
+
+        assert!(!ok, "coached error is still a failure");
+        let content = msg.content.expect("tool_result has content");
+        assert!(content.contains("Missing required field: filePath"));
+        assert!(
+            content.contains("Example: coaching_error({filePath:"),
+            "override guidance must be appended: got `{content}`"
         );
     }
 

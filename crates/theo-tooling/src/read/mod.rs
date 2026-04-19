@@ -148,6 +148,29 @@ impl Tool for ReadTool {
         ToolCategory::FileOps
     }
 
+    fn format_validation_error(
+        &self,
+        error: &ToolError,
+        _args: &serde_json::Value,
+    ) -> Option<String> {
+        let msg = error.to_string();
+        if msg.contains("filePath") {
+            Some(
+                "Provide `filePath` as a string. Example: read({filePath: 'Cargo.toml'}) \
+                 or read({filePath: 'src/lib.rs', offset: 200, limit: 100})."
+                    .to_string(),
+            )
+        } else if msg.contains("out of range") {
+            Some(
+                "`offset` starts at line 1 and cannot exceed the file's total line count. \
+                 Omit offset to start from the beginning, or call read once without offset to learn the total."
+                    .to_string(),
+            )
+        } else {
+            None
+        }
+    }
+
     async fn execute(
         &self,
         args: serde_json::Value,

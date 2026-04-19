@@ -355,6 +355,25 @@ pub trait Tool: Send + Sync {
         false
     }
 
+    /// Coach the agent when argument validation fails.
+    ///
+    /// Return `Some(msg)` to replace the raw `ToolError::InvalidArgs` /
+    /// `ToolError::Validation` string with an onboarding-style message that
+    /// names the offending parameter, shows the expected type, and gives a
+    /// concrete example. Return `None` (default) to keep the raw error.
+    ///
+    /// The default is `None` — opt-in, so unmigrated tools are unaffected.
+    ///
+    /// Anthropic "Writing tools for agents" principle 8 (actionable errors).
+    /// Ref: opendev `BaseTool::format_validation_error` (traits.rs:444-447).
+    fn format_validation_error(
+        &self,
+        _error: &crate::error::ToolError,
+        _args: &serde_json::Value,
+    ) -> Option<String> {
+        None
+    }
+
     /// Execute the tool with given arguments and context
     async fn execute(
         &self,
@@ -640,6 +659,75 @@ mod tests {
     fn supports_streaming_default_returns_false() {
         let tool = IdentityTool;
         assert!(!tool.supports_streaming());
+    }
+
+    // ── format_validation_error tests ────────────────────────────
+
+    struct CoachingTool;
+
+    #[async_trait]
+    impl Tool for CoachingTool {
+        fn id(&self) -> &str {
+            "coaching"
+        }
+        fn description(&self) -> &str {
+            "tool that coaches on validation errors"
+        }
+        fn format_validation_error(
+            &self,
+            error: &crate::error::ToolError,
+            _args: &serde_json::Value,
+        ) -> Option<String> {
+            let msg = error.to_string();
+            if msg.contains("filePath") {
+                Some(
+                    "Missing `filePath`. Provide an absolute or project-relative path, \
+                     e.g. coaching({filePath: 'src/lib.rs'})."
+                        .to_string(),
+                )
+            } else {
+                None
+            }
+        }
+        async fn execute(
+            &self,
+            _args: serde_json::Value,
+            _ctx: &ToolContext,
+            _perm: &mut PermissionCollector,
+        ) -> Result<ToolOutput, ToolError> {
+            unreachable!()
+        }
+    }
+
+    #[test]
+    fn format_validation_error_default_returns_none() {
+        let tool = IdentityTool;
+        let err = ToolError::InvalidArgs("Missing required field: filePath".to_string());
+        assert!(
+            tool.format_validation_error(&err, &serde_json::Value::Null)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn format_validation_error_override_receives_error_and_args() {
+        let tool = CoachingTool;
+        let err = ToolError::InvalidArgs("Missing required field: filePath".to_string());
+        let args = serde_json::json!({});
+        let coached = tool.format_validation_error(&err, &args).unwrap();
+        assert!(coached.contains("filePath"));
+        assert!(coached.contains("Example") || coached.contains("e.g."));
+    }
+
+    #[test]
+    fn format_validation_error_override_declines_unrecognized_errors() {
+        let tool = CoachingTool;
+        let err = ToolError::InvalidArgs("Missing required field: other".to_string());
+        assert!(
+            tool.format_validation_error(&err, &serde_json::Value::Null)
+                .is_none(),
+            "overrides should only coach on errors they recognize"
+        );
     }
 
     // ── llm_suffix / ToolOutput builder tests ────────────────────

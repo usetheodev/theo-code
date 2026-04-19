@@ -66,6 +66,23 @@ impl Tool for GrepTool {
         ToolCategory::Search
     }
 
+    fn format_validation_error(
+        &self,
+        error: &ToolError,
+        _args: &serde_json::Value,
+    ) -> Option<String> {
+        let msg = error.to_string();
+        if msg.contains("pattern") {
+            Some(
+                "Provide `pattern` as a regex string. Narrow with `path` to a subdir and `include` to a filename glob. \
+                 Example: grep({pattern: 'fn main', path: 'crates/theo-cli', include: '*.rs'})."
+                    .to_string(),
+            )
+        } else {
+            None
+        }
+    }
+
     async fn execute(
         &self,
         args: serde_json::Value,
