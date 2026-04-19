@@ -4,6 +4,7 @@ pub mod budget_enforcer;
 pub mod capability_gate;
 pub mod compaction;
 pub mod compaction_stages;
+pub mod compaction_summary;
 pub mod config;
 pub mod context_metrics;
 pub mod convergence;
