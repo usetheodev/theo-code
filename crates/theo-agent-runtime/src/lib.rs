@@ -25,6 +25,7 @@ pub mod project_config;
 pub mod reflector;
 pub mod retry;
 pub mod roadmap;
+pub mod sanitizer;
 pub mod run_engine;
 pub mod sensor;
 #[doc(hidden)] // Dead code: exported but never instantiated externally
