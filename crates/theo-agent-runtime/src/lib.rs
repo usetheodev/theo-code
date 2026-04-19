@@ -35,6 +35,7 @@ pub mod scheduler;
 pub mod session_tree;
 pub mod session_bootstrap;
 pub mod state_manager;
+pub mod system_prompt_composer;
 pub mod skill;
 pub mod snapshot;
 pub mod subagent;
