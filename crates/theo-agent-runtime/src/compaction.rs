@@ -7,6 +7,7 @@
 //! - Tool call/result pairs as atomic units
 //! - A summary of compacted content
 
+use crate::sanitizer::sanitize_tool_pairs;
 use theo_infra_llm::types::{Message, Role};
 
 /// Structured context for semantic compaction summaries.
@@ -290,6 +291,10 @@ pub fn compact_if_needed_with_context(
         .unwrap_or(0);
 
     messages.insert(insert_pos, Message::user(summary));
+
+    // Post-compaction integrity: repair any orphaned tool pairs
+    // introduced by truncation/drop operations above.
+    sanitize_tool_pairs(messages);
 }
 
 /// Emergency compaction to a specific token target.
@@ -335,6 +340,9 @@ pub fn compact_messages_to_target(
             None => break, // Only system messages left.
         }
     }
+
+    // Aggressive dropping above can leave orphaned tool pairs.
+    sanitize_tool_pairs(messages);
 }
 
 // ---------------------------------------------------------------------------
