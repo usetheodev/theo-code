@@ -103,6 +103,61 @@ pub struct FileAttachment {
     pub url: String,
 }
 
+// ── Truncation Rule ─────────────────────────────────────────────────
+
+/// Strategy the sanitizer uses when a tool output exceeds `max_chars`.
+///
+/// Ref: opendev `TruncationStrategy` (traits.rs:534-542, sanitizer.rs:27-53).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TruncationStrategy {
+    /// Keep the first `max_chars` characters (best for reads, start of files).
+    Head,
+    /// Keep the last `max_chars` characters (best for shells, error traces).
+    Tail,
+    /// Keep the first `head` and last `tail` characters, joined by an elision marker.
+    HeadTail { head: usize, tail: usize },
+}
+
+/// Per-tool rule the sanitizer consults before appending output to the LLM
+/// message stream. Tools return `Option<TruncationRule>` from `truncation_rule()`;
+/// `None` disables sanitizer-level truncation (the tool still owns its own limits).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TruncationRule {
+    pub max_chars: usize,
+    pub strategy: TruncationStrategy,
+}
+
+impl TruncationRule {
+    /// Apply the rule to `input`, returning `None` if `input` already fits.
+    /// The returned string includes an inline `[truncated: N of M chars]`
+    /// marker so the agent can recognise the shortening.
+    pub fn apply(&self, input: &str) -> Option<String> {
+        let total = input.chars().count();
+        if total <= self.max_chars {
+            return None;
+        }
+        let marker = format!("\n[truncated: showing bounded window of {total} chars]\n");
+        let out = match self.strategy {
+            TruncationStrategy::Head => {
+                let head: String = input.chars().take(self.max_chars).collect();
+                format!("{head}{marker}")
+            }
+            TruncationStrategy::Tail => {
+                let skip = total.saturating_sub(self.max_chars);
+                let tail: String = input.chars().skip(skip).collect();
+                format!("{marker}{tail}")
+            }
+            TruncationStrategy::HeadTail { head, tail } => {
+                let head_s: String = input.chars().take(head).collect();
+                let tail_s: String = input.chars().skip(total.saturating_sub(tail)).collect();
+                format!("{head_s}{marker}{tail_s}")
+            }
+        };
+        Some(out)
+    }
+}
+
 // ── Tool Schema & Category ──────────────────────────────────────────
 
 /// Category of a tool — used for filtering and building minimal tool sets.
@@ -353,6 +408,21 @@ pub trait Tool: Send + Sync {
     /// The default returns false (no streaming support).
     fn supports_streaming(&self) -> bool {
         false
+    }
+
+    /// Per-tool truncation rule enforced by the agent-runtime sanitizer.
+    ///
+    /// Return `Some(TruncationRule)` to cap the output length for this tool —
+    /// the sanitizer applies the rule AFTER `execute` returns and BEFORE the
+    /// message reaches the LLM. Tools that already truncate internally (e.g.
+    /// `bash` via `theo_domain::truncate`) can return `None`.
+    ///
+    /// The `llm_suffix` is applied after truncation, so coaching is never
+    /// cut off. Anthropic principles 10 (truncate with guidance) and 12
+    /// (minimize context overhead). Ref: opendev `BaseTool::truncation_rule`
+    /// (traits.rs:534-542) and `ToolResultSanitizer` (sanitizer.rs:27-53).
+    fn truncation_rule(&self) -> Option<TruncationRule> {
+        None
     }
 
     /// Coach the agent when argument validation fails.
@@ -659,6 +729,57 @@ mod tests {
     fn supports_streaming_default_returns_false() {
         let tool = IdentityTool;
         assert!(!tool.supports_streaming());
+    }
+
+    // ── TruncationRule tests ─────────────────────────────────────
+
+    #[test]
+    fn truncation_rule_returns_none_when_input_fits() {
+        let rule = TruncationRule {
+            max_chars: 100,
+            strategy: TruncationStrategy::Head,
+        };
+        assert!(rule.apply("short").is_none());
+    }
+
+    #[test]
+    fn truncation_rule_head_keeps_prefix() {
+        let rule = TruncationRule {
+            max_chars: 5,
+            strategy: TruncationStrategy::Head,
+        };
+        let out = rule.apply("abcdefghij").unwrap();
+        assert!(out.starts_with("abcde"));
+        assert!(out.contains("[truncated"));
+    }
+
+    #[test]
+    fn truncation_rule_tail_keeps_suffix() {
+        let rule = TruncationRule {
+            max_chars: 5,
+            strategy: TruncationStrategy::Tail,
+        };
+        let out = rule.apply("abcdefghij").unwrap();
+        assert!(out.ends_with("fghij"));
+        assert!(out.contains("[truncated"));
+    }
+
+    #[test]
+    fn truncation_rule_headtail_keeps_both_ends() {
+        let rule = TruncationRule {
+            max_chars: 6,
+            strategy: TruncationStrategy::HeadTail { head: 3, tail: 3 },
+        };
+        let out = rule.apply("abcdefghij").unwrap();
+        assert!(out.starts_with("abc"));
+        assert!(out.ends_with("hij"));
+        assert!(!out.contains("defg"));
+    }
+
+    #[test]
+    fn tool_truncation_rule_default_is_none() {
+        let tool = IdentityTool;
+        assert!(tool.truncation_rule().is_none());
     }
 
     // ── format_validation_error tests ────────────────────────────

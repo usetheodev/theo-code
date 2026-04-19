@@ -212,9 +212,11 @@ pub async fn execute_tool_call(
     let mut permissions = PermissionCollector::new();
     match tool.execute(args, ctx, &mut permissions).await {
         Ok(output) => {
-            // Truncate the body independently of the model-only suffix so that
-            // coaching text (opendev `with_llm_suffix` pattern) is never cut off.
-            let body = if output.output.len() > 8000 {
+            // Per-tool truncation rule (opendev `ToolResultSanitizer` pattern).
+            // Falls back to the legacy 8000-char global cap when no rule is set.
+            let body = if let Some(rule) = tool.truncation_rule() {
+                rule.apply(&output.output).unwrap_or_else(|| output.output.clone())
+            } else if output.output.len() > 8000 {
                 format!(
                     "{}...\n[truncated, {} chars total]",
                     &output.output[..8000],
@@ -417,6 +419,67 @@ mod tests {
                 "Missing required field: filePath".to_string(),
             ))
         }
+    }
+
+    struct BigOutputTool;
+
+    #[async_trait]
+    impl Tool for BigOutputTool {
+        fn id(&self) -> &str {
+            "big_output"
+        }
+        fn description(&self) -> &str {
+            "test tool that emits a large payload under a tail-truncation rule"
+        }
+        fn truncation_rule(&self) -> Option<theo_domain::tool::TruncationRule> {
+            Some(theo_domain::tool::TruncationRule {
+                max_chars: 50,
+                strategy: theo_domain::tool::TruncationStrategy::Tail,
+            })
+        }
+        async fn execute(
+            &self,
+            _args: serde_json::Value,
+            _ctx: &ToolContext,
+            _perm: &mut PermissionCollector,
+        ) -> Result<ToolOutput, ToolError> {
+            let body = "AAAAAAAAAA".repeat(50); // 500 chars
+            Ok(ToolOutput::new("big", body).with_llm_suffix("narrow next call"))
+        }
+    }
+
+    #[tokio::test]
+    async fn execute_tool_call_applies_truncation_rule_before_suffix() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Box::new(BigOutputTool)).unwrap();
+
+        let call = ToolCall {
+            id: "c-big".to_string(),
+            call_type: "function".to_string(),
+            function: FunctionCall {
+                name: "big_output".to_string(),
+                arguments: "{}".to_string(),
+            },
+        };
+
+        let (msg, ok) = execute_tool_call(&registry, &call, &test_ctx()).await;
+
+        assert!(ok);
+        let content = msg.content.expect("tool_result has content");
+        // Body must be truncated (original was 500 chars; we capped at 50 + marker).
+        assert!(
+            content.len() < 500,
+            "sanitizer must have truncated the body"
+        );
+        assert!(
+            content.contains("[truncated"),
+            "sanitizer must annotate truncation"
+        );
+        // Suffix must still survive past the truncation.
+        assert!(
+            content.contains("narrow next call"),
+            "llm_suffix must be preserved after truncation"
+        );
     }
 
     #[tokio::test]

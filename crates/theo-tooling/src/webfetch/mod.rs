@@ -102,6 +102,19 @@ impl Tool for WebFetchTool {
         ToolCategory::Web
     }
 
+    /// Webpage bodies can be huge — cap at 10k chars, keep head (usually
+    /// contains the structural content / title) plus the last kilobyte
+    /// (often contains footer links and follow-up URLs).
+    fn truncation_rule(&self) -> Option<theo_domain::tool::TruncationRule> {
+        Some(theo_domain::tool::TruncationRule {
+            max_chars: 10_000,
+            strategy: theo_domain::tool::TruncationStrategy::HeadTail {
+                head: 8_000,
+                tail: 2_000,
+            },
+        })
+    }
+
     async fn execute(
         &self,
         args: serde_json::Value,

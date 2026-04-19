@@ -58,6 +58,15 @@ impl Tool for GlobTool {
         ToolCategory::Search
     }
 
+    /// Glob output is an alphabetically-sorted file list — head is the
+    /// stable prefix the agent can use to see representative matches.
+    fn truncation_rule(&self) -> Option<theo_domain::tool::TruncationRule> {
+        Some(theo_domain::tool::TruncationRule {
+            max_chars: 3_000,
+            strategy: theo_domain::tool::TruncationStrategy::Head,
+        })
+    }
+
     async fn execute(
         &self,
         args: serde_json::Value,

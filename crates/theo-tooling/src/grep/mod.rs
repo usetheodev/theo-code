@@ -66,6 +66,16 @@ impl Tool for GrepTool {
         ToolCategory::Search
     }
 
+    /// Grep output is a list of matches — tail is more informative than head
+    /// when broad patterns generate thousands of hits. Ref: opendev
+    /// sanitizer.rs:27-53.
+    fn truncation_rule(&self) -> Option<theo_domain::tool::TruncationRule> {
+        Some(theo_domain::tool::TruncationRule {
+            max_chars: 4_000,
+            strategy: theo_domain::tool::TruncationStrategy::Tail,
+        })
+    }
+
     fn format_validation_error(
         &self,
         error: &ToolError,
