@@ -6529,6 +6529,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "theo-domain",
+ "theo-test-memory-fixtures",
  "thiserror 2.0.18",
  "tokio",
 ]
