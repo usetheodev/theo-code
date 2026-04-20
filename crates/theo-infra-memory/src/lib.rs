@@ -12,6 +12,7 @@ pub mod builtin;
 pub mod engine;
 pub mod fs_util;
 pub mod lint;
+pub mod retrieval;
 pub mod security;
 pub mod wiki;
 
@@ -19,5 +20,9 @@ pub use builtin::BuiltinMemoryProvider;
 pub use engine::{EngineStats, MemoryEngine};
 pub use fs_util::atomic_write;
 pub use lint::{LessonMetric, LintInputs, LintIssue, LintThresholds, Severity, render_json, run_lint};
+pub use retrieval::{
+    MemoryRetrieval, RetrievalBackedMemory, ScoredMemory, SourceType, ThresholdConfig,
+    pack_within_budget,
+};
 pub use security::{InjectionReason, scan as security_scan};
 pub use wiki::{HashManifest, SourceHash, lint_pages, parse_page};
