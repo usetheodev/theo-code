@@ -6,12 +6,38 @@ use theo_tooling::registry::ToolRegistry;
 ///
 /// Each tool declares its own schema via the `Tool::schema()` method.
 /// The registry validates schemas at registration time.
+///
+/// Deferred tools (those with `should_defer() == true`) are excluded —
+/// the agent discovers them by calling the `tool_search` meta-tool.
+/// Anthropic principle 12 (minimize context overhead).
 pub fn registry_to_definitions(registry: &ToolRegistry) -> Vec<ToolDefinition> {
     let mut defs: Vec<ToolDefinition> = registry
-        .definitions()
+        .visible_definitions()
         .into_iter()
         .map(|def| ToolDefinition::new(def.id, &def.description, def.schema.to_json_schema()))
         .collect();
+
+    // Add the `tool_search` meta-tool — lets the model discover deferred
+    // tools by keyword when it needs capability beyond the default set.
+    // Ref: opendev `search_hint` + registry discovery (traits.rs:547-575).
+    defs.push(ToolDefinition::new(
+        "tool_search",
+        concat!(
+            "Search for deferred (rarely-used) tools by keyword. Returns a list of `(id, hint)` \
+             pairs the agent can invoke by name. Use this only when none of the visible tools ",
+            "fit the task. Example: tool_search({query: 'wiki lookup'})."
+        ),
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Keyword to match against deferred tool ids and search hints"
+                }
+            },
+            "required": ["query"]
+        }),
+    ));
 
     // Add the `done` meta-tool (not in the registry)
     defs.push(ToolDefinition::new(
@@ -201,6 +227,35 @@ pub async fn execute_tool_call(
         }
     };
 
+    // Meta-tool: `tool_search` — keyword lookup over deferred tools.
+    // Dispatched here (not in the registry) because it needs direct
+    // access to the registry to enumerate deferred entries.
+    if name == "tool_search" {
+        let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
+        if query.is_empty() {
+            return (
+                Message::tool_result(
+                    &call.id,
+                    name,
+                    "tool_search requires a non-empty `query`. Example: tool_search({query: 'wiki'}).",
+                ),
+                false,
+            );
+        }
+        let hits = registry.search_deferred(query);
+        let body = if hits.is_empty() {
+            format!("No deferred tools matched `{query}`.")
+        } else {
+            let mut out = format!("Deferred tools matching `{query}`:\n");
+            for (id, hint) in &hits {
+                out.push_str(&format!("- {id}: {hint}\n"));
+            }
+            out.push_str("\nInvoke any of these by name with their normal schema.");
+            out
+        };
+        return (Message::tool_result(&call.id, name, body), true);
+    }
+
     let Some(tool) = registry.get(name) else {
         let error_msg = format!(
             "Unknown tool: {name}. Available tools: {}",
@@ -210,6 +265,9 @@ pub async fn execute_tool_call(
     };
 
     let mut permissions = PermissionCollector::new();
+    // Clone args so we can still pass them to `format_validation_error`
+    // after `execute` consumes its owned copy.
+    let args_for_error = args.clone();
     match tool.execute(args, ctx, &mut permissions).await {
         Ok(output) => {
             // Per-tool truncation rule (opendev `ToolResultSanitizer` pattern).
@@ -235,7 +293,7 @@ pub async fn execute_tool_call(
             // Give the tool a chance to coach the agent on how to fix the
             // call: named parameter, expected type, concrete example.
             // Anthropic principle 8 (actionable errors).
-            let coached = tool.format_validation_error(&e, &args);
+            let coached = tool.format_validation_error(&e, &args_for_error);
             let error_msg = match coached {
                 Some(guidance) => format!("Tool error: {e}\n\n{guidance}"),
                 None => format!("Tool error: {e}"),
@@ -261,7 +319,10 @@ mod tests {
         let defs = registry_to_definitions(&registry);
 
         // Should have all registry tools + meta-tools
-        assert_eq!(defs.len(), registry.len() + 5); // +5 for `done` + `subagent` + `skill` + `subagent_parallel` + `batch`
+        // Meta-tools injected by registry_to_definitions: tool_search, done,
+        // subagent, subagent_parallel, skill, batch (+6). Deferred tools in
+        // the default registry are filtered out; none are currently deferred.
+        assert_eq!(defs.len(), registry.len() + 6);
 
         let names: Vec<&str> = defs.iter().map(|d| d.function.name.as_str()).collect();
         assert!(names.contains(&"read"));
@@ -522,6 +583,112 @@ mod tests {
         assert!(ok);
         let content = msg.content.expect("tool_result has content");
         assert_eq!(content, "just the body");
+    }
+
+    // ── tool_search meta-tool tests ──────────────────────────────
+
+    struct DeferredWikiTool;
+
+    #[async_trait]
+    impl Tool for DeferredWikiTool {
+        fn id(&self) -> &str {
+            "wiki_lookup"
+        }
+        fn description(&self) -> &str {
+            "deferred wiki lookup tool"
+        }
+        fn should_defer(&self) -> bool {
+            true
+        }
+        fn search_hint(&self) -> Option<&str> {
+            Some("wiki knowledge base page lookup")
+        }
+        async fn execute(
+            &self,
+            _args: serde_json::Value,
+            _ctx: &ToolContext,
+            _perm: &mut PermissionCollector,
+        ) -> Result<ToolOutput, ToolError> {
+            Ok(ToolOutput::new("wiki", "page content"))
+        }
+    }
+
+    #[test]
+    fn registry_to_definitions_hides_deferred_tools() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Box::new(DeferredWikiTool)).unwrap();
+
+        let defs = registry_to_definitions(&registry);
+        let names: Vec<&str> = defs.iter().map(|d| d.function.name.as_str()).collect();
+
+        assert!(
+            !names.contains(&"wiki_lookup"),
+            "deferred tools must not appear in the default tool definitions"
+        );
+        assert!(
+            names.contains(&"tool_search"),
+            "tool_search meta-tool must be injected so the agent can discover deferred tools"
+        );
+    }
+
+    #[tokio::test]
+    async fn tool_search_returns_matching_deferred_tools() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Box::new(DeferredWikiTool)).unwrap();
+
+        let call = ToolCall {
+            id: "c-search".to_string(),
+            call_type: "function".to_string(),
+            function: FunctionCall {
+                name: "tool_search".to_string(),
+                arguments: serde_json::json!({"query": "wiki"}).to_string(),
+            },
+        };
+
+        let (msg, ok) = execute_tool_call(&registry, &call, &test_ctx()).await;
+
+        assert!(ok);
+        let content = msg.content.expect("tool_result has content");
+        assert!(content.contains("wiki_lookup"));
+        assert!(content.contains("wiki knowledge base page lookup"));
+    }
+
+    #[tokio::test]
+    async fn tool_search_reports_empty_when_no_deferred_tool_matches() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Box::new(DeferredWikiTool)).unwrap();
+
+        let call = ToolCall {
+            id: "c-miss".to_string(),
+            call_type: "function".to_string(),
+            function: FunctionCall {
+                name: "tool_search".to_string(),
+                arguments: serde_json::json!({"query": "nonexistent"}).to_string(),
+            },
+        };
+
+        let (msg, ok) = execute_tool_call(&registry, &call, &test_ctx()).await;
+
+        assert!(ok);
+        let content = msg.content.expect("tool_result has content");
+        assert!(content.contains("No deferred tools matched"));
+    }
+
+    #[tokio::test]
+    async fn tool_search_rejects_empty_query() {
+        let registry = ToolRegistry::new();
+        let call = ToolCall {
+            id: "c-empty".to_string(),
+            call_type: "function".to_string(),
+            function: FunctionCall {
+                name: "tool_search".to_string(),
+                arguments: serde_json::json!({"query": ""}).to_string(),
+            },
+        };
+        let (msg, ok) = execute_tool_call(&registry, &call, &test_ctx()).await;
+        assert!(!ok);
+        let content = msg.content.expect("tool_result has content");
+        assert!(content.contains("non-empty `query`"));
     }
 
     #[test]

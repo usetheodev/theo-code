@@ -314,7 +314,7 @@ impl Tool for BashTool {
             let path_hint = truncated_result
                 .output_path
                 .as_deref()
-                .map(|p| format!(" Full output saved to: {p}."))
+                .map(|p| format!(" Full output saved to: {}.", p.display()))
                 .unwrap_or_default();
             Some(format!(
                 "[output truncated]{path_hint} To reduce output, pipe through `head`/`tail`, \
