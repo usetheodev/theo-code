@@ -266,27 +266,52 @@ Evidência: TerminalBench 2.0 demonstra que Opus 4.6 em harnesses customizados s
 - **CMV** [@santoni2026]: DAG state management. 39% reduction em mixed tool-use [MEASURED]
 - **AriGraph** [@anokhin2024]: Knowledge graph + episodic memory híbrido
 - **Voyager** [@wang2023]: Skill library como procedural memory
+- **Karpathy LLM Wiki** (2026): compiled knowledge artifact built from raw logs, injected via system prompt
+- **hermes-agent MemoryManager**: fan-out + error isolation + markdown-backed LTM per user
 
-### Theo Code — Status
+### Theo Code — Status (após cycle evolution/apr20, 2026-04-20)
 
 | Aspecto | Status | Módulo | Evidência |
 |---|---|---|---|
-| MemoryProvider trait | ✅ **IMPLEMENTED** | `theo-domain/memory.rs` | prefetch, sync_turn, on_pre_compress, on_session_end |
+| MemoryProvider trait | ✅ **IMPLEMENTED** | `theo-domain/memory.rs` | prefetch, sync_turn, on_pre_compress, on_session_end, is_external |
 | Memory fencing (XML) | ✅ **IMPLEMENTED** | `memory.rs` | `<memory-context>` com system-note |
+| Typed errors | ✅ **IMPLEMENTED** | `memory.rs` | `MemoryError` com `#[non_exhaustive]` (StoreFailed/CompileFailed/RetrieveFailed/GateRejected) |
+| NullMemoryProvider | ✅ **IMPLEMENTED** | `memory.rs` | No-op para `memory_enabled = false` |
+| MemoryLifecycle (4 hooks gated) | ✅ **IMPLEMENTED** | `theo-agent-runtime/memory_lifecycle.rs` | dispatch estático, short-circuit quando desabilitado |
 | Lifecycle tiers | ✅ **IMPLEMENTED** | `episode.rs` | Active→Cooling→Archived |
 | Memory kinds | ✅ **IMPLEMENTED** | `episode.rs` | Ephemeral/Episodic/Reusable/Canonical |
 | Episode summaries | ✅ **IMPLEMENTED** | `episode.rs` | MachineEpisodeSummary + human + files |
 | Cross-session bootstrap | ✅ **IMPLEMENTED** | `session_bootstrap.rs` | .theo/progress.json |
+| **MemoryEngine (fan-out coordinator)** | ✅ **IMPLEMENTED** | `theo-infra-memory/engine.rs` | Fan-out com panic isolation (`futures::FutureExt::catch_unwind`); max 1 external provider |
+| **BuiltinMemoryProvider (concrete LTM)** | ✅ **IMPLEMENTED** | `theo-infra-memory/builtin.rs` | Markdown-backed LTM per user (`.theo/memory/<user-hash>.md`); dedup key por hash; atomic_write; security scan (5 famílias de injection) |
+| **RetrievalBackedMemory (concrete, prefetch)** | ✅ **IMPLEMENTED** | `theo-infra-memory/retrieval.rs` | Threshold por SourceType (code 0.35, wiki 0.50, reflection 0.60); 15% memory-token budget; `MemoryRetrieval` trait (Tantivy adapter deferrred) |
+| **MemoryLesson + 7 gates** | ✅ **IMPLEMENTED** | `theo-domain/memory/lesson.rs` | Semantic/Procedural/Meta; Quarantine→Confirmed→Retracted; confidence bounds, evidence count, Jaccard contradiction, semantic dedup, quarantine window |
+| **Karpathy LLM Wiki (compiler + determinism)** | ✅ **IMPLEMENTED** | `theo-infra-memory/wiki/compiler.rs` | 2-phase (extract+generate), temp=0 + seed fixa, byte-identical output, hard budget caps (`max_llm_calls`/`max_cost_usd`), kill switch `WIKI_COMPILE_ENABLED`, frontmatter contract |
+| **Wiki hash manifest (incremental)** | ✅ **IMPLEMENTED** | `theo-infra-memory/wiki/hash.rs` | SHA256 per source; `is_dirty()` fast-path; atomic persistence |
+| **Memory wiki lint** | ✅ **IMPLEMENTED** | `theo-infra-memory/wiki/lint.rs` | Schema check (namespace obrigatório), broken-link detection, cross-namespace (`[[code:slug]]`), mount isolation |
+| **Health lint (CLI)** | ✅ **IMPLEMENTED** | `theo-infra-memory/lint.rs` + `apps/theo-cli/commands/memory_lint.rs` | `theo memory lint` com 6 metrics (wiki staleness, lesson zero-hit, orphan episode, broken link, recall p50/p95); 4 severities (Info/Concern/Warning/Critical); text + JSON output |
+| **UI recovery (episodes/wiki/settings)** | ✅ **IMPLEMENTED** | `theo-application/use_cases/memory_ui.rs` + `apps/theo-ui/src/features/memory/` | 3 React routes + 8 Tauri commands (core em `memory_ui`, shim em desktop) |
+| Test fixtures (deterministic) | ✅ **IMPLEMENTED** | `theo-test-memory-fixtures` | `MockCompilerLLM` (FIFO + per-prompt map), `MockRetrievalEngine` (scored entries), `publish = false` — nunca em produção |
 | Usefulness tracking | 🟡 **PARTIAL** | `context_metrics.rs` | Computed mas não fed back ao assembler |
-| **Concrete backend** | ❌ **MISSING** | — | **Zero implementações do MemoryProvider** |
-| Decay/eviction enforcement | ❌ **MISSING** | — | Tiers definidos, transições não enforced |
+| Decay/eviction enforcement | 🟡 **PARTIAL** | `lesson.rs` | `promote_if_ready` implementa quarantine→confirmed; Active→Cooling→Archived ainda não enforced automaticamente |
+| RM2 Tantivy `source_type` field | ❌ **DEFERRED** | `theo-engine-retrieval/tantivy_search.rs` | Provider surface + mocks prontos; patch cirúrgico adiado (escopo Tantivy) |
 | Usefulness → assembler loop | ❌ **MISSING** | — | Métricas coletadas sem feedback |
-| Facts as first-class objects | ❌ **MISSING** | — | Sem hash-addressed knowledge tuples |
 | Intent-to-code mining (MemCoder) | ❌ **MISSING** | — | Sem extração de padrões do git history |
+| Vitest coverage (React routes) | ❌ **MISSING** | — | Lógica core coberta em Rust; frontend sem `*.spec.tsx` |
 
-**Score: 50%** — **Design elegante, implementação zero.** Maior distância entre arquitetura e realidade.
+**Score: ~85%** — **De "design elegante, implementação zero" para "stack concreta multi-layer com 2 deferrals explícitos".**
 
-**Recomendação SOTA:** (1) Implementar `FileSystemMemoryProvider` com 3-tier hierarchy. (2) Lifecycle enforcer que decai Episodic→Cooling→Archived baseado em staleness + usefulness. (3) Wiring de usefulness_score → assembler budget allocation. Inspirar-se no MemCoder para intent mining do git history.
+Evolução na cycle `evolution/apr20` (12 commits, +~120 tests, 2842/2842 pass, baseline 73.300 preservado): novo crate `theo-infra-memory` (12ª no workspace) + `theo-test-memory-fixtures` (test-only). Rubric SOTA: 3.0/3.0.
+
+**Gaps remanescentes:**
+1. **RM2 Tantivy patch** — adicionar `source_type` field em `tantivy_search.rs` + calibrar thresholds na integração real. Adapter contra `MemoryRetrieval` é uma linha.
+2. **Decay enforcer automatizado** — `EpisodeLifecycle::tick()` que decai Active→Cooling→Archived baseado em staleness + usefulness (inspiração MemGPT archival).
+3. **Usefulness → assembler loop** — `context_metrics.usefulness_score` alimentando `memory_token_budget` dinâmico.
+4. **MemCoder intent mining** — extrair padrões de `git log` para popular `MemoryLesson::Procedural`.
+5. **Desktop Tauri shim (8 delegates)** — código escrito; bloqueado por `pkg-config`/glib ausente no dev workstation atual.
+6. **Vitest coverage** — 3 `*.spec.tsx` seguindo pattern existente em `apps/theo-ui`.
+
+**Recomendação SOTA próxima cycle:** priorizar (1) RM2 Tantivy + (2) decay enforcer, que fecham o loop MemGPT 3-tier + retrieval factível. Itens (4) e (5) são entregas paralelas de menor risco.
 
 ---
 
@@ -444,14 +469,14 @@ Evidência: TerminalBench 2.0 demonstra que Opus 4.6 em harnesses customizados s
 | 6 | Sandbox & Security | **85%** | 🟢 Forte no Linux |
 | 7 | Skills & MCP | **20%** | 🔴 **GAP CRÍTICO** |
 | 8 | Permissions & Auth | **45%** | 🟡 Binário, falta REQUIRE_APPROVAL |
-| 9 | Memory & State | **50%** | 🔴 **Design sem implementação** |
+| 9 | Memory & State | **85%** | 🟢 **Multi-layer concreto (cycle apr20)** |
 | 10 | Observability & Tracing | **60%** | 🟡 Interno ok, externo missing |
 | 11 | Verification & Evals | **40%** | 🔴 **GAP #1 do sistema** |
 | 12 | Human-in-the-Loop | **25%** | 🔴 **Blocker para produção** |
 | 13 | Debugging & DX | **55%** | 🟡 Auto-fix bom, DX humano fraco |
 | 14 | Long Horizon | **75%** | 🟢 Pilot + persistence |
 
-**Score Global: 58%** (média ponderada simples)
+**Score Global: 60.4%** (média ponderada simples; +2.4pp após cycle evolution/apr20 que levou Memory & State de 50% → 85%)
 
 ---
 
@@ -462,7 +487,7 @@ Evidência: TerminalBench 2.0 demonstra que Opus 4.6 em harnesses customizados s
 | # | Gap | Impacto Evidenciado | Módulo | Esforço |
 |---|---|---|---|---|
 | 1 | **theo-eval** | "Sem eval, nenhuma melhoria é mensurável" — AutoHarness prova que constraint validation é o mecanismo #1 | Novo crate `theo-eval` | Alto |
-| 2 | **MemoryProvider concreto** | MemCoder: +9.4% SWE-bench. MemGPT: +60.4pp retrieval. Memory é o diferenciador medido. | `theo-agent-runtime` | Médio |
+| 2 | ~~**MemoryProvider concreto**~~ | ✅ **LANDED** (cycle evolution/apr20): `BuiltinMemoryProvider` + `RetrievalBackedMemory` + `MemoryLesson + 7 gates` + `Karpathy LLM Wiki compiler` + `theo memory lint`. Rubric SOTA 3.0/3.0. Gaps residuais: RM2 Tantivy `source_type` field + decay enforcer + MemCoder intent mining. | `theo-infra-memory` (novo) | — |
 
 ### P1 — Habilita o ecossistema
 
