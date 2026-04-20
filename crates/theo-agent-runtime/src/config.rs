@@ -291,6 +291,13 @@ pub struct AgentConfig {
     /// Useful in headless/benchmark mode where losing an instance to a transient
     /// rate limit is expensive. Default: false (uses standard 3 retries, 1-30s).
     pub aggressive_retry: bool,
+    /// Master switch for the agent-memory subsystem. When `false`, every
+    /// memory lifecycle hook (`prefetch`, `sync_turn`, `on_pre_compress`,
+    /// `on_session_end`) short-circuits to the NullMemoryProvider — runtime
+    /// behavior is identical to pre-RM0. When `true`, the configured
+    /// `MemoryEngine` is consulted at every hook. Plan ref:
+    /// `outputs/agent-memory-plan.md` RM-pre-5. Default: `false`.
+    pub memory_enabled: bool,
     /// Optional model router. When `Some`, every ChatRequest consults the
     /// router for its model + reasoning effort. When `None`, the session
     /// uses `model` / `reasoning_effort` verbatim — preserving pre-R3
@@ -299,6 +306,37 @@ pub struct AgentConfig {
     /// Wrapped in `RouterHandle` so `AgentConfig` can stay `Debug + Clone`
     /// without forcing the trait to require `Debug`.
     pub router: Option<RouterHandle>,
+    /// Optional memory provider. When `Some` AND `memory_enabled == true`,
+    /// the agent loop calls `prefetch` before each LLM call, `sync_turn`
+    /// after each completed turn, `on_pre_compress` before compaction, and
+    /// `on_session_end` at convergence/abort. When `None` OR
+    /// `memory_enabled == false`, memory hooks short-circuit to a
+    /// NullMemoryProvider (runtime behaviour identical to pre-RM0). Plan
+    /// ref: `outputs/agent-memory-plan.md` RM0.
+    pub memory_provider: Option<MemoryHandle>,
+}
+
+/// Debug-friendly wrapper around `Arc<dyn MemoryProvider>` so `AgentConfig`
+/// keeps its `#[derive(Debug, Clone)]` without forcing a `Debug` bound
+/// into the `MemoryProvider` trait.
+#[derive(Clone)]
+pub struct MemoryHandle(pub Arc<dyn theo_domain::memory::MemoryProvider>);
+
+impl MemoryHandle {
+    pub fn new(provider: Arc<dyn theo_domain::memory::MemoryProvider>) -> Self {
+        Self(provider)
+    }
+    pub fn as_provider(&self) -> &dyn theo_domain::memory::MemoryProvider {
+        self.0.as_ref()
+    }
+}
+
+impl std::fmt::Debug for MemoryHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("MemoryHandle")
+            .field(&self.0.name())
+            .finish()
+    }
 }
 
 /// Debug-friendly wrapper around `Arc<dyn ModelRouter>` so `AgentConfig`
@@ -344,6 +382,8 @@ impl Default for AgentConfig {
             context_window_tokens: 128_000,
             tool_execution_mode: ToolExecutionMode::default(),
             aggressive_retry: false,
+            memory_enabled: false,
+            memory_provider: None,
             router: None,
         }
     }

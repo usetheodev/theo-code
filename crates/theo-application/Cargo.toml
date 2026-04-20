@@ -19,6 +19,7 @@ async-trait.workspace = true
 ignore.workspace = true
 theo-governance.workspace = true
 theo-infra-llm.workspace = true
+theo-infra-memory.workspace = true
 rayon.workspace = true
 bincode.workspace = true
 blake3.workspace = true

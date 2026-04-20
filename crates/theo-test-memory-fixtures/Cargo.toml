@@ -1,0 +1,12 @@
+[package]
+name = "theo-test-memory-fixtures"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+theo-domain.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true

@@ -18,8 +18,43 @@
 //! - **No embedding logic here**: scoring/similarity belongs in
 //!   implementations (e.g., theo-engine-retrieval). The trait stays pure.
 
+pub mod lesson;
+pub mod wiki_backend;
+pub use lesson::{
+    GateConfig, GateReject, LessonCategory, LessonStatus, MemoryLesson, apply_gates,
+    jaccard_similarity, normalize_lesson, promote_if_ready,
+};
+pub use wiki_backend::{MemoryWikiBackend, MemoryWikiLintError, MemoryWikiPage};
+
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
+/// Typed errors for memory operations.
+///
+/// Plan ref: `outputs/agent-memory-plan.md` RM-pre-2. Every `MemoryProvider`
+/// impl and every `MemoryEngine` call site surfaces one of these variants
+/// rather than `String` / `anyhow::Error`. `#[non_exhaustive]` so future
+/// variants (e.g. `QuarantineBlocked`) can land without breaking downstream.
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum MemoryError {
+    #[error("store write failed for key `{key}`: {source}")]
+    StoreFailed {
+        key: String,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("wiki compilation failed: {reason}")]
+    CompileFailed { reason: String },
+    #[error("recall query failed: {source}")]
+    RetrieveFailed {
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+    #[error("lesson gate rejected: {reason}")]
+    GateRejected { reason: String },
+}
 
 /// Opening fence for memory blocks injected into the context.
 pub const MEMORY_FENCE_OPEN: &str = "<memory-context>";
@@ -52,6 +87,23 @@ pub fn build_memory_context_block(raw: &str) -> String {
     format!("{MEMORY_FENCE_OPEN}\n{MEMORY_FENCE_NOTE}\n{raw}\n{MEMORY_FENCE_CLOSE}")
 }
 
+/// Behavior-preserving provider: every hook is a no-op. Used when
+/// `AgentConfig.memory_enabled = false` or when no concrete provider is
+/// configured. Plan ref: `outputs/agent-memory-plan.md` RM0-AC-6.
+#[derive(Debug, Clone, Default)]
+pub struct NullMemoryProvider;
+
+#[async_trait]
+impl MemoryProvider for NullMemoryProvider {
+    fn name(&self) -> &str {
+        "null"
+    }
+    async fn prefetch(&self, _query: &str) -> String {
+        String::new()
+    }
+    async fn sync_turn(&self, _user: &str, _assistant: &str) {}
+}
+
 /// Trait for components that persist and recall information across turns/sessions.
 ///
 /// Lifecycle called by the agent runtime's memory manager:
@@ -80,6 +132,13 @@ pub trait MemoryProvider: Send + Sync {
 
     /// Session lifecycle hook. Default: no-op.
     async fn on_session_end(&self) {}
+
+    /// Whether this provider talks to a paid external service (Mem0,
+    /// Honcho, etc.). The `MemoryEngine` enforces at most one external
+    /// provider so two paid backends never double-bill. Default: false.
+    fn is_external(&self) -> bool {
+        false
+    }
 }
 
 #[cfg(test)]
@@ -139,5 +198,47 @@ mod tests {
         let p: Box<dyn MemoryProvider> = Box::new(EmptyProvider);
         assert_eq!(p.name(), "empty");
         assert_eq!(p.prefetch("q").await, "");
+    }
+
+    // ── RM-pre-2 ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_pre2_ac_1_memory_error_variants_display() {
+        let e = MemoryError::StoreFailed {
+            key: "foo".into(),
+            source: std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied"),
+        };
+        assert!(e.to_string().contains("foo"));
+        assert!(e.to_string().contains("denied"));
+
+        let e = MemoryError::CompileFailed {
+            reason: "budget".into(),
+        };
+        assert!(e.to_string().contains("budget"));
+
+        let e = MemoryError::GateRejected {
+            reason: "confidence 0.99 exceeds ceiling".into(),
+        };
+        assert!(e.to_string().contains("confidence"));
+    }
+
+    #[test]
+    fn test_pre2_ac_2_memory_error_carries_source() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "missing");
+        let e = MemoryError::StoreFailed {
+            key: "k".into(),
+            source: io_err,
+        };
+        // `std::error::Error::source()` exposes the chained `#[source]`.
+        let src = std::error::Error::source(&e).expect("source chain present");
+        assert!(src.to_string().contains("missing"));
+    }
+
+    #[test]
+    fn test_pre2_ac_3_memory_error_implements_std_error() {
+        fn takes_error(_: Box<dyn std::error::Error + Send + Sync>) {}
+        takes_error(Box::new(MemoryError::CompileFailed {
+            reason: "budget".into(),
+        }));
     }
 }
