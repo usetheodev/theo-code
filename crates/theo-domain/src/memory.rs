@@ -18,8 +18,10 @@
 //! - **No embedding logic here**: scoring/similarity belongs in
 //!   implementations (e.g., theo-engine-retrieval). The trait stays pure.
 
+pub mod decay;
 pub mod lesson;
 pub mod wiki_backend;
+pub use decay::{DecayThresholds, MemoryLifecycleEnforcer};
 pub use lesson::{
     GateConfig, GateReject, LessonCategory, LessonStatus, MemoryLesson, apply_gates,
     jaccard_similarity, normalize_lesson, promote_if_ready,

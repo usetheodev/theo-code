@@ -15,6 +15,8 @@ pub mod reranker;
 pub mod search;
 pub mod summary;
 #[cfg(feature = "tantivy-backend")]
+pub mod memory_tantivy;
+#[cfg(feature = "tantivy-backend")]
 pub mod tantivy_search;
 pub mod wiki;
 

@@ -12,6 +12,12 @@ serde_json.workspace = true
 thiserror.workspace = true
 futures = "0.3"
 sha2 = "0.10"
+theo-engine-retrieval = { workspace = true, optional = true }
+
+[features]
+default = []
+tantivy-backend = ["theo-engine-retrieval/tantivy-backend"]
 
 [dev-dependencies]
 theo-test-memory-fixtures.workspace = true
+theo-engine-retrieval = { workspace = true, features = ["tantivy-backend"] }
