@@ -11,9 +11,6 @@ impl SlashCommand for ModelCommand {
     fn name(&self) -> &'static str {
         "model"
     }
-    fn description(&self) -> &'static str {
-        "Show or switch the active LLM model"
-    }
     fn category(&self) -> CommandCategory {
         CommandCategory::Config
     }

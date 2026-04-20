@@ -260,7 +260,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
-    use crate::tree_sitter;
+    
     use crate::types::Visibility;
 
     fn symbols_for(source: &str, lang: SupportedLanguage, filename: &str) -> Vec<Symbol> {

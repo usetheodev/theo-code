@@ -22,7 +22,6 @@ mod tests {
                 )));
             } else {
                 state.transcript.push(TranscriptEntry::ToolCard(ToolCardState {
-                    call_id: format!("c-{i}"),
                     tool_name: "bash".to_string(),
                     status: ToolCardStatus::Succeeded,
                     started_at: Instant::now(),

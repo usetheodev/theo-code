@@ -71,13 +71,6 @@ pub fn domain_event_to_json(event: &DomainEvent) -> Option<JsonEvent> {
     }
 }
 
-/// Emit a JsonEvent as a single line to stdout.
-pub fn emit_json_event(event: &JsonEvent) {
-    if let Ok(json) = serde_json::to_string(event) {
-        println!("{json}");
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -33,10 +33,6 @@ pub enum Key {
     Right,
     Home,
     End,
-    PageUp,
-    PageDown,
-    Insert,
-    Delete,
     F(u8),
 }
 
@@ -56,20 +52,6 @@ impl Modifiers {
     pub fn ctrl() -> Self {
         Self {
             ctrl: true,
-            ..Self::default()
-        }
-    }
-
-    pub fn alt() -> Self {
-        Self {
-            alt: true,
-            ..Self::default()
-        }
-    }
-
-    pub fn shift() -> Self {
-        Self {
-            shift: true,
             ..Self::default()
         }
     }

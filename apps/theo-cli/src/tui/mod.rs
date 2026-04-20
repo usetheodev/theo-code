@@ -9,7 +9,6 @@ mod app;
 mod autocomplete;
 mod bench;
 mod commands;
-pub mod config;
 mod events;
 mod input;
 mod markdown;

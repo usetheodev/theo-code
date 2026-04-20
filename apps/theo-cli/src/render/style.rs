@@ -39,13 +39,6 @@ impl StyleCaps {
         }
     }
 
-    /// Colors only (TTY without unicode, rare).
-    pub const fn colors_only() -> Self {
-        Self {
-            colors: true,
-            unicode: false,
-        }
-    }
 }
 
 impl Default for StyleCaps {

@@ -16,9 +16,6 @@ impl SlashCommand for MemoryCommand {
     fn name(&self) -> &'static str {
         "memory"
     }
-    fn description(&self) -> &'static str {
-        "List, search, or delete project memories"
-    }
     fn category(&self) -> CommandCategory {
         CommandCategory::Info
     }

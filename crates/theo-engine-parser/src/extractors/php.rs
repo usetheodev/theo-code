@@ -620,7 +620,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
-    use crate::tree_sitter;
+    
 
     fn extract_php(source: &str) -> FileExtraction {
         let path = PathBuf::from("routes.php");

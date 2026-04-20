@@ -43,7 +43,7 @@ pub fn draw(frame: &mut Frame, state: &TuiState) {
 
     // Sidebar
     if let Some(sb_area) = sidebar_area {
-        super::widgets::sidebar::render_sidebar(frame, sb_area, state, state.sidebar_tab);
+        super::widgets::sidebar::render_sidebar(frame, sb_area, state);
     }
 
     // Search bar overlay (above input)

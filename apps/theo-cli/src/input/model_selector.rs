@@ -8,10 +8,7 @@
 /// A configured model entry for cycling.
 #[derive(Debug, Clone)]
 pub struct ModelEntry {
-    pub provider: String,
     pub model_id: String,
-    pub display_name: String,
-    pub thinking_level: Option<String>,
 }
 
 /// Model selector that cycles through configured entries.
@@ -69,10 +66,7 @@ mod tests {
 
     fn make_entry(name: &str) -> ModelEntry {
         ModelEntry {
-            provider: "test".to_string(),
             model_id: name.to_string(),
-            display_name: name.to_string(),
-            thinking_level: None,
         }
     }
 

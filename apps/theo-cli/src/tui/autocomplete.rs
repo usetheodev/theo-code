@@ -10,13 +10,6 @@ use std::path::Path;
 pub struct Candidate {
     pub text: String,
     pub description: String,
-    pub kind: CandidateKind,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum CandidateKind {
-    SlashCommand,
-    FilePath,
 }
 
 /// Autocomplete state.
@@ -54,30 +47,30 @@ impl AutocompleteState {
 /// All available slash commands.
 pub fn slash_commands() -> Vec<Candidate> {
     vec![
-        Candidate { text: "/help".into(), description: "Show keybindings and commands".into(), kind: CandidateKind::SlashCommand },
-        Candidate { text: "/status".into(), description: "Show provider, model, token info".into(), kind: CandidateKind::SlashCommand },
-        Candidate { text: "/clear".into(), description: "Clear transcript".into(), kind: CandidateKind::SlashCommand },
-        Candidate { text: "/export".into(), description: "Export session as markdown".into(), kind: CandidateKind::SlashCommand },
-        Candidate { text: "/mode".into(), description: "Cycle agent mode (agent/plan/ask)".into(), kind: CandidateKind::SlashCommand },
-        Candidate { text: "/quit".into(), description: "Exit theo".into(), kind: CandidateKind::SlashCommand },
-        Candidate { text: "/timeline".into(), description: "Show tool chain causality".into(), kind: CandidateKind::SlashCommand },
-        Candidate { text: "/theme".into(), description: "Change color theme".into(), kind: CandidateKind::SlashCommand },
-        Candidate { text: "/tab".into(), description: "Open new session tab".into(), kind: CandidateKind::SlashCommand },
-        Candidate { text: "/history".into(), description: "Search across all sessions".into(), kind: CandidateKind::SlashCommand },
-        Candidate { text: "/login".into(), description: "Show auth options".into(), kind: CandidateKind::SlashCommand },
-        Candidate { text: "/login https://api.opencode.ai".into(), description: "Login with your plan (device flow)".into(), kind: CandidateKind::SlashCommand },
-        Candidate { text: "/login sk-".into(), description: "Set API key directly".into(), kind: CandidateKind::SlashCommand },
-        Candidate { text: "/login device".into(), description: "OpenAI device flow".into(), kind: CandidateKind::SlashCommand },
-        Candidate { text: "/logout".into(), description: "Clear stored auth tokens".into(), kind: CandidateKind::SlashCommand },
-        Candidate { text: "/memory".into(), description: "Manage project memories (list/search/delete)".into(), kind: CandidateKind::SlashCommand },
-        Candidate { text: "/skills".into(), description: "List available skills".into(), kind: CandidateKind::SlashCommand },
-        Candidate { text: "/model".into(), description: "Switch LLM model".into(), kind: CandidateKind::SlashCommand },
-        Candidate { text: "/sidebar".into(), description: "Toggle sidebar panel".into(), kind: CandidateKind::SlashCommand },
-        Candidate { text: "/search".into(), description: "Search in transcript (Ctrl+F)".into(), kind: CandidateKind::SlashCommand },
-        Candidate { text: "/close".into(), description: "Close current tab".into(), kind: CandidateKind::SlashCommand },
-        Candidate { text: "/copy".into(), description: "Copy last response to clipboard".into(), kind: CandidateKind::SlashCommand },
-        Candidate { text: "/copy code".into(), description: "Copy last code block".into(), kind: CandidateKind::SlashCommand },
-        Candidate { text: "/select".into(), description: "Toggle mouse selection mode (Ctrl+Y)".into(), kind: CandidateKind::SlashCommand },
+        Candidate { text: "/help".into(), description: "Show keybindings and commands".into() },
+        Candidate { text: "/status".into(), description: "Show provider, model, token info".into() },
+        Candidate { text: "/clear".into(), description: "Clear transcript".into() },
+        Candidate { text: "/export".into(), description: "Export session as markdown".into() },
+        Candidate { text: "/mode".into(), description: "Cycle agent mode (agent/plan/ask)".into() },
+        Candidate { text: "/quit".into(), description: "Exit theo".into() },
+        Candidate { text: "/timeline".into(), description: "Show tool chain causality".into() },
+        Candidate { text: "/theme".into(), description: "Change color theme".into() },
+        Candidate { text: "/tab".into(), description: "Open new session tab".into() },
+        Candidate { text: "/history".into(), description: "Search across all sessions".into() },
+        Candidate { text: "/login".into(), description: "Show auth options".into() },
+        Candidate { text: "/login https://api.opencode.ai".into(), description: "Login with your plan (device flow)".into() },
+        Candidate { text: "/login sk-".into(), description: "Set API key directly".into() },
+        Candidate { text: "/login device".into(), description: "OpenAI device flow".into() },
+        Candidate { text: "/logout".into(), description: "Clear stored auth tokens".into() },
+        Candidate { text: "/memory".into(), description: "Manage project memories (list/search/delete)".into() },
+        Candidate { text: "/skills".into(), description: "List available skills".into() },
+        Candidate { text: "/model".into(), description: "Switch LLM model".into() },
+        Candidate { text: "/sidebar".into(), description: "Toggle sidebar panel".into() },
+        Candidate { text: "/search".into(), description: "Search in transcript (Ctrl+F)".into() },
+        Candidate { text: "/close".into(), description: "Close current tab".into() },
+        Candidate { text: "/copy".into(), description: "Copy last response to clipboard".into() },
+        Candidate { text: "/copy code".into(), description: "Copy last code block".into() },
+        Candidate { text: "/select".into(), description: "Toggle mouse selection mode (Ctrl+Y)".into() },
     ]
 }
 
@@ -96,7 +89,6 @@ pub fn file_candidates(project_dir: &Path, query: &str) -> Vec<Candidate> {
                 results.push(Candidate {
                     text: format!("@{display}"),
                     description: String::new(),
-                    kind: CandidateKind::FilePath,
                 });
             }
 

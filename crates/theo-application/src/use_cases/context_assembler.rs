@@ -676,7 +676,7 @@ mod tests {
 
     #[test]
     fn feedback_score_default_is_half() {
-        let mut assembler = ContextAssembler::new(4000);
+        let assembler = ContextAssembler::new(4000);
         assert!((assembler.feedback_score("unknown") - 0.5).abs() < 0.001);
     }
 
@@ -795,7 +795,7 @@ mod tests {
 
     #[test]
     fn budget_allocation_ratios() {
-        let mut assembler = ContextAssembler::new(10000);
+        let assembler = ContextAssembler::new(10000);
         let alloc = assembler.compute_allocation();
         assert_eq!(alloc.task_overhead, 1500); // 15%
         assert_eq!(alloc.execution_context, 2500); // 25%

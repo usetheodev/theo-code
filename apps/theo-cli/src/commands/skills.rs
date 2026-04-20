@@ -17,9 +17,6 @@ impl SlashCommand for SkillsCommand {
     fn name(&self) -> &'static str {
         "skills"
     }
-    fn description(&self) -> &'static str {
-        "List available skills"
-    }
     fn category(&self) -> CommandCategory {
         CommandCategory::Info
     }

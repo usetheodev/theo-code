@@ -22,7 +22,6 @@ pub enum TranscriptEntry {
 
 #[derive(Debug, Clone)]
 pub struct ToolCardState {
-    pub call_id: String,
     pub tool_name: String,
     pub status: ToolCardStatus,
     pub started_at: Instant,
@@ -82,7 +81,6 @@ pub struct TuiState {
     pub prompt_history: Vec<String>,
     pub copy_mode: bool, // when true, mouse capture is disabled for native selection
     pub show_sidebar: bool,
-    pub sidebar_tab: super::widgets::sidebar::SidebarTab,
     pub show_model_picker: bool,
     pub available_models: Vec<String>,
     pub model_picker_selected: usize,
@@ -115,13 +113,11 @@ pub struct TabState {
 #[derive(Debug, Clone)]
 pub struct TodoItem {
     pub id: String,
-    pub content: String,
     pub status: String,
 }
 
 #[derive(Debug, Clone)]
 pub struct PendingApproval {
-    pub decision_id: String,
     pub tool_name: String,
     pub risk_level: String,
     pub args_preview: String,
@@ -130,7 +126,6 @@ pub struct PendingApproval {
 #[derive(Debug, Clone)]
 pub struct ToolChainEntry {
     pub tool_name: String,
-    pub reason: String, // why this tool was called
     pub status: ToolCardStatus,
     pub duration_ms: Option<u64>,
 }
@@ -143,7 +138,6 @@ pub struct SessionPickerState {
 
 #[derive(Debug, Clone)]
 pub struct SessionMeta {
-    pub path: std::path::PathBuf,
     pub modified: String, // formatted date
     pub message_count: usize,
     pub preview: String, // first user message, truncated
@@ -190,7 +184,6 @@ impl TuiState {
             prompt_history: Vec::new(),
             copy_mode: false,
             show_sidebar: width > 120,
-            sidebar_tab: super::widgets::sidebar::SidebarTab::Status,
             show_model_picker: false,
             available_models: vec![
                 "gpt-4o".to_string(),
@@ -248,26 +241,19 @@ pub enum Msg {
     SearchStart,
     SearchChar(char),
     SearchBackspace,
-    SearchNext,
-    SearchPrev,
     SearchClose,
     AgentComplete(String, bool), // (summary, success)
     RestoreLastPrompt,
     Notify(String),
-    CopyToClipboard(String),
     InterruptAgent,
     ClearTranscript,
     ExportSession,
     ToggleSidebar,
-    NextSidebarTab,
     ToggleModelPicker,
     ModelPickerUp,
     ModelPickerDown,
     ModelPickerSelect,
     ToggleThemePicker,
-    ThemePickerUp,
-    ThemePickerDown,
-    ThemePickerSelect,
     AutocompleteUpdate,
     AutocompleteUp,
     AutocompleteDown,
@@ -279,8 +265,6 @@ pub enum Msg {
     SwitchTab(usize),
     // Timeline (F4)
     ToggleTimeline,
-    // Notifications
-    NotifyCompletion(String),
     // Approval
     ApproveDecision,
     RejectDecision,
@@ -435,20 +419,6 @@ pub fn update(state: &mut TuiState, msg: Msg) {
             state.search_query.pop();
             run_search(state);
         }
-        Msg::SearchNext => {
-            if !state.search_results.is_empty() {
-                state.search_current = (state.search_current + 1) % state.search_results.len();
-            }
-        }
-        Msg::SearchPrev => {
-            if !state.search_results.is_empty() {
-                state.search_current = if state.search_current == 0 {
-                    state.search_results.len() - 1
-                } else {
-                    state.search_current - 1
-                };
-            }
-        }
         Msg::SearchClose => {
             state.search_mode = false;
             state.search_query.clear();
@@ -493,11 +463,6 @@ pub fn update(state: &mut TuiState, msg: Msg) {
         Msg::Notify(message) => {
             state.transcript.push(TranscriptEntry::SystemMessage(message));
         }
-        Msg::CopyToClipboard(text) => {
-            // OSC52 clipboard escape sequence (works in most modern terminals + tmux + SSH)
-            eprint!("\x1b]52;c;{}\x07", base64_encode(&text));
-            state.transcript.push(TranscriptEntry::SystemMessage("Copied to clipboard".to_string()));
-        }
         Msg::InterruptAgent => {
             if state.agent_running {
                 state.agent_running = false;
@@ -523,9 +488,6 @@ pub fn update(state: &mut TuiState, msg: Msg) {
         Msg::ToggleSidebar => {
             state.show_sidebar = !state.show_sidebar;
         }
-        Msg::NextSidebarTab => {
-            state.sidebar_tab = state.sidebar_tab.next();
-        }
         Msg::ToggleModelPicker => {
             state.show_model_picker = !state.show_model_picker;
             state.model_picker_selected = 0;
@@ -550,22 +512,6 @@ pub fn update(state: &mut TuiState, msg: Msg) {
         Msg::ToggleThemePicker => {
             state.show_theme_picker = !state.show_theme_picker;
             state.theme_picker_selected = 0;
-        }
-        Msg::ThemePickerUp => {
-            if state.theme_picker_selected > 0 {
-                state.theme_picker_selected -= 1;
-            }
-        }
-        Msg::ThemePickerDown => {
-            state.theme_picker_selected += 1;
-        }
-        Msg::ThemePickerSelect => {
-            let themes = super::theme::Theme::all();
-            if let Some(theme) = themes.get(state.theme_picker_selected) {
-                state.theme = theme.clone();
-                state.show_theme_picker = false;
-                state.transcript.push(TranscriptEntry::SystemMessage(format!("Theme: {}", theme.name)));
-            }
         }
         Msg::AutocompleteUpdate => {
             update_autocomplete(state);
@@ -638,25 +584,6 @@ pub fn update(state: &mut TuiState, msg: Msg) {
         }
         Msg::ToggleTimeline => {
             state.show_timeline = !state.show_timeline;
-        }
-        Msg::NotifyCompletion(summary) => {
-            // OS notification for task completion (Linux: notify-send)
-            #[cfg(target_os = "linux")]
-            {
-                let _ = std::process::Command::new("notify-send")
-                    .args(["Theo", &summary])
-                    .spawn();
-            }
-            #[cfg(target_os = "macos")]
-            {
-                let script = format!(
-                    "display notification \"{}\" with title \"Theo\"",
-                    summary.replace('"', "\\\"")
-                );
-                let _ = std::process::Command::new("osascript")
-                    .args(["-e", &script])
-                    .spawn();
-            }
         }
         Msg::ApproveDecision => {
             // Actual resolution happens in mod.rs which has access to the gate
@@ -959,7 +886,6 @@ fn handle_domain_event(state: &mut TuiState, event: DomainEvent) {
                 .to_string();
 
             let card = ToolCardState {
-                call_id: call_id.clone(),
                 tool_name,
                 status: ToolCardStatus::Running,
                 started_at: Instant::now(),
@@ -1002,7 +928,6 @@ fn handle_domain_event(state: &mut TuiState, event: DomainEvent) {
                 .to_string();
             state.tool_chain.push(ToolChainEntry {
                 tool_name,
-                reason: String::new(), // TODO: extract from LLM reasoning
                 status: if success { ToolCardStatus::Succeeded } else { ToolCardStatus::Failed },
                 duration_ms,
             });
@@ -1058,7 +983,6 @@ fn handle_domain_event(state: &mut TuiState, event: DomainEvent) {
         }
         EventType::TodoUpdated => {
             let action = event.payload.get("type").and_then(|v| v.as_str()).unwrap_or("");
-            let content = event.payload.get("content").and_then(|v| v.as_str()).unwrap_or("");
             let id = event.payload.get("id").and_then(|v| v.as_str())
                 .or_else(|| event.payload.get("id").and_then(|v| v.as_u64()).map(|_| ""))
                 .unwrap_or(&event.entity_id);
@@ -1068,7 +992,6 @@ fn handle_domain_event(state: &mut TuiState, event: DomainEvent) {
                 "task_create" => {
                     state.todos.push(TodoItem {
                         id: id.to_string(),
-                        content: content.to_string(),
                         status: "pending".to_string(),
                     });
                 }

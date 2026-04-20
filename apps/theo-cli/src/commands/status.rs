@@ -14,9 +14,6 @@ impl SlashCommand for StatusCommand {
     fn name(&self) -> &'static str {
         "status"
     }
-    fn description(&self) -> &'static str {
-        "Show provider, model, and project info"
-    }
     fn category(&self) -> CommandCategory {
         CommandCategory::Info
     }

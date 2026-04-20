@@ -241,14 +241,6 @@ fn mrr(returned_files: &[String], expected: &[&str]) -> f64 {
     0.0
 }
 
-/// Extract ranked file paths directly from a score map (no assembly expansion).
-/// Used by RRF eval to avoid community dilution.
-fn extract_files_from_scores(scores: &std::collections::HashMap<String, f64>) -> Vec<String> {
-    let mut sorted: Vec<_> = scores.iter().collect();
-    sorted.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap_or(std::cmp::Ordering::Equal));
-    sorted.into_iter().map(|(k, _)| k.clone()).collect()
-}
-
 /// Extract unique file paths from assembly context items, ordered by item score.
 fn extract_files_from_content(
     items: &[theo_engine_retrieval::assembly::ContextItem],
@@ -282,7 +274,7 @@ fn eval_graphctx_retrieval_quality() {
     use theo_engine_graph::bridge;
     use theo_engine_graph::cluster::{ClusterAlgorithm, hierarchical_cluster};
     use theo_engine_retrieval::assembly::{
-        assemble_by_symbol, assemble_files_direct, assemble_greedy,
+        assemble_by_symbol, assemble_files_direct,
     };
     use theo_engine_retrieval::search::FileBm25;
     use theo_engine_retrieval::search::MultiSignalScorer;
@@ -301,7 +293,7 @@ fn eval_graphctx_retrieval_quality() {
         stats.files_parsed, stats.files_found, stats.symbols_extracted
     );
 
-    let (mut graph, _bridge_stats) = bridge::build_graph(&files);
+    let (graph, _bridge_stats) = bridge::build_graph(&files);
     eprintln!(
         "Graph: {} nodes, {} edges",
         graph.node_count(),
@@ -367,7 +359,7 @@ fn eval_graphctx_retrieval_quality() {
         );
     }
 
-    let scorer = MultiSignalScorer::build(&communities, &graph);
+    let _scorer = MultiSignalScorer::build(&communities, &graph);
 
     // Run eval
     let queries = ground_truth();
@@ -1186,7 +1178,7 @@ fn eval_hybrid_search() {
 fn eval_graph_attention_ab() {
     use theo_engine_graph::bridge;
     use theo_engine_graph::cluster::{ClusterAlgorithm, hierarchical_cluster};
-    use theo_engine_retrieval::assembly::assemble_greedy;
+    
     use theo_engine_retrieval::search::MultiSignalScorer;
 
     let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

@@ -38,17 +38,6 @@ pub enum CommandCategory {
     Action,
 }
 
-impl CommandCategory {
-    pub fn label(&self) -> &'static str {
-        match self {
-            CommandCategory::Session => "Session",
-            CommandCategory::Info => "Info",
-            CommandCategory::Config => "Config",
-            CommandCategory::Action => "Action",
-        }
-    }
-}
-
 /// Contextual runtime state passed to each command.
 pub struct CommandContext<'a> {
     pub config: &'a AgentConfig,
@@ -76,8 +65,6 @@ pub trait SlashCommand: Send + Sync {
     fn aliases(&self) -> &'static [&'static str] {
         &[]
     }
-    /// Short description for `/help`.
-    fn description(&self) -> &'static str;
     /// Category used to group commands in `/help`.
     fn category(&self) -> CommandCategory;
     /// Execute the command with its arguments (excluding the name).
@@ -98,11 +85,6 @@ impl CommandRegistry {
 
     pub fn register(&mut self, cmd: Arc<dyn SlashCommand>) {
         self.commands.push(cmd);
-    }
-
-    /// All commands in registration order.
-    pub fn all(&self) -> &[Arc<dyn SlashCommand>] {
-        &self.commands
     }
 
     /// Look up a command by name or alias (input already stripped of `/`).
@@ -184,9 +166,6 @@ mod tests {
         fn name(&self) -> &'static str {
             self.0
         }
-        fn description(&self) -> &'static str {
-            "stub"
-        }
         fn category(&self) -> CommandCategory {
             CommandCategory::Action
         }
@@ -253,9 +232,6 @@ mod tests {
             fn name(&self) -> &'static str {
                 "echo"
             }
-            fn description(&self) -> &'static str {
-                "echo"
-            }
             fn category(&self) -> CommandCategory {
                 CommandCategory::Info
             }
@@ -315,9 +291,6 @@ mod tests {
             }
             fn aliases(&self) -> &'static [&'static str] {
                 &["quit", "q"]
-            }
-            fn description(&self) -> &'static str {
-                "exit"
             }
             fn category(&self) -> CommandCategory {
                 CommandCategory::Session

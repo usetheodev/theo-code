@@ -11,9 +11,6 @@ impl SlashCommand for ClearCommand {
     fn name(&self) -> &'static str {
         "clear"
     }
-    fn description(&self) -> &'static str {
-        "Clear the terminal screen"
-    }
     fn category(&self) -> CommandCategory {
         CommandCategory::Session
     }

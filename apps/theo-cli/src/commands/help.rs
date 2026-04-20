@@ -17,9 +17,6 @@ impl SlashCommand for HelpCommand {
     fn aliases(&self) -> &'static [&'static str] {
         &["h"]
     }
-    fn description(&self) -> &'static str {
-        "Show available commands grouped by category"
-    }
     fn category(&self) -> CommandCategory {
         CommandCategory::Info
     }

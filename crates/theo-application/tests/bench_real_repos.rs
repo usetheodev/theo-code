@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 /// Real-world benchmark: runs GraphCTX pipeline on 14 external repos.
 ///
 /// Measures: extraction time, graph build, clustering, query scoring, assembly.
@@ -10,10 +9,7 @@ use std::path::Path;
 use std::time::Instant;
 
 use theo_application::use_cases::extraction;
-use theo_application::use_cases::pipeline::{Pipeline, PipelineConfig};
-use theo_engine_retrieval::metrics::{
-    DepEdge, RetrievalMetrics, hit_at_k, mrr, precision_at_k, recall_at_k,
-};
+use theo_application::use_cases::pipeline::Pipeline;
 
 // ---------------------------------------------------------------------------
 // Ground truth: curated queries per repo with expected files
@@ -285,9 +281,7 @@ fn run_benchmark(case: &BenchCase) -> Option<RepoBenchResult> {
     let total_start = Instant::now();
 
     // Phase 1: Extract
-    let extract_start = Instant::now();
     let (files, extract_stats) = extraction::extract_repo(repo_path);
-    let extract_ms = extract_start.elapsed().as_millis() as u64;
 
     if files.is_empty() {
         eprintln!("  ⚠ {} extracted 0 files", case.name);
@@ -296,13 +290,8 @@ fn run_benchmark(case: &BenchCase) -> Option<RepoBenchResult> {
 
     // Phase 2: Build graph + cluster
     let mut pipeline = Pipeline::with_defaults();
-    let build_start = Instant::now();
-    let bridge_stats = pipeline.build_graph(&files);
-    let build_ms = build_start.elapsed().as_millis() as u64;
-
-    let cluster_start = Instant::now();
+    let _bridge_stats = pipeline.build_graph(&files);
     let communities = pipeline.cluster();
-    let cluster_ms = cluster_start.elapsed().as_millis() as u64;
     let community_count = communities.len();
 
     // Phase 3: Query each ground truth case
@@ -348,7 +337,7 @@ fn run_benchmark(case: &BenchCase) -> Option<RepoBenchResult> {
             .collect();
 
         // For standard metrics, use community IDs + fuzzy matches as "returned"
-        let effective_returned: Vec<String> = returned_files
+        let _effective_returned: Vec<String> = returned_files
             .iter()
             .chain(fuzzy_returned.iter())
             .cloned()
@@ -371,7 +360,6 @@ fn run_benchmark(case: &BenchCase) -> Option<RepoBenchResult> {
             query: qcase.query.to_string(),
             returned_count: returned_files.len(),
             mrr: m,
-            recall_at_5: r5,
             recall_at_10: r10,
             hit_at_5: h5,
             precision_at_5: p5,
@@ -399,9 +387,6 @@ fn run_benchmark(case: &BenchCase) -> Option<RepoBenchResult> {
         files_parsed: extract_stats.files_parsed,
         symbols_extracted: extract_stats.symbols_extracted,
         community_count,
-        extract_ms,
-        build_ms,
-        cluster_ms,
         total_ms,
         avg_mrr,
         avg_recall,
@@ -418,9 +403,6 @@ struct RepoBenchResult {
     files_parsed: usize,
     symbols_extracted: usize,
     community_count: usize,
-    extract_ms: u64,
-    build_ms: u64,
-    cluster_ms: u64,
     total_ms: u64,
     avg_mrr: f64,
     avg_recall: f64,
@@ -434,7 +416,6 @@ struct QueryResult {
     query: String,
     returned_count: usize,
     mrr: f64,
-    recall_at_5: f64,
     recall_at_10: f64,
     hit_at_5: f64,
     precision_at_5: f64,

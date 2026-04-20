@@ -1,71 +1,19 @@
 //! Sidebar widget — toggleable right panel showing context info.
 //!
-//! Three tabs: Status, Tools, Context.
-//! Toggle with Tab key. Auto-shows on terminals > 120 cols.
+//! Currently the sidebar only shows a Status view. Tools/Context tabs were
+//! planned but never wired up, so they were removed along with the tab enum.
 
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, Paragraph, Tabs};
+use ratatui::widgets::{Block, Borders, Paragraph};
 
 use crate::tui::app::TuiState;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum SidebarTab {
-    Status,
-    Tools,
-    Context,
-}
-
-impl SidebarTab {
-    pub fn titles() -> Vec<&'static str> {
-        vec!["Status", "Tools", "Context"]
-    }
-
-    pub fn index(&self) -> usize {
-        match self {
-            SidebarTab::Status => 0,
-            SidebarTab::Tools => 1,
-            SidebarTab::Context => 2,
-        }
-    }
-
-    pub fn next(&self) -> Self {
-        match self {
-            SidebarTab::Status => SidebarTab::Tools,
-            SidebarTab::Tools => SidebarTab::Context,
-            SidebarTab::Context => SidebarTab::Status,
-        }
-    }
-}
-
 /// Render the sidebar in the given area.
-pub fn render_sidebar(frame: &mut Frame, area: Rect, state: &TuiState, tab: SidebarTab) {
-    let chunks = Layout::vertical([
-        Constraint::Length(2), // tabs
-        Constraint::Min(1),   // content
-    ])
-    .split(area);
-
-    // Tab bar
-    let titles: Vec<Line> = SidebarTab::titles()
-        .into_iter()
-        .map(|t| Line::from(t))
-        .collect();
-    let tabs = Tabs::new(titles)
-        .select(tab.index())
-        .highlight_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
-        .divider("│");
-    frame.render_widget(tabs, chunks[0]);
-
-    // Content
-    let content = match tab {
-        SidebarTab::Status => render_status_tab(state),
-        SidebarTab::Tools => render_tools_tab(state),
-        SidebarTab::Context => render_context_tab(state),
-    };
-
+pub fn render_sidebar(frame: &mut Frame, area: Rect, state: &TuiState) {
+    let content = render_status_tab(state);
     let panel = Paragraph::new(content)
-        .block(Block::default().borders(Borders::LEFT));
-    frame.render_widget(panel, chunks[1]);
+        .block(Block::default().borders(Borders::LEFT).title(" Status "));
+    frame.render_widget(panel, area);
 }
 
 fn render_status_tab(state: &TuiState) -> Vec<Line<'static>> {
@@ -111,98 +59,4 @@ fn render_status_tab(state: &TuiState) -> Vec<Line<'static>> {
             ),
         ]),
     ]
-}
-
-fn render_tools_tab(state: &TuiState) -> Vec<Line<'static>> {
-    let mut lines = vec![
-        Line::from(Span::styled(
-            format!(" {} tools running", state.status.tools_running),
-            Style::default().fg(Color::Yellow),
-        )),
-        Line::from(""),
-    ];
-
-    // Show active tool cards
-    for entry in &state.transcript {
-        if let crate::tui::app::TranscriptEntry::ToolCard(card) = entry {
-            let (icon, color) = match card.status {
-                crate::tui::app::ToolCardStatus::Running => ("⠋", Color::Yellow),
-                crate::tui::app::ToolCardStatus::Succeeded => ("✓", Color::Green),
-                crate::tui::app::ToolCardStatus::Failed => ("✗", Color::Red),
-            };
-            let duration = card.duration_ms
-                .map(|ms| format!(" {ms}ms"))
-                .unwrap_or_else(|| {
-                    format!(" {:.1}s...", card.started_at.elapsed().as_secs_f64())
-                });
-            lines.push(Line::from(vec![
-                Span::styled(format!(" {icon} "), Style::default().fg(color)),
-                Span::styled(card.tool_name.clone(), Style::default().fg(Color::White)),
-                Span::styled(duration, Style::default().fg(Color::DarkGray)),
-            ]));
-        }
-    }
-
-    if lines.len() <= 2 {
-        lines.push(Line::from(Span::styled(
-            " No tools executed yet",
-            Style::default().fg(Color::DarkGray),
-        )));
-    }
-
-    // Todos section
-    if !state.todos.is_empty() {
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            " Tasks",
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-        )));
-        for todo in &state.todos {
-            let (icon, color) = match todo.status.as_str() {
-                "completed" => ("✓", Color::Green),
-                "in_progress" => ("⠋", Color::Yellow),
-                "cancelled" => ("✗", Color::Red),
-                _ => ("○", Color::DarkGray),
-            };
-            lines.push(Line::from(vec![
-                Span::styled(format!(" {icon} "), Style::default().fg(color)),
-                Span::styled(todo.content.clone(), Style::default().fg(Color::White)),
-            ]));
-        }
-    }
-
-    lines
-}
-
-fn render_context_tab(state: &TuiState) -> Vec<Line<'static>> {
-    let mut lines = Vec::new();
-
-    // Tool chain (causality timeline)
-    if !state.tool_chain.is_empty() {
-        lines.push(Line::from(Span::styled(
-            " Tool Chain",
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-        )));
-        lines.push(Line::from(""));
-        for entry in state.tool_chain.iter().rev().take(15) {
-            let (icon, color) = match entry.status {
-                crate::tui::app::ToolCardStatus::Succeeded => ("✓", Color::Green),
-                crate::tui::app::ToolCardStatus::Failed => ("✗", Color::Red),
-                crate::tui::app::ToolCardStatus::Running => ("⠋", Color::Yellow),
-            };
-            let dur = entry.duration_ms.map(|ms| format!(" {ms}ms")).unwrap_or_default();
-            lines.push(Line::from(vec![
-                Span::styled(format!(" {icon} "), Style::default().fg(color)),
-                Span::styled(entry.tool_name.clone(), Style::default().fg(Color::White)),
-                Span::styled(dur, Style::default().fg(Color::DarkGray)),
-            ]));
-        }
-    } else {
-        lines.push(Line::from(Span::styled(
-            " No tools executed yet",
-            Style::default().fg(Color::DarkGray),
-        )));
-    }
-
-    lines
 }

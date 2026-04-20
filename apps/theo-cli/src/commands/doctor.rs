@@ -14,9 +14,6 @@ impl SlashCommand for DoctorCommand {
     fn name(&self) -> &'static str {
         "doctor"
     }
-    fn description(&self) -> &'static str {
-        "Run environment and configuration diagnostics"
-    }
     fn category(&self) -> CommandCategory {
         CommandCategory::Action
     }

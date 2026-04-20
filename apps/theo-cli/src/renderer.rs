@@ -35,15 +35,6 @@ impl CliRenderer {
         }
     }
 
-    /// Construct with explicit caps (used in tests / integration with
-    /// a controlled terminal).
-    pub fn with_caps(caps: StyleCaps) -> Self {
-        Self {
-            caps,
-            streaming: Mutex::new(StreamingMarkdownRenderer::new(caps)),
-        }
-    }
-
     /// Flush any buffered streaming markdown state. Call at turn
     /// boundaries to avoid leaking unclosed tokens across messages.
     fn flush_streaming(&self) {

@@ -59,7 +59,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
-    use crate::tree_sitter;
+    
 
     fn extract_python(source: &str) -> FileExtraction {
         let path = PathBuf::from("test.py");

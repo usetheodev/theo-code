@@ -50,9 +50,6 @@ impl SlashCommand for CostCommand {
     fn name(&self) -> &'static str {
         "cost"
     }
-    fn description(&self) -> &'static str {
-        "Show token usage and cost for this session"
-    }
     fn category(&self) -> CommandCategory {
         CommandCategory::Info
     }

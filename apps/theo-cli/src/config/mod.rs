@@ -125,12 +125,6 @@ impl TheoConfig {
         Ok(cfg)
     }
 
-    /// Load from the resolved XDG config path.
-    pub fn load() -> Result<Self, ConfigError> {
-        let paths = TheoPaths::resolve();
-        Self::load_from(&paths.config_file())
-    }
-
     /// Serialize to a TOML string.
     pub fn to_toml(&self) -> String {
         toml::to_string_pretty(self).unwrap_or_default()

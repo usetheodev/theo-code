@@ -12,7 +12,6 @@ use std::path::Path;
 use super::model::*;
 
 const MAX_INSIGHT_LINES: usize = 10_000;
-const EXCERPT_MAX_CHARS: usize = 500;
 
 // ---------------------------------------------------------------------------
 // Ingest

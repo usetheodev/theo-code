@@ -24,7 +24,9 @@ use theo_engine_parser::tree_sitter::{self as ts, SupportedLanguage};
 use theo_engine_parser::types::FileExtraction;
 
 use theo_engine_retrieval::assembly;
-use theo_engine_retrieval::search::{FileBm25, MultiSignalScorer};
+use theo_engine_retrieval::search::FileBm25;
+#[cfg(not(feature = "tantivy-backend"))]
+use theo_engine_retrieval::search::MultiSignalScorer;
 
 #[cfg(feature = "tantivy-backend")]
 use theo_engine_retrieval::tantivy_search::FileTantivyIndex;
