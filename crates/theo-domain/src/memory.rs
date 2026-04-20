@@ -124,6 +124,13 @@ pub trait MemoryProvider: Send + Sync {
 
     /// Session lifecycle hook. Default: no-op.
     async fn on_session_end(&self) {}
+
+    /// Whether this provider talks to a paid external service (Mem0,
+    /// Honcho, etc.). The `MemoryEngine` enforces at most one external
+    /// provider so two paid backends never double-bill. Default: false.
+    fn is_external(&self) -> bool {
+        false
+    }
 }
 
 #[cfg(test)]
