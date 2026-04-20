@@ -6513,8 +6513,10 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "theo-domain",
  "thiserror 2.0.18",
  "tokio",
+ "toml 0.8.2",
 ]
 
 [[package]]

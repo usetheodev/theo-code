@@ -1,21 +1,46 @@
 #!/bin/bash
-# Reject commit messages that contain AI co-authorship trailers.
-# Activated via `git config core.hooksPath .githooks`.
+# Reject commits that contain ANY co-authorship trailer or generated-attribution footer.
+#
+# This repo forbids:
+#   - ANY `Co-Authored-By:` trailer (human or AI — no exceptions)
+#   - `🤖 Generated with ...` footers
+#   - `Generated with [Claude Code]...` footers
+#
+# Install (once per clone):
+#   git config core.hooksPath .githooks
 set -euo pipefail
 
-msg_file="$1"
+MSG_FILE="${1:?missing commit message file path}"
 
-if grep -iE '^(Co-Authored-By|Co-authored-by):' "$msg_file" >/dev/null 2>&1; then
-    echo "[commit-msg] BLOCKED: commit message contains a Co-Authored-By trailer." >&2
-    echo "  This project does not permit co-authorship trailers in commits." >&2
-    echo "  Remove the trailer and try again." >&2
-    exit 1
+if [ ! -f "$MSG_FILE" ]; then
+    exit 0
 fi
 
-if grep -F 'Generated with [Claude' "$msg_file" >/dev/null 2>&1 \
-   || grep -F '🤖 Generated with' "$msg_file" >/dev/null 2>&1; then
-    echo "[commit-msg] BLOCKED: commit message contains a 'Generated with Claude' footer." >&2
-    echo "  This project does not permit AI-generation footers in commits." >&2
+# Ignore comment lines (#) — git strips those anyway.
+EFFECTIVE=$(grep -v '^\s*#' "$MSG_FILE" || true)
+
+FAIL=0
+
+if echo "$EFFECTIVE" | grep -qiE '^[[:space:]]*Co-Authored-By:'; then
+    echo "[commit-msg] BLOCKED: Co-Authored-By trailers are forbidden in this repo (any co-authorship — human or AI)."
+    FAIL=1
+fi
+
+if echo "$EFFECTIVE" | grep -qE '🤖[[:space:]]*Generated with'; then
+    echo "[commit-msg] BLOCKED: robot-emoji 'Generated with' footer is forbidden."
+    FAIL=1
+fi
+
+if echo "$EFFECTIVE" | grep -qiE 'Generated with \[?Claude Code'; then
+    echo "[commit-msg] BLOCKED: 'Generated with Claude Code' attribution is forbidden."
+    FAIL=1
+fi
+
+if [ "$FAIL" -ne 0 ]; then
+    echo ""
+    echo "Remove the offending line(s) and commit again."
+    echo "To amend the current commit message in-place, run:"
+    echo "  git commit --amend"
     exit 1
 fi
 
