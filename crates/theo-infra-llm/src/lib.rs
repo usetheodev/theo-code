@@ -8,6 +8,7 @@ pub mod overflow;
 pub mod partial_json;
 pub mod provider;
 pub mod providers;
+pub mod routing;
 pub mod stream;
 pub mod transform;
 pub mod types;

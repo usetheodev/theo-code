@@ -1,0 +1,6 @@
+{
+  "id": "complex-008",
+  "label": "complex",
+  "prompt": "implement a new subagent role dedicated to cost estimation",
+  "expected_token_budget": 9800
+}

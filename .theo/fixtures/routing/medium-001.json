@@ -1,0 +1,6 @@
+{
+  "id": "medium-001",
+  "label": "medium",
+  "prompt": "add a new function that returns the sum of a vec",
+  "expected_token_budget": 1800
+}

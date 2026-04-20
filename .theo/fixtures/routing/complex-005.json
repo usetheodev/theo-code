@@ -1,0 +1,6 @@
+{
+  "id": "complex-005",
+  "label": "complex",
+  "prompt": "design a sharded cache for the retrieval embedder with lock-free reads",
+  "expected_token_budget": 12000
+}

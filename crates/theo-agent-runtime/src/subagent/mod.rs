@@ -30,6 +30,17 @@ pub enum SubAgentRole {
 }
 
 impl SubAgentRole {
+    /// Map to the canonical routing role-id. Plan §R4: routing slots key
+    /// on these string ids so `theo-domain` stays dependency-free.
+    pub fn role_id(&self) -> theo_domain::routing::SubAgentRoleId {
+        match self {
+            SubAgentRole::Explorer => theo_domain::routing::SubAgentRoleId::EXPLORER,
+            SubAgentRole::Implementer => theo_domain::routing::SubAgentRoleId::IMPLEMENTER,
+            SubAgentRole::Verifier => theo_domain::routing::SubAgentRoleId::VERIFIER,
+            SubAgentRole::Reviewer => theo_domain::routing::SubAgentRoleId::REVIEWER,
+        }
+    }
+
     pub fn display_name(&self) -> &str {
         match self {
             SubAgentRole::Explorer => "Explorer",

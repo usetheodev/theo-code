@@ -1,0 +1,6 @@
+{
+  "id": "medium-009",
+  "label": "medium",
+  "prompt": "update keywords list in the routing module",
+  "expected_token_budget": 1500
+}

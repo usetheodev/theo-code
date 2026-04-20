@@ -1,0 +1,6 @@
+{
+  "id": "complex-001",
+  "label": "complex",
+  "prompt": "debug why the compaction_stages test is flaky on CI",
+  "expected_token_budget": 8000
+}

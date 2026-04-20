@@ -1,0 +1,6 @@
+{
+  "id": "simple-004",
+  "label": "simple",
+  "prompt": "echo hello world",
+  "expected_token_budget": 100
+}

@@ -1,0 +1,6 @@
+{
+  "id": "complex-009",
+  "label": "complex",
+  "prompt": "architecture for streaming tool results with partial JSON parsing",
+  "expected_token_budget": 11500
+}

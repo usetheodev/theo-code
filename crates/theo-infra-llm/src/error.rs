@@ -31,6 +31,13 @@ pub enum LlmError {
 
     #[error("context overflow from {provider}: {message}")]
     ContextOverflow { provider: String, message: String },
+
+    /// Emitted when the routing fallback cascade has exhausted its hop
+    /// budget without a successful call. Carries the list of model ids
+    /// that were tried, in order, so the caller can diagnose which tier
+    /// ultimately failed. Plan ref: outputs/smart-model-routing-plan.md §R5.
+    #[error("routing fallback exhausted after trying {attempted:?}")]
+    FallbackExhausted { attempted: Vec<String> },
 }
 
 impl LlmError {
@@ -56,6 +63,27 @@ impl LlmError {
     /// Whether this error is a context overflow (prompt too long for model).
     pub fn is_context_overflow(&self) -> bool {
         matches!(self, LlmError::ContextOverflow { .. })
+    }
+
+    /// Map an LLM error to a routing failure hint so the router can
+    /// decide whether to retry, fall back, or surface the error.
+    /// Returns `None` for errors that should bubble up without retry
+    /// (auth, parse, generic 4xx).
+    pub fn to_routing_hint(&self) -> Option<theo_domain::routing::RoutingFailureHint> {
+        use theo_domain::routing::RoutingFailureHint;
+        match self {
+            LlmError::ContextOverflow { .. } => Some(RoutingFailureHint::ContextOverflow),
+            LlmError::RateLimited { .. } => Some(RoutingFailureHint::RateLimit),
+            LlmError::Timeout | LlmError::ServiceUnavailable | LlmError::Network(_) => {
+                Some(RoutingFailureHint::Transient)
+            }
+            LlmError::AuthFailed(_)
+            | LlmError::Api { .. }
+            | LlmError::Parse(_)
+            | LlmError::StreamEnded
+            | LlmError::ProviderNotFound(_)
+            | LlmError::FallbackExhausted { .. } => None,
+        }
     }
 
     /// Create from HTTP status code.

@@ -1,0 +1,6 @@
+{
+  "id": "medium-002",
+  "label": "medium",
+  "prompt": "fix the typo in the grep tool description",
+  "expected_token_budget": 1500
+}

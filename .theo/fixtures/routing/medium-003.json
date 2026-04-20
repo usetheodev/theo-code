@@ -1,0 +1,6 @@
+{
+  "id": "medium-003",
+  "label": "medium",
+  "prompt": "write a doc comment for the ModelChoice struct",
+  "expected_token_budget": 1200
+}

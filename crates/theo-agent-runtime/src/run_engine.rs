@@ -659,12 +659,50 @@ impl AgentRunEngine {
             // LLM call
             self.transition_run(RunState::Planning);
 
-            let mut request = ChatRequest::new(&self.config.model, messages.clone())
+            // --- Routing decision (plan §R3) ---
+            // Consult the configured router; when absent, fall back to
+            // the session defaults. The router is called exactly once
+            // per turn at this single call site (invariant enforced by
+            // structural_hygiene.rs).
+            let latest_user_msg = messages
+                .iter()
+                .rev()
+                .find(|m| matches!(m.role, theo_infra_llm::types::Role::User))
+                .and_then(|m| m.content.as_deref());
+            let mut routing_ctx =
+                theo_domain::routing::RoutingContext::new(theo_domain::routing::RoutingPhase::Normal);
+            routing_ctx.latest_user_message = latest_user_msg;
+            routing_ctx.conversation_tokens = estimated_context_tokens as u64;
+            routing_ctx.iteration = iteration;
+            routing_ctx.requires_tool_use = !tool_defs.is_empty();
+            let (chosen_model, chosen_effort, routing_reason): (String, Option<String>, &'static str) =
+                match &self.config.router {
+                    Some(handle) => {
+                        let choice = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            handle.as_router().route(&routing_ctx)
+                        }));
+                        match choice {
+                            Ok(c) => (c.model_id, c.reasoning_effort, c.routing_reason),
+                            Err(_) => (
+                                self.config.model.clone(),
+                                self.config.reasoning_effort.clone(),
+                                "router_panic_fallback_default",
+                            ),
+                        }
+                    }
+                    None => (
+                        self.config.model.clone(),
+                        self.config.reasoning_effort.clone(),
+                        "no_router",
+                    ),
+                };
+
+            let mut request = ChatRequest::new(&chosen_model, messages.clone())
                 .with_tools(tool_defs.clone())
                 .with_max_tokens(self.config.max_tokens)
                 .with_temperature(self.config.temperature);
 
-            if let Some(ref effort) = self.config.reasoning_effort {
+            if let Some(ref effort) = chosen_effort {
                 request = request.with_reasoning_effort(effort);
             }
 
@@ -672,7 +710,11 @@ impl AgentRunEngine {
             self.event_bus.publish(DomainEvent::new(
                 EventType::LlmCallStart,
                 self.run.run_id.as_str(),
-                serde_json::json!({"iteration": iteration}),
+                serde_json::json!({
+                    "iteration": iteration,
+                    "routing_reason": routing_reason,
+                    "model": chosen_model,
+                }),
             ));
 
             let llm_start = std::time::Instant::now();
