@@ -36,7 +36,8 @@ impl Tool for ThinkTool {
                 description: "Your reasoning, plan, or analysis. Be specific: what files to read, what changes to make, in what order.".to_string(),
                 required: true,
             }],
-        }
+        input_examples: Vec::new(),
+    }
     }
 
     fn category(&self) -> ToolCategory {

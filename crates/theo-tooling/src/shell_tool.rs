@@ -50,6 +50,7 @@ impl Tool for ShellTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             params: self.params.clone(),
+            input_examples: Vec::new(),
         }
     }
 

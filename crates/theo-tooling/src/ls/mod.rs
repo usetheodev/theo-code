@@ -32,7 +32,8 @@ impl Tool for LsTool {
                 description: "Directory path to list".to_string(),
                 required: false,
             }],
-        }
+        input_examples: Vec::new(),
+    }
     }
 
     fn category(&self) -> ToolCategory {

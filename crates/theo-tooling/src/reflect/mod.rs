@@ -63,7 +63,8 @@ impl Tool for ReflectTool {
                     required: false,
                 },
             ],
-        }
+        input_examples: Vec::new(),
+    }
     }
 
     fn category(&self) -> ToolCategory {

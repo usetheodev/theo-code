@@ -392,6 +392,32 @@ mod tests {
         );
     }
 
+    /// Guard: complex tools must carry at least one `input_examples` entry so
+    /// the LLM sees a concrete invocation in the JSON Schema (Anthropic
+    /// "Tool Use Examples" — reported 72% -> 90% param accuracy).
+    #[test]
+    fn complex_tools_declare_input_examples() {
+        let registry = create_default_registry();
+        for tool_id in ["edit", "read", "grep", "bash", "apply_patch"] {
+            let tool = registry
+                .get(tool_id)
+                .unwrap_or_else(|| panic!("tool `{tool_id}` missing"));
+            let schema = tool.schema();
+            assert!(
+                !schema.input_examples.is_empty(),
+                "tool `{tool_id}` must declare at least one input example"
+            );
+            let json = schema.to_json_schema();
+            let examples = json["examples"].as_array().unwrap_or_else(|| {
+                panic!("tool `{tool_id}` JSON Schema must expose `examples` array")
+            });
+            assert!(
+                !examples.is_empty(),
+                "tool `{tool_id}` JSON Schema `examples` array is empty"
+            );
+        }
+    }
+
     /// Guard: the top-5 tools must have onboarding-style descriptions with
     /// NOT-usage rules and at least one concrete example.
     /// Anthropic "Writing tools for agents", principles 3 and 11.
@@ -620,7 +646,8 @@ mod tests {
                         description: "bad param".to_string(),
                         required: false,
                     }],
-                }
+                input_examples: Vec::new(),
+            }
             }
             async fn execute(
                 &self,

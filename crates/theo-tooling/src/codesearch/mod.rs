@@ -31,7 +31,8 @@ impl Tool for CodeSearchTool {
                 description: "Code search query".to_string(),
                 required: true,
             }],
-        }
+        input_examples: Vec::new(),
+    }
     }
 
     fn category(&self) -> ToolCategory {

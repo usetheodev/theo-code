@@ -77,7 +77,8 @@ impl Tool for HttpGetTool {
                     required: false,
                 },
             ],
-        }
+        input_examples: Vec::new(),
+    }
     }
 
     async fn execute(
@@ -176,7 +177,8 @@ impl Tool for HttpPostTool {
                     required: false,
                 },
             ],
-        }
+        input_examples: Vec::new(),
+    }
     }
 
     async fn execute(

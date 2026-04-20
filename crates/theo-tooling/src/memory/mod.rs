@@ -206,7 +206,8 @@ impl Tool for MemoryTool {
                     required: false,
                 },
             ],
-        }
+        input_examples: Vec::new(),
+    }
     }
 
     fn category(&self) -> ToolCategory {

@@ -38,7 +38,8 @@ impl Tool for MultiEditTool {
                     required: true,
                 },
             ],
-        }
+        input_examples: Vec::new(),
+    }
     }
 
     fn category(&self) -> ToolCategory {

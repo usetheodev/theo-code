@@ -346,6 +346,17 @@ impl Tool for ApplyPatchTool {
                 description: "Unified diff patch to apply".to_string(),
                 required: true,
             }],
+            input_examples: vec![
+                serde_json::json!({
+                    "patchText": "*** Begin Patch\n*** Add File: src/hello.rs\n+pub fn hello() {\n+    println!(\"hi\");\n+}\n*** End Patch\n"
+                }),
+                serde_json::json!({
+                    "patchText": "*** Begin Patch\n*** Update File: src/lib.rs\n@@\n pub mod foo;\n+pub mod bar;\n*** End Patch\n"
+                }),
+                serde_json::json!({
+                    "patchText": "*** Begin Patch\n*** Delete File: old/obsolete.rs\n*** End Patch\n"
+                }),
+            ],
         }
     }
 

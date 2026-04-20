@@ -55,7 +55,8 @@ impl Tool for QuestionTool {
                 description: "Array of questions to ask the user".to_string(),
                 required: true,
             }],
-        }
+        input_examples: Vec::new(),
+    }
     }
 
     fn category(&self) -> ToolCategory {

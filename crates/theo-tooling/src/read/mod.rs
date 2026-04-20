@@ -141,6 +141,11 @@ impl Tool for ReadTool {
                     required: false,
                 },
             ],
+            input_examples: vec![
+                serde_json::json!({"filePath": "Cargo.toml"}),
+                serde_json::json!({"filePath": "src/lib.rs", "offset": 200, "limit": 100}),
+                serde_json::json!({"filePath": "docs/"}),
+            ],
         }
     }
 

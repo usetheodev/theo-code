@@ -59,6 +59,15 @@ impl Tool for GrepTool {
                     required: false,
                 },
             ],
+            input_examples: vec![
+                serde_json::json!({"pattern": "fn main"}),
+                serde_json::json!({
+                    "pattern": "TODO|FIXME",
+                    "path": "crates/theo-cli",
+                    "include": "*.rs"
+                }),
+                serde_json::json!({"pattern": "impl Default for "}),
+            ],
         }
     }
 

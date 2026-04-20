@@ -1,76 +1,56 @@
-# SOTA Criteria — Tool Design Revision (Anthropic Best Practices)
+# SOTA Criteria — Tool Calling 2.0 Adoption
 
-**Version:** 1.0 (tool-design revision)
-**Date:** 2026-04-19
-**Prompt:** Revisar tools baseados em Anthropic best practices
-**Based on:** https://www.anthropic.com/engineering/writing-tools-for-agents + opendev-tools-core + fff-mcp
+**Version:** 3.0 (Tool Calling 2.0 cycle)
+**Date:** 2026-04-20
+**Baseline:** 588d0b6 score 72.3
 
 ## Rubric (each dimension 0-3, CONVERGED at avg >= 2.5)
 
-### 1. Pattern Fidelity (opendev-tools-core + fff-mcp)
-- **3** — `llm_suffix`, `truncation_rule`, `format_validation_error`, `should_defer` all land with opendev-traceable semantics; citations in code comments
-- **2** — 3/4 patterns land with fidelity
-- **1** — 1-2 patterns land, partial fidelity
-- **0** — patterns invoked by name only, no mechanism
+### 1. Pattern Fidelity
+- **3** — input_examples, dynamic filtering, batch_execute all land with Anthropic-traceable semantics
+- **2** — 2 of 3 land faithfully
+- **1** — 1 lands
+- **0** — none
 
-### 2. Architectural Fit (theo-domain boundaries)
-- **3** — new types live in `theo-domain`; `theo-tooling` and `theo-agent-runtime` consume them; zero circular deps; no unwrap; thiserror-typed errors
-- **2** — one boundary friction (e.g., shared helper in tooling instead of domain) but no violation
-- **1** — cross-crate type duplicated to avoid import
-- **0** — violates `theo-domain -> nothing` or adds unwrap
+### 2. Architectural Fit
+- **3** — new surface in `theo-domain`; `theo-tooling` and `theo-agent-runtime` consume via trait; no new external deps; no unwrap in production code
+- **2** — one boundary friction but no violation
+- **1** — cross-crate duplication to avoid import
+- **0** — violates `theo-domain → nothing` or adds unwrap
 
 ### 3. Completeness
-- **3** — 5+ tools updated end-to-end (llm_suffix wired, truncation enforced, rich descriptions, validation overrides); ToolOutput serializes the new field
-- **2** — 3-4 tools fully wired
-- **1** — trait surface changes but zero tool adopts the new APIs
+- **3** — 3+ tools carry input_examples; webfetch emits filtered output; batch_execute has dispatch + binding semantics + integration test
+- **2** — 2 of the 3 above are fully wired
+- **1** — trait / schema surface changes but no tool adopts
 - **0** — scaffolding only
 
 ### 4. Testability
-- **3** — unit tests for each new trait method (default + override), integration test showing llm_suffix reaches agent-runtime serializer, truncation-boundary property test
-- **2** — unit tests present, missing integration
-- **1** — smoke test only
-- **0** — no tests or tests only cover the defaults
+- **3** — per-feature unit tests (schema serialization, HTML reducer pure function, batch variable binding), plus integration tests on the agent-runtime dispatch path
+- **2** — unit only
+- **1** — smoke only
+- **0** — none
 
 ### 5. Simplicity
-- **3** — each change <= 200 LOC, no premature abstractions, descriptions < 800 chars, no over-parameterization
+- **3** — each change <= 200 LOC, no premature abstractions, no new deps, no new workspace members
 - **2** — one change crosses 200 LOC but justified
-- **1** — abstraction for hypothetical future tools
-- **0** — refactor sprawl, helper modules that hide behavior
+- **1** — speculative abstractions
+- **0** — refactor sprawl
 
 ## Guardrails
 
-- Hygiene floor: `theo-evaluate.sh` score must not regress
-- Each change <= 200 LOC; decompose if larger
+- Hygiene floor: `cargo check --workspace --tests` stays at 0 warnings, 0 errors (baseline was already fixed)
+- Harness score must stay >= 72.3 (baseline)
+- Pre-commit hook passes WITHOUT `--no-verify` on every commit
+- Each change <= 200 LOC; decompose larger changes
+- TDD: every behavior change starts with a failing test
 - `theo-domain` stays dependency-free
-- No new workspace members, no new external crates
-- TDD enforced: every behavior change starts with a failing test
-- Tool descriptions limited to 800 chars (token budget)
-- Truncation defaults: bash=8000 tail, read=15000 head, grep=4000 tail, webfetch=10000 head
+- No new external crates; no new workspace members
 
 ## Done Definition
 
-- `cargo test -p theo-domain -p theo-tooling -p theo-agent-runtime` passes
-- `cargo clippy --workspace -- -D warnings` passes
-- At least 5 tools use `llm_suffix` in their error paths
-- At least 3 tools declare a non-None `truncation_rule`
-- Top 5 tools (read, grep, glob, bash, edit) have decision-tree descriptions with NOT-usage rules
+- `cargo test --workspace` still passes (2556+ tests)
+- `cargo check --workspace --tests` 0 warnings
+- At least 3 tools declare a non-empty `input_examples`
+- Webfetch reducer strips `<script>`, `<style>`, and at least nav/header/footer on a representative HTML fixture
+- `batch_execute` meta-tool: schema present in `registry_to_definitions`, dispatch returns per-step results, integration test covers a 2-step chain with variable binding
 - SOTA rubric average >= 2.5
-
-## Mapping to 12 Anthropic Principles
-
-| Principle | Addressed by | Cycle |
-|---|---|---|
-| 1 Strategic selection | P3 (descriptions) | cycle 1 |
-| 2 Consolidation | — (kept out; no tool merges in this pass) | — |
-| 3 Distinct purposes | P3 (NOT-usage rules) | cycle 1 |
-| 4 Namespacing | — (git_*, task_*, http_* already prefixed) | — |
-| 5 Unambiguous params | P4 (format_validation_error) | cycle 2 |
-| 6 Response format control | — (deferred; revisit post-convergence) | — |
-| 7 Semantic identifiers | — (tools return human-readable paths already) | — |
-| 8 Actionable errors | P1 (llm_suffix) + P4 | cycles 1-2 |
-| 9 Pagination defaults | — (read has offset/limit; keep) | — |
-| 10 Truncate with guidance | P1 suffix + P2 rule | cycle 1-2 |
-| 11 Onboarding descriptions | P3 | cycle 1 |
-| 12 Minimize context | P2 truncation + P5 should_defer | cycles 2-3 |
-
-Principles 2, 4, 6, 7, 9 are considered already satisfied or explicitly out-of-scope for this pass.

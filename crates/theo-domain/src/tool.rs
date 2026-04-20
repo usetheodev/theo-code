@@ -194,17 +194,35 @@ pub struct ToolParam {
 
 /// Schema describing a tool's input parameters.
 ///
-/// Designed to be converted to an OpenAI-compatible JSON Schema
-/// for LLM tool definitions.
+/// Designed to be converted to an OpenAI/Anthropic-compatible JSON Schema
+/// for LLM tool definitions. The optional `input_examples` field is emitted
+/// as a top-level `examples: [...]` array — matches Anthropic's "Tool Use
+/// Examples" surface and coaches the LLM on how to fill correlated or
+/// nested parameters (reported 72% -> 90% accuracy on complex schemas).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolSchema {
     pub params: Vec<ToolParam>,
+    /// Concrete example invocations — each value is a full arguments object
+    /// the LLM can copy-paste. Omitted from the JSON Schema when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub input_examples: Vec<serde_json::Value>,
 }
 
 impl ToolSchema {
     /// Create a new empty schema (for tools with no parameters).
     pub fn new() -> Self {
-        Self { params: vec![] }
+        Self {
+            params: vec![],
+            input_examples: Vec::new(),
+        }
+    }
+
+    /// Attach one or more example invocations.
+    /// Each example must be a JSON object whose keys correspond to `params`.
+    #[must_use]
+    pub fn with_examples(mut self, examples: Vec<serde_json::Value>) -> Self {
+        self.input_examples = examples;
+        self
     }
 
     /// Convert to a JSON Schema object suitable for LLM tool definitions.
@@ -243,6 +261,12 @@ impl ToolSchema {
         );
         if !required.is_empty() {
             schema.insert("required".to_string(), serde_json::Value::Array(required));
+        }
+        if !self.input_examples.is_empty() {
+            schema.insert(
+                "examples".to_string(),
+                serde_json::Value::Array(self.input_examples.clone()),
+            );
         }
 
         serde_json::Value::Object(schema)
@@ -568,8 +592,7 @@ mod tests {
                     description: "Max lines".to_string(),
                     required: false,
                 },
-            ],
-        };
+            ], input_examples: Vec::new(), };
         let json = schema.to_json_schema();
 
         assert_eq!(json["type"], "object");
@@ -589,8 +612,7 @@ mod tests {
                 param_type: "invalid_type".to_string(),
                 description: "desc".to_string(),
                 required: false,
-            }],
-        };
+            }], input_examples: Vec::new(), };
         assert!(schema.validate().is_err());
     }
 
@@ -602,8 +624,7 @@ mod tests {
                 param_type: "string".to_string(),
                 description: "desc".to_string(),
                 required: false,
-            }],
-        };
+            }], input_examples: Vec::new(), };
         assert!(schema.validate().is_err());
     }
 
@@ -615,8 +636,7 @@ mod tests {
                 param_type: "string".to_string(),
                 description: "".to_string(),
                 required: false,
-            }],
-        };
+            }], input_examples: Vec::new(), };
         assert!(schema.validate().is_err());
     }
 
@@ -628,9 +648,55 @@ mod tests {
                 param_type: "string".to_string(),
                 description: "The command to run".to_string(),
                 required: true,
-            }],
-        };
+            }], input_examples: Vec::new(), };
         assert!(schema.validate().is_ok());
+    }
+
+    // ── input_examples tests ─────────────────────────────────────
+
+    #[test]
+    fn schema_without_examples_omits_examples_key() {
+        let schema = ToolSchema::new();
+        let json = schema.to_json_schema();
+        assert!(
+            json.get("examples").is_none(),
+            "empty examples list must not appear in JSON Schema"
+        );
+    }
+
+    #[test]
+    fn schema_with_examples_emits_examples_array() {
+        let schema = ToolSchema {
+            params: vec![ToolParam {
+                name: "pattern".to_string(),
+                param_type: "string".to_string(),
+                description: "Regex".to_string(),
+                required: true,
+            }],
+            input_examples: vec![
+                serde_json::json!({"pattern": "fn main"}),
+                serde_json::json!({"pattern": "use serde"}),
+            ],
+        };
+        let json = schema.to_json_schema();
+        let examples = json["examples"].as_array().expect("examples is array");
+        assert_eq!(examples.len(), 2);
+        assert_eq!(examples[0]["pattern"], "fn main");
+    }
+
+    #[test]
+    fn schema_with_examples_builder_produces_same_json() {
+        let schema = ToolSchema::new()
+            .with_examples(vec![serde_json::json!({"pattern": "fn"})]);
+        let json = schema.to_json_schema();
+        assert_eq!(json["examples"][0]["pattern"], "fn");
+    }
+
+    #[test]
+    fn schema_deserializes_without_input_examples_field() {
+        let json = r#"{"params":[]}"#;
+        let schema: ToolSchema = serde_json::from_str(json).unwrap();
+        assert!(schema.input_examples.is_empty());
     }
 
     #[test]

@@ -124,6 +124,20 @@ impl Tool for BashTool {
                     required: false,
                 },
             ],
+            input_examples: vec![
+                serde_json::json!({
+                    "command": "cargo test -p theo-domain",
+                    "description": "Run domain tests"
+                }),
+                serde_json::json!({
+                    "command": "git status --short",
+                    "description": "Review uncommitted changes"
+                }),
+                serde_json::json!({
+                    "command": "wc -l crates/theo-domain/src/tool.rs",
+                    "description": "Count lines in a source file"
+                }),
+            ],
         }
     }
 

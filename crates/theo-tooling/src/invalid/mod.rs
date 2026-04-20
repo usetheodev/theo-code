@@ -39,7 +39,8 @@ impl Tool for InvalidTool {
                     required: false,
                 },
             ],
-        }
+        input_examples: Vec::new(),
+    }
     }
 
     fn category(&self) -> ToolCategory {

@@ -52,7 +52,8 @@ impl Tool for WikiQueryTool {
                     required: false,
                 },
             ],
-        }
+        input_examples: Vec::new(),
+    }
     }
 
     fn category(&self) -> ToolCategory {
@@ -180,7 +181,8 @@ impl Tool for WikiIngestTool {
                     required: false,
                 },
             ],
-        }
+        input_examples: Vec::new(),
+    }
     }
 
     fn category(&self) -> ToolCategory {
@@ -267,7 +269,7 @@ impl Tool for WikiGenerateTool {
     }
 
     fn schema(&self) -> ToolSchema {
-        ToolSchema { params: vec![] } // No parameters — operates on current project
+        ToolSchema::new() // No parameters — operates on current project
     }
 
     fn category(&self) -> ToolCategory {

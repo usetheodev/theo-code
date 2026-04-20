@@ -20,7 +20,7 @@ impl Tool for EnvInfoTool {
         ToolCategory::Utility
     }
     fn schema(&self) -> ToolSchema {
-        ToolSchema { params: vec![] }
+        ToolSchema::new()
     }
 
     async fn execute(

@@ -137,6 +137,24 @@ impl Tool for EditTool {
                     required: false,
                 },
             ],
+            input_examples: vec![
+                serde_json::json!({
+                    "filePath": "src/lib.rs",
+                    "oldString": "pub mod old;",
+                    "newString": "pub mod new;"
+                }),
+                serde_json::json!({
+                    "filePath": "src/new.rs",
+                    "oldString": "",
+                    "newString": "pub fn hello() {}\n"
+                }),
+                serde_json::json!({
+                    "filePath": "README.md",
+                    "oldString": "TODO",
+                    "newString": "DONE",
+                    "replaceAll": true
+                }),
+            ],
         }
     }
 

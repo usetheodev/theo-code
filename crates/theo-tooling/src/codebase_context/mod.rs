@@ -69,7 +69,8 @@ impl Tool for CodebaseContextTool {
                     required: false,
                 },
             ],
-        }
+        input_examples: Vec::new(),
+    }
     }
 
     async fn execute(

@@ -57,7 +57,8 @@ impl Tool for WriteTool {
                     required: true,
                 },
             ],
-        }
+        input_examples: Vec::new(),
+    }
     }
 
     fn category(&self) -> ToolCategory {

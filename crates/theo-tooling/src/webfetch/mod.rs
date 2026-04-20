@@ -95,7 +95,8 @@ impl Tool for WebFetchTool {
                 description: "URL to fetch".to_string(),
                 required: true,
             }],
-        }
+        input_examples: Vec::new(),
+    }
     }
 
     fn category(&self) -> ToolCategory {

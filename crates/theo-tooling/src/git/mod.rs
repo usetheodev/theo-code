@@ -46,7 +46,7 @@ impl Tool for GitStatusTool {
         ToolCategory::Utility
     }
     fn schema(&self) -> ToolSchema {
-        ToolSchema { params: vec![] }
+        ToolSchema::new()
     }
 
     async fn execute(
@@ -99,7 +99,8 @@ impl Tool for GitDiffTool {
                     required: false,
                 },
             ],
-        }
+        input_examples: Vec::new(),
+    }
     }
 
     async fn execute(
@@ -157,7 +158,8 @@ impl Tool for GitLogTool {
                 description: "Number of commits to show (default 10)".into(),
                 required: false,
             }],
-        }
+        input_examples: Vec::new(),
+    }
     }
 
     async fn execute(
@@ -216,7 +218,8 @@ impl Tool for GitCommitTool {
                     required: false,
                 },
             ],
-        }
+        input_examples: Vec::new(),
+    }
     }
 
     async fn execute(

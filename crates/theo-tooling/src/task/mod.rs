@@ -66,7 +66,8 @@ impl Tool for TaskTool {
                     required: true,
                 },
             ],
-        }
+        input_examples: Vec::new(),
+    }
     }
 
     fn category(&self) -> ToolCategory {
