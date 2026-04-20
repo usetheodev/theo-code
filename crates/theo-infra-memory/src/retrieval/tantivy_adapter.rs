@@ -117,7 +117,7 @@ mod tests {
                 body: "fn main rust tokio".into(),
             },
         ])
-        .unwrap()
+        .expect("test fixture ok")
     }
 
     #[tokio::test]

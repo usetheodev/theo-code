@@ -47,8 +47,6 @@ mod inner {
 
     pub struct MemoryTantivyIndex {
         index: Index,
-        #[allow(dead_code)]
-        schema: Schema,
         f_slug: Field,
         f_source_type: Field,
         f_body: Field,
@@ -73,7 +71,7 @@ mod inner {
             };
             let schema = schema_builder.build();
 
-            let index = Index::create_in_ram(schema.clone());
+            let index = Index::create_in_ram(schema);
 
             let analyzer = TextAnalyzer::builder(SimpleTokenizer::default())
                 .filter(LowerCaser)
@@ -93,7 +91,6 @@ mod inner {
 
             Ok(Self {
                 index,
-                schema,
                 f_slug,
                 f_source_type,
                 f_body,
@@ -221,26 +218,26 @@ mod inner {
 
         #[test]
         fn build_indexes_all_docs() {
-            let idx = MemoryTantivyIndex::build(&fixtures()).unwrap();
+            let idx = MemoryTantivyIndex::build(&fixtures()).expect("test fixture ok");
             assert_eq!(idx.num_docs(), 4);
         }
 
         #[test]
         fn search_returns_scored_hits_for_matching_body() {
-            let idx = MemoryTantivyIndex::build(&fixtures()).unwrap();
-            let hits = idx.search("ownership", 10, None).unwrap();
+            let idx = MemoryTantivyIndex::build(&fixtures()).expect("test fixture ok");
+            let hits = idx.search("ownership", 10, None).expect("test fixture ok");
             assert!(!hits.is_empty());
             assert!(hits.iter().any(|h| h.slug == "rust-ownership"));
         }
 
         #[test]
         fn source_type_filter_narrows_results() {
-            let idx = MemoryTantivyIndex::build(&fixtures()).unwrap();
+            let idx = MemoryTantivyIndex::build(&fixtures()).expect("test fixture ok");
             // Query term present in both wiki and code docs.
-            let all = idx.search("rust ownership memory", 10, None).unwrap();
+            let all = idx.search("rust ownership memory", 10, None).expect("test fixture ok");
             let wiki_only = idx
                 .search("rust ownership memory", 10, Some("wiki"))
-                .unwrap();
+                .expect("test fixture ok");
             assert!(wiki_only.iter().all(|h| h.source_type == "wiki"));
             assert!(
                 wiki_only.len() <= all.len(),
@@ -250,22 +247,22 @@ mod inner {
 
         #[test]
         fn empty_query_returns_no_hits() {
-            let idx = MemoryTantivyIndex::build(&fixtures()).unwrap();
-            assert!(idx.search("", 10, None).unwrap().is_empty());
-            assert!(idx.search("   ", 10, None).unwrap().is_empty());
+            let idx = MemoryTantivyIndex::build(&fixtures()).expect("test fixture ok");
+            assert!(idx.search("", 10, None).expect("test fixture ok").is_empty());
+            assert!(idx.search("   ", 10, None).expect("test fixture ok").is_empty());
         }
 
         #[test]
         fn non_matching_filter_returns_empty() {
-            let idx = MemoryTantivyIndex::build(&fixtures()).unwrap();
-            let hits = idx.search("ownership", 10, Some("nonexistent-ns")).unwrap();
+            let idx = MemoryTantivyIndex::build(&fixtures()).expect("test fixture ok");
+            let hits = idx.search("ownership", 10, Some("nonexistent-ns")).expect("test fixture ok");
             assert!(hits.is_empty());
         }
 
         #[test]
         fn hits_to_map_preserves_scores() {
-            let idx = MemoryTantivyIndex::build(&fixtures()).unwrap();
-            let hits = idx.search("ownership", 10, None).unwrap();
+            let idx = MemoryTantivyIndex::build(&fixtures()).expect("test fixture ok");
+            let hits = idx.search("ownership", 10, None).expect("test fixture ok");
             let map = hits_to_map(&hits);
             assert_eq!(map.len(), hits.len());
             for h in &hits {
