@@ -7,10 +7,12 @@
 //!
 //! Plan: `outputs/smart-model-routing-plan.md`.
 
+pub mod config;
 pub mod keywords;
 pub mod metrics;
 pub mod pricing;
 pub mod rules;
 
+pub use config::{RoutingConfig, SlotConfig, env_disables_routing};
 pub use pricing::{PricingError, PricingTable};
 pub use rules::RuleBasedRouter;

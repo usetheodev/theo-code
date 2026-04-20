@@ -16,3 +16,4 @@ bytes = "1"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
+toml.workspace = true
