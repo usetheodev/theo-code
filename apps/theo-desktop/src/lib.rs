@@ -39,6 +39,15 @@ pub fn run() {
             commands::anthropic_auth::anthropic_logout,
             commands::anthropic_auth::anthropic_apply_to_config,
             commands::anthropic_auth::anthropic_models,
+            // Memory commands
+            commands::memory::get_episodes,
+            commands::memory::dismiss_episode,
+            commands::memory::list_wiki_pages,
+            commands::memory::get_wiki_page,
+            commands::memory::run_wiki_lint,
+            commands::memory::trigger_wiki_compile,
+            commands::memory::get_memory_settings,
+            commands::memory::save_memory_settings,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Theo Code");
