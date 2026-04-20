@@ -981,7 +981,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
-    use crate::tree_sitter;
+    
 
     fn parse_and_extract(source: &str, language: SupportedLanguage) -> Vec<DataModel> {
         let path = PathBuf::from("test_file");

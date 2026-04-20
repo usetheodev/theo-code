@@ -39,7 +39,8 @@ impl Tool for InvalidTool {
                     required: false,
                 },
             ],
-        }
+        input_examples: Vec::new(),
+    }
     }
 
     fn category(&self) -> ToolCategory {
@@ -60,6 +61,7 @@ impl Tool for InvalidTool {
             output: format!("Error: {error}"),
             metadata: serde_json::json!({}),
             attachments: None,
+            llm_suffix: None,
         })
     }
 }

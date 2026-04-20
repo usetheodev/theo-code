@@ -241,14 +241,6 @@ fn mrr(returned_files: &[String], expected: &[&str]) -> f64 {
     0.0
 }
 
-/// Extract ranked file paths directly from a score map (no assembly expansion).
-/// Used by RRF eval to avoid community dilution.
-fn extract_files_from_scores(scores: &std::collections::HashMap<String, f64>) -> Vec<String> {
-    let mut sorted: Vec<_> = scores.iter().collect();
-    sorted.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap_or(std::cmp::Ordering::Equal));
-    sorted.into_iter().map(|(k, _)| k.clone()).collect()
-}
-
 /// Extract unique file paths from assembly context items, ordered by item score.
 fn extract_files_from_content(
     items: &[theo_engine_retrieval::assembly::ContextItem],
@@ -367,7 +359,7 @@ fn eval_graphctx_retrieval_quality() {
         );
     }
 
-    let scorer = MultiSignalScorer::build(&communities, &graph);
+    let _scorer = MultiSignalScorer::build(&communities, &graph);
 
     // Run eval
     let queries = ground_truth();

@@ -619,7 +619,7 @@ fn is_csharp_interface_name(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tree_sitter::{self, SupportedLanguage};
+    use crate::tree_sitter::SupportedLanguage;
     use std::path::PathBuf;
 
     fn parse_and_extract(source: &str, language: SupportedLanguage) -> Vec<Reference> {

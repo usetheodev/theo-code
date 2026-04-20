@@ -53,7 +53,8 @@ impl Tool for LspTool {
                     required: true,
                 },
             ],
-        }
+        input_examples: Vec::new(),
+    }
     }
 
     fn category(&self) -> ToolCategory {

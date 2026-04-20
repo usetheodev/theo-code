@@ -435,7 +435,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
-    use crate::tree_sitter;
+    
 
     fn extract_go(source: &str) -> FileExtraction {
         let path = PathBuf::from("main.go");

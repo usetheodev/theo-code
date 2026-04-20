@@ -665,7 +665,7 @@ pub fn tokenise(text: &str) -> Vec<String>
             is_stale: false,
             page_kind: "module".into(),
         }];
-        let (allow, conf, _) =
+        let (_allow, conf, _) =
             evaluate_direct_return(&results, "strong auth token", DEFAULT_BM25_FLOOR);
         assert!(conf > 0.0, "confidence should be positive for strong match");
         // May or may not pass category threshold depending on query class

@@ -77,6 +77,7 @@ impl Tool for HttpGetTool {
                     required: false,
                 },
             ],
+            input_examples: Vec::new(),
         }
     }
 
@@ -132,6 +133,7 @@ impl Tool for HttpGetTool {
             output: format!("Status: {status}\n\n{body_display}"),
             metadata: serde_json::json!({"status": status, "url": url}),
             attachments: None,
+            llm_suffix: None,
         })
     }
 }
@@ -175,6 +177,7 @@ impl Tool for HttpPostTool {
                     required: false,
                 },
             ],
+            input_examples: Vec::new(),
         }
     }
 
@@ -221,6 +224,7 @@ impl Tool for HttpPostTool {
             output: format!("Status: {status}\n\n{resp_body}"),
             metadata: serde_json::json!({"status": status, "url": url}),
             attachments: None,
+            llm_suffix: None,
         })
     }
 }

@@ -6,4 +6,6 @@
 pub mod caps;
 pub mod resize;
 
+pub mod caps;
+
 pub use caps::TtyCaps;

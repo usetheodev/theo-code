@@ -96,7 +96,16 @@ impl Tool for EditTool {
     }
 
     fn description(&self) -> &str {
-        "Replace text in a file"
+        concat!(
+            "Replace `oldString` with `newString` in `filePath`. ",
+            "The match must be exact (whitespace and punctuation included) and unique unless `replaceAll: true`. ",
+            "Use this for small, surgical changes where you know the exact current text. ",
+            "Use `write` instead when creating a new file from scratch or fully overwriting one. ",
+            "Use `apply_patch` instead when a change spans many files or a large diff. ",
+            "Pass an empty `oldString` to CREATE a new file with `newString` as its contents. ",
+            "If the match is not unique, add more surrounding context to `oldString` OR set `replaceAll: true` deliberately. ",
+            "Example: edit({filePath: 'src/lib.rs', oldString: 'pub mod old;', newString: 'pub mod new;'})."
+        )
     }
 
     fn schema(&self) -> ToolSchema {
@@ -128,11 +137,67 @@ impl Tool for EditTool {
                     required: false,
                 },
             ],
+            input_examples: vec![
+                serde_json::json!({
+                    "filePath": "src/lib.rs",
+                    "oldString": "pub mod old;",
+                    "newString": "pub mod new;"
+                }),
+                serde_json::json!({
+                    "filePath": "src/new.rs",
+                    "oldString": "",
+                    "newString": "pub fn hello() {}\n"
+                }),
+                serde_json::json!({
+                    "filePath": "README.md",
+                    "oldString": "TODO",
+                    "newString": "DONE",
+                    "replaceAll": true
+                }),
+            ],
         }
     }
 
     fn category(&self) -> ToolCategory {
         ToolCategory::FileOps
+    }
+
+    /// Coach the agent when a common edit-call mistake shows up.
+    /// Anthropic principle 8; ref: opendev `BaseTool::format_validation_error`.
+    fn format_validation_error(
+        &self,
+        error: &ToolError,
+        _args: &serde_json::Value,
+    ) -> Option<String> {
+        let msg = error.to_string();
+        if msg.contains("filePath") {
+            Some(
+                "Provide `filePath` as a string (absolute or project-relative). \
+                 Example: edit({filePath: 'src/lib.rs', oldString: 'pub mod old;', newString: 'pub mod new;'})."
+                    .to_string(),
+            )
+        } else if msg.contains("oldString") || msg.contains("newString") {
+            Some(
+                "`oldString` and `newString` are both required strings and must differ. \
+                 To CREATE a new file, pass oldString: '' and put the file content in newString. \
+                 Example: edit({filePath: 'src/new.rs', oldString: '', newString: 'pub fn hello() {}'})."
+                    .to_string(),
+            )
+        } else if msg.contains("old_string and new_string are identical") {
+            Some(
+                "`oldString` equals `newString` — no change would happen. \
+                 If you intended to insert without removing, include the surrounding context in both so the diff is non-empty."
+                    .to_string(),
+            )
+        } else if msg.contains("not found in the file") {
+            Some(
+                "The exact `oldString` is not present. Re-read the file to copy the text verbatim (whitespace, tabs, quotes matter). \
+                 If the pattern appears multiple times and you want them all, set replaceAll: true."
+                    .to_string(),
+            )
+        } else {
+            None
+        }
     }
 
     async fn execute(
@@ -181,6 +246,13 @@ impl Tool for EditTool {
                     },
                 }),
                 attachments: None,
+                // Coach the model: new files often need to be wired into the
+                // build (module decl, import, Cargo.toml). Follow-up reminder.
+                llm_suffix: Some(
+                    "New file created. If this is Rust source, add the `pub mod` line \
+                     in the parent `lib.rs` / `mod.rs` so it participates in the build."
+                        .to_string(),
+                ),
             });
         }
 
@@ -242,6 +314,7 @@ impl Tool for EditTool {
                 },
             }),
             attachments: None,
+            llm_suffix: None,
         })
     }
 }

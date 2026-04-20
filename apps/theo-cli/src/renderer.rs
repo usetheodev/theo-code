@@ -43,7 +43,6 @@ impl CliRenderer {
             streaming: Mutex::new(StreamingMarkdownRenderer::new(caps)),
         }
     }
-
     /// Flush any buffered streaming markdown state. Call at turn
     /// boundaries to avoid leaking unclosed tokens across messages.
     fn flush_streaming(&self) {

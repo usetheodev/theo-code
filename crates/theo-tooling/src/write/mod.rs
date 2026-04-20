@@ -57,7 +57,8 @@ impl Tool for WriteTool {
                     required: true,
                 },
             ],
-        }
+        input_examples: Vec::new(),
+    }
     }
 
     fn category(&self) -> ToolCategory {
@@ -99,6 +100,18 @@ impl Tool for WriteTool {
 
         let title = Self::relative_path(&resolved, &ctx.project_dir);
 
+        // Coach the model after creating a new file: builds usually need
+        // the new module wired into its parent.
+        let llm_suffix = if !exists {
+            Some(
+                "New file created. If it is a Rust source file, add `pub mod <name>;` in the \
+                 parent `lib.rs` / `mod.rs` so it participates in the build."
+                    .to_string(),
+            )
+        } else {
+            None
+        };
+
         Ok(ToolOutput {
             title,
             output: format!(
@@ -111,6 +124,7 @@ impl Tool for WriteTool {
                 "exists": exists,
             }),
             attachments: None,
+            llm_suffix,
         })
     }
 }

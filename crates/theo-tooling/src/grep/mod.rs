@@ -26,7 +26,15 @@ impl Tool for GrepTool {
     }
 
     fn description(&self) -> &str {
-        "Search file contents using regex patterns"
+        concat!(
+            "Search file contents with a regex pattern. Returns file:line:match for each hit. ",
+            "Use this when you know part of the text (symbol name, error string, literal constant) and want every occurrence. ",
+            "Use `glob` instead when searching by FILENAME pattern (e.g. '**/*.rs'). ",
+            "Use `read` instead when you already know the file path and want its full contents. ",
+            "Use `codebase_context` for structural relationships (callers, callees, definitions) rather than text matches. ",
+            "Scope with `path` to a subdir and `glob` to a filename filter — a broad regex over the whole workspace can easily truncate; narrow first. ",
+            "Example: grep({pattern: 'fn main', path: 'crates/theo-cli', glob: '*.rs'})."
+        )
     }
 
     fn schema(&self) -> ToolSchema {
@@ -51,11 +59,47 @@ impl Tool for GrepTool {
                     required: false,
                 },
             ],
+            input_examples: vec![
+                serde_json::json!({"pattern": "fn main"}),
+                serde_json::json!({
+                    "pattern": "TODO|FIXME",
+                    "path": "crates/theo-cli",
+                    "include": "*.rs"
+                }),
+                serde_json::json!({"pattern": "impl Default for "}),
+            ],
         }
     }
 
     fn category(&self) -> ToolCategory {
         ToolCategory::Search
+    }
+
+    /// Grep output is a list of matches — tail is more informative than head
+    /// when broad patterns generate thousands of hits. Ref: opendev
+    /// sanitizer.rs:27-53.
+    fn truncation_rule(&self) -> Option<theo_domain::tool::TruncationRule> {
+        Some(theo_domain::tool::TruncationRule {
+            max_chars: 4_000,
+            strategy: theo_domain::tool::TruncationStrategy::Tail,
+        })
+    }
+
+    fn format_validation_error(
+        &self,
+        error: &ToolError,
+        _args: &serde_json::Value,
+    ) -> Option<String> {
+        let msg = error.to_string();
+        if msg.contains("pattern") {
+            Some(
+                "Provide `pattern` as a regex string. Narrow with `path` to a subdir and `include` to a filename glob. \
+                 Example: grep({pattern: 'fn main', path: 'crates/theo-cli', include: '*.rs'})."
+                    .to_string(),
+            )
+        } else {
+            None
+        }
     }
 
     async fn execute(
@@ -104,6 +148,12 @@ impl Tool for GrepTool {
                 output: "No files found".to_string(),
                 metadata: serde_json::json!({"matches": 0, "truncated": false}),
                 attachments: None,
+                // Coach the model to broaden / check case / widen path.
+                llm_suffix: Some(
+                    "Zero matches. Consider: (1) removing `path` to search the whole repo, \
+                     (2) loosening the regex, (3) using `codebase_context` for symbol lookup."
+                        .to_string(),
+                ),
             });
         }
 
@@ -143,6 +193,7 @@ impl Tool for GrepTool {
                 "truncated": truncated,
             }),
             attachments: None,
+            llm_suffix: None,
         })
     }
 }

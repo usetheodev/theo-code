@@ -1,0 +1,15 @@
+# Pin the C toolchain to the system gcc so crates that invoke cc-rs
+# (tree-sitter-*, ring, zstd, ort-sys, etc.) don't accidentally pick up a
+# shim like zig-bootstrap's clang, which fails to parse the full Linux
+# target triple (breaks ring@0.17's build script) and omits libstdc++
+# (breaks ort-sys's ONNX Runtime C++ linkage).
+[env]
+CC_x86_64-unknown-linux-gnu = "/usr/bin/cc"
+CXX_x86_64-unknown-linux-gnu = "/usr/bin/g++"
+AR_x86_64-unknown-linux-gnu = "/usr/bin/ar"
+
+# Tell rustc to use the system `cc` as linker driver so that C++ crates
+# (ONNX Runtime via ort-sys) resolve libstdc++ the same way cc-rs does.
+[target.x86_64-unknown-linux-gnu]
+linker = "/usr/bin/cc"
+rustflags = ["-C", "link-arg=-lstdc++"]

@@ -46,7 +46,7 @@ impl Tool for GitStatusTool {
         ToolCategory::Utility
     }
     fn schema(&self) -> ToolSchema {
-        ToolSchema { params: vec![] }
+        ToolSchema::new()
     }
 
     async fn execute(
@@ -61,6 +61,7 @@ impl Tool for GitStatusTool {
             output,
             metadata: serde_json::json!({}),
             attachments: None,
+            llm_suffix: None,
         })
     }
 }
@@ -98,6 +99,7 @@ impl Tool for GitDiffTool {
                     required: false,
                 },
             ],
+            input_examples: Vec::new(),
         }
     }
 
@@ -126,6 +128,7 @@ impl Tool for GitDiffTool {
             output,
             metadata: serde_json::json!({}),
             attachments: None,
+            llm_suffix: None,
         })
     }
 }
@@ -155,6 +158,7 @@ impl Tool for GitLogTool {
                 description: "Number of commits to show (default 10)".into(),
                 required: false,
             }],
+            input_examples: Vec::new(),
         }
     }
 
@@ -176,6 +180,7 @@ impl Tool for GitLogTool {
             output,
             metadata: serde_json::json!({}),
             attachments: None,
+            llm_suffix: None,
         })
     }
 }
@@ -213,6 +218,7 @@ impl Tool for GitCommitTool {
                     required: false,
                 },
             ],
+            input_examples: Vec::new(),
         }
     }
 
@@ -254,6 +260,7 @@ impl Tool for GitCommitTool {
             output,
             metadata: serde_json::json!({"message": message}),
             attachments: None,
+            llm_suffix: None,
         })
     }
 }

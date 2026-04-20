@@ -151,7 +151,8 @@ impl Tool for TaskCreateTool {
                 description: "Description of the task".to_string(),
                 required: true,
             }],
-        }
+        input_examples: Vec::new(),
+    }
     }
 
     fn category(&self) -> ToolCategory {
@@ -180,6 +181,7 @@ impl Tool for TaskCreateTool {
                 "content": content,
             }),
             attachments: None,
+            llm_suffix: None,
         })
     }
 }
@@ -222,7 +224,8 @@ impl Tool for TaskUpdateTool {
                     required: true,
                 },
             ],
-        }
+        input_examples: Vec::new(),
+    }
     }
 
     fn category(&self) -> ToolCategory {
@@ -274,6 +277,7 @@ impl Tool for TaskUpdateTool {
                 "status": status_str,
             }),
             attachments: None,
+            llm_suffix: None,
         })
     }
 }

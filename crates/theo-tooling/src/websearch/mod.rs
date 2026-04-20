@@ -31,7 +31,8 @@ impl Tool for WebSearchTool {
                 description: "Search query".to_string(),
                 required: true,
             }],
-        }
+        input_examples: Vec::new(),
+    }
     }
 
     fn category(&self) -> ToolCategory {

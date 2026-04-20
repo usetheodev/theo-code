@@ -50,6 +50,7 @@ impl Tool for ShellTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             params: self.params.clone(),
+            input_examples: Vec::new(),
         }
     }
 
@@ -101,6 +102,7 @@ impl Tool for ShellTool {
                         output: stdout,
                         metadata: serde_json::json!({"plugin_tool": self.name}),
                         attachments: None,
+                        llm_suffix: None,
                     })
                 } else {
                     let msg = if stderr.is_empty() { stdout } else { stderr };

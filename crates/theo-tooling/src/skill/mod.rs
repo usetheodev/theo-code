@@ -52,7 +52,8 @@ impl Tool for SkillTool {
                 description: "Name of the skill to load".to_string(),
                 required: true,
             }],
-        }
+        input_examples: Vec::new(),
+    }
     }
 
     fn category(&self) -> ToolCategory {
@@ -112,6 +113,7 @@ impl Tool for SkillTool {
                 "dir": skill.dir.display().to_string(),
             }),
             attachments: None,
+            llm_suffix: None,
         })
     }
 }

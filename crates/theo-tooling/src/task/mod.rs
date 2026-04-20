@@ -66,7 +66,8 @@ impl Tool for TaskTool {
                     required: true,
                 },
             ],
-        }
+        input_examples: Vec::new(),
+    }
     }
 
     fn category(&self) -> ToolCategory {
@@ -89,6 +90,7 @@ impl Tool for TaskTool {
             output: format!("Task spawned with prompt: {prompt}"),
             metadata: serde_json::json!({}),
             attachments: None,
+            llm_suffix: None,
         })
     }
 }

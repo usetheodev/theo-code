@@ -7,7 +7,13 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-/// Result of a tool execution
+/// Result of a tool execution.
+///
+/// The optional `llm_suffix` field carries text appended to the output only
+/// when the result is serialized for the model (hidden from the user UI).
+/// Tools use it to coach the agent on retries or follow-up actions — see
+/// Anthropic "Writing tools for agents" principle 8 (actionable errors)
+/// and opendev `ToolResult::with_llm_suffix` (traits.rs:128-176).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolOutput {
     pub title: String,
@@ -15,6 +21,65 @@ pub struct ToolOutput {
     pub metadata: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attachments: Option<Vec<FileAttachment>>,
+    /// Model-only trailing text (hidden from UI). Used for retry hints and
+    /// truncation guidance. `None` by default; populate via `with_llm_suffix`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub llm_suffix: Option<String>,
+}
+
+impl Default for ToolOutput {
+    fn default() -> Self {
+        Self {
+            title: String::new(),
+            output: String::new(),
+            metadata: serde_json::Value::Null,
+            attachments: None,
+            llm_suffix: None,
+        }
+    }
+}
+
+impl ToolOutput {
+    /// Create a minimal `ToolOutput` with title and textual output.
+    pub fn new(title: impl Into<String>, output: impl Into<String>) -> Self {
+        Self {
+            title: title.into(),
+            output: output.into(),
+            ..Self::default()
+        }
+    }
+
+    /// Attach structured metadata.
+    #[must_use]
+    pub fn with_metadata(mut self, metadata: serde_json::Value) -> Self {
+        self.metadata = metadata;
+        self
+    }
+
+    /// Attach files (images, PDFs) for downstream rendering.
+    #[must_use]
+    pub fn with_attachments(mut self, attachments: Vec<FileAttachment>) -> Self {
+        self.attachments = Some(attachments);
+        self
+    }
+
+    /// Attach a trailing suffix visible only to the model.
+    /// Used to coach retries, document truncation, and name follow-up tools.
+    #[must_use]
+    pub fn with_llm_suffix(mut self, suffix: impl Into<String>) -> Self {
+        self.llm_suffix = Some(suffix.into());
+        self
+    }
+
+    /// Render for the model: `output` followed by a blank line and
+    /// `llm_suffix` when present. Users see only `output` (via `title`/UI).
+    #[must_use]
+    pub fn model_text(&self) -> String {
+        match &self.llm_suffix {
+            Some(suffix) if !suffix.is_empty() => format!("{}\n\n{}", self.output, suffix),
+            _ => self.output.clone(),
+        }
+    }
 }
 
 /// Partial result emitted during tool execution.
@@ -36,6 +101,61 @@ pub struct FileAttachment {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mime: Option<String>,
     pub url: String,
+}
+
+// ── Truncation Rule ─────────────────────────────────────────────────
+
+/// Strategy the sanitizer uses when a tool output exceeds `max_chars`.
+///
+/// Ref: opendev `TruncationStrategy` (traits.rs:534-542, sanitizer.rs:27-53).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TruncationStrategy {
+    /// Keep the first `max_chars` characters (best for reads, start of files).
+    Head,
+    /// Keep the last `max_chars` characters (best for shells, error traces).
+    Tail,
+    /// Keep the first `head` and last `tail` characters, joined by an elision marker.
+    HeadTail { head: usize, tail: usize },
+}
+
+/// Per-tool rule the sanitizer consults before appending output to the LLM
+/// message stream. Tools return `Option<TruncationRule>` from `truncation_rule()`;
+/// `None` disables sanitizer-level truncation (the tool still owns its own limits).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TruncationRule {
+    pub max_chars: usize,
+    pub strategy: TruncationStrategy,
+}
+
+impl TruncationRule {
+    /// Apply the rule to `input`, returning `None` if `input` already fits.
+    /// The returned string includes an inline `[truncated: N of M chars]`
+    /// marker so the agent can recognise the shortening.
+    pub fn apply(&self, input: &str) -> Option<String> {
+        let total = input.chars().count();
+        if total <= self.max_chars {
+            return None;
+        }
+        let marker = format!("\n[truncated: showing bounded window of {total} chars]\n");
+        let out = match self.strategy {
+            TruncationStrategy::Head => {
+                let head: String = input.chars().take(self.max_chars).collect();
+                format!("{head}{marker}")
+            }
+            TruncationStrategy::Tail => {
+                let skip = total.saturating_sub(self.max_chars);
+                let tail: String = input.chars().skip(skip).collect();
+                format!("{marker}{tail}")
+            }
+            TruncationStrategy::HeadTail { head, tail } => {
+                let head_s: String = input.chars().take(head).collect();
+                let tail_s: String = input.chars().skip(total.saturating_sub(tail)).collect();
+                format!("{head_s}{marker}{tail_s}")
+            }
+        };
+        Some(out)
+    }
 }
 
 // ── Tool Schema & Category ──────────────────────────────────────────
@@ -74,17 +194,35 @@ pub struct ToolParam {
 
 /// Schema describing a tool's input parameters.
 ///
-/// Designed to be converted to an OpenAI-compatible JSON Schema
-/// for LLM tool definitions.
+/// Designed to be converted to an OpenAI/Anthropic-compatible JSON Schema
+/// for LLM tool definitions. The optional `input_examples` field is emitted
+/// as a top-level `examples: [...]` array — matches Anthropic's "Tool Use
+/// Examples" surface and coaches the LLM on how to fill correlated or
+/// nested parameters (reported 72% -> 90% accuracy on complex schemas).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolSchema {
     pub params: Vec<ToolParam>,
+    /// Concrete example invocations — each value is a full arguments object
+    /// the LLM can copy-paste. Omitted from the JSON Schema when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub input_examples: Vec<serde_json::Value>,
 }
 
 impl ToolSchema {
     /// Create a new empty schema (for tools with no parameters).
     pub fn new() -> Self {
-        Self { params: vec![] }
+        Self {
+            params: vec![],
+            input_examples: Vec::new(),
+        }
+    }
+
+    /// Attach one or more example invocations.
+    /// Each example must be a JSON object whose keys correspond to `params`.
+    #[must_use]
+    pub fn with_examples(mut self, examples: Vec<serde_json::Value>) -> Self {
+        self.input_examples = examples;
+        self
     }
 
     /// Convert to a JSON Schema object suitable for LLM tool definitions.
@@ -123,6 +261,12 @@ impl ToolSchema {
         );
         if !required.is_empty() {
             schema.insert("required".to_string(), serde_json::Value::Array(required));
+        }
+        if !self.input_examples.is_empty() {
+            schema.insert(
+                "examples".to_string(),
+                serde_json::Value::Array(self.input_examples.clone()),
+            );
         }
 
         serde_json::Value::Object(schema)
@@ -290,6 +434,61 @@ pub trait Tool: Send + Sync {
         false
     }
 
+    /// If `true`, this tool is omitted from the default tool definitions
+    /// shown to the agent — the agent discovers it by calling the
+    /// `tool_search` meta-tool with a keyword that matches `search_hint`.
+    ///
+    /// Use sparingly: a deferred tool costs one extra round-trip to surface,
+    /// so defer only tools that are rarely needed AND have expensive schemas.
+    /// Default `false` (tool is always visible). Anthropic principle 12
+    /// (minimize context overhead). Ref: opendev `should_defer`
+    /// (traits.rs:547-575).
+    fn should_defer(&self) -> bool {
+        false
+    }
+
+    /// Short keyword phrase used by `tool_search` to match deferred tools.
+    /// Should contain the verbs an agent would use when describing the task
+    /// (e.g. "apply multi-file patch diff", "fetch web url contents").
+    /// Returning `None` means the tool is only matched by its id.
+    fn search_hint(&self) -> Option<&str> {
+        None
+    }
+
+    /// Per-tool truncation rule enforced by the agent-runtime sanitizer.
+    ///
+    /// Return `Some(TruncationRule)` to cap the output length for this tool —
+    /// the sanitizer applies the rule AFTER `execute` returns and BEFORE the
+    /// message reaches the LLM. Tools that already truncate internally (e.g.
+    /// `bash` via `theo_domain::truncate`) can return `None`.
+    ///
+    /// The `llm_suffix` is applied after truncation, so coaching is never
+    /// cut off. Anthropic principles 10 (truncate with guidance) and 12
+    /// (minimize context overhead). Ref: opendev `BaseTool::truncation_rule`
+    /// (traits.rs:534-542) and `ToolResultSanitizer` (sanitizer.rs:27-53).
+    fn truncation_rule(&self) -> Option<TruncationRule> {
+        None
+    }
+
+    /// Coach the agent when argument validation fails.
+    ///
+    /// Return `Some(msg)` to replace the raw `ToolError::InvalidArgs` /
+    /// `ToolError::Validation` string with an onboarding-style message that
+    /// names the offending parameter, shows the expected type, and gives a
+    /// concrete example. Return `None` (default) to keep the raw error.
+    ///
+    /// The default is `None` — opt-in, so unmigrated tools are unaffected.
+    ///
+    /// Anthropic "Writing tools for agents" principle 8 (actionable errors).
+    /// Ref: opendev `BaseTool::format_validation_error` (traits.rs:444-447).
+    fn format_validation_error(
+        &self,
+        _error: &crate::error::ToolError,
+        _args: &serde_json::Value,
+    ) -> Option<String> {
+        None
+    }
+
     /// Execute the tool with given arguments and context
     async fn execute(
         &self,
@@ -393,8 +592,7 @@ mod tests {
                     description: "Max lines".to_string(),
                     required: false,
                 },
-            ],
-        };
+            ], input_examples: Vec::new(), };
         let json = schema.to_json_schema();
 
         assert_eq!(json["type"], "object");
@@ -414,8 +612,7 @@ mod tests {
                 param_type: "invalid_type".to_string(),
                 description: "desc".to_string(),
                 required: false,
-            }],
-        };
+            }], input_examples: Vec::new(), };
         assert!(schema.validate().is_err());
     }
 
@@ -427,8 +624,7 @@ mod tests {
                 param_type: "string".to_string(),
                 description: "desc".to_string(),
                 required: false,
-            }],
-        };
+            }], input_examples: Vec::new(), };
         assert!(schema.validate().is_err());
     }
 
@@ -440,8 +636,7 @@ mod tests {
                 param_type: "string".to_string(),
                 description: "".to_string(),
                 required: false,
-            }],
-        };
+            }], input_examples: Vec::new(), };
         assert!(schema.validate().is_err());
     }
 
@@ -453,9 +648,55 @@ mod tests {
                 param_type: "string".to_string(),
                 description: "The command to run".to_string(),
                 required: true,
-            }],
-        };
+            }], input_examples: Vec::new(), };
         assert!(schema.validate().is_ok());
+    }
+
+    // ── input_examples tests ─────────────────────────────────────
+
+    #[test]
+    fn schema_without_examples_omits_examples_key() {
+        let schema = ToolSchema::new();
+        let json = schema.to_json_schema();
+        assert!(
+            json.get("examples").is_none(),
+            "empty examples list must not appear in JSON Schema"
+        );
+    }
+
+    #[test]
+    fn schema_with_examples_emits_examples_array() {
+        let schema = ToolSchema {
+            params: vec![ToolParam {
+                name: "pattern".to_string(),
+                param_type: "string".to_string(),
+                description: "Regex".to_string(),
+                required: true,
+            }],
+            input_examples: vec![
+                serde_json::json!({"pattern": "fn main"}),
+                serde_json::json!({"pattern": "use serde"}),
+            ],
+        };
+        let json = schema.to_json_schema();
+        let examples = json["examples"].as_array().expect("examples is array");
+        assert_eq!(examples.len(), 2);
+        assert_eq!(examples[0]["pattern"], "fn main");
+    }
+
+    #[test]
+    fn schema_with_examples_builder_produces_same_json() {
+        let schema = ToolSchema::new()
+            .with_examples(vec![serde_json::json!({"pattern": "fn"})]);
+        let json = schema.to_json_schema();
+        assert_eq!(json["examples"][0]["pattern"], "fn");
+    }
+
+    #[test]
+    fn schema_deserializes_without_input_examples_field() {
+        let json = r#"{"params":[]}"#;
+        let schema: ToolSchema = serde_json::from_str(json).unwrap();
+        assert!(schema.input_examples.is_empty());
     }
 
     #[test]
@@ -575,6 +816,234 @@ mod tests {
     fn supports_streaming_default_returns_false() {
         let tool = IdentityTool;
         assert!(!tool.supports_streaming());
+    }
+
+    // ── should_defer / search_hint tests ─────────────────────────
+
+    #[test]
+    fn should_defer_default_is_false() {
+        let tool = IdentityTool;
+        assert!(!tool.should_defer());
+    }
+
+    #[test]
+    fn search_hint_default_is_none() {
+        let tool = IdentityTool;
+        assert!(tool.search_hint().is_none());
+    }
+
+    struct DeferredTool;
+
+    #[async_trait]
+    impl Tool for DeferredTool {
+        fn id(&self) -> &str {
+            "deferred"
+        }
+        fn description(&self) -> &str {
+            "rarely-used tool, only surfaced via tool_search"
+        }
+        fn should_defer(&self) -> bool {
+            true
+        }
+        fn search_hint(&self) -> Option<&str> {
+            Some("wiki knowledge base lookup")
+        }
+        async fn execute(
+            &self,
+            _args: serde_json::Value,
+            _ctx: &ToolContext,
+            _perm: &mut PermissionCollector,
+        ) -> Result<ToolOutput, ToolError> {
+            unreachable!()
+        }
+    }
+
+    #[test]
+    fn deferred_tool_overrides_defaults() {
+        let tool = DeferredTool;
+        assert!(tool.should_defer());
+        assert_eq!(tool.search_hint(), Some("wiki knowledge base lookup"));
+    }
+
+    // ── TruncationRule tests ─────────────────────────────────────
+
+    #[test]
+    fn truncation_rule_returns_none_when_input_fits() {
+        let rule = TruncationRule {
+            max_chars: 100,
+            strategy: TruncationStrategy::Head,
+        };
+        assert!(rule.apply("short").is_none());
+    }
+
+    #[test]
+    fn truncation_rule_head_keeps_prefix() {
+        let rule = TruncationRule {
+            max_chars: 5,
+            strategy: TruncationStrategy::Head,
+        };
+        let out = rule.apply("abcdefghij").unwrap();
+        assert!(out.starts_with("abcde"));
+        assert!(out.contains("[truncated"));
+    }
+
+    #[test]
+    fn truncation_rule_tail_keeps_suffix() {
+        let rule = TruncationRule {
+            max_chars: 5,
+            strategy: TruncationStrategy::Tail,
+        };
+        let out = rule.apply("abcdefghij").unwrap();
+        assert!(out.ends_with("fghij"));
+        assert!(out.contains("[truncated"));
+    }
+
+    #[test]
+    fn truncation_rule_headtail_keeps_both_ends() {
+        let rule = TruncationRule {
+            max_chars: 6,
+            strategy: TruncationStrategy::HeadTail { head: 3, tail: 3 },
+        };
+        let out = rule.apply("abcdefghij").unwrap();
+        assert!(out.starts_with("abc"));
+        assert!(out.ends_with("hij"));
+        assert!(!out.contains("defg"));
+    }
+
+    #[test]
+    fn tool_truncation_rule_default_is_none() {
+        let tool = IdentityTool;
+        assert!(tool.truncation_rule().is_none());
+    }
+
+    // ── format_validation_error tests ────────────────────────────
+
+    struct CoachingTool;
+
+    #[async_trait]
+    impl Tool for CoachingTool {
+        fn id(&self) -> &str {
+            "coaching"
+        }
+        fn description(&self) -> &str {
+            "tool that coaches on validation errors"
+        }
+        fn format_validation_error(
+            &self,
+            error: &crate::error::ToolError,
+            _args: &serde_json::Value,
+        ) -> Option<String> {
+            let msg = error.to_string();
+            if msg.contains("filePath") {
+                Some(
+                    "Missing `filePath`. Provide an absolute or project-relative path, \
+                     e.g. coaching({filePath: 'src/lib.rs'})."
+                        .to_string(),
+                )
+            } else {
+                None
+            }
+        }
+        async fn execute(
+            &self,
+            _args: serde_json::Value,
+            _ctx: &ToolContext,
+            _perm: &mut PermissionCollector,
+        ) -> Result<ToolOutput, ToolError> {
+            unreachable!()
+        }
+    }
+
+    #[test]
+    fn format_validation_error_default_returns_none() {
+        let tool = IdentityTool;
+        let err = ToolError::InvalidArgs("Missing required field: filePath".to_string());
+        assert!(
+            tool.format_validation_error(&err, &serde_json::Value::Null)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn format_validation_error_override_receives_error_and_args() {
+        let tool = CoachingTool;
+        let err = ToolError::InvalidArgs("Missing required field: filePath".to_string());
+        let args = serde_json::json!({});
+        let coached = tool.format_validation_error(&err, &args).unwrap();
+        assert!(coached.contains("filePath"));
+        assert!(coached.contains("Example") || coached.contains("e.g."));
+    }
+
+    #[test]
+    fn format_validation_error_override_declines_unrecognized_errors() {
+        let tool = CoachingTool;
+        let err = ToolError::InvalidArgs("Missing required field: other".to_string());
+        assert!(
+            tool.format_validation_error(&err, &serde_json::Value::Null)
+                .is_none(),
+            "overrides should only coach on errors they recognize"
+        );
+    }
+
+    // ── llm_suffix / ToolOutput builder tests ────────────────────
+
+    #[test]
+    fn tool_output_new_leaves_suffix_none() {
+        let out = ToolOutput::new("title", "body");
+        assert_eq!(out.title, "title");
+        assert_eq!(out.output, "body");
+        assert!(out.llm_suffix.is_none());
+    }
+
+    #[test]
+    fn tool_output_with_llm_suffix_sets_field() {
+        let out = ToolOutput::new("title", "body")
+            .with_llm_suffix("Try grep with a narrower pattern.");
+        assert_eq!(
+            out.llm_suffix.as_deref(),
+            Some("Try grep with a narrower pattern.")
+        );
+    }
+
+    #[test]
+    fn tool_output_model_text_appends_suffix() {
+        let out =
+            ToolOutput::new("t", "line1\nline2").with_llm_suffix("Use read_file with offset.");
+        assert_eq!(
+            out.model_text(),
+            "line1\nline2\n\nUse read_file with offset."
+        );
+    }
+
+    #[test]
+    fn tool_output_model_text_without_suffix_is_output() {
+        let out = ToolOutput::new("t", "hello");
+        assert_eq!(out.model_text(), "hello");
+    }
+
+    #[test]
+    fn tool_output_llm_suffix_skipped_when_none_in_serde() {
+        let out = ToolOutput::new("t", "o");
+        let json = serde_json::to_value(&out).unwrap();
+        assert!(
+            json.get("llm_suffix").is_none(),
+            "serde should omit llm_suffix when None"
+        );
+    }
+
+    #[test]
+    fn tool_output_llm_suffix_roundtrips_through_serde() {
+        let out = ToolOutput::new("t", "o").with_llm_suffix("coach");
+        let json = serde_json::to_string(&out).unwrap();
+        let back: ToolOutput = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.llm_suffix.as_deref(), Some("coach"));
+    }
+
+    #[test]
+    fn tool_output_default_deserializes_without_llm_suffix_field() {
+        let json = r#"{"title":"t","output":"o","metadata":null}"#;
+        let out: ToolOutput = serde_json::from_str(json).unwrap();
+        assert!(out.llm_suffix.is_none());
     }
 
     #[test]
