@@ -1,0 +1,22 @@
+#!/bin/bash
+# Reject commit messages that contain AI co-authorship trailers.
+# Activated via `git config core.hooksPath .githooks`.
+set -euo pipefail
+
+msg_file="$1"
+
+if grep -iE '^(Co-Authored-By|Co-authored-by):' "$msg_file" >/dev/null 2>&1; then
+    echo "[commit-msg] BLOCKED: commit message contains a Co-Authored-By trailer." >&2
+    echo "  This project does not permit co-authorship trailers in commits." >&2
+    echo "  Remove the trailer and try again." >&2
+    exit 1
+fi
+
+if grep -F 'Generated with [Claude' "$msg_file" >/dev/null 2>&1 \
+   || grep -F '🤖 Generated with' "$msg_file" >/dev/null 2>&1; then
+    echo "[commit-msg] BLOCKED: commit message contains a 'Generated with Claude' footer." >&2
+    echo "  This project does not permit AI-generation footers in commits." >&2
+    exit 1
+fi
+
+exit 0
