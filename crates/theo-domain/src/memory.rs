@@ -79,6 +79,23 @@ pub fn build_memory_context_block(raw: &str) -> String {
     format!("{MEMORY_FENCE_OPEN}\n{MEMORY_FENCE_NOTE}\n{raw}\n{MEMORY_FENCE_CLOSE}")
 }
 
+/// Behavior-preserving provider: every hook is a no-op. Used when
+/// `AgentConfig.memory_enabled = false` or when no concrete provider is
+/// configured. Plan ref: `outputs/agent-memory-plan.md` RM0-AC-6.
+#[derive(Debug, Clone, Default)]
+pub struct NullMemoryProvider;
+
+#[async_trait]
+impl MemoryProvider for NullMemoryProvider {
+    fn name(&self) -> &str {
+        "null"
+    }
+    async fn prefetch(&self, _query: &str) -> String {
+        String::new()
+    }
+    async fn sync_turn(&self, _user: &str, _assistant: &str) {}
+}
+
 /// Trait for components that persist and recall information across turns/sessions.
 ///
 /// Lifecycle called by the agent runtime's memory manager:

@@ -18,6 +18,7 @@ pub mod failure_tracker;
 pub mod hooks;
 pub mod jit_instructions;
 pub mod loop_state;
+pub mod memory_lifecycle;
 pub mod metrics;
 #[doc(hidden)] // Dead code: exported but never instantiated externally
 pub mod observability;
