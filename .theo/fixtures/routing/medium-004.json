@@ -1,0 +1,6 @@
+{
+  "id": "medium-004",
+  "label": "medium",
+  "prompt": "rename the variable foo to bar in src/tui/app.rs",
+  "expected_token_budget": 1600
+}

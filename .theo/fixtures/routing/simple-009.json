@@ -1,0 +1,6 @@
+{
+  "id": "simple-009",
+  "label": "simple",
+  "prompt": "what version of rustc is installed",
+  "expected_token_budget": 150
+}

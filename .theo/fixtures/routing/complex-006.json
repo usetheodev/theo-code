@@ -1,0 +1,6 @@
+{
+  "id": "complex-006",
+  "label": "complex",
+  "prompt": "review the batch_execute meta-tool for race conditions and fix them",
+  "expected_token_budget": 8500
+}

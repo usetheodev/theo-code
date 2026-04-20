@@ -1,0 +1,6 @@
+{
+  "id": "medium-006",
+  "label": "medium",
+  "prompt": "add a test that asserts slash_commands is non empty",
+  "expected_token_budget": 1700
+}

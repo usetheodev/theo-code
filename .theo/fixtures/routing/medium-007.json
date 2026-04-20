@@ -1,0 +1,6 @@
+{
+  "id": "medium-007",
+  "label": "medium",
+  "prompt": "change the default fps from 30 to 60 in tui config",
+  "expected_token_budget": 1300
+}

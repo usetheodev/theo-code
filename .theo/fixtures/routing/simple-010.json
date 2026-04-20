@@ -1,0 +1,6 @@
+{
+  "id": "simple-010",
+  "label": "simple",
+  "prompt": "list env vars starting with CARGO",
+  "expected_token_budget": 200
+}

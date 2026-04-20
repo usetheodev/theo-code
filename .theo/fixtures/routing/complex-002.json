@@ -1,0 +1,6 @@
+{
+  "id": "complex-002",
+  "label": "complex",
+  "prompt": "refactor the RunEngine so the ChatRequest builder is a separate type",
+  "expected_token_budget": 9500
+}

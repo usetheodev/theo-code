@@ -1,0 +1,6 @@
+{
+  "id": "complex-007",
+  "label": "complex",
+  "prompt": "optimize the file_retriever BM25 scoring hot path using SIMD",
+  "expected_token_budget": 11000
+}

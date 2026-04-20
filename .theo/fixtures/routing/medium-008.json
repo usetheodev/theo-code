@@ -1,0 +1,6 @@
+{
+  "id": "medium-008",
+  "label": "medium",
+  "prompt": "add `pub` to the filter_html function",
+  "expected_token_budget": 1100
+}

@@ -1,0 +1,6 @@
+{
+  "id": "complex-010",
+  "label": "complex",
+  "prompt": "debug pytest failure in the hf_hub download code path on macOS",
+  "expected_token_budget": 9200
+}

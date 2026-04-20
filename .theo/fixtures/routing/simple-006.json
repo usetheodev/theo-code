@@ -1,0 +1,6 @@
+{
+  "id": "simple-006",
+  "label": "simple",
+  "prompt": "show me the README",
+  "expected_token_budget": 300
+}

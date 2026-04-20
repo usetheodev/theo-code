@@ -1,0 +1,6 @@
+{
+  "id": "simple-007",
+  "label": "simple",
+  "prompt": "cat src/lib.rs line 10",
+  "expected_token_budget": 180
+}
