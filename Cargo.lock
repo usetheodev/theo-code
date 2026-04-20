@@ -6544,6 +6544,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "theo-test-memory-fixtures"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "serde",
+ "serde_json",
+ "theo-domain",
+ "tokio",
+]
+
+[[package]]
 name = "theo-tooling"
 version = "0.1.0"
 dependencies = [

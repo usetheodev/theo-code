@@ -10,6 +10,7 @@ members = [
     "crates/theo-agent-runtime",
     "crates/theo-infra-auth",
     "crates/theo-infra-memory",
+    "crates/theo-test-memory-fixtures",
     "crates/theo-api-contracts",
     "crates/theo-application",
     "apps/theo-desktop",
@@ -34,6 +35,7 @@ theo-infra-llm = { path = "crates/theo-infra-llm" }
 theo-agent-runtime = { path = "crates/theo-agent-runtime" }
 theo-infra-auth = { path = "crates/theo-infra-auth" }
 theo-infra-memory = { path = "crates/theo-infra-memory" }
+theo-test-memory-fixtures = { path = "crates/theo-test-memory-fixtures" }
 theo-api-contracts = { path = "crates/theo-api-contracts" }
 theo-application = { path = "crates/theo-application" }
 tokio = { version = "1", features = ["full"] }
