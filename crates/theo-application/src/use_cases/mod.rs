@@ -3,6 +3,8 @@ pub mod conversion;
 pub mod extraction;
 pub mod graph_context_service;
 pub mod impact;
+pub mod memory_lint;
+pub mod memory_ui;
 pub mod pipeline;
 pub mod run_agent_session;
 pub mod wiki_backend_impl;

@@ -783,7 +783,16 @@ impl AgentRunEngine {
                 }
             }
 
-            let response = match llm_result.unwrap() {
+            // RM-pre-3: replace pre-existing `unwrap()` with a typed error.
+            // Defensive — in practice the retry loop above always assigns
+            // `llm_result` at least once, but relying on that invariant via
+            // `unwrap()` would panic on any future refactor that breaks it.
+            let llm_result = llm_result.unwrap_or_else(|| {
+                Err(theo_infra_llm::LlmError::Parse(
+                    "LLM retry loop produced no result (invariant broken)".to_string(),
+                ))
+            });
+            let response = match llm_result {
                 Ok(resp) => {
                     let llm_duration = llm_start.elapsed().as_millis() as u64;
                     let input_tok = resp
