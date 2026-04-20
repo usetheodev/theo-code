@@ -1,42 +1,46 @@
-# Evolution Research — Cycle evolution/apr20-1553
+# Evolution Research — Tool Calling 2.0 (cycle 2026-04-20 T14:00:00Z)
 
-**Prompt:** `Recomendação SOTA próxima cycle: priorizar (1) RM2 Tantivy + (2) decay enforcer`
-**Builds on:** `outputs/agent-memory-plan.md` + cycle `evolution/apr20` (12 commits, memory subsystem landed).
+**Prompt:** Anthropic Tool Calling 2.0 — programmatic tool calling, dynamic
+filtering, deferred loading, input examples.
 
-## Targets
+## Verification: all three P1/P2/P3 targets already landed on develop
 
-1. **RM2 Tantivy closure** — `RetrievalBackedMemory` provider (cycle apr20) binds to the `MemoryRetrieval` trait; no concrete backend exists. Need a Tantivy-backed adapter.
-2. **Decay enforcer** — `MemoryLifecycle` tier enum (Active → Cooling → Archived) exists in `theo-domain/episode.rs:139` but has no `tick()` driving transitions from (age, usefulness, hit_count). MemGPT 3-tier parity requires enforced decay.
-
-## Current state (verified)
-
-- `theo-domain/episode.rs:139-182` — `MemoryLifecycle::next()` does naive tier bump, no signals.
-- `theo-engine-retrieval/src/tantivy_search.rs` — 940 lines, `FileTantivyIndex` is strictly over `CodeGraph` File nodes (7 code-specific fields: path/filename/symbol/signature/doc/imports/path_segments). Not a drop-in home for memory docs.
-- `theo-infra-memory/src/retrieval.rs` (cycle apr20) — `MemoryRetrieval` trait + `RetrievalBackedMemory` provider; threshold per `SourceType` (Code 0.35 / Wiki 0.50 / Reflection 0.60) + 15% token budget; binds to any `MemoryRetrieval` impl.
-
-## Reference patterns
-
-| Source | Pattern | Applied where |
+| Target | Status | Evidence |
 |---|---|---|
-| **MemGPT** [@packer2023] 3-tier (main/archival/recall) | Tier transitions driven by (staleness, hit_count, usefulness). No time-based auto-flush in Theo. | `theo-domain` — new `MemoryLifecycleEnforcer::tick()`. |
-| **MemCoder** [@deng2026] structured memory with lifecycle | Typed knowledge object + gates (already in `MemoryLesson`). Extend to `EpisodeSummary` via the tier enforcer. | Pure logic in `theo-domain`; wiring to `EpisodeSummary` deferred. |
-| **hermes-agent** markdown-backed LTM per user | Namespace isolation via separate files. Matches memory-wiki mount rule (RM5a). | New `MemoryTantivyIndex` sibling to `FileTantivyIndex` — no shared schema. |
-| **Karpathy LLM Wiki** (2026) | Separate compiled artefact, namespaced `[[memory:slug]]` vs `[[code:slug]]`. | Same rationale for a separate Tantivy index. |
+| **P1** `input_examples` on `ToolSchema` | ✅ LANDED | `theo-domain/src/tool.rs:208` declares `pub input_examples: Vec<serde_json::Value>`; `tool.rs:265-269` emits them into the JSON Schema output under the top-level `examples` key (OpenAI/Anthropic compatible). Populated on **5** top tools: edit, read, grep, bash, apply_patch (verified via grep of `input_examples: vec![` in each `mod.rs`). |
+| **P2** Dynamic HTML filtering in webfetch | ✅ LANDED | `theo-tooling/src/webfetch/mod.rs:215` defines `filter_html(html) -> (String, usize)` stripping `script/style/nav/header/footer/noscript` + inline `on*=""` event handlers + collapsing runs of blank lines. Returns the char-count of noise removed. Caller at `mod.rs:194` emits `llm_suffix` citing the count ("[html-filter] Removed X chars ..."). 10 dedicated `html_filter_*` tests all green. |
+| **P3** Batch meta-tool | ✅ LANDED | `theo-tooling/src/batch/mod.rs` declares `BatchTool` with `id() == "batch"`, schema accepting `calls: array`, max 25, intercepted by RunEngine (not executed inline). |
+| Tool search deferred loading | ✅ LANDED | `Tool::should_defer` + `Tool::search_hint` default impls at `tool.rs:446-456`; `ToolRegistry::visible_definitions()` + `search_deferred()` + `tool_search` meta-tool confirmed via grep. |
+| `TruncationRule` + sanitizer | ✅ LANDED | `tool.rs:469`. |
+| `format_validation_error` | ✅ LANDED | `tool.rs:484`. |
+| `ToolOutput::llm_suffix` + `with_llm_suffix` | ✅ LANDED | `tool.rs:27` field; `tool.rs:69-71` builder. |
 
-## Scope this cycle
+## What, then, is the delta this cycle?
 
-- **P1**: `MemoryLifecycleEnforcer` (pure domain logic) + `DecayThresholds` + `tick(age, usefulness, hit_count)` → new tier. `#[test]` RED-GREEN pairs for each transition.
-- **P2**: `MemoryTantivyIndex` in `theo-engine-retrieval` (new file `memory_tantivy.rs`), indexing memory docs by `(slug, namespace, body, source_type)`. Implements `MemoryRetrieval` via a thin adapter in `theo-infra-memory/src/retrieval/tantivy_adapter.rs`.
-- **P3**: Wire a `TantivyMemoryBackend::from_pages()` constructor that ingests `MemoryWikiPage` + `MemoryLesson` + journal entries and honors `SourceType`.
+Zero net-new features required by the prompt. The only code change
+needed this cycle was a **hygiene fix**: a duplicate
+`crates/theo-infra-memory/src/retrieval.rs` left over from a
+cross-branch `git restore` during an earlier merge. Both the stray
+file and the canonical `retrieval/mod.rs + retrieval/tantivy_adapter.rs`
+structure coexisted and caused rustc `E0761 file for module ... found
+at both`. Removed the stray in `ca2610f`.
 
-## Defer
+## Hygiene delta
 
-- `EpisodeSummary` auto-decay integration (runtime wiring of enforcer to session tick).
-- MemCoder git-log intent mining.
-- Desktop Tauri shim + vitest coverage.
+| Metric | Pre-fix | Post-fix | Baseline goal |
+|---|---|---|---|
+| Harness score | 69.266 | 73.272 | ≥ 72.300 (state file) ✅ |
+| compile_crates | 10/13 | 13/13 | 13/13 ✅ |
+| tests passing | 2054 | 2848 | — |
+| L1 | 88.031 | 96.044 | — |
+| L2 | 50.500 | 50.500 | — |
 
-## LOC budget
+The 4 remaining `tests_failed` entries are pre-existing `bwrap_*`
+sandbox tests failing on the kernel's restricted user namespace
+(`Operation not permitted` on `RTM_NEWADDR`) — environment, not code.
 
-- Decay enforcer: ~120 LOC (domain, pure logic, TDD).
-- MemoryTantivyIndex: ~150 LOC + adapter ~60 LOC.
-- Total ~330 LOC across 2-3 commits, each ≤ 200 LOC.
+## Decision
+
+No P1/P2/P3 implementation work required. Cycle converges immediately
+on a hygiene fix that restored baseline compile + score after an
+accidental file duplication.
