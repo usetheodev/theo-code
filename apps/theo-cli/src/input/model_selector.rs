@@ -73,7 +73,6 @@ mod tests {
             model_id: name.to_string(),
             display_name: name.to_string(),
             thinking_level: None,
-            model_id: name.to_string(),
         }
     }
 
