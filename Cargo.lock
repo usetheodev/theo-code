@@ -6366,6 +6366,7 @@ dependencies = [
  "theo-engine-retrieval",
  "theo-governance",
  "theo-infra-llm",
+ "theo-infra-memory",
  "theo-tooling",
  "thiserror 2.0.18",
  "tokio",
