@@ -7,12 +7,14 @@
 //!
 //! Plan: `outputs/smart-model-routing-plan.md`.
 
+pub mod cascade;
 pub mod config;
 pub mod keywords;
 pub mod metrics;
 pub mod pricing;
 pub mod rules;
 
+pub use cascade::{CascadeState, CascadeStep, MAX_FALLBACK_HOPS, exhausted_error};
 pub use config::{RoutingConfig, SlotConfig, env_disables_routing};
 pub use pricing::{PricingError, PricingTable};
 pub use rules::RuleBasedRouter;
