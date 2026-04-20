@@ -17,7 +17,7 @@ if echo "$COMMAND" | grep -qE 'git\s+(checkout|revert)\s'; then
   exit 2
 fi
 
-if echo "$COMMAND" | grep -qE 'git\s+push\s+--force'; then
+if echo "$COMMAND" | grep -qE 'git\s+push\s+(-f\b|--force($|\s))'; then
   echo "BLOCKED: force push is forbidden. Use --force-with-lease if absolutely necessary." >&2
   exit 2
 fi
