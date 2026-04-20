@@ -18,6 +18,12 @@
 //! - **No embedding logic here**: scoring/similarity belongs in
 //!   implementations (e.g., theo-engine-retrieval). The trait stays pure.
 
+pub mod lesson;
+pub use lesson::{
+    GateConfig, GateReject, LessonCategory, LessonStatus, MemoryLesson, apply_gates,
+    jaccard_similarity, normalize_lesson, promote_if_ready,
+};
+
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
