@@ -39,6 +39,51 @@ pub fn registry_to_definitions(registry: &ToolRegistry) -> Vec<ToolDefinition> {
         }),
     ));
 
+    // Add the `batch_execute` meta-tool — minimum-viable programmatic tool
+    // calling. The agent supplies an ordered list of {tool, args}, each
+    // executed serially. Early-exits on the first failure so downstream
+    // steps don't see stale data. This is NOT a full code interpreter; it
+    // is the deterministic core of Anthropic's "Programmatic Tool Calling"
+    // that unlocks for-loop-over-inputs patterns without a sandbox.
+    defs.push(ToolDefinition::new(
+        "batch_execute",
+        concat!(
+            "Execute an ordered list of tool calls in one assistant turn. ",
+            "Runs each step serially and stops at the first failure. Use this to collapse N round-trips ",
+            "(e.g. 'fetch 3 URLs then summarise') into a single LLM generation — cuts ~30-50% of tokens ",
+            "on parallelisable workflows. Each step is `{tool: string, args: object}` matching that ",
+            "tool's own schema. The aggregated result is returned as a JSON block with per-step ",
+            "`ok: bool`, `name`, and `result`/`error` fields. ",
+            "Example: batch_execute({calls: [",
+            "{tool: 'read', args: {filePath: 'Cargo.toml'}}, ",
+            "{tool: 'grep', args: {pattern: 'version', path: '.'}} ]})."
+        ),
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "calls": {
+                    "type": "array",
+                    "description": "Ordered list of tool invocations to execute serially.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "tool": {
+                                "type": "string",
+                                "description": "Name of a visible tool (not a meta-tool). Cannot be `done`, `subagent`, `subagent_parallel`, `skill`, `tool_search`, or `batch_execute` itself."
+                            },
+                            "args": {
+                                "type": "object",
+                                "description": "Arguments for the invoked tool, matching its JSON schema."
+                            }
+                        },
+                        "required": ["tool", "args"]
+                    }
+                }
+            },
+            "required": ["calls"]
+        }),
+    ));
+
     // Add the `done` meta-tool (not in the registry)
     defs.push(ToolDefinition::new(
         "done",
@@ -227,6 +272,90 @@ pub async fn execute_tool_call(
         }
     };
 
+    // Meta-tool: `batch_execute` — run a list of tool calls serially and
+    // return a combined JSON result. Early-exits on the first failure so
+    // downstream steps do not see stale data. Anthropic "Programmatic Tool
+    // Calling" (minimum-viable form: no code sandbox, just batched calls).
+    if name == "batch_execute" {
+        const BLOCKED: &[&str] = &[
+            "batch_execute",
+            "batch",
+            "tool_search",
+            "done",
+            "subagent",
+            "subagent_parallel",
+            "skill",
+        ];
+        let Some(calls) = args.get("calls").and_then(|v| v.as_array()) else {
+            return (
+                Message::tool_result(
+                    &call.id,
+                    name,
+                    "batch_execute requires a `calls` array. Example: batch_execute({calls: [{tool: 'read', args: {filePath: 'Cargo.toml'}}]}).",
+                ),
+                false,
+            );
+        };
+        if calls.is_empty() {
+            return (
+                Message::tool_result(&call.id, name, "batch_execute received an empty `calls` array — nothing to execute."),
+                false,
+            );
+        }
+        let mut results: Vec<serde_json::Value> = Vec::with_capacity(calls.len());
+        let mut any_failed = false;
+        for (i, step) in calls.iter().enumerate() {
+            let tool_name = step
+                .get("tool")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let step_args = step
+                .get("args")
+                .cloned()
+                .unwrap_or(serde_json::Value::Object(Default::default()));
+            if tool_name.is_empty() || BLOCKED.contains(&tool_name.as_str()) {
+                results.push(serde_json::json!({
+                    "step": i,
+                    "tool": tool_name,
+                    "ok": false,
+                    "error": format!("cannot run `{tool_name}` inside batch_execute (missing or blocked meta-tool)")
+                }));
+                any_failed = true;
+                break;
+            }
+            let step_call = ToolCall {
+                id: format!("{}_step{i}", call.id),
+                call_type: "function".to_string(),
+                function: theo_infra_llm::types::FunctionCall {
+                    name: tool_name.clone(),
+                    arguments: step_args.to_string(),
+                },
+            };
+            let (step_msg, ok) =
+                Box::pin(execute_tool_call(registry, &step_call, ctx)).await;
+            let content = step_msg.content.unwrap_or_default();
+            results.push(serde_json::json!({
+                "step": i,
+                "tool": tool_name,
+                "ok": ok,
+                "result": content,
+            }));
+            if !ok {
+                any_failed = true;
+                break;
+            }
+        }
+        let body = serde_json::json!({
+            "ok": !any_failed,
+            "steps": results,
+        });
+        return (
+            Message::tool_result(&call.id, name, body.to_string()),
+            !any_failed,
+        );
+    }
+
     // Meta-tool: `tool_search` — keyword lookup over deferred tools.
     // Dispatched here (not in the registry) because it needs direct
     // access to the registry to enumerate deferred entries.
@@ -318,11 +447,11 @@ mod tests {
         let registry = create_default_registry();
         let defs = registry_to_definitions(&registry);
 
-        // Should have all registry tools + meta-tools
-        // Meta-tools injected by registry_to_definitions: tool_search, done,
-        // subagent, subagent_parallel, skill, batch (+6). Deferred tools in
-        // the default registry are filtered out; none are currently deferred.
-        assert_eq!(defs.len(), registry.len() + 6);
+        // Meta-tools injected by registry_to_definitions: tool_search,
+        // batch_execute, done, subagent, subagent_parallel, skill, batch
+        // (+7). Deferred tools in the default registry are filtered out;
+        // none are currently deferred.
+        assert_eq!(defs.len(), registry.len() + 7);
 
         let names: Vec<&str> = defs.iter().map(|d| d.function.name.as_str()).collect();
         assert!(names.contains(&"read"));
@@ -583,6 +712,151 @@ mod tests {
         assert!(ok);
         let content = msg.content.expect("tool_result has content");
         assert_eq!(content, "just the body");
+    }
+
+    // ── batch_execute meta-tool tests ────────────────────────────
+
+    struct EchoTool;
+
+    #[async_trait]
+    impl Tool for EchoTool {
+        fn id(&self) -> &str {
+            "echo"
+        }
+        fn description(&self) -> &str {
+            "test tool that echoes a `value` field"
+        }
+        async fn execute(
+            &self,
+            args: serde_json::Value,
+            _ctx: &ToolContext,
+            _perm: &mut PermissionCollector,
+        ) -> Result<ToolOutput, ToolError> {
+            let v = args.get("value").and_then(|v| v.as_str()).unwrap_or("");
+            Ok(ToolOutput::new("echo", v.to_string()))
+        }
+    }
+
+    struct FailingTool;
+
+    #[async_trait]
+    impl Tool for FailingTool {
+        fn id(&self) -> &str {
+            "failing"
+        }
+        fn description(&self) -> &str {
+            "test tool that always errors"
+        }
+        async fn execute(
+            &self,
+            _args: serde_json::Value,
+            _ctx: &ToolContext,
+            _perm: &mut PermissionCollector,
+        ) -> Result<ToolOutput, ToolError> {
+            Err(ToolError::Execution("boom".to_string()))
+        }
+    }
+
+    fn batch_call(calls: serde_json::Value) -> ToolCall {
+        ToolCall {
+            id: "batch-1".to_string(),
+            call_type: "function".to_string(),
+            function: FunctionCall {
+                name: "batch_execute".to_string(),
+                arguments: serde_json::json!({"calls": calls}).to_string(),
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn batch_execute_runs_calls_in_order_and_returns_all_results() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Box::new(EchoTool)).unwrap();
+
+        let call = batch_call(serde_json::json!([
+            {"tool": "echo", "args": {"value": "alpha"}},
+            {"tool": "echo", "args": {"value": "beta"}},
+            {"tool": "echo", "args": {"value": "gamma"}},
+        ]));
+
+        let (msg, ok) = execute_tool_call(&registry, &call, &test_ctx()).await;
+        assert!(ok);
+        let content = msg.content.expect("tool_result has content");
+        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+        assert_eq!(parsed["ok"], true);
+        let steps = parsed["steps"].as_array().unwrap();
+        assert_eq!(steps.len(), 3);
+        assert_eq!(steps[0]["result"], "alpha");
+        assert_eq!(steps[1]["result"], "beta");
+        assert_eq!(steps[2]["result"], "gamma");
+    }
+
+    #[tokio::test]
+    async fn batch_execute_stops_at_first_failure() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Box::new(EchoTool)).unwrap();
+        registry.register(Box::new(FailingTool)).unwrap();
+
+        let call = batch_call(serde_json::json!([
+            {"tool": "echo", "args": {"value": "first"}},
+            {"tool": "failing", "args": {}},
+            {"tool": "echo", "args": {"value": "unreachable"}},
+        ]));
+
+        let (msg, ok) = execute_tool_call(&registry, &call, &test_ctx()).await;
+        assert!(!ok, "batch_execute should report failure when any step fails");
+        let content = msg.content.expect("tool_result has content");
+        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+        assert_eq!(parsed["ok"], false);
+        let steps = parsed["steps"].as_array().unwrap();
+        assert_eq!(steps.len(), 2, "execution must stop after the failing step");
+        assert_eq!(steps[0]["ok"], true);
+        assert_eq!(steps[1]["ok"], false);
+    }
+
+    #[tokio::test]
+    async fn batch_execute_rejects_meta_tools_inside() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Box::new(EchoTool)).unwrap();
+
+        let call = batch_call(serde_json::json!([
+            {"tool": "batch_execute", "args": {"calls": []}},
+        ]));
+
+        let (msg, ok) = execute_tool_call(&registry, &call, &test_ctx()).await;
+        assert!(!ok);
+        let content = msg.content.expect("tool_result has content");
+        assert!(
+            content.contains("batch_execute"),
+            "error must name the blocked meta-tool: got `{content}`"
+        );
+    }
+
+    #[tokio::test]
+    async fn batch_execute_rejects_missing_calls_array() {
+        let registry = ToolRegistry::new();
+        let call = ToolCall {
+            id: "batch-none".to_string(),
+            call_type: "function".to_string(),
+            function: FunctionCall {
+                name: "batch_execute".to_string(),
+                arguments: "{}".to_string(),
+            },
+        };
+        let (msg, ok) = execute_tool_call(&registry, &call, &test_ctx()).await;
+        assert!(!ok);
+        let content = msg.content.expect("tool_result has content");
+        assert!(content.contains("requires a `calls` array"));
+    }
+
+    #[tokio::test]
+    async fn batch_execute_rejects_empty_calls_array() {
+        let registry = ToolRegistry::new();
+        let call = batch_call(serde_json::json!([]));
+        let (msg, ok) = execute_tool_call(&registry, &call, &test_ctx()).await;
+        assert!(!ok);
+        let content = msg.content.expect("tool_result has content");
+        assert!(content.contains("empty `calls` array"));
     }
 
     // ── tool_search meta-tool tests ──────────────────────────────
