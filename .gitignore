@@ -23,6 +23,7 @@ wiki-site/
 referencias
 !crates/theo-infra-llm/src/provider
 !crates/theo-engine-retrieval/src/wiki
+!crates/theo-infra-memory/src/wiki
 
 # Python
 __pycache__/

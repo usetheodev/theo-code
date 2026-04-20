@@ -19,10 +19,12 @@
 //!   implementations (e.g., theo-engine-retrieval). The trait stays pure.
 
 pub mod lesson;
+pub mod wiki_backend;
 pub use lesson::{
     GateConfig, GateReject, LessonCategory, LessonStatus, MemoryLesson, apply_gates,
     jaccard_similarity, normalize_lesson, promote_if_ready,
 };
+pub use wiki_backend::{MemoryWikiBackend, MemoryWikiLintError, MemoryWikiPage};
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};

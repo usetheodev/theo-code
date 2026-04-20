@@ -6527,6 +6527,7 @@ dependencies = [
  "futures",
  "serde",
  "serde_json",
+ "sha2",
  "theo-domain",
  "thiserror 2.0.18",
  "tokio",
