@@ -63,7 +63,8 @@ impl Tool for ReflectTool {
                     required: false,
                 },
             ],
-        }
+        input_examples: Vec::new(),
+    }
     }
 
     fn category(&self) -> ToolCategory {
@@ -131,6 +132,7 @@ impl Tool for ReflectTool {
                 "should_stop": should_stop,
             }),
             attachments: None,
+            llm_suffix: None,
         })
     }
 }

@@ -1,0 +1,6 @@
+{
+  "id": "simple-001",
+  "label": "simple",
+  "prompt": "list files in src/",
+  "expected_token_budget": 200
+}

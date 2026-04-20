@@ -1,0 +1,6 @@
+{
+  "id": "simple-008",
+  "label": "simple",
+  "prompt": "wc -l on crates/theo-domain/src/tool.rs",
+  "expected_token_budget": 200
+}

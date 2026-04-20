@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+theo-domain.workspace = true
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -15,3 +16,4 @@ bytes = "1"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
+toml.workspace = true

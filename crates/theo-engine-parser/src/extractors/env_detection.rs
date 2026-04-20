@@ -395,7 +395,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
-    use crate::tree_sitter;
+    
 
     fn env_deps_for(source: &str, lang: SupportedLanguage, filename: &str) -> Vec<EnvDependency> {
         let path = PathBuf::from(filename);

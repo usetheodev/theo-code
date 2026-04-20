@@ -106,7 +106,17 @@ impl Tool for ReadTool {
     }
 
     fn description(&self) -> &str {
-        "Read a file or directory"
+        concat!(
+            "Read a file (with line numbers) or list a directory. ",
+            "Use this when you need the exact contents of a known file: source, config, lock file, docs. ",
+            "Supports partial reads via `offset` (1-based line number) and `limit`. ",
+            "Images (PNG/JPG) return as inline attachments. ",
+            "Use `glob` instead to find files by NAME pattern. ",
+            "Use `grep` instead to SEARCH file contents; do NOT read every matching file to scan it yourself. ",
+            "For long files, pass offset/limit to avoid large token spend; the tool will tell you how to resume. ",
+            "Example: read({filePath: 'Cargo.toml'}). ",
+            "Example: read({filePath: 'src/lib.rs', offset: 200, limit: 100})."
+        )
     }
 
     fn schema(&self) -> ToolSchema {
@@ -131,11 +141,39 @@ impl Tool for ReadTool {
                     required: false,
                 },
             ],
+            input_examples: vec![
+                serde_json::json!({"filePath": "Cargo.toml"}),
+                serde_json::json!({"filePath": "src/lib.rs", "offset": 200, "limit": 100}),
+                serde_json::json!({"filePath": "docs/"}),
+            ],
         }
     }
 
     fn category(&self) -> ToolCategory {
         ToolCategory::FileOps
+    }
+
+    fn format_validation_error(
+        &self,
+        error: &ToolError,
+        _args: &serde_json::Value,
+    ) -> Option<String> {
+        let msg = error.to_string();
+        if msg.contains("filePath") {
+            Some(
+                "Provide `filePath` as a string. Example: read({filePath: 'Cargo.toml'}) \
+                 or read({filePath: 'src/lib.rs', offset: 200, limit: 100})."
+                    .to_string(),
+            )
+        } else if msg.contains("out of range") {
+            Some(
+                "`offset` starts at line 1 and cannot exceed the file's total line count. \
+                 Omit offset to start from the beginning, or call read once without offset to learn the total."
+                    .to_string(),
+            )
+        } else {
+            None
+        }
     }
 
     async fn execute(
@@ -200,6 +238,7 @@ impl Tool for ReadTool {
                     mime: Some(mime.clone()),
                     url: format!("data:{mime};base64,{b64}"),
                 }]),
+                llm_suffix: None,
             });
         }
 
@@ -248,6 +287,7 @@ impl Tool for ReadTool {
                 output: "\nEnd of file - total 0 lines".to_string(),
                 metadata: serde_json::json!({"truncated": false}),
                 attachments: None,
+                llm_suffix: None,
             });
         }
 
@@ -284,11 +324,23 @@ impl Tool for ReadTool {
             output.push_str(&format!("\nEnd of file - total {total_lines} lines"));
         }
 
+        // When a read is truncated, coach the model on how to resume with
+        // a precise `offset`. Anthropic principle 10 (truncate with guidance).
+        let llm_suffix = if truncated {
+            Some(format!(
+                "[read truncated] File has more content. Continue with `read(filePath, offset={}, limit=...)` to read the next window.",
+                start + shown
+            ))
+        } else {
+            None
+        };
+
         Ok(ToolOutput {
             title: file_path_str,
             output,
             metadata: serde_json::json!({"truncated": truncated}),
             attachments: None,
+            llm_suffix,
         })
     }
 }
@@ -336,6 +388,7 @@ impl ReadTool {
             output,
             metadata: serde_json::json!({"truncated": truncated}),
             attachments: None,
+            llm_suffix: None,
         })
     }
 }

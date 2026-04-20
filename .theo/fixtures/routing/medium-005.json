@@ -1,0 +1,6 @@
+{
+  "id": "medium-005",
+  "label": "medium",
+  "prompt": "update the README to mention input_examples",
+  "expected_token_budget": 1400
+}

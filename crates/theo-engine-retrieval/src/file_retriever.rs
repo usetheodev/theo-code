@@ -493,7 +493,7 @@ pub fn build_context_blocks(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use theo_engine_graph::model::{Edge, Node, SymbolKind};
+    use theo_engine_graph::model::{Edge, EdgeType, Node, SymbolKind};
 
     fn file_node(id: &str, path: &str) -> Node {
         Node {
@@ -787,7 +787,7 @@ mod tests {
         let result = retrieve_files(&graph, &communities, "verify token", &config, &seen);
 
         // auth.rs calls query_db in db.rs → db.rs should be in expanded
-        let all_files: Vec<&str> = result.expanded_files.iter().map(|s| s.as_str()).collect();
+        let _all_files: Vec<&str> = result.expanded_files.iter().map(|s| s.as_str()).collect();
         // At minimum, expansion should find some related files
         assert!(
             result.primary_files.len() + result.expanded_files.len() > 1,

@@ -77,7 +77,6 @@ pub fn emit_json_event(event: &JsonEvent) {
         println!("{json}");
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;

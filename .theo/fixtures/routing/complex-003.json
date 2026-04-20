@@ -1,0 +1,6 @@
+{
+  "id": "complex-003",
+  "label": "complex",
+  "prompt": "implement retry with exponential backoff across all LLM providers",
+  "expected_token_budget": 10500
+}

@@ -1,0 +1,6 @@
+{
+  "id": "complex-004",
+  "label": "complex",
+  "prompt": "analyse the traceback from run_engine tests and propose a fix",
+  "expected_token_budget": 9000
+}

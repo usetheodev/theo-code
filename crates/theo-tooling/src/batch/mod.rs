@@ -39,7 +39,8 @@ impl Tool for BatchTool {
                 description: "Array of tool calls. Each item: {\"tool\": \"tool_name\", \"args\": {tool_arguments}}. Max 25 calls. Cannot include batch, done, subagent, subagent_parallel, or skill.".to_string(),
                 required: true,
             }],
-        }
+        input_examples: Vec::new(),
+    }
     }
 
     fn category(&self) -> ToolCategory {

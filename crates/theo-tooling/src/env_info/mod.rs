@@ -20,7 +20,7 @@ impl Tool for EnvInfoTool {
         ToolCategory::Utility
     }
     fn schema(&self) -> ToolSchema {
-        ToolSchema { params: vec![] }
+        ToolSchema::new()
     }
 
     async fn execute(
@@ -70,6 +70,7 @@ impl Tool for EnvInfoTool {
             output: info,
             metadata: serde_json::json!({"os": std::env::consts::OS, "arch": std::env::consts::ARCH}),
             attachments: None,
+            llm_suffix: None,
         })
     }
 }

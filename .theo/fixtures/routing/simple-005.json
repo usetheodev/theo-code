@@ -1,0 +1,6 @@
+{
+  "id": "simple-005",
+  "label": "simple",
+  "prompt": "print current directory",
+  "expected_token_budget": 120
+}

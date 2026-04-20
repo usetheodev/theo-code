@@ -12,6 +12,7 @@ pub mod memory;
 pub mod permission;
 pub mod priority;
 pub mod retry_policy;
+pub mod routing;
 pub mod sandbox;
 pub mod session;
 pub mod session_summary;

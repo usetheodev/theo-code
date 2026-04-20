@@ -95,11 +95,25 @@ impl Tool for WebFetchTool {
                 description: "URL to fetch".to_string(),
                 required: true,
             }],
-        }
+        input_examples: Vec::new(),
+    }
     }
 
     fn category(&self) -> ToolCategory {
         ToolCategory::Web
+    }
+
+    /// Webpage bodies can be huge — cap at 10k chars, keep head (usually
+    /// contains the structural content / title) plus the last kilobyte
+    /// (often contains footer links and follow-up URLs).
+    fn truncation_rule(&self) -> Option<theo_domain::tool::TruncationRule> {
+        Some(theo_domain::tool::TruncationRule {
+            max_chars: 10_000,
+            strategy: theo_domain::tool::TruncationStrategy::HeadTail {
+                head: 8_000,
+                tail: 2_000,
+            },
+        })
     }
 
     async fn execute(
@@ -152,22 +166,149 @@ impl Tool for WebFetchTool {
                     mime: Some(mime),
                     url: format!("data:{};base64,{b64}", Self::extract_mime(&content_type)),
                 }]),
+                llm_suffix: None,
             });
         }
 
-        // Handle SVG as text
+        // Handle SVG/HTML as text
         let text = response
             .text()
             .await
             .map_err(|e| ToolError::Execution(format!("Failed to read response: {e}")))?;
 
+        // Dynamic filtering: when the response looks like HTML, strip noise
+        // blocks (scripts/styles/nav/header/footer) deterministically before
+        // the body enters the context window. Anthropic "Dynamic Filtering"
+        // ships ~24% token reduction on web fetches; our reducer is simpler
+        // than a code-exec sandbox but follows the same "digest before
+        // context" principle.
+        let is_html = mime.contains("html") || text.trim_start().starts_with("<!DOCTYPE html")
+            || text.trim_start().starts_with("<html");
+        let (filtered, dropped_chars) = if is_html {
+            filter_html(&text)
+        } else {
+            (text.clone(), 0)
+        };
+        let llm_suffix = if dropped_chars > 0 {
+            Some(format!(
+                "[html-filter] Removed {dropped_chars} chars of script/style/nav/header/footer noise from the response. Set fetch parameters (or target a specific section of the URL) if you need the raw HTML."
+            ))
+        } else {
+            None
+        };
+
         Ok(ToolOutput {
             title: url,
-            output: text,
-            metadata: serde_json::json!({}),
+            output: filtered,
+            metadata: serde_json::json!({"filtered_chars_removed": dropped_chars, "is_html": is_html}),
             attachments: None,
+            llm_suffix,
         })
     }
+}
+
+/// Strip `<script>`, `<style>`, `<nav>`, `<header>`, `<footer>`, and inline
+/// event handlers from an HTML document. Returns the filtered body and the
+/// number of characters that were removed. Deterministic and allocation-light
+/// — not a full HTML parser, just a targeted reducer for the common noise
+/// blocks Anthropic cites in their Dynamic Filtering walkthrough.
+pub(crate) fn filter_html(html: &str) -> (String, usize) {
+    let original_len = html.chars().count();
+    let mut out = html.to_string();
+    for tag in ["script", "style", "nav", "header", "footer", "noscript"] {
+        out = strip_tag_block(&out, tag);
+    }
+    // Strip inline on* event handlers ( on[a-z]+="..." or on[a-z]+='...' )
+    out = strip_inline_event_handlers(&out);
+    // Collapse runs of whitespace the stripping leaves behind
+    out = collapse_whitespace(&out);
+    let new_len = out.chars().count();
+    let removed = original_len.saturating_sub(new_len);
+    (out, removed)
+}
+
+fn strip_tag_block(input: &str, tag: &str) -> String {
+    let open = format!("<{tag}");
+    let close = format!("</{tag}>");
+    let mut out = String::with_capacity(input.len());
+    let mut rest = input;
+    loop {
+        // Case-insensitive match of "<tag"
+        let lower = rest.to_lowercase();
+        let Some(open_idx) = lower.find(&open) else {
+            out.push_str(rest);
+            break;
+        };
+        out.push_str(&rest[..open_idx]);
+        // Skip past the closing `>` of the opening tag
+        let after_open = &rest[open_idx..];
+        let Some(rel_gt) = after_open.find('>') else {
+            // Malformed — bail out and append the rest
+            out.push_str(after_open);
+            break;
+        };
+        let search_start = open_idx + rel_gt + 1;
+        let lower_remaining = rest[search_start..].to_lowercase();
+        let Some(close_rel) = lower_remaining.find(&close) else {
+            // No closing tag — drop everything from here on.
+            break;
+        };
+        let close_abs = search_start + close_rel + close.len();
+        rest = &rest[close_abs..];
+    }
+    out
+}
+
+fn strip_inline_event_handlers(input: &str) -> String {
+    // Matches ` on<word>="..."` and ` on<word>='...'` conservatively.
+    let mut out = String::with_capacity(input.len());
+    let bytes = input.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if i + 3 < bytes.len() && bytes[i] == b' ' && bytes[i + 1] == b'o' && bytes[i + 2] == b'n'
+            && bytes[i + 3].is_ascii_alphabetic()
+        {
+            // Find the `=` that names the handler attribute
+            let mut j = i + 3;
+            while j < bytes.len() && bytes[j].is_ascii_alphabetic() {
+                j += 1;
+            }
+            if j < bytes.len() && bytes[j] == b'=' {
+                let quote = bytes.get(j + 1).copied();
+                if quote == Some(b'"') || quote == Some(b'\'') {
+                    // Find the matching closing quote
+                    let q = quote.unwrap();
+                    if let Some(end) = input[j + 2..].as_bytes().iter().position(|&b| b == q) {
+                        i = j + 2 + end + 1;
+                        continue;
+                    }
+                }
+            }
+        }
+        out.push(bytes[i] as char);
+        i += 1;
+    }
+    out
+}
+
+fn collapse_whitespace(input: &str) -> String {
+    // Collapse runs of 3+ blank lines into exactly 2 (one blank line between
+    // paragraphs). Leaves single/double newlines alone to preserve structure.
+    let mut out = String::with_capacity(input.len());
+    let mut blank_run = 0;
+    for line in input.lines() {
+        if line.trim().is_empty() {
+            blank_run += 1;
+            if blank_run <= 1 {
+                out.push('\n');
+            }
+        } else {
+            blank_run = 0;
+            out.push_str(line);
+            out.push('\n');
+        }
+    }
+    out
 }
 
 fn base64_encode(data: &[u8]) -> String {
@@ -230,5 +371,61 @@ mod tests {
         let input = &[137, 80, 78, 71, 13, 10, 26, 10]; // PNG magic bytes
         let encoded = base64_encode(input);
         assert!(encoded.starts_with("iVBOR"));
+    }
+
+    // ── Dynamic HTML filter tests ────────────────────────────────
+
+    #[test]
+    fn html_filter_strips_script_block() {
+        let html = r#"<html><body><p>hello</p><script>alert('x');</script><p>world</p></body></html>"#;
+        let (out, removed) = filter_html(html);
+        assert!(!out.contains("alert"));
+        assert!(out.contains("hello"));
+        assert!(out.contains("world"));
+        assert!(removed > 0);
+    }
+
+    #[test]
+    fn html_filter_strips_style_block() {
+        let html = r#"<html><head><style>body{color:red}</style></head><body>text</body></html>"#;
+        let (out, _removed) = filter_html(html);
+        assert!(!out.contains("color:red"));
+        assert!(out.contains("text"));
+    }
+
+    #[test]
+    fn html_filter_strips_nav_header_footer() {
+        let html = r#"<html><body><nav>menu</nav><header>h</header><main>content</main><footer>f</footer></body></html>"#;
+        let (out, _removed) = filter_html(html);
+        assert!(!out.contains("menu"));
+        assert!(!out.contains("<header>"));
+        assert!(!out.contains("<footer>"));
+        assert!(out.contains("content"));
+    }
+
+    #[test]
+    fn html_filter_removes_inline_event_handlers() {
+        let html = r#"<body><a href="/" onclick="trackClick()" onmouseover='pop()'>link</a></body>"#;
+        let (out, _removed) = filter_html(html);
+        assert!(!out.contains("onclick"));
+        assert!(!out.contains("onmouseover"));
+        assert!(out.contains("link"));
+    }
+
+    #[test]
+    fn html_filter_returns_zero_removed_when_no_noise() {
+        let html = "<p>clean text</p>";
+        let (out, removed) = filter_html(html);
+        assert_eq!(out.trim(), "<p>clean text</p>");
+        assert_eq!(removed, 0);
+    }
+
+    #[test]
+    fn html_filter_handles_case_insensitive_tags() {
+        let html = "<SCRIPT>evil()</SCRIPT><p>ok</p>";
+        let (out, removed) = filter_html(html);
+        assert!(!out.to_lowercase().contains("evil"));
+        assert!(out.contains("ok"));
+        assert!(removed > 0);
     }
 }

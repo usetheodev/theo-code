@@ -1,0 +1,64 @@
+# Example `.theo/config.toml` demonstrating the [routing] block.
+# Plan ref: outputs/smart-model-routing-plan.md §4.6.
+
+[model]
+# Session-default model used when routing is disabled OR when a slot
+# lookup falls back.
+default = "claude-sonnet-4-7"
+provider = "anthropic"
+
+[routing]
+# Master switch. `THEO_ROUTING_DISABLED=1` or `theo --router off` force
+# this to `false` regardless of what the file says.
+enabled = true
+# Strategy. Today only "rules" is implemented. Future strategies ("learned",
+# "cascade") will be gated behind additional feature flags.
+strategy = "rules"
+
+# ─── Tier aliases ────────────────────────────────────────────────────
+
+[routing.slots.cheap]
+# Used for "simple" Normal-phase turns identified by the keyword
+# classifier.
+model = "claude-haiku-4-5"
+provider = "anthropic"
+max_output_tokens = 2048
+
+[routing.slots.default]
+# Used for "complex" Normal-phase turns.
+model = "claude-sonnet-4-7"
+provider = "anthropic"
+max_output_tokens = 8192
+
+[routing.slots.strong]
+# Used for self-critique / reviewer passes and for ContextOverflow
+# fallbacks.
+model = "claude-opus-4-7"
+provider = "anthropic"
+max_output_tokens = 16384
+reasoning_effort = "high"
+
+[routing.slots.vision]
+# Used whenever `RoutingContext.requires_vision = true` or phase == Vision.
+model = "claude-sonnet-4-7"
+provider = "anthropic"
+
+[routing.slots.compact]
+# Used for compaction stages. Keeping this cheap is fine — the summariser
+# does not need deep reasoning, only faithful condensation.
+model = "claude-haiku-4-5"
+provider = "anthropic"
+
+# ─── Subagent slots (keyed by SubAgentRole::role_id()) ───────────────
+
+[routing.slots.subagent_explorer]
+model = "claude-haiku-4-5"
+provider = "anthropic"
+
+[routing.slots.subagent_implementer]
+model = "claude-sonnet-4-7"
+provider = "anthropic"
+
+# `subagent_verifier` and `subagent_reviewer` are intentionally absent;
+# when a role's slot is missing, the router falls back to the
+# `default` slot.

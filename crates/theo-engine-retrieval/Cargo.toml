@@ -10,7 +10,11 @@ serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true
 thiserror.workspace = true
-fastembed = "4"
+# Use rustls so this crate's transitive hf-hub does not pull native-tls
+# (openssl-sys), matching the workspace-wide reqwest configuration.
+# `online` implies `hf-hub-native-tls` (openssl) — omit it; rustls-tls on
+# hf-hub already enables downloads over HTTPS without pulling openssl-sys.
+fastembed = { version = "4", default-features = false, features = ["hf-hub-rustls-tls", "ort-download-binaries"] }
 tantivy = { workspace = true, optional = true }
 bincode = { workspace = true, optional = true }
 

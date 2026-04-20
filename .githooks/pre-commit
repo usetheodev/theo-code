@@ -12,18 +12,28 @@ fi
 
 # Extract unique crate names from changed file paths
 AFFECTED_CRATES=""
+# Read the package name from Cargo.toml (folder name may differ, e.g. apps/theo-cli -> package "theo").
+pkg_name() {
+    local cargo_toml="$1"
+    grep -E '^name\s*=\s*".*"' "$cargo_toml" | head -n1 | sed -E 's/^name\s*=\s*"([^"]+)"/\1/'
+}
+
 for file in $CHANGED_FILES; do
     case "$file" in
         crates/*/*)
-            crate=$(echo "$file" | cut -d'/' -f2)
-            if [ -f "crates/$crate/Cargo.toml" ]; then
-                AFFECTED_CRATES="$AFFECTED_CRATES $crate"
+            dir=$(echo "$file" | cut -d'/' -f2)
+            manifest="crates/$dir/Cargo.toml"
+            if [ -f "$manifest" ]; then
+                crate=$(pkg_name "$manifest")
+                [ -n "$crate" ] && AFFECTED_CRATES="$AFFECTED_CRATES $crate"
             fi
             ;;
         apps/*/*)
-            crate=$(echo "$file" | cut -d'/' -f2)
-            if [ -f "apps/$crate/Cargo.toml" ]; then
-                AFFECTED_CRATES="$AFFECTED_CRATES $crate"
+            dir=$(echo "$file" | cut -d'/' -f2)
+            manifest="apps/$dir/Cargo.toml"
+            if [ -f "$manifest" ]; then
+                crate=$(pkg_name "$manifest")
+                [ -n "$crate" ] && AFFECTED_CRATES="$AFFECTED_CRATES $crate"
             fi
             ;;
     esac
@@ -38,18 +48,21 @@ fi
 
 echo "[pre-commit] Affected crates: $AFFECTED_CRATES"
 
-# Run cargo clippy on affected crates (warnings are warnings, not errors)
+# Run cargo clippy on affected crates (warnings are warnings, not errors).
+# `--all-targets` covers lib, bins, tests, examples without erroring on
+# bin-only packages (where --lib would fail).
 for crate in $AFFECTED_CRATES; do
     echo "[pre-commit] clippy: $crate"
-    if ! cargo clippy -p "$crate" --lib --quiet 2>/dev/null; then
+    if ! cargo clippy -p "$crate" --all-targets --quiet 2>/dev/null; then
         echo "[pre-commit] WARNING: clippy issues in $crate (non-blocking)"
     fi
 done
 
-# Run cargo test on affected crates (failures block commit)
+# Run cargo test on affected crates (failures block commit). Omit --lib so
+# bin-only packages (e.g. theo) still have their unit tests executed.
 for crate in $AFFECTED_CRATES; do
     echo "[pre-commit] test: $crate"
-    if ! cargo test -p "$crate" --lib --quiet 2>&1 | tail -3; then
+    if ! cargo test -p "$crate" --quiet 2>&1 | tail -3; then
         echo "[pre-commit] BLOCKED: tests failed in $crate"
         exit 1
     fi

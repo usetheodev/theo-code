@@ -1,0 +1,6 @@
+{
+  "id": "simple-002",
+  "label": "simple",
+  "prompt": "show git status",
+  "expected_token_budget": 150
+}

@@ -1485,7 +1485,7 @@ fn wiki_ab_benchmark() {
     eprintln!("=== A/B BENCHMARK: Wiki Cache vs RRF-only ===\n");
 
     // Step 1: Build graph + generate wiki (if not exists)
-    let (files, stats) = theo_application::use_cases::extraction::extract_repo(workspace_root);
+    let (files, _stats) = theo_application::use_cases::extraction::extract_repo(workspace_root);
     let (graph, _) = bridge::build_graph(&files);
     let cluster = hierarchical_cluster(&graph, ClusterAlgorithm::FileLeiden { resolution: 1.0 });
 

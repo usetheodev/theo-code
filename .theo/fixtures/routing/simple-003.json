@@ -1,0 +1,6 @@
+{
+  "id": "simple-003",
+  "label": "simple",
+  "prompt": "what does Cargo.toml contain",
+  "expected_token_budget": 250
+}

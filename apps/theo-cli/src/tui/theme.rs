@@ -4,7 +4,6 @@
 //! Can be extended with custom themes via ~/.config/theo/tui.toml.
 
 use ratatui::prelude::*;
-
 #[derive(Debug, Clone)]
 pub struct Theme {
     pub name: String,
@@ -148,13 +147,7 @@ impl Theme {
     }
 
     pub fn available_themes() -> Vec<String> {
-        vec![
-            "dark".to_string(),
-            "light".to_string(),
-            "high-contrast".to_string(),
-            "dracula".to_string(),
-            "tokyo-night".to_string(),
-        ]
+        Self::all().into_iter().map(|t| t.name).collect()
     }
 
     pub fn by_name(name: &str) -> Self {

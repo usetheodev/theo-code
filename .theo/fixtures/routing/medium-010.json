@@ -1,0 +1,6 @@
+{
+  "id": "medium-010",
+  "label": "medium",
+  "prompt": "extend the pricing table to include claude-haiku-4-5",
+  "expected_token_budget": 1900
+}

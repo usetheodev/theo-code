@@ -55,7 +55,8 @@ impl Tool for QuestionTool {
                 description: "Array of questions to ask the user".to_string(),
                 required: true,
             }],
-        }
+        input_examples: Vec::new(),
+    }
     }
 
     fn category(&self) -> ToolCategory {
@@ -95,6 +96,7 @@ impl Tool for QuestionTool {
             output: output_parts.join("\n"),
             metadata: serde_json::json!({"answers": answers}),
             attachments: None,
+            llm_suffix: None,
         })
     }
 }
