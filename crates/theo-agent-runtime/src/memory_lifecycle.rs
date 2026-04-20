@@ -10,7 +10,7 @@
 //! Reference: `referencias/hermes-agent/agent/memory_manager.py:97-206`
 //! (fan-out + error isolation) and plan `outputs/agent-memory-plan.md` §RM0.
 
-use theo_domain::memory::{MemoryProvider, build_memory_context_block};
+use theo_domain::memory::build_memory_context_block;
 
 use crate::config::AgentConfig;
 
