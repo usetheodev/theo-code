@@ -291,6 +291,13 @@ pub struct AgentConfig {
     /// Useful in headless/benchmark mode where losing an instance to a transient
     /// rate limit is expensive. Default: false (uses standard 3 retries, 1-30s).
     pub aggressive_retry: bool,
+    /// Master switch for the agent-memory subsystem. When `false`, every
+    /// memory lifecycle hook (`prefetch`, `sync_turn`, `on_pre_compress`,
+    /// `on_session_end`) short-circuits to the NullMemoryProvider — runtime
+    /// behavior is identical to pre-RM0. When `true`, the configured
+    /// `MemoryEngine` is consulted at every hook. Plan ref:
+    /// `outputs/agent-memory-plan.md` RM-pre-5. Default: `false`.
+    pub memory_enabled: bool,
     /// Optional model router. When `Some`, every ChatRequest consults the
     /// router for its model + reasoning effort. When `None`, the session
     /// uses `model` / `reasoning_effort` verbatim — preserving pre-R3
@@ -344,6 +351,7 @@ impl Default for AgentConfig {
             context_window_tokens: 128_000,
             tool_execution_mode: ToolExecutionMode::default(),
             aggressive_retry: false,
+            memory_enabled: false,
             router: None,
         }
     }

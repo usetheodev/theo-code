@@ -296,3 +296,13 @@ eval_detail.json
 # Evolution loop output
 evolution-output/
 .theo/evolution_log.jsonl
+
+# ----------------------------------------------------------------------------
+# Agent memory — personal user data, never commit
+# Plan ref: outputs/agent-memory-plan.md RM-pre-1
+# ----------------------------------------------------------------------------
+.theo/memory/
+.theo/wiki/memory/
+.theo/reflections.jsonl
+# Code-wiki stays tracked (deterministic from source) — explicit allow
+!.theo/wiki/code/

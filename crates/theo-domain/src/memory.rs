@@ -20,6 +20,33 @@
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
+/// Typed errors for memory operations.
+///
+/// Plan ref: `outputs/agent-memory-plan.md` RM-pre-2. Every `MemoryProvider`
+/// impl and every `MemoryEngine` call site surfaces one of these variants
+/// rather than `String` / `anyhow::Error`. `#[non_exhaustive]` so future
+/// variants (e.g. `QuarantineBlocked`) can land without breaking downstream.
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum MemoryError {
+    #[error("store write failed for key `{key}`: {source}")]
+    StoreFailed {
+        key: String,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("wiki compilation failed: {reason}")]
+    CompileFailed { reason: String },
+    #[error("recall query failed: {source}")]
+    RetrieveFailed {
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+    #[error("lesson gate rejected: {reason}")]
+    GateRejected { reason: String },
+}
 
 /// Opening fence for memory blocks injected into the context.
 pub const MEMORY_FENCE_OPEN: &str = "<memory-context>";
@@ -139,5 +166,47 @@ mod tests {
         let p: Box<dyn MemoryProvider> = Box::new(EmptyProvider);
         assert_eq!(p.name(), "empty");
         assert_eq!(p.prefetch("q").await, "");
+    }
+
+    // ── RM-pre-2 ─────────────────────────────────────────────────
+
+    #[test]
+    fn test_pre2_ac_1_memory_error_variants_display() {
+        let e = MemoryError::StoreFailed {
+            key: "foo".into(),
+            source: std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied"),
+        };
+        assert!(e.to_string().contains("foo"));
+        assert!(e.to_string().contains("denied"));
+
+        let e = MemoryError::CompileFailed {
+            reason: "budget".into(),
+        };
+        assert!(e.to_string().contains("budget"));
+
+        let e = MemoryError::GateRejected {
+            reason: "confidence 0.99 exceeds ceiling".into(),
+        };
+        assert!(e.to_string().contains("confidence"));
+    }
+
+    #[test]
+    fn test_pre2_ac_2_memory_error_carries_source() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "missing");
+        let e = MemoryError::StoreFailed {
+            key: "k".into(),
+            source: io_err,
+        };
+        // `std::error::Error::source()` exposes the chained `#[source]`.
+        let src = std::error::Error::source(&e).expect("source chain present");
+        assert!(src.to_string().contains("missing"));
+    }
+
+    #[test]
+    fn test_pre2_ac_3_memory_error_implements_std_error() {
+        fn takes_error(_: Box<dyn std::error::Error + Send + Sync>) {}
+        takes_error(Box::new(MemoryError::CompileFailed {
+            reason: "budget".into(),
+        }));
     }
 }
