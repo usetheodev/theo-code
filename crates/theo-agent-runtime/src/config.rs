@@ -291,6 +291,36 @@ pub struct AgentConfig {
     /// Useful in headless/benchmark mode where losing an instance to a transient
     /// rate limit is expensive. Default: false (uses standard 3 retries, 1-30s).
     pub aggressive_retry: bool,
+    /// Optional model router. When `Some`, every ChatRequest consults the
+    /// router for its model + reasoning effort. When `None`, the session
+    /// uses `model` / `reasoning_effort` verbatim — preserving pre-R3
+    /// behaviour. Plan ref: outputs/smart-model-routing-plan.md §R3.
+    ///
+    /// Wrapped in `RouterHandle` so `AgentConfig` can stay `Debug + Clone`
+    /// without forcing the trait to require `Debug`.
+    pub router: Option<RouterHandle>,
+}
+
+/// Debug-friendly wrapper around `Arc<dyn ModelRouter>` so `AgentConfig`
+/// keeps its `#[derive(Debug, Clone)]` without leaking a `Debug` bound
+/// into the router trait surface.
+#[derive(Clone)]
+pub struct RouterHandle(pub Arc<dyn theo_domain::routing::ModelRouter>);
+
+impl RouterHandle {
+    pub fn new(router: Arc<dyn theo_domain::routing::ModelRouter>) -> Self {
+        Self(router)
+    }
+
+    pub fn as_router(&self) -> &dyn theo_domain::routing::ModelRouter {
+        self.0.as_ref()
+    }
+}
+
+impl std::fmt::Debug for RouterHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("RouterHandle").field(&"<dyn ModelRouter>").finish()
+    }
 }
 
 impl Default for AgentConfig {
@@ -314,6 +344,7 @@ impl Default for AgentConfig {
             context_window_tokens: 128_000,
             tool_execution_mode: ToolExecutionMode::default(),
             aggressive_retry: false,
+            router: None,
         }
     }
 }
