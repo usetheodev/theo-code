@@ -1,13 +1,12 @@
-mod commands;
 mod config;
 mod init;
 mod input;
 mod json_output;
+mod memory_lint;
 mod permission;
 mod pilot;
 mod render;
 mod renderer;
-mod repl;
 mod status_line;
 mod tui;
 mod tty;
@@ -24,15 +23,15 @@ use theo_application::use_cases::pipeline::{Pipeline, PipelineConfig};
 
 /// Theo — autonomous coding agent
 ///
-/// Run without arguments to start the interactive REPL.
+/// Run without arguments to start the interactive TUI.
 /// Run with a prompt to execute a single task and exit.
 ///
 /// Examples:
-///   theo                          Start interactive REPL
+///   theo                          Start interactive TUI
 ///   theo "fix the bug in auth"    Execute task and exit
-///   theo --mode plan "design X"   Plan mode single-shot
 ///   theo init                     Initialize project
 ///   theo pilot "implement X"      Autonomous loop
+///   theo memory lint              Memory-subsystem lint
 #[derive(Parser)]
 #[command(name = "theo", version = "0.1.0")]
 struct Cli {
@@ -52,13 +51,9 @@ struct Cli {
     #[arg(long, global = true)]
     max_iter: Option<usize>,
 
-    /// Agent mode
+    /// Agent mode (headless only — interactive mode uses `/mode` slash command)
     #[arg(long, global = true, value_parser = ["agent", "plan", "ask"])]
     mode: Option<String>,
-
-    /// Launch TUI mode (ratatui)
-    #[arg(long, global = true)]
-    tui: bool,
 
     /// Headless mode for benchmarks/CI: read prompt from args (or stdin),
     /// emit a single JSON result line on stdout, no banners/REPL/streaming.
@@ -79,7 +74,7 @@ struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
 
-    /// Task to execute (opens REPL if omitted, ignored when using subcommands)
+    /// Task to execute (opens TUI if omitted, ignored when using subcommands)
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     prompt: Vec<String>,
 }
@@ -170,15 +165,7 @@ fn main() {
                 cmd_headless(prompt, cli.repo, cli.provider, cli.model, cli.max_iter, cli.mode, cli.temperature, cli.seed);
                 return;
             }
-            cmd_agent(
-                prompt,
-                cli.repo,
-                cli.provider,
-                cli.model,
-                cli.max_iter,
-                cli.mode,
-                cli.tui,
-            );
+            cmd_agent(prompt, cli.repo, cli.provider, cli.model, cli.max_iter);
         }
         Some(Commands::Pilot {
             calls,
@@ -207,7 +194,7 @@ fn main() {
         }
         Some(Commands::Memory { action }) => match action {
             MemoryAction::Lint { format } => {
-                let fmt = commands::memory_lint::LintFormat::from_str_opt(format.as_deref());
+                let fmt = memory_lint::LintFormat::from_str_opt(format.as_deref());
                 // Stub inputs — real collection belongs to a follow-up
                 // that reads hash manifest, journal timestamps, and
                 // retrieval metrics. The subcommand surface lands here
@@ -220,7 +207,7 @@ fn main() {
                     recall_p50_ms: 0.0,
                     recall_p95_ms: 0.0,
                 };
-                let code = commands::memory_lint::run(inputs, fmt);
+                let code = memory_lint::run(inputs, fmt);
                 std::process::exit(code);
             }
         },
@@ -229,16 +216,8 @@ fn main() {
                 cmd_headless(cli.prompt, cli.repo, cli.provider, cli.model, cli.max_iter, cli.mode, cli.temperature, cli.seed);
                 return;
             }
-            // Default: agent mode. REPL if no prompt, single-shot if prompt given.
-            cmd_agent(
-                cli.prompt,
-                cli.repo,
-                cli.provider,
-                cli.model,
-                cli.max_iter,
-                cli.mode,
-                cli.tui,
-            );
+            // Default: TUI (interactive or one-shot with trailing prompt).
+            cmd_agent(cli.prompt, cli.repo, cli.provider, cli.model, cli.max_iter);
         }
     }
 }
@@ -277,8 +256,6 @@ fn cmd_agent(
     provider_id: Option<String>,
     model: Option<String>,
     max_iter: Option<usize>,
-    mode: Option<String>,
-    use_tui: bool,
 ) {
     let project_dir = resolve_dir(repo);
 
@@ -293,28 +270,9 @@ fn cmd_agent(
         let (config, provider_name) =
             resolve_agent_config(provider_id.as_deref(), model.as_deref(), max_iter).await;
 
-        if use_tui {
-            if let Err(e) = tui::run(config, project_dir, provider_name, inline_prompt).await {
-                eprintln!("TUI error: {e}");
-                std::process::exit(1);
-            }
-            return;
-        }
-
-        let mut repl = repl::Repl::new(config, project_dir, provider_name);
-        if let Some(ref mode_str) = mode {
-            if let Some(m) = theo_agent_runtime::config::AgentMode::from_str(mode_str) {
-                repl = repl.with_mode(m);
-            } else {
-                eprintln!("Unknown mode: {}. Use: agent, plan, ask", mode_str);
-                std::process::exit(1);
-            }
-        }
-
-        if let Some(prompt) = inline_prompt {
-            repl.execute_single(&prompt).await;
-        } else {
-            repl.run().await;
+        if let Err(e) = tui::run(config, project_dir, provider_name, inline_prompt).await {
+            eprintln!("TUI error: {e}");
+            std::process::exit(1);
         }
     });
 }
