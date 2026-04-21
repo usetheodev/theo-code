@@ -237,8 +237,9 @@ impl AgentRunEngine {
             let mut usage = self.session_token_usage.clone();
             if let Some(c) = theo_domain::budget::known_model_cost(&self.config.model) { usage.recompute_cost(&c); }
             summary.token_usage = Some(usage);
-            let _ = crate::lesson_pipeline::extract_and_persist_for_outcome(
-                &self.project_dir, summary.machine_summary.outcome, &events);
+            // Phase 2: T2.1 (lessons G5) + T2.3 (hypotheses G6).
+            let _ = crate::lesson_pipeline::extract_and_persist_for_outcome(&self.project_dir, summary.machine_summary.outcome, &events);
+            let _ = crate::hypothesis_pipeline::persist_unresolved(&self.project_dir, &summary);
             let episodes_dir = self
                 .project_dir
                 .join(".theo")

@@ -107,9 +107,9 @@ pub mod run_engine_hooks {
             .join("\n");
         let extracted = MemoryLifecycle::on_pre_compress(cfg, &text).await;
         if !extracted.is_empty() {
-            messages.push(Message::system(&format!(
+            messages.push(Message::system(format!(
                 "## Memory (pre-compress extract)\n{extracted}"
-            )));
+            ).as_str()));
         }
     }
 
@@ -144,17 +144,17 @@ pub mod run_engine_hooks {
             .join("memory");
         let memory_store =
             theo_tooling::memory::FileMemoryStore::for_project(&memory_root, project_dir);
-        if let Ok(memories) = memory_store.list().await {
-            if !memories.is_empty() {
-                let block = memories
-                    .iter()
-                    .map(|m| format!("- **{}**: {}", m.key, m.value))
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                messages.push(Message::system(&format!(
-                    "## Memory from previous runs\n{block}"
-                )));
-            }
+        if let Ok(memories) = memory_store.list().await
+            && !memories.is_empty()
+        {
+            let block = memories
+                .iter()
+                .map(|m| format!("- **{}**: {}", m.key, m.value))
+                .collect::<Vec<_>>()
+                .join("\n");
+            messages.push(Message::system(format!(
+                "## Memory from previous runs\n{block}"
+            ).as_str()));
         }
     }
 

@@ -44,10 +44,10 @@ impl FsSessionSearch {
                     if path.extension().and_then(|s| s.to_str()) != Some("json") {
                         continue;
                     }
-                    if let Ok(raw) = std::fs::read_to_string(&path) {
-                        if let Ok(ep) = serde_json::from_str::<EpisodeSummary>(&raw) {
-                            out.push(ep);
-                        }
+                    if let Ok(raw) = std::fs::read_to_string(&path)
+                        && let Ok(ep) = serde_json::from_str::<EpisodeSummary>(&raw)
+                    {
+                        out.push(ep);
                     }
                 }
             }

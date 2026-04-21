@@ -16,6 +16,7 @@ pub mod evolution;
 pub mod extension;
 pub mod failure_tracker;
 pub mod hooks;
+pub mod hypothesis_pipeline;
 pub mod jit_instructions;
 pub mod lesson_pipeline;
 pub mod loop_state;

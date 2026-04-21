@@ -90,10 +90,10 @@ pub fn load_existing_lessons(project_dir: &Path) -> Vec<MemoryLesson> {
             if p.extension().and_then(|s| s.to_str()) != Some("json") {
                 continue;
             }
-            if let Ok(raw) = std::fs::read_to_string(&p) {
-                if let Ok(l) = serde_json::from_str::<MemoryLesson>(&raw) {
-                    out.push(l);
-                }
+            if let Ok(raw) = std::fs::read_to_string(&p)
+                && let Ok(l) = serde_json::from_str::<MemoryLesson>(&raw)
+            {
+                out.push(l);
             }
         }
     }
