@@ -339,28 +339,14 @@ impl AgentRunEngine {
             .await;
         }
 
-        // Inject episode summaries from previous runs (cross-session learning).
+        // Phase 0 T0.3: feed eligible episode summaries back into context
+        // (lifecycle != Archived, TTL not expired, 5% token budget).
         if !self.config.is_subagent {
-            let episodes = crate::state_manager::StateManager::load_episode_summaries(&self.project_dir);
-            if !episodes.is_empty() {
-                let episode_context: Vec<String> = episodes
-                    .iter()
-                    .rev()
-                    .take(5) // Most recent 5 episodes
-                    .map(|ep| {
-                        format!(
-                            "- **{}**: {} (files: {})",
-                            ep.run_id,
-                            ep.machine_summary.objective,
-                            ep.affected_files.join(", ")
-                        )
-                    })
-                    .collect();
-                messages.push(Message::system(&format!(
-                    "## Recent Episode History\n{}",
-                    episode_context.join("\n")
-                )));
-            }
+            crate::memory_lifecycle::run_engine_hooks::inject_episode_history(
+                &self.project_dir,
+                self.config.context_window_tokens,
+                &mut messages,
+            );
         }
 
         // Boot sequence: inject progress from previous sessions + recent git activity.

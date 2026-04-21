@@ -157,6 +157,86 @@ pub mod run_engine_hooks {
             }
         }
     }
+
+    /// Phase 0 T0.3: feed eligible episode summaries back into the
+    /// session context.
+    ///
+    /// Filtering (AC-0.3.1..0.3.6):
+    /// - Lifecycle == Archived → skip (AC-0.3.2).
+    /// - TTL expired → skip (AC-0.3.3).
+    /// - Top-5 most recent (AC-0.3.1).
+    /// - Emits `learned_constraints` as warnings (AC-0.3.4) and
+    ///   `failed_attempts` visible to the LLM (AC-0.3.5).
+    /// - Caps the injected block at 5% of the context window using a
+    ///   rough chars/4 token estimate (AC-0.3.6).
+    /// - No episodes → no message pushed (AC-0.3.7).
+    pub fn inject_episode_history(
+        project_dir: &std::path::Path,
+        context_window_tokens: usize,
+        messages: &mut Vec<Message>,
+    ) {
+        use theo_domain::episode::{MemoryLifecycle as Lc, TtlPolicy};
+
+        let all = crate::state_manager::StateManager::load_episode_summaries(project_dir);
+        if all.is_empty() {
+            return;
+        }
+
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+
+        let eligible: Vec<_> = all
+            .iter()
+            .rev()
+            .filter(|ep| ep.lifecycle != Lc::Archived)
+            .filter(|ep| match ep.ttl_policy {
+                TtlPolicy::Permanent => true,
+                TtlPolicy::RunScoped => true,
+                TtlPolicy::TimeScoped { seconds } => {
+                    now_ms.saturating_sub(ep.created_at) < seconds.saturating_mul(1000)
+                }
+            })
+            .take(5)
+            .collect();
+
+        if eligible.is_empty() {
+            return;
+        }
+
+        let mut parts: Vec<String> = Vec::new();
+        for ep in &eligible {
+            let mut piece = format!(
+                "### {} — {}\nfiles: {}",
+                ep.run_id,
+                ep.machine_summary.objective,
+                ep.affected_files.join(", ")
+            );
+            if !ep.machine_summary.learned_constraints.is_empty() {
+                piece.push_str("\n\n**Learned constraints (treat as warnings):**");
+                for c in &ep.machine_summary.learned_constraints {
+                    piece.push_str(&format!("\n- {c}"));
+                }
+            }
+            if !ep.machine_summary.failed_attempts.is_empty() {
+                piece.push_str("\n\n**Past failures:**");
+                for f in &ep.machine_summary.failed_attempts {
+                    piece.push_str(&format!("\n- {f}"));
+                }
+            }
+            parts.push(piece);
+        }
+
+        let mut body = format!("## Recent Episode History\n\n{}", parts.join("\n\n"));
+        // Token budget: 5% of context window (chars/4 ≈ tokens).
+        let budget_chars = context_window_tokens.saturating_mul(4) / 20;
+        if body.len() > budget_chars && budget_chars > 0 {
+            body.truncate(budget_chars);
+            body.push_str("\n… [truncated to 5% context budget]");
+        }
+        messages.push(Message::system(&body));
+    }
 }
 
 #[cfg(test)]
@@ -334,5 +414,172 @@ mod tests {
         MemoryLifecycle::sync_turn(&cfg, "u", "a").await; // no panic
         assert_eq!(MemoryLifecycle::on_pre_compress(&cfg, "x").await, "");
         MemoryLifecycle::on_session_end(&cfg).await;
+    }
+
+    // ── Phase 0 T0.3 tests: inject_episode_history ──────────────
+    mod t0_3 {
+        use super::super::run_engine_hooks::inject_episode_history;
+        use theo_infra_llm::types::Message;
+
+        fn write_episode(
+            dir: &std::path::Path,
+            id: &str,
+            lifecycle: &str,
+            ttl: serde_json::Value,
+            constraints: &[&str],
+            failed: &[&str],
+            created_at: u64,
+        ) {
+            let episodes_dir = dir.join(".theo/memory/episodes");
+            std::fs::create_dir_all(&episodes_dir).unwrap();
+            let payload = serde_json::json!({
+                "summary_id": id,
+                "run_id": id,
+                "task_id": null,
+                "window_start_event_id": "",
+                "window_end_event_id": "",
+                "machine_summary": {
+                    "objective": format!("goal-{id}"),
+                    "key_actions": [],
+                    "outcome": "Success",
+                    "successful_steps": [],
+                    "failed_attempts": failed,
+                    "learned_constraints": constraints,
+                    "files_touched": []
+                },
+                "human_summary": null,
+                "evidence_event_ids": [],
+                "affected_files": ["src/main.rs"],
+                "open_questions": [],
+                "unresolved_hypotheses": [],
+                "referenced_community_ids": [],
+                "supersedes_summary_id": null,
+                "schema_version": 1,
+                "created_at": created_at,
+                "ttl_policy": ttl,
+                "lifecycle": lifecycle
+            });
+            std::fs::write(
+                episodes_dir.join(format!("{id}.json")),
+                serde_json::to_string(&payload).unwrap(),
+            )
+            .unwrap();
+        }
+
+        #[test]
+        fn test_t0_3_ac_1_loads_recent_episodes() {
+            let dir = tempfile::tempdir().unwrap();
+            write_episode(
+                dir.path(),
+                "ep-a",
+                "Active",
+                serde_json::json!("RunScoped"),
+                &["no unwrap"],
+                &[],
+                1,
+            );
+            let mut messages: Vec<Message> = Vec::new();
+            inject_episode_history(dir.path(), 100_000, &mut messages);
+            assert_eq!(messages.len(), 1);
+            assert!(messages[0].content.as_ref().unwrap().contains("goal-ep-a"));
+            assert!(messages[0].content.as_ref().unwrap().contains("no unwrap"));
+        }
+
+        #[test]
+        fn test_t0_3_ac_2_archived_excluded() {
+            let dir = tempfile::tempdir().unwrap();
+            write_episode(
+                dir.path(),
+                "ep-old",
+                "Archived",
+                serde_json::json!("Permanent"),
+                &[],
+                &[],
+                1,
+            );
+            let mut messages: Vec<Message> = Vec::new();
+            inject_episode_history(dir.path(), 100_000, &mut messages);
+            assert!(
+                messages.is_empty(),
+                "archived episodes must not be injected"
+            );
+        }
+
+        #[test]
+        fn test_t0_3_ac_3_expired_ttl_excluded() {
+            let dir = tempfile::tempdir().unwrap();
+            // created_at = 1 ms ago, seconds = 0 → expired
+            write_episode(
+                dir.path(),
+                "ep-expired",
+                "Active",
+                serde_json::json!({"TimeScoped": {"seconds": 0}}),
+                &[],
+                &[],
+                1,
+            );
+            let mut messages: Vec<Message> = Vec::new();
+            inject_episode_history(dir.path(), 100_000, &mut messages);
+            assert!(messages.is_empty());
+        }
+
+        #[test]
+        fn test_t0_3_ac_5_failed_attempts_visible() {
+            let dir = tempfile::tempdir().unwrap();
+            write_episode(
+                dir.path(),
+                "ep-fail",
+                "Active",
+                serde_json::json!("RunScoped"),
+                &[],
+                &["bash: permission denied"],
+                1,
+            );
+            let mut messages: Vec<Message> = Vec::new();
+            inject_episode_history(dir.path(), 100_000, &mut messages);
+            assert_eq!(messages.len(), 1);
+            assert!(
+                messages[0]
+                    .content
+                    .as_ref()
+                    .unwrap()
+                    .contains("permission denied")
+            );
+        }
+
+        #[test]
+        fn test_t0_3_ac_6_respects_5pct_token_budget() {
+            let dir = tempfile::tempdir().unwrap();
+            // Write a huge constraint string to force truncation.
+            let huge: String = std::iter::repeat('x').take(100_000).collect();
+            write_episode(
+                dir.path(),
+                "ep-big",
+                "Active",
+                serde_json::json!("RunScoped"),
+                &[huge.as_str()],
+                &[],
+                1,
+            );
+            // 1000 tokens * 4 chars / 20 = 200 chars budget.
+            let mut messages: Vec<Message> = Vec::new();
+            inject_episode_history(dir.path(), 1000, &mut messages);
+            assert_eq!(messages.len(), 1);
+            let body = messages[0].content.as_ref().unwrap();
+            assert!(
+                body.len() <= 260,
+                "must respect 5% budget, got {} chars",
+                body.len()
+            );
+            assert!(body.contains("truncated"), "must mark truncation");
+        }
+
+        #[test]
+        fn test_t0_3_ac_7_no_episodes_is_noop() {
+            let dir = tempfile::tempdir().unwrap();
+            let mut messages: Vec<Message> = Vec::new();
+            inject_episode_history(dir.path(), 100_000, &mut messages);
+            assert!(messages.is_empty(), "no episodes → no system message");
+        }
     }
 }
