@@ -99,32 +99,42 @@ impl StateManager {
 
     /// Load episode summaries from previous runs.
     ///
-    /// Scans `.theo/wiki/episodes/` for JSON files and deserializes them.
-    /// Returns an empty vec if no episodes exist or on any error.
+    /// Primary path: `.theo/memory/episodes/` (decision: meeting 20260420-221947 #4).
+    /// Legacy fallback: `.theo/wiki/episodes/` (earlier location). Both are scanned
+    /// and merged; the memory path wins on duplicate `summary_id`. Returns an
+    /// empty vec if no episodes exist or on any error.
     pub fn load_episode_summaries(
         project_dir: &Path,
     ) -> Vec<theo_domain::episode::EpisodeSummary> {
-        let episodes_dir = project_dir.join(".theo").join("wiki").join("episodes");
-        if !episodes_dir.exists() {
-            return Vec::new();
-        }
+        let memory_dir = project_dir.join(".theo").join("memory").join("episodes");
+        let legacy_dir = project_dir.join(".theo").join("wiki").join("episodes");
 
-        let mut summaries = Vec::new();
-        if let Ok(entries) = std::fs::read_dir(&episodes_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().and_then(|e| e.to_str()) == Some("json") {
+        let mut seen: std::collections::HashMap<String, theo_domain::episode::EpisodeSummary> =
+            std::collections::HashMap::new();
+
+        // Scan legacy first, then memory — memory entries overwrite duplicates.
+        for dir in [&legacy_dir, &memory_dir] {
+            if !dir.exists() {
+                continue;
+            }
+            if let Ok(entries) = std::fs::read_dir(dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                        continue;
+                    }
                     if let Ok(content) = std::fs::read_to_string(&path) {
                         if let Ok(summary) =
                             serde_json::from_str::<theo_domain::episode::EpisodeSummary>(&content)
                         {
-                            summaries.push(summary);
+                            seen.insert(summary.summary_id.clone(), summary);
                         }
                     }
                 }
             }
         }
 
+        let mut summaries: Vec<_> = seen.into_values().collect();
         // Sort by created_at (oldest first) for chronological context.
         summaries.sort_by_key(|s| s.created_at);
         summaries
@@ -205,7 +215,7 @@ mod tests {
     fn test_episode_summaries_loadable_for_resume() {
         // Arrange
         let dir = tempfile::tempdir().unwrap();
-        let episodes_dir = dir.path().join(".theo/wiki/episodes");
+        let episodes_dir = dir.path().join(".theo/memory/episodes");
         std::fs::create_dir_all(&episodes_dir).unwrap();
 
         // Write a minimal episode summary JSON
@@ -262,6 +272,100 @@ mod tests {
 
         // Assert
         assert!(summaries.is_empty());
+    }
+
+    #[test]
+    fn test_p1_legacy_wiki_episodes_still_readable() {
+        // Legacy path `.theo/wiki/episodes/` must keep loading so that
+        // users upgrading across this change do not lose episode history
+        // (decision: meeting 20260420-221947 #4).
+        let dir = tempfile::tempdir().unwrap();
+        let legacy_dir = dir.path().join(".theo/wiki/episodes");
+        std::fs::create_dir_all(&legacy_dir).unwrap();
+        let payload = serde_json::json!({
+            "summary_id": "ep-legacy-1",
+            "run_id": "run-L",
+            "task_id": null,
+            "window_start_event_id": "",
+            "window_end_event_id": "",
+            "machine_summary": {
+                "objective": "legacy", "key_actions": [], "outcome": "Success",
+                "successful_steps": [], "failed_attempts": [],
+                "learned_constraints": [], "files_touched": []
+            },
+            "human_summary": null,
+            "evidence_event_ids": [],
+            "affected_files": [],
+            "open_questions": [],
+            "unresolved_hypotheses": [],
+            "referenced_community_ids": [],
+            "supersedes_summary_id": null,
+            "schema_version": 1,
+            "created_at": 1u64,
+            "ttl_policy": "RunScoped",
+            "lifecycle": "Active"
+        });
+        std::fs::write(
+            legacy_dir.join("ep-legacy-1.json"),
+            serde_json::to_string(&payload).unwrap(),
+        )
+        .unwrap();
+
+        let summaries = StateManager::load_episode_summaries(dir.path());
+
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].summary_id, "ep-legacy-1");
+    }
+
+    #[test]
+    fn test_p1_memory_path_wins_over_legacy_on_duplicate_id() {
+        // Same summary_id present in both paths → the `.theo/memory/episodes/`
+        // version is authoritative.
+        let dir = tempfile::tempdir().unwrap();
+        let legacy = dir.path().join(".theo/wiki/episodes");
+        let memory = dir.path().join(".theo/memory/episodes");
+        std::fs::create_dir_all(&legacy).unwrap();
+        std::fs::create_dir_all(&memory).unwrap();
+        let make_payload = |objective: &str| {
+            serde_json::json!({
+                "summary_id": "ep-dup",
+                "run_id": "run-X",
+                "task_id": null,
+                "window_start_event_id": "",
+                "window_end_event_id": "",
+                "machine_summary": {
+                    "objective": objective, "key_actions": [], "outcome": "Success",
+                    "successful_steps": [], "failed_attempts": [],
+                    "learned_constraints": [], "files_touched": []
+                },
+                "human_summary": null,
+                "evidence_event_ids": [],
+                "affected_files": [],
+                "open_questions": [],
+                "unresolved_hypotheses": [],
+                "referenced_community_ids": [],
+                "supersedes_summary_id": null,
+                "schema_version": 1,
+                "created_at": 1u64,
+                "ttl_policy": "RunScoped",
+                "lifecycle": "Active"
+            })
+        };
+        std::fs::write(
+            legacy.join("ep-dup.json"),
+            serde_json::to_string(&make_payload("legacy")).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(
+            memory.join("ep-dup.json"),
+            serde_json::to_string(&make_payload("memory")).unwrap(),
+        )
+        .unwrap();
+
+        let summaries = StateManager::load_episode_summaries(dir.path());
+
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].machine_summary.objective, "memory");
     }
 
     #[test]

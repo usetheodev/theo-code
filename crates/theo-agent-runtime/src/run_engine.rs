@@ -210,7 +210,9 @@ impl AgentRunEngine {
             );
         }
 
-        // Generate EpisodeSummary from run events and persist to .theo/wiki/episodes/
+        // Generate EpisodeSummary from run events and persist to .theo/memory/episodes/
+        // (decision: meeting 20260420-221947 #4 — episodes belong to memory namespace,
+        // not wiki; wiki is reserved for compiled content).
         let events = self.event_bus.events();
         if !events.is_empty() {
             let task_objective = self
@@ -224,7 +226,11 @@ impl AgentRunEngine {
                 &task_objective,
                 &events,
             );
-            let episodes_dir = self.project_dir.join(".theo").join("wiki").join("episodes");
+            let episodes_dir = self
+                .project_dir
+                .join(".theo")
+                .join("memory")
+                .join("episodes");
             if std::fs::create_dir_all(&episodes_dir).is_ok() {
                 let episode_path = episodes_dir.join(format!("{}.json", summary.summary_id));
                 let _ = std::fs::write(
