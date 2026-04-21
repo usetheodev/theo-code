@@ -7,6 +7,9 @@ import { DeploysPage } from "../features/deploys/pages/DeploysPage";
 import { MonitoringPage } from "../features/monitoring/pages/MonitoringPage";
 import { DatabasePage } from "../features/database/pages/DatabasePage";
 import { SettingsPage } from "../features/settings/pages/SettingsPage";
+import { EpisodesPage } from "../features/memory/pages/EpisodesPage";
+import { MemoryWikiPage } from "../features/memory/pages/WikiPage";
+import { MemorySettingsPage } from "../features/memory/pages/SettingsPage";
 
 export const router = createHashRouter([
   {
@@ -21,6 +24,9 @@ export const router = createHashRouter([
       { path: "monitoring", element: <MonitoringPage /> },
       { path: "database", element: <DatabasePage /> },
       { path: "settings", element: <SettingsPage /> },
+      { path: "memory/episodes", element: <EpisodesPage /> },
+      { path: "memory/wiki", element: <MemoryWikiPage /> },
+      { path: "memory/settings", element: <MemorySettingsPage /> },
     ],
   },
 ]);

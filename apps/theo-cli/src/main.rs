@@ -138,6 +138,22 @@ enum Commands {
         /// Repository path
         repo_path: PathBuf,
     },
+
+    /// Memory subsystem utilities (lint, inspect).
+    Memory {
+        #[command(subcommand)]
+        action: MemoryAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum MemoryAction {
+    /// Run health-check lint over the memory mount.
+    Lint {
+        /// Output format (text|json).
+        #[arg(long)]
+        format: Option<String>,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -189,6 +205,25 @@ fn main() {
         Some(Commands::Stats { repo_path }) => {
             cmd_stats(&repo_path);
         }
+        Some(Commands::Memory { action }) => match action {
+            MemoryAction::Lint { format } => {
+                let fmt = commands::memory_lint::LintFormat::from_str_opt(format.as_deref());
+                // Stub inputs — real collection belongs to a follow-up
+                // that reads hash manifest, journal timestamps, and
+                // retrieval metrics. The subcommand surface lands here
+                // so downstream plumbing has a stable entry point.
+                let inputs = theo_application::use_cases::memory_lint::LintInputs {
+                    seconds_since_last_compile: 0,
+                    lessons: Vec::new(),
+                    orphan_episode_ids: Vec::new(),
+                    broken_link_pages: Vec::new(),
+                    recall_p50_ms: 0.0,
+                    recall_p95_ms: 0.0,
+                };
+                let code = commands::memory_lint::run(inputs, fmt);
+                std::process::exit(code);
+            }
+        },
         None => {
             if cli.headless {
                 cmd_headless(cli.prompt, cli.repo, cli.provider, cli.model, cli.max_iter, cli.mode, cli.temperature, cli.seed);

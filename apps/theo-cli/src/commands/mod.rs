@@ -15,6 +15,7 @@ mod cost;
 mod doctor;
 mod help;
 mod memory;
+pub mod memory_lint;
 mod model;
 pub mod session_commands;
 mod skills;
