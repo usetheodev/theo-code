@@ -64,6 +64,8 @@ pub struct AgentRunEngine {
     /// Steering and follow-up message queues for mid-run injection.
     /// Pi-mono ref: `packages/agent/src/agent-loop.ts:165-229`
     message_queues: MessageQueues,
+    /// Phase 1 T1.1: accumulated token usage across LLM calls.
+    session_token_usage: theo_domain::budget::TokenUsage,
 }
 
 impl AgentRunEngine {
@@ -139,7 +141,13 @@ impl AgentRunEngine {
             working_set: theo_domain::working_set::WorkingSet::new(),
             context_metrics: ContextMetrics::new(),
             message_queues: MessageQueues::default(),
+            session_token_usage: theo_domain::budget::TokenUsage::default(),
         }
+    }
+
+    /// Accumulated token usage (Phase 1 T1.1 AC-1.1.4, CLI display).
+    pub fn session_token_usage(&self) -> &theo_domain::budget::TokenUsage {
+        &self.session_token_usage
     }
 
     /// Sets the message queues for steering and follow-up injection.
@@ -222,12 +230,13 @@ impl AgentRunEngine {
                 .get(&self.task_id)
                 .map(|t| t.objective.clone())
                 .unwrap_or_else(|| "unknown".to_string());
-            let summary = theo_domain::episode::EpisodeSummary::from_events(
-                self.run.run_id.as_str(),
-                Some(self.task_id.as_str()),
-                &task_objective,
-                &events,
+            let mut summary = theo_domain::episode::EpisodeSummary::from_events(
+                self.run.run_id.as_str(), Some(self.task_id.as_str()), &task_objective, &events,
             );
+            // Phase 1 T1.1: attach accumulated token usage + estimated cost.
+            let mut usage = self.session_token_usage.clone();
+            if let Some(c) = theo_domain::budget::known_model_cost(&self.config.model) { usage.recompute_cost(&c); }
+            summary.token_usage = Some(usage);
             let episodes_dir = self
                 .project_dir
                 .join(".theo")
@@ -807,6 +816,12 @@ impl AgentRunEngine {
                     self.budget_enforcer.record_tokens(total_tok);
                     self.metrics
                         .record_llm_call_detailed(llm_duration, input_tok, output_tok);
+                    // Phase 1 T1.1: accumulate the 6-field token usage
+                    // (cache / reasoning stay at 0 until providers expose
+                    // them; cost recomputed lazily at episode write time).
+                    self.session_token_usage.accumulate(&theo_domain::budget::TokenUsage {
+                        input_tokens: input_tok, output_tokens: output_tok, ..Default::default()
+                    });
                     resp
                 }
                 Err(e) if e.is_context_overflow() => {

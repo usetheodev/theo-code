@@ -61,6 +61,10 @@ pub struct EpisodeSummary {
     /// What kind of knowledge this summary represents.
     #[serde(default)]
     pub memory_kind: MemoryKind,
+    /// Token usage accumulated across LLM calls for this episode.
+    /// Added in Phase 1 T1.1 — serde default keeps legacy JSONs readable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_usage: Option<crate::budget::TokenUsage>,
 }
 
 /// Machine-readable episode summary for agent resume.
@@ -617,6 +621,7 @@ impl EpisodeSummary {
             ttl_policy,
             lifecycle: MemoryLifecycle::Active,
             memory_kind,
+            token_usage: None,
         }
     }
 }
