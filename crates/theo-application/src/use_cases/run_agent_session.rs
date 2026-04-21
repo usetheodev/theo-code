@@ -25,7 +25,7 @@ pub enum RunSessionError {
 /// Initializes GRAPHCTX (code intelligence) before running the agent.
 /// If graph build fails, the agent runs without code context (graceful degradation).
 pub async fn run_agent_session(
-    config: AgentConfig,
+    mut config: AgentConfig,
     task: &str,
     project_dir: &Path,
     event_listener: Arc<dyn EventListener>,
@@ -39,6 +39,10 @@ pub async fn run_agent_session(
             project_dir.display().to_string(),
         ));
     }
+
+    // Phase 0 T0.2: when memory is enabled, attach a MemoryEngine with
+    // BuiltinMemoryProvider. No-op when disabled.
+    super::memory_factory::attach_memory_to_config(&mut config, project_dir);
 
     // Initialize GRAPHCTX — fire-and-forget background build.
     // Disabled entirely when THEO_NO_GRAPHCTX=1.
