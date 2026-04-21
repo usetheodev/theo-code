@@ -15,6 +15,7 @@ pub mod retry_policy;
 pub mod routing;
 pub mod sandbox;
 pub mod session;
+pub mod session_search;
 pub mod session_summary;
 pub mod task;
 pub mod tokens;

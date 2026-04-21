@@ -21,3 +21,4 @@ tantivy-backend = ["theo-engine-retrieval/tantivy-backend"]
 [dev-dependencies]
 theo-test-memory-fixtures.workspace = true
 theo-engine-retrieval = { workspace = true, features = ["tantivy-backend"] }
+tempfile.workspace = true
