@@ -17,6 +17,7 @@ pub mod extension;
 pub mod failure_tracker;
 pub mod hooks;
 pub mod jit_instructions;
+pub mod lesson_pipeline;
 pub mod loop_state;
 pub mod memory_lifecycle;
 pub mod metrics;

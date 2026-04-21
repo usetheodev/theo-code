@@ -233,10 +233,12 @@ impl AgentRunEngine {
             let mut summary = theo_domain::episode::EpisodeSummary::from_events(
                 self.run.run_id.as_str(), Some(self.task_id.as_str()), &task_objective, &events,
             );
-            // Phase 1 T1.1: attach accumulated token usage + estimated cost.
+            // Phase 1 T1.1 (usage+cost) + Phase 2 T2.1 (lesson pipeline, G5).
             let mut usage = self.session_token_usage.clone();
             if let Some(c) = theo_domain::budget::known_model_cost(&self.config.model) { usage.recompute_cost(&c); }
             summary.token_usage = Some(usage);
+            let _ = crate::lesson_pipeline::extract_and_persist_for_outcome(
+                &self.project_dir, summary.machine_summary.outcome, &events);
             let episodes_dir = self
                 .project_dir
                 .join(".theo")
