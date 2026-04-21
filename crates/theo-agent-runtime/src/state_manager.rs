@@ -148,10 +148,10 @@ mod tests {
     #[test]
     fn test_state_manager_creates_session_tree_on_disk() {
         // Arrange
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().expect("t");
 
         // Act
-        let sm = StateManager::create(dir.path(), "run-001").unwrap();
+        let sm = StateManager::create(dir.path(), "run-001").expect("t");
 
         // Assert
         let session_path = dir.path().join(".theo/state/run-001/session.jsonl");
@@ -163,18 +163,18 @@ mod tests {
     #[test]
     fn test_state_manager_append_and_reload() {
         // Arrange
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().expect("t");
         {
-            let mut sm = StateManager::create(dir.path(), "run-002").unwrap();
-            sm.append_message("user", "Hello").unwrap();
-            sm.append_message("assistant", "Hi there!").unwrap();
-            sm.append_message("user", "How are you?").unwrap();
+            let mut sm = StateManager::create(dir.path(), "run-002").expect("t");
+            sm.append_message("user", "Hello").expect("t");
+            sm.append_message("assistant", "Hi there!").expect("t");
+            sm.append_message("user", "How are you?").expect("t");
             assert_eq!(sm.len(), 4); // header + 3 messages
         }
 
         // Act: reload from disk
         let loaded = StateManager::load(dir.path(), "run-002")
-            .unwrap()
+            .expect("t")
             .expect("should find existing session");
 
         // Assert
@@ -185,10 +185,10 @@ mod tests {
     #[test]
     fn test_state_manager_build_context_converts_to_pairs() {
         // Arrange
-        let dir = tempfile::tempdir().unwrap();
-        let mut sm = StateManager::create(dir.path(), "run-003").unwrap();
-        sm.append_message("user", "question").unwrap();
-        sm.append_message("assistant", "answer").unwrap();
+        let dir = tempfile::tempdir().expect("t");
+        let mut sm = StateManager::create(dir.path(), "run-003").expect("t");
+        sm.append_message("user", "question").expect("t");
+        sm.append_message("assistant", "answer").expect("t");
 
         // Act
         let context = sm.build_context();
@@ -202,10 +202,10 @@ mod tests {
     #[test]
     fn test_state_manager_load_nonexistent_returns_none() {
         // Arrange
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().expect("t");
 
         // Act
-        let result = StateManager::load(dir.path(), "nonexistent-run").unwrap();
+        let result = StateManager::load(dir.path(), "nonexistent-run").expect("t");
 
         // Assert
         assert!(result.is_none());
@@ -214,9 +214,9 @@ mod tests {
     #[test]
     fn test_episode_summaries_loadable_for_resume() {
         // Arrange
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().expect("t");
         let episodes_dir = dir.path().join(".theo/memory/episodes");
-        std::fs::create_dir_all(&episodes_dir).unwrap();
+        std::fs::create_dir_all(&episodes_dir).expect("t");
 
         // Write a minimal episode summary JSON
         let episode_json = serde_json::json!({
@@ -248,9 +248,9 @@ mod tests {
         });
         std::fs::write(
             episodes_dir.join("ep-test-001.json"),
-            serde_json::to_string_pretty(&episode_json).unwrap(),
+            serde_json::to_string_pretty(&episode_json).expect("t"),
         )
-        .unwrap();
+        .expect("t");
 
         // Act
         let summaries = StateManager::load_episode_summaries(dir.path());
@@ -265,7 +265,7 @@ mod tests {
     #[test]
     fn test_episode_summaries_empty_when_no_episodes() {
         // Arrange
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().expect("t");
 
         // Act
         let summaries = StateManager::load_episode_summaries(dir.path());
@@ -279,9 +279,9 @@ mod tests {
         // Legacy path `.theo/wiki/episodes/` must keep loading so that
         // users upgrading across this change do not lose episode history
         // (decision: meeting 20260420-221947 #4).
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().expect("t");
         let legacy_dir = dir.path().join(".theo/wiki/episodes");
-        std::fs::create_dir_all(&legacy_dir).unwrap();
+        std::fs::create_dir_all(&legacy_dir).expect("t");
         let payload = serde_json::json!({
             "summary_id": "ep-legacy-1",
             "run_id": "run-L",
@@ -307,9 +307,9 @@ mod tests {
         });
         std::fs::write(
             legacy_dir.join("ep-legacy-1.json"),
-            serde_json::to_string(&payload).unwrap(),
+            serde_json::to_string(&payload).expect("t"),
         )
-        .unwrap();
+        .expect("t");
 
         let summaries = StateManager::load_episode_summaries(dir.path());
 
@@ -321,11 +321,11 @@ mod tests {
     fn test_p1_memory_path_wins_over_legacy_on_duplicate_id() {
         // Same summary_id present in both paths → the `.theo/memory/episodes/`
         // version is authoritative.
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().expect("t");
         let legacy = dir.path().join(".theo/wiki/episodes");
         let memory = dir.path().join(".theo/memory/episodes");
-        std::fs::create_dir_all(&legacy).unwrap();
-        std::fs::create_dir_all(&memory).unwrap();
+        std::fs::create_dir_all(&legacy).expect("t");
+        std::fs::create_dir_all(&memory).expect("t");
         let make_payload = |objective: &str| {
             serde_json::json!({
                 "summary_id": "ep-dup",
@@ -353,14 +353,14 @@ mod tests {
         };
         std::fs::write(
             legacy.join("ep-dup.json"),
-            serde_json::to_string(&make_payload("legacy")).unwrap(),
+            serde_json::to_string(&make_payload("legacy")).expect("t"),
         )
-        .unwrap();
+        .expect("t");
         std::fs::write(
             memory.join("ep-dup.json"),
-            serde_json::to_string(&make_payload("memory")).unwrap(),
+            serde_json::to_string(&make_payload("memory")).expect("t"),
         )
-        .unwrap();
+        .expect("t");
 
         let summaries = StateManager::load_episode_summaries(dir.path());
 
@@ -371,8 +371,8 @@ mod tests {
     #[test]
     fn test_state_manager_state_dir_path() {
         // Arrange
-        let dir = tempfile::tempdir().unwrap();
-        let sm = StateManager::create(dir.path(), "run-004").unwrap();
+        let dir = tempfile::tempdir().expect("t");
+        let sm = StateManager::create(dir.path(), "run-004").expect("t");
 
         // Assert
         let expected = dir.path().join(".theo/state/run-004");

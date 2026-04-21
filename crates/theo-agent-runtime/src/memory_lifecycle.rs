@@ -272,25 +272,25 @@ mod tests {
         async fn prefetch(&self, query: &str) -> String {
             self.log
                 .lock()
-                .unwrap()
+                .expect("t")
                 .push(format!("prefetch:{query}"));
             format!("past fact about {query}")
         }
         async fn sync_turn(&self, user: &str, assistant: &str) {
             self.log
                 .lock()
-                .unwrap()
+                .expect("t")
                 .push(format!("sync:{user}>>{assistant}"));
         }
         async fn on_pre_compress(&self, txt: &str) -> String {
             self.log
                 .lock()
-                .unwrap()
+                .expect("t")
                 .push(format!("pre_compress:{}", txt.len()));
             "extracted".to_string()
         }
         async fn on_session_end(&self) {
-            self.log.lock().unwrap().push("end".into());
+            self.log.lock().expect("t").push("end".into());
         }
     }
 
@@ -314,7 +314,7 @@ mod tests {
             "block must be fenced: {block}"
         );
         assert!(block.contains("past fact about routing"));
-        assert_eq!(log.lock().unwrap().first().unwrap(), "prefetch:routing");
+        assert_eq!(log.lock().expect("t").first().expect("t"), "prefetch:routing");
     }
 
     // ── RM0-AC-2 ─────────────────────────────────────────────────
@@ -323,7 +323,7 @@ mod tests {
         let (provider, log) = RecordingProvider::new();
         let cfg = cfg_with(provider, true);
         MemoryLifecycle::sync_turn(&cfg, "hello", "world").await;
-        assert_eq!(log.lock().unwrap().last().unwrap(), "sync:hello>>world");
+        assert_eq!(log.lock().expect("t").last().expect("t"), "sync:hello>>world");
     }
 
     // ── RM0-AC-3 ─────────────────────────────────────────────────
@@ -333,7 +333,7 @@ mod tests {
         let cfg = cfg_with(provider, true);
         let out = MemoryLifecycle::on_pre_compress(&cfg, "abc").await;
         assert_eq!(out, "extracted");
-        assert_eq!(log.lock().unwrap().last().unwrap(), "pre_compress:3");
+        assert_eq!(log.lock().expect("t").last().expect("t"), "pre_compress:3");
     }
 
     // ── RM0-AC-4 ─────────────────────────────────────────────────
@@ -342,7 +342,7 @@ mod tests {
         let (provider, log) = RecordingProvider::new();
         let cfg = cfg_with(provider, true);
         MemoryLifecycle::on_session_end(&cfg).await;
-        assert_eq!(log.lock().unwrap().last().unwrap(), "end");
+        assert_eq!(log.lock().expect("t").last().expect("t"), "end");
     }
 
     // ── RM0-AC-5 ─────────────────────────────────────────────────
@@ -359,9 +359,9 @@ mod tests {
         assert_eq!(block, "");
         assert_eq!(fx, "");
         assert!(
-            log.lock().unwrap().is_empty(),
+            log.lock().expect("t").is_empty(),
             "disabled memory must not call provider; got {:?}",
-            log.lock().unwrap()
+            log.lock().expect("t")
         );
     }
 
@@ -395,7 +395,7 @@ mod tests {
         MemoryLifecycle::on_pre_compress(&cfg, "mid-session text").await;
         MemoryLifecycle::on_session_end(&cfg).await;
 
-        let entries = log.lock().unwrap().clone();
+        let entries = log.lock().expect("t").clone();
         assert_eq!(entries.len(), 4);
         assert!(entries[0].starts_with("prefetch:"));
         assert!(entries[1].starts_with("sync:"));
@@ -431,7 +431,7 @@ mod tests {
             created_at: u64,
         ) {
             let episodes_dir = dir.join(".theo/memory/episodes");
-            std::fs::create_dir_all(&episodes_dir).unwrap();
+            std::fs::create_dir_all(&episodes_dir).expect("t");
             let payload = serde_json::json!({
                 "summary_id": id,
                 "run_id": id,
@@ -461,14 +461,14 @@ mod tests {
             });
             std::fs::write(
                 episodes_dir.join(format!("{id}.json")),
-                serde_json::to_string(&payload).unwrap(),
+                serde_json::to_string(&payload).expect("t"),
             )
-            .unwrap();
+            .expect("t");
         }
 
         #[test]
         fn test_t0_3_ac_1_loads_recent_episodes() {
-            let dir = tempfile::tempdir().unwrap();
+            let dir = tempfile::tempdir().expect("t");
             write_episode(
                 dir.path(),
                 "ep-a",
@@ -481,13 +481,13 @@ mod tests {
             let mut messages: Vec<Message> = Vec::new();
             inject_episode_history(dir.path(), 100_000, &mut messages);
             assert_eq!(messages.len(), 1);
-            assert!(messages[0].content.as_ref().unwrap().contains("goal-ep-a"));
-            assert!(messages[0].content.as_ref().unwrap().contains("no unwrap"));
+            assert!(messages[0].content.as_ref().expect("t").contains("goal-ep-a"));
+            assert!(messages[0].content.as_ref().expect("t").contains("no unwrap"));
         }
 
         #[test]
         fn test_t0_3_ac_2_archived_excluded() {
-            let dir = tempfile::tempdir().unwrap();
+            let dir = tempfile::tempdir().expect("t");
             write_episode(
                 dir.path(),
                 "ep-old",
@@ -507,7 +507,7 @@ mod tests {
 
         #[test]
         fn test_t0_3_ac_3_expired_ttl_excluded() {
-            let dir = tempfile::tempdir().unwrap();
+            let dir = tempfile::tempdir().expect("t");
             // created_at = 1 ms ago, seconds = 0 → expired
             write_episode(
                 dir.path(),
@@ -525,7 +525,7 @@ mod tests {
 
         #[test]
         fn test_t0_3_ac_5_failed_attempts_visible() {
-            let dir = tempfile::tempdir().unwrap();
+            let dir = tempfile::tempdir().expect("t");
             write_episode(
                 dir.path(),
                 "ep-fail",
@@ -542,14 +542,14 @@ mod tests {
                 messages[0]
                     .content
                     .as_ref()
-                    .unwrap()
+                    .expect("t")
                     .contains("permission denied")
             );
         }
 
         #[test]
         fn test_t0_3_ac_6_respects_5pct_token_budget() {
-            let dir = tempfile::tempdir().unwrap();
+            let dir = tempfile::tempdir().expect("t");
             // Write a huge constraint string to force truncation.
             let huge: String = std::iter::repeat('x').take(100_000).collect();
             write_episode(
@@ -565,7 +565,7 @@ mod tests {
             let mut messages: Vec<Message> = Vec::new();
             inject_episode_history(dir.path(), 1000, &mut messages);
             assert_eq!(messages.len(), 1);
-            let body = messages[0].content.as_ref().unwrap();
+            let body = messages[0].content.as_ref().expect("t");
             assert!(
                 body.len() <= 260,
                 "must respect 5% budget, got {} chars",
@@ -576,7 +576,7 @@ mod tests {
 
         #[test]
         fn test_t0_3_ac_7_no_episodes_is_noop() {
-            let dir = tempfile::tempdir().unwrap();
+            let dir = tempfile::tempdir().expect("t");
             let mut messages: Vec<Message> = Vec::new();
             inject_episode_history(dir.path(), 100_000, &mut messages);
             assert!(messages.is_empty(), "no episodes → no system message");

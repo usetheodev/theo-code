@@ -268,7 +268,7 @@ mod tests {
             elapsed_secs: 61,
             ..Default::default()
         };
-        let violation = usage.exceeds(&budget).unwrap();
+        let violation = usage.exceeds(&budget).expect("t");
         assert!(matches!(
             violation,
             BudgetViolation::TimeExceeded {
@@ -288,7 +288,7 @@ mod tests {
             tokens_used: 1001,
             ..Default::default()
         };
-        let violation = usage.exceeds(&budget).unwrap();
+        let violation = usage.exceeds(&budget).expect("t");
         assert!(matches!(
             violation,
             BudgetViolation::TokensExceeded {
@@ -308,7 +308,7 @@ mod tests {
             iterations_used: 11,
             ..Default::default()
         };
-        let violation = usage.exceeds(&budget).unwrap();
+        let violation = usage.exceeds(&budget).expect("t");
         assert!(matches!(
             violation,
             BudgetViolation::IterationsExceeded {
@@ -328,7 +328,7 @@ mod tests {
             tool_calls_used: 6,
             ..Default::default()
         };
-        let violation = usage.exceeds(&budget).unwrap();
+        let violation = usage.exceeds(&budget).expect("t");
         assert!(matches!(
             violation,
             BudgetViolation::ToolCallsExceeded {
@@ -359,8 +359,8 @@ mod tests {
             },
         ];
         for v in &violations {
-            let json = serde_json::to_string(v).unwrap();
-            let back: BudgetViolation = serde_json::from_str(&json).unwrap();
+            let json = serde_json::to_string(v).expect("t");
+            let back: BudgetViolation = serde_json::from_str(&json).expect("t");
             assert_eq!(*v, back);
         }
     }
@@ -368,8 +368,8 @@ mod tests {
     #[test]
     fn budget_serde_roundtrip() {
         let budget = Budget::default();
-        let json = serde_json::to_string(&budget).unwrap();
-        let back: Budget = serde_json::from_str(&json).unwrap();
+        let json = serde_json::to_string(&budget).expect("t");
+        let back: Budget = serde_json::from_str(&json).expect("t");
         assert_eq!(back.max_time_secs, budget.max_time_secs);
         assert_eq!(back.max_tokens, budget.max_tokens);
     }
@@ -465,7 +465,7 @@ mod tests {
     #[test]
     fn known_model_cost_gpt4o_pricing() {
         // Arrange & Act
-        let cost = known_model_cost("gpt-4o").unwrap();
+        let cost = known_model_cost("gpt-4o").expect("t");
 
         // Assert
         assert!((cost.input_per_million - 2.5).abs() < 1e-9);
@@ -491,8 +491,8 @@ mod tests {
             cache_write_per_million: 3.75,
         };
         let breakdown = CostBreakdown::calculate(&cost, 1_000_000, 500_000);
-        let json = serde_json::to_string(&breakdown).unwrap();
-        let back: CostBreakdown = serde_json::from_str(&json).unwrap();
+        let json = serde_json::to_string(&breakdown).expect("t");
+        let back: CostBreakdown = serde_json::from_str(&json).expect("t");
         assert!((back.total - breakdown.total).abs() < 1e-9);
     }
 
@@ -504,8 +504,8 @@ mod tests {
             cache_read_per_million: 1.5,
             cache_write_per_million: 18.75,
         };
-        let json = serde_json::to_string(&cost).unwrap();
-        let back: ModelCost = serde_json::from_str(&json).unwrap();
+        let json = serde_json::to_string(&cost).expect("t");
+        let back: ModelCost = serde_json::from_str(&json).expect("t");
         assert!((back.input_per_million - 15.0).abs() < 1e-9);
         assert!((back.output_per_million - 75.0).abs() < 1e-9);
     }
@@ -585,8 +585,8 @@ mod tests {
             reasoning_tokens: 25,
             estimated_cost_usd: 0.0123,
         };
-        let json = serde_json::to_string(&u).unwrap();
-        let back: TokenUsage = serde_json::from_str(&json).unwrap();
+        let json = serde_json::to_string(&u).expect("t");
+        let back: TokenUsage = serde_json::from_str(&json).expect("t");
         assert_eq!(u, back);
     }
 }

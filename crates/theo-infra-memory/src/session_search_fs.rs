@@ -128,7 +128,7 @@ mod tests {
         created_at: u64,
     ) {
         let ed = dir.join(".theo/memory/episodes");
-        std::fs::create_dir_all(&ed).unwrap();
+        std::fs::create_dir_all(&ed).expect("t");
         let p = json!({
             "summary_id": id, "run_id": id,
             "task_id": null,
@@ -156,18 +156,18 @@ mod tests {
         });
         std::fs::write(
             ed.join(format!("{id}.json")),
-            serde_json::to_string(&p).unwrap(),
+            serde_json::to_string(&p).expect("t"),
         )
-        .unwrap();
+        .expect("t");
     }
 
     // ── AC-1.4.3: keyword search matches across fields ───────────
     #[test]
     fn test_t1_4_ac_3_keyword_match_in_objective() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().expect("t");
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .expect("t")
             .as_millis() as u64;
         write_ep(dir.path(), "ep-1", "fix login bug", &[], now_ms);
         write_ep(dir.path(), "ep-2", "refactor database", &[], now_ms);
@@ -181,10 +181,10 @@ mod tests {
     // ── AC-1.4.4: rank by keyword_overlap * 0.6 + recency * 0.4 ──
     #[test]
     fn test_t1_4_ac_4_rank_combines_keyword_and_recency() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().expect("t");
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .expect("t")
             .as_millis() as u64;
         let one_week_ago = now_ms.saturating_sub(7 * 24 * 3600 * 1000);
 
@@ -202,10 +202,10 @@ mod tests {
     // ── AC-1.4.5: max 3 results, structured text format ──────────
     #[test]
     fn test_t1_4_ac_5_caps_at_max_results() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().expect("t");
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .expect("t")
             .as_millis() as u64;
         for i in 0..10 {
             write_ep(dir.path(), &format!("ep-{i}"), "fix login", &[], now_ms);
@@ -222,10 +222,10 @@ mod tests {
     // ── AC-1.4.6: performance <50ms with 100 episodes ────────────
     #[test]
     fn test_t1_4_ac_6_performance_under_50ms_with_100_episodes() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().expect("t");
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .expect("t")
             .as_millis() as u64;
         for i in 0..100 {
             write_ep(
@@ -251,7 +251,7 @@ mod tests {
     // ── AC-1.4.7: no results → explanatory placeholder ───────────
     #[test]
     fn test_t1_4_ac_7_no_results_yields_placeholder() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().expect("t");
         let s = FsSessionSearch::new(dir.path());
         let hits = s.search("anything", 3);
         assert!(hits.is_empty());

@@ -293,8 +293,8 @@ mod tests {
     // ── P.3 schema_version ───────────────────────────────────────
     #[test]
     fn test_p3_lesson_schema_version_serialized() {
-        let l = apply_gates(candidate(), &[], &GateConfig::production()).unwrap();
-        let j = serde_json::to_value(&l).unwrap();
+        let l = apply_gates(candidate(), &[], &GateConfig::production()).expect("t");
+        let j = serde_json::to_value(&l).expect("t");
         assert_eq!(j.get("schema_version").and_then(|v| v.as_u64()), Some(1));
     }
 
@@ -313,7 +313,7 @@ mod tests {
             "last_hit_at_unix": null,
             "hit_count": 0
         }"#;
-        let back: MemoryLesson = serde_json::from_str(legacy_json).unwrap();
+        let back: MemoryLesson = serde_json::from_str(legacy_json).expect("t");
         assert_eq!(back.schema_version, 1);
     }
 
@@ -388,7 +388,7 @@ mod tests {
     #[test]
     fn test_rm4_ac_7_clean_candidate_starts_quarantine() {
         let c = candidate();
-        let got = apply_gates(c, &[], &GateConfig::production()).unwrap();
+        let got = apply_gates(c, &[], &GateConfig::production()).expect("t");
         assert_eq!(got.status, LessonStatus::Quarantine);
         assert!(got.created_at_unix > 0);
     }
@@ -396,7 +396,7 @@ mod tests {
     // ── RM4-AC-8 ─────────────────────────────────────────────────
     #[test]
     fn test_rm4_ac_8_promote_requires_hits_and_window() {
-        let mut lesson = apply_gates(candidate(), &[], &GateConfig::production()).unwrap();
+        let mut lesson = apply_gates(candidate(), &[], &GateConfig::production()).expect("t");
         // No hits yet → no promotion even if time elapsed.
         lesson.created_at_unix = now_unix().saturating_sub(10 * 86_400);
         assert!(!promote_if_ready(&mut lesson, &GateConfig::production()));
@@ -410,7 +410,7 @@ mod tests {
     // ── RM4-AC-9 ─────────────────────────────────────────────────
     #[test]
     fn test_rm4_ac_9_promote_no_op_after_invalidation() {
-        let mut lesson = apply_gates(candidate(), &[], &GateConfig::production()).unwrap();
+        let mut lesson = apply_gates(candidate(), &[], &GateConfig::production()).expect("t");
         lesson.status = LessonStatus::Invalidated;
         lesson.hit_count = 10;
         lesson.created_at_unix = 0; // ancient
@@ -434,16 +434,16 @@ mod tests {
             "hit_count": 0,
             "schema_version": 1
         }"#;
-        let back: MemoryLesson = serde_json::from_str(legacy_json).unwrap();
+        let back: MemoryLesson = serde_json::from_str(legacy_json).expect("t");
         assert_eq!(back.status, LessonStatus::Invalidated);
     }
 
     // ── RM4-AC-10 ────────────────────────────────────────────────
     #[test]
     fn test_rm4_ac_10_serde_roundtrip_preserves_status() {
-        let l = apply_gates(candidate(), &[], &GateConfig::production()).unwrap();
-        let j = serde_json::to_string(&l).unwrap();
-        let back: MemoryLesson = serde_json::from_str(&j).unwrap();
+        let l = apply_gates(candidate(), &[], &GateConfig::production()).expect("t");
+        let j = serde_json::to_string(&l).expect("t");
+        let back: MemoryLesson = serde_json::from_str(&j).expect("t");
         assert_eq!(back, l);
     }
 

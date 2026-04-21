@@ -486,7 +486,7 @@ mod tests {
         let systems: Vec<_> = msgs.iter().filter(|m| m.role == Role::System).collect();
         assert_eq!(systems.len(), 2);
         assert_eq!(
-            systems[0].content.as_deref().unwrap(),
+            systems[0].content.as_deref().expect("t"),
             "IMPORTANT SYSTEM PROMPT WITH LOTS OF TEXT"
         );
     }
@@ -621,7 +621,7 @@ mod tests {
             })
             .expect("Expected compaction summary");
 
-        let content = summary.content.as_deref().unwrap();
+        let content = summary.content.as_deref().expect("t");
         assert!(
             content.contains("Fix authentication bug"),
             "Summary should contain task objective"

@@ -204,7 +204,7 @@ mod tests {
 
     #[test]
     fn test_t2_1_ac_3_approved_persisted_with_schema_version() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().expect("t");
         // 2 evidence events for the same constraint so gate 3 passes.
         let evs = vec![
             ev_constraint("avoid mutex inside async", "workspace-local"),
@@ -216,7 +216,7 @@ mod tests {
         // enforced here; the second would be rejected when persisted
         // because gate 6 would see the first). Use ONE candidate and
         // manually bump evidence_event_ids to 2 so gate 3 passes.
-        let mut candidate = candidates_from_events(&evs[..1]).into_iter().next().unwrap();
+        let mut candidate = candidates_from_events(&evs[..1]).into_iter().next().expect("t");
         candidate.evidence_event_ids.push("evt-2".into());
         let (approved, rejected) = run_gates_and_persist(
             dir.path(),
@@ -234,11 +234,11 @@ mod tests {
 
     #[test]
     fn test_t2_1_ac_4_low_confidence_rejected_by_gate() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().expect("t");
         let mut candidate = candidates_from_events(&[ev_constraint("x y", "task-local")])
             .into_iter()
             .next()
-            .unwrap();
+            .expect("t");
         candidate.confidence = 0.2; // below gate 2 floor (0.60)
         let (a, r) = run_gates_and_persist(dir.path(), vec![candidate], &GateConfig::production());
         assert_eq!(a, 0);
@@ -247,7 +247,7 @@ mod tests {
 
     #[test]
     fn test_t2_1_ac_5_success_outcome_skips_pipeline() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().expect("t");
         let (a, r) = extract_and_persist_for_outcome(
             dir.path(),
             EpisodeOutcome::Success,

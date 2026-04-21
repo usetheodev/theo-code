@@ -164,10 +164,10 @@ mod tests {
             "theo-builtin-{}-{suffix}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                .expect("t")
                 .as_nanos()
         ));
-        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::create_dir_all(&dir).expect("t");
         dir.join("memory.md")
     }
 
@@ -231,7 +231,7 @@ mod tests {
             }));
         }
         for h in handles {
-            h.await.unwrap();
+            h.await.expect("t");
         }
         let out = bp.prefetch("q").await;
         for i in 0..10 {
@@ -248,11 +248,11 @@ mod tests {
         let path = tempfile_path("ac7");
         let bp = BuiltinMemoryProvider::new(&path);
         bp.sync_turn("test", "ack").await;
-        let disk = tokio::fs::read_to_string(&path).await.unwrap();
+        let disk = tokio::fs::read_to_string(&path).await.expect("t");
         assert!(disk.contains("test"));
         let tmp = path.with_file_name(format!(
             "{}.tmp",
-            path.file_name().unwrap().to_string_lossy()
+            path.file_name().expect("t").to_string_lossy()
         ));
         assert!(!tmp.exists(), "temp sibling cleaned after success");
     }
@@ -308,7 +308,7 @@ mod tests {
         bp.sync_turn("alpha", "ack").await;
         let _ = bp.prefetch("q").await; // freeze snapshot
         bp.sync_turn("beta", "ack").await; // persists even after freeze
-        let disk = tokio::fs::read_to_string(&path).await.unwrap();
+        let disk = tokio::fs::read_to_string(&path).await.expect("t");
         assert!(disk.contains("alpha"), "pre-freeze write on disk");
         assert!(disk.contains("beta"), "post-freeze write on disk");
     }
@@ -345,7 +345,7 @@ mod tests {
         // in-memory state only; on-disk content is a side effect. The
         // file existence + content proves atomic persistence for RM3a;
         // full reload-on-open lives as an RM3b enhancement.
-        let disk = tokio::fs::read_to_string(&path).await.unwrap();
+        let disk = tokio::fs::read_to_string(&path).await.expect("t");
         assert!(disk.contains("first"));
     }
 }

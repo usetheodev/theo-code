@@ -71,7 +71,7 @@ mod tests {
     fn test_t0_2_ac_1_builtin_registered_when_enabled() {
         let mut cfg = AgentConfig::default();
         cfg.memory_enabled = true;
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().expect("t");
 
         let engine = build_memory_engine(&cfg, dir.path());
         assert!(
@@ -85,7 +85,7 @@ mod tests {
     fn test_t0_2_ac_2_none_when_disabled() {
         let cfg = AgentConfig::default();
         assert!(!cfg.memory_enabled);
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().expect("t");
 
         let engine = build_memory_engine(&cfg, dir.path());
         assert!(
@@ -99,7 +99,7 @@ mod tests {
     async fn test_t0_2_ac_3_md_file_created_after_first_sync() {
         let mut cfg = AgentConfig::default();
         cfg.memory_enabled = true;
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().expect("t");
 
         let engine = build_memory_engine(&cfg, dir.path()).expect("engine built");
         engine.sync_turn("user says hi", "assistant says hello").await;
@@ -109,7 +109,7 @@ mod tests {
         let mem_dir = dir.path().join(".theo").join("memory");
         assert!(mem_dir.exists(), ".theo/memory/ should be created");
         let md_exists = std::fs::read_dir(&mem_dir)
-            .unwrap()
+            .expect("t")
             .flatten()
             .any(|e| e.path().extension().and_then(|s| s.to_str()) == Some("md"));
         assert!(md_exists, "sync_turn must produce a .md file");
@@ -120,7 +120,7 @@ mod tests {
     async fn test_t0_2_ac_4_injection_still_blocked_through_engine() {
         let mut cfg = AgentConfig::default();
         cfg.memory_enabled = true;
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().expect("t");
         let engine = build_memory_engine(&cfg, dir.path()).expect("engine built");
 
         engine
@@ -146,7 +146,7 @@ mod tests {
     async fn test_t0_2_ac_6_builtin_md_starts_empty_on_corruption() {
         let mut cfg = AgentConfig::default();
         cfg.memory_enabled = true;
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().expect("t");
         let engine = build_memory_engine(&cfg, dir.path()).expect("engine built");
         // Fresh provider, no prior state: prefetch returns empty.
         assert_eq!(engine.prefetch("q").await, "");
@@ -158,7 +158,7 @@ mod tests {
         let mut cfg = AgentConfig::default();
         cfg.memory_enabled = true;
         assert!(cfg.memory_provider.is_none());
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().expect("t");
 
         attach_memory_to_config(&mut cfg, dir.path());
         assert!(
@@ -171,7 +171,7 @@ mod tests {
     fn test_t0_2_attach_is_noop_when_disabled() {
         let mut cfg = AgentConfig::default();
         assert!(!cfg.memory_enabled);
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir().expect("t");
 
         attach_memory_to_config(&mut cfg, dir.path());
         assert!(cfg.memory_provider.is_none());
