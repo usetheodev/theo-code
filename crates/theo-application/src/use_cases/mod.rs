@@ -1,3 +1,4 @@
+pub mod auth;
 pub mod context_assembler;
 pub mod conversion;
 pub mod extraction;

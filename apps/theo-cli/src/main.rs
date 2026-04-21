@@ -139,6 +139,28 @@ enum Commands {
         #[command(subcommand)]
         action: MemoryAction,
     },
+
+    /// Authenticate with a provider (OAuth device flow or API key).
+    ///
+    /// `theo login`              → OpenAI OAuth device flow (default).
+    /// `theo login --key <K>`    → Persist `K` as an API key.
+    /// `theo login --server <U>` → Generic RFC 8628 device flow.
+    Login {
+        /// API key (`sk-...` or `sess-...`). Skips OAuth entirely.
+        #[arg(long)]
+        key: Option<String>,
+
+        /// Custom RFC 8628 device-flow server URL.
+        #[arg(long)]
+        server: Option<String>,
+
+        /// Do not auto-open a browser (headless/SSH sessions).
+        #[arg(long)]
+        no_browser: bool,
+    },
+
+    /// Remove saved credentials (OpenAI provider).
+    Logout,
 }
 
 #[derive(Subcommand)]
@@ -192,6 +214,12 @@ fn main() {
         Some(Commands::Stats { repo_path }) => {
             cmd_stats(&repo_path);
         }
+        Some(Commands::Login { key, server, no_browser }) => {
+            std::process::exit(cmd_login(key, server, no_browser));
+        }
+        Some(Commands::Logout) => {
+            std::process::exit(cmd_logout());
+        }
         Some(Commands::Memory { action }) => match action {
             MemoryAction::Lint { format } => {
                 let fmt = memory_lint::LintFormat::from_str_opt(format.as_deref());
@@ -225,6 +253,112 @@ fn main() {
 // ---------------------------------------------------------------------------
 // Command handlers
 // ---------------------------------------------------------------------------
+
+/// `theo login` — OAuth device flow, API-key paste, or custom server URL.
+/// Returns the desired process exit code (0 = success, 1 = failure).
+fn cmd_login(key: Option<String>, server: Option<String>, no_browser: bool) -> i32 {
+    use theo_application::use_cases::auth;
+
+    // Path 1: API key direct persistence.
+    if let Some(raw) = key {
+        let store = theo_infra_auth::store::AuthStore::open();
+        match auth::save_api_key(&store, &raw) {
+            Ok(_) => {
+                eprintln!("✓ Saved API key: {}", auth::mask_key(raw.trim()));
+                0
+            }
+            Err(e) => {
+                eprintln!("✗ save failed: {e}");
+                1
+            }
+        }
+    } else if let Some(url) = server {
+        eprintln!("✗ `--server {url}` is not yet wired in the headless CLI.");
+        eprintln!("  Use the TUI `/login {url}` (Ctrl+C then run `theo`) for the generic RFC 8628 flow.");
+        1
+    } else {
+        // Path 2: OpenAI OAuth device flow.
+        let rt = match tokio::runtime::Runtime::new() {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("✗ failed to create tokio runtime: {e}");
+                return 1;
+            }
+        };
+        rt.block_on(async { run_oauth_device_flow(no_browser).await })
+    }
+}
+
+/// Run the OpenAI device-flow end-to-end, printing UX prompts to stderr.
+async fn run_oauth_device_flow(no_browser: bool) -> i32 {
+    let auth_client = theo_infra_auth::OpenAIAuth::with_default_store();
+    eprintln!("Contacting OpenAI authorization server...");
+    let code = match auth_client.start_device_flow().await {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("✗ device flow failed: {e}");
+            return 1;
+        }
+    };
+    eprintln!();
+    eprintln!("─────────────────────────────────────");
+    eprintln!("1. Open:  {}", code.verification_uri);
+    eprintln!("2. Enter code:  {}", code.user_code);
+    eprintln!("3. Authorize the Theo application.");
+    eprintln!("─────────────────────────────────────");
+    eprintln!();
+    if !no_browser {
+        let _ = open_browser(&code.verification_uri);
+    }
+    eprintln!("Waiting for authorization…");
+    match auth_client.poll_device_flow(&code).await {
+        Ok(_) => {
+            eprintln!("✓ Authenticated with OpenAI. Tokens saved.");
+            0
+        }
+        Err(e) => {
+            eprintln!("✗ authorization failed: {e}");
+            1
+        }
+    }
+}
+
+/// Best-effort browser opener for the device-flow URL. Linux uses
+/// `xdg-open`, macOS uses `open`. Failures are silent.
+fn open_browser(url: &str) -> std::io::Result<()> {
+    #[cfg(target_os = "linux")]
+    let program = "xdg-open";
+    #[cfg(target_os = "macos")]
+    let program = "open";
+    #[cfg(all(not(target_os = "linux"), not(target_os = "macos")))]
+    let program = "true"; // noop on unsupported platforms
+    std::process::Command::new(program)
+        .arg(url)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map(|_| ())
+}
+
+/// `theo logout` — clear saved OpenAI credentials.
+fn cmd_logout() -> i32 {
+    use theo_application::use_cases::auth;
+    let store = theo_infra_auth::store::AuthStore::open();
+    match auth::logout(&store) {
+        Ok(true) => {
+            eprintln!("✓ Logged out. Saved credentials cleared.");
+            0
+        }
+        Ok(false) => {
+            eprintln!("Nothing to log out of — no OpenAI credentials were saved.");
+            0
+        }
+        Err(e) => {
+            eprintln!("✗ logout failed: {e}");
+            1
+        }
+    }
+}
 
 fn cmd_init(repo: PathBuf) {
     let project_dir = resolve_dir(repo);
