@@ -68,6 +68,97 @@ impl MemoryLifecycle {
     }
 }
 
+/// Run-engine helpers (Phase 0 T0.1). Extracted here so `run_engine.rs`
+/// stays under the 2500-line structural-hygiene cap while still hooking
+/// every lifecycle point the plan requires.
+pub mod run_engine_hooks {
+    use super::MemoryLifecycle;
+    use crate::config::AgentConfig;
+    use theo_infra_llm::types::{Message, Role};
+
+    /// Inject memory prefetch result as a fenced system message, if any.
+    /// Returns true when a message was actually pushed.
+    pub async fn inject_prefetch(
+        cfg: &AgentConfig,
+        messages: &mut Vec<Message>,
+        query: &str,
+    ) -> bool {
+        if !cfg.memory_enabled {
+            return false;
+        }
+        let block = MemoryLifecycle::prefetch(cfg, query).await;
+        if block.is_empty() {
+            return false;
+        }
+        messages.push(Message::system(&block));
+        true
+    }
+
+    /// Invoke `on_pre_compress` and push any extracted content into
+    /// `messages` so it survives the subsequent compaction step.
+    pub async fn pre_compress_push(cfg: &AgentConfig, messages: &mut Vec<Message>) {
+        if !cfg.memory_enabled {
+            return;
+        }
+        let text: String = messages
+            .iter()
+            .filter_map(|m| m.content.clone())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let extracted = MemoryLifecycle::on_pre_compress(cfg, &text).await;
+        if !extracted.is_empty() {
+            messages.push(Message::system(&format!(
+                "## Memory (pre-compress extract)\n{extracted}"
+            )));
+        }
+    }
+
+    /// Pair-end sync: find the most recent user message and persist it
+    /// against `assistant_content`. No-op when memory is disabled.
+    pub async fn sync_final_turn(cfg: &AgentConfig, messages: &[Message], assistant_content: &str) {
+        if !cfg.memory_enabled {
+            return;
+        }
+        let user_msg = messages
+            .iter()
+            .rev()
+            .find(|m| matches!(m.role, Role::User))
+            .and_then(|m| m.content.clone())
+            .unwrap_or_default();
+        MemoryLifecycle::sync_turn(cfg, &user_msg, assistant_content).await;
+    }
+
+    /// Legacy memory fallback (pre-RM0 behaviour): loads kv entries from
+    /// `$HOME/.config/theo/memory` and pushes them as a system message.
+    /// Invoked ONLY when `memory_enabled=false` — preserves existing users'
+    /// behaviour while the formal provider path is rolled out.
+    pub async fn inject_legacy_file_memory(
+        project_dir: &std::path::Path,
+        messages: &mut Vec<Message>,
+    ) {
+        let memory_root = std::env::var("HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| std::path::PathBuf::from("/tmp"))
+            .join(".config")
+            .join("theo")
+            .join("memory");
+        let memory_store =
+            theo_tooling::memory::FileMemoryStore::for_project(&memory_root, project_dir);
+        if let Ok(memories) = memory_store.list().await {
+            if !memories.is_empty() {
+                let block = memories
+                    .iter()
+                    .map(|m| format!("- **{}**: {}", m.key, m.value))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                messages.push(Message::system(&format!(
+                    "## Memory from previous runs\n{block}"
+                )));
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

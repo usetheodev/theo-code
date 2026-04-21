@@ -189,25 +189,27 @@ impl AgentRunEngine {
     /// Execute with fresh messages (no session history).
     pub async fn execute(&mut self) -> AgentResult {
         let result = self.execute_with_history(Vec::new()).await;
-        self.record_session_exit(&result);
+        self.record_session_exit(&result).await;
         result
     }
 
-    /// Record session exit: save failure patterns + session progress + context metrics.
-    /// Best-effort — never fails, never blocks.
-    fn record_session_exit(&mut self, result: &AgentResult) {
+    /// Record session exit. Phase 0 T0.1: async with `tokio::fs` for
+    /// non-blocking hot-path shutdown + fires `on_session_end` hook on
+    /// every exit (AC-0.1.4, AC-0.1.8).
+    async fn record_session_exit(&mut self, result: &AgentResult) {
         // Save failure pattern tracker
         self.failure_tracker.save();
 
         // Save context metrics to .theo/metrics/{run_id}.json
         let metrics_dir = self.project_dir.join(".theo").join("metrics");
-        if std::fs::create_dir_all(&metrics_dir).is_ok() {
+        if tokio::fs::create_dir_all(&metrics_dir).await.is_ok() {
             let report = self.context_metrics.to_report();
             let metrics_path = metrics_dir.join(format!("{}.json", self.run.run_id.as_str()));
-            let _ = std::fs::write(
+            let _ = tokio::fs::write(
                 &metrics_path,
                 serde_json::to_string_pretty(&report).unwrap_or_default(),
-            );
+            )
+            .await;
         }
 
         // Generate EpisodeSummary from run events and persist to .theo/memory/episodes/
@@ -231,14 +233,18 @@ impl AgentRunEngine {
                 .join(".theo")
                 .join("memory")
                 .join("episodes");
-            if std::fs::create_dir_all(&episodes_dir).is_ok() {
+            if tokio::fs::create_dir_all(&episodes_dir).await.is_ok() {
                 let episode_path = episodes_dir.join(format!("{}.json", summary.summary_id));
-                let _ = std::fs::write(
+                let _ = tokio::fs::write(
                     &episode_path,
                     serde_json::to_string_pretty(&summary).unwrap_or_default(),
-                );
+                )
+                .await;
             }
         }
+
+        // Phase 0 T0.1 AC-0.1.4: memory-provider session-end hook (every exit path).
+        crate::memory_lifecycle::MemoryLifecycle::on_session_end(&self.config).await;
 
         // Record session end for cross-session progress tracking
         if !self.config.is_subagent {
@@ -313,27 +319,24 @@ impl AgentRunEngine {
         // No automatic injection: the LLM decides when it needs code structure context.
         // The graph_context provider is passed to tools via ToolContext.graph_context.
 
-        // Inject memories from previous runs (cross-run memory)
-        let memory_root = std::env::var("HOME")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|_| std::path::PathBuf::from("/tmp"))
-            .join(".config")
-            .join("theo")
-            .join("memory");
-
-        let memory_store =
-            theo_tooling::memory::FileMemoryStore::for_project(&memory_root, &self.project_dir);
-        if let Ok(memories) = memory_store.list().await {
-            if !memories.is_empty() {
-                let memory_context = memories
-                    .iter()
-                    .map(|m| format!("- **{}**: {}", m.key, m.value))
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                messages.push(Message::system(&format!(
-                    "## Memory from previous runs\n{memory_context}"
-                )));
-            }
+        // Memory injection (Phase 0 T0.1): prefetch when enabled (sole
+        // source), else legacy FileMemoryStore fallback. Dual-injection
+        // is prevented by this explicit branch (evolution-agent concern).
+        if self.config.memory_enabled {
+            let query = self
+                .task_manager
+                .get(&self.task_id)
+                .map(|t| t.objective.clone())
+                .unwrap_or_else(|| "session".into());
+            let _ = crate::memory_lifecycle::run_engine_hooks::inject_prefetch(
+                &self.config, &mut messages, &query,
+            )
+            .await;
+        } else {
+            crate::memory_lifecycle::run_engine_hooks::inject_legacy_file_memory(
+                &self.project_dir, &mut messages,
+            )
+            .await;
         }
 
         // Inject episode summaries from previous runs (cross-session learning).
@@ -647,6 +650,9 @@ impl AgentRunEngine {
                     .cloned()
                     .collect(),
             };
+            // Phase 0 T0.1 AC-0.1.3: pre-compression memory hook (survives truncation).
+            crate::memory_lifecycle::run_engine_hooks::pre_compress_push(&self.config, &mut messages).await;
+
             crate::compaction::compact_if_needed_with_context(
                 &mut messages,
                 self.config.context_window_tokens,
@@ -929,6 +935,15 @@ impl AgentRunEngine {
                         continue;
                     }
                 }
+
+                // Phase 0 T0.1 AC-0.1.2: persist the user→assistant exchange
+                // INLINE (not fire-and-forget) — durability > latency.
+                crate::memory_lifecycle::run_engine_hooks::sync_final_turn(
+                    &self.config,
+                    &messages,
+                    &content,
+                )
+                .await;
 
                 self.transition_run(RunState::Converged);
                 let _ = self
