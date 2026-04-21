@@ -157,23 +157,16 @@ impl AgentRunEngine {
     }
 
     /// Sets the graph context provider for code intelligence injection.
-    pub fn with_graph_context(
-        mut self,
-        provider: Arc<dyn theo_domain::graph_context::GraphContextProvider>,
-    ) -> Self {
+    pub fn with_graph_context(mut self, provider: Arc<dyn theo_domain::graph_context::GraphContextProvider>) -> Self {
         self.graph_context = Some(provider);
         self
     }
 
     /// Returns the run_id.
-    pub fn run_id(&self) -> &RunId {
-        &self.run.run_id
-    }
+    pub fn run_id(&self) -> &RunId { &self.run.run_id }
 
     /// Returns the current RunState.
-    pub fn state(&self) -> RunState {
-        self.run.state
-    }
+    pub fn state(&self) -> RunState { self.run.state }
 
     /// Returns the current iteration.
     pub fn iteration(&self) -> usize {
@@ -201,9 +194,10 @@ impl AgentRunEngine {
         result
     }
 
-    /// Record session exit. Phase 0 T0.1: async with `tokio::fs` for
-    /// non-blocking hot-path shutdown + fires `on_session_end` hook on
-    /// every exit (AC-0.1.4, AC-0.1.8).
+    /// AgentLoop::run_with_history adapter — shares execute()'s shutdown path.
+    pub async fn record_session_exit_public(&mut self, r: &AgentResult) { self.record_session_exit(r).await; }
+
+    /// Record session exit. Phase 0 T0.1: async tokio::fs + on_session_end hook.
     async fn record_session_exit(&mut self, result: &AgentResult) {
         // Save failure pattern tracker
         self.failure_tracker.save();

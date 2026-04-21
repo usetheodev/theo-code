@@ -512,6 +512,15 @@ fn cmd_headless(
         // Headless mode: use aggressive retry to survive rate limits
         config.aggressive_retry = true;
 
+        // Phase 0 T0.2: attach the MemoryEngine if memory_enabled=true.
+        // run_agent_session does this for the interactive path; headless
+        // bypasses that wrapper, so we must attach here or every memory
+        // hook stays at no-op despite THEO_MEMORY=1.
+        theo_application::use_cases::memory_factory::attach_memory_to_config(
+            &mut config,
+            &project_dir,
+        );
+
         let registry = theo_tooling::registry::create_default_registry();
         let agent = theo_agent_runtime::AgentLoop::new(config, registry);
 
