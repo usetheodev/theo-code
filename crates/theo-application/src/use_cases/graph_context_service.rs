@@ -55,6 +55,9 @@ const LEIDEN_RESOLUTION: f64 = 1.0;
 struct GraphState {
     graph: CodeGraph,
     communities: Vec<Community>,
+    /// Root of the indexed workspace. Required by the context-wiring
+    /// phases (compression, inline-builder) that read source off disk.
+    project_dir: std::path::PathBuf,
     /// MultiSignalScorer: only built when no RRF pipeline available (Tier 0 only).
     /// When tantivy-backend is active, query_context uses FileBm25 directly,
     /// saving ~200MB RAM from scorer's BM25 index + TF-IDF model.
@@ -153,6 +156,7 @@ impl GraphContextProvider for GraphContextService {
             *state = GraphBuildState::Ready(GraphState {
                 graph,
                 communities,
+                project_dir: dir.clone(),
                 #[cfg(not(feature = "tantivy-backend"))]
                 scorer,
                 #[cfg(feature = "tantivy-backend")]
@@ -220,6 +224,7 @@ impl GraphContextProvider for GraphContextService {
                     *state = GraphBuildState::Ready(GraphState {
                         graph,
                         communities,
+                        project_dir: dir_for_cache.clone(),
                         #[cfg(not(feature = "tantivy-backend"))]
                         scorer,
                         #[cfg(feature = "tantivy-backend")]
@@ -437,12 +442,18 @@ impl GraphContextProvider for GraphContextService {
             );
 
             if !retrieval_result.primary_files.is_empty() {
-                // File-first path: build blocks from ranked files
-                theo_engine_retrieval::file_retriever::build_context_blocks(
-                    &retrieval_result,
-                    &graph_state.graph,
-                    budget_tokens,
-                )
+                // File-first path with Phase 2 compression: primary files get
+                // their source read + compressed when possible, falling back to
+                // signature concatenation if any step fails.
+                let (ctx_blocks, _savings) =
+                    theo_engine_retrieval::file_retriever::build_context_blocks_with_compression(
+                        &retrieval_result,
+                        &graph_state.graph,
+                        budget_tokens,
+                        Some(&graph_state.project_dir),
+                        query,
+                    );
+                ctx_blocks
             } else {
                 // Fallback: community-level assembly (legacy path)
                 let payload = assembly::assemble_files_direct(

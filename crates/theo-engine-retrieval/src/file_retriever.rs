@@ -438,29 +438,62 @@ fn expand_from_files(
 ///
 /// For each ranked file: extract symbol signatures as content.
 /// For expanded files: lighter content (just path + top symbols).
+///
+/// This thin wrapper keeps the pre-PLAN_CONTEXT_WIRING interface intact.
+/// Callers that can supply a workspace root should use
+/// [`build_context_blocks_with_compression`] for the Phase 2 path that
+/// compresses primary-file sources via `code_compression::compress_for_context`.
 pub fn build_context_blocks(
     result: &FileRetrievalResult,
     graph: &CodeGraph,
     budget_tokens: usize,
 ) -> Vec<theo_domain::graph_context::ContextBlock> {
+    let (blocks, _savings) =
+        build_context_blocks_with_compression(result, graph, budget_tokens, None, "");
+    blocks
+}
+
+/// Build context blocks with optional source-compression for primary files
+/// (PLAN_CONTEXT_WIRING Phase 2).
+///
+/// When `workspace_root` is `Some`, each primary file's source is read from
+/// disk, parsed via Tree-Sitter, and passed through
+/// `code_compression::compress_for_context` — query-relevant symbols keep
+/// their full bodies, others collapse to signatures. Savings = original −
+/// compressed tokens, reported back as the second return value so callers
+/// can attach it to `FileRetrievalResult.compression_savings_tokens`.
+///
+/// When `workspace_root` is `None` (or any path-read fails), falls back to
+/// the pre-Phase-2 behaviour of concatenating each child's signature —
+/// identical output to `build_context_blocks`.
+pub fn build_context_blocks_with_compression(
+    result: &FileRetrievalResult,
+    graph: &CodeGraph,
+    budget_tokens: usize,
+    workspace_root: Option<&std::path::Path>,
+    query: &str,
+) -> (Vec<theo_domain::graph_context::ContextBlock>, usize) {
     let mut blocks = Vec::new();
     let mut tokens_used = 0;
+    let mut compression_savings = 0usize;
+    let query_tokens: HashSet<String> = tokenise(query).into_iter().collect();
 
-    // Primary files: full signature content
+    // Primary files: full signature content (or compressed source when
+    // workspace_root is available and parsing succeeds).
     for ranked in &result.primary_files {
         let file_id = format!("file:{}", ranked.path);
-        let mut content = format!("## {}\n", ranked.path);
+        let (content, token_count, saved) = match workspace_root {
+            Some(root) => compress_primary_or_fallback(
+                root,
+                ranked,
+                &file_id,
+                graph,
+                &query_tokens,
+            ),
+            None => fallback_signatures_only(&ranked.path, &file_id, graph),
+        };
+        compression_savings += saved;
 
-        for child_id in graph.contains_children(&file_id) {
-            if let Some(node) = graph.get_node(child_id) {
-                if let Some(ref sig) = node.signature {
-                    content.push_str(sig);
-                    content.push('\n');
-                }
-            }
-        }
-
-        let token_count = (content.len() + 3) / 4; // ~4 chars per token
         if tokens_used + token_count > budget_tokens {
             break;
         }
@@ -520,7 +553,75 @@ pub fn build_context_blocks(
         tokens_used += token_count;
     }
 
-    blocks
+    (blocks, compression_savings)
+}
+
+/// Fallback: concatenate child-symbol signatures (pre-Phase-2 behaviour).
+fn fallback_signatures_only(
+    path: &str,
+    file_id: &str,
+    graph: &CodeGraph,
+) -> (String, usize, usize) {
+    let mut content = format!("## {}\n", path);
+    for child_id in graph.contains_children(file_id) {
+        if let Some(node) = graph.get_node(child_id) {
+            if let Some(ref sig) = node.signature {
+                content.push_str(sig);
+                content.push('\n');
+            }
+        }
+    }
+    let token_count = (content.len() + 3) / 4;
+    (content, token_count, 0)
+}
+
+/// Try to read + compress `ranked.path` from disk. On any failure
+/// (fs read / language detection / parser / no symbols) falls back
+/// to `fallback_signatures_only` — graceful degradation.
+fn compress_primary_or_fallback(
+    workspace_root: &std::path::Path,
+    ranked: &RankedFile,
+    file_id: &str,
+    graph: &CodeGraph,
+    query_tokens: &HashSet<String>,
+) -> (String, usize, usize) {
+    use theo_engine_parser::extractors::symbols::extract_symbols;
+    use theo_engine_parser::tree_sitter::{detect_language, parse_source};
+
+    let full_path = workspace_root.join(&ranked.path);
+    let Ok(source) = std::fs::read_to_string(&full_path) else {
+        return fallback_signatures_only(&ranked.path, file_id, graph);
+    };
+    let Some(language) = detect_language(&full_path) else {
+        return fallback_signatures_only(&ranked.path, file_id, graph);
+    };
+    let Ok(parsed) = parse_source(&full_path, &source, language, None) else {
+        return fallback_signatures_only(&ranked.path, file_id, graph);
+    };
+    let symbols = extract_symbols(&source, &parsed.tree, language, &full_path);
+    if symbols.is_empty() {
+        return fallback_signatures_only(&ranked.path, file_id, graph);
+    }
+
+    // Relevant symbols = symbols whose name (case-insensitive) matches any
+    // query token. Keeps them in full body; others get signature-only.
+    let mut relevant: HashSet<String> = HashSet::new();
+    for sym in &symbols {
+        if query_tokens.contains(&sym.name.to_lowercase()) {
+            relevant.insert(sym.name.clone());
+        }
+    }
+
+    let compressed = theo_engine_parser::code_compression::compress_for_context(
+        &source,
+        &symbols,
+        &relevant,
+        &ranked.path,
+    );
+    let savings = compressed
+        .original_tokens
+        .saturating_sub(compressed.compressed_tokens);
+    (compressed.text, compressed.compressed_tokens, savings)
 }
 
 // ---------------------------------------------------------------------------
@@ -980,5 +1081,110 @@ mod tests {
                 "removal fraction {removal_fraction} exceeded 50% safety bound"
             );
         }
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // Phase 2 integration — code_compression wired into
+    // build_context_blocks_with_compression (PLAN_CONTEXT_WIRING Phase 2)
+    // ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn build_context_blocks_without_workspace_root_uses_signatures() {
+        // None workspace_root keeps the pre-Phase-2 behaviour: content is
+        // concatenated signatures, savings = 0.
+        let graph = build_test_graph();
+        let communities = vec![];
+        let config = RerankConfig::default();
+        let seen = HashSet::new();
+        let result = retrieve_files(&graph, &communities, "verify_token", &config, &seen);
+
+        let (blocks, savings) =
+            build_context_blocks_with_compression(&result, &graph, 10_000, None, "verify_token");
+
+        assert!(!blocks.is_empty(), "must produce at least one block");
+        assert_eq!(savings, 0, "no compression attempted without workspace_root");
+    }
+
+    #[test]
+    fn build_context_blocks_compression_falls_back_when_file_missing() {
+        // Points workspace_root at a non-existent directory: every fs::read
+        // should fail → graceful fallback to signatures, savings = 0.
+        let graph = build_test_graph();
+        let communities = vec![];
+        let config = RerankConfig::default();
+        let seen = HashSet::new();
+        let result = retrieve_files(&graph, &communities, "verify_token", &config, &seen);
+
+        let fake_root = std::path::Path::new("/tmp/theo-no-such-dir-xyz-999");
+        let (blocks, savings) = build_context_blocks_with_compression(
+            &result,
+            &graph,
+            10_000,
+            Some(fake_root),
+            "verify_token",
+        );
+
+        assert!(!blocks.is_empty(), "fallback must still produce blocks");
+        assert_eq!(
+            savings, 0,
+            "missing-file fallback must yield zero compression savings"
+        );
+    }
+
+    #[test]
+    fn build_context_blocks_compression_saves_tokens_on_real_source() {
+        // Arrange: write a Rust file with one relevant function and four
+        // irrelevant functions. Compression should keep the relevant body
+        // and reduce the others to signatures, yielding savings > 0.
+        let tmp = tempfile::tempdir().expect("tmpdir");
+        let file_name = "demo.rs";
+        let path = tmp.path().join(file_name);
+        let mut src = String::from(
+            "fn relevant_symbol() {\n    // body line 1\n    // body line 2\n    println!(\"hi\");\n}\n\n",
+        );
+        for i in 0..4 {
+            src.push_str(&format!(
+                "fn noise_{i}() {{\n    // bulk body {i}\n    let x = {i};\n    let y = x + {i};\n    println!(\"{{x}} {{y}}\");\n}}\n\n",
+                i = i
+            ));
+        }
+        std::fs::write(&path, &src).expect("write demo");
+
+        // Build a minimal graph containing just this file.
+        let mut g = CodeGraph::new();
+        g.add_node(file_node(&format!("file:{file_name}"), file_name));
+        let communities = vec![];
+        let config = RerankConfig::default();
+        let seen = HashSet::new();
+        // Query targets the relevant function by name.
+        let result = retrieve_files(&g, &communities, "relevant_symbol", &config, &seen);
+        // Force presence of the file in result regardless of ranker output,
+        // so we always exercise the compression helper.
+        let forced_result = FileRetrievalResult {
+            primary_files: vec![RankedFile {
+                path: file_name.to_string(),
+                score: 1.0,
+                signals: Vec::new(),
+            }],
+            ..result
+        };
+
+        let (blocks, savings) = build_context_blocks_with_compression(
+            &forced_result,
+            &g,
+            10_000,
+            Some(tmp.path()),
+            "relevant_symbol",
+        );
+
+        assert_eq!(blocks.len(), 1, "one block for the single file");
+        // The relevant function's body must survive compression.
+        assert!(
+            blocks[0].content.contains("relevant_symbol"),
+            "compressed content must mention relevant_symbol: {}",
+            &blocks[0].content
+        );
+        // Savings are non-zero when compression actually ran.
+        assert!(savings > 0, "expected compression savings > 0, got {savings}");
     }
 }
