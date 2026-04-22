@@ -227,8 +227,13 @@ pub fn maybe_prepend_bootstrap(cfg: &AgentConfig, project_dir: &std::path::Path,
     }
 }
 
-/// Phase 4 wiring helper: fire-and-forget transcript indexing.
-pub fn maybe_index_transcript(
+/// Phase 4 wiring helper: transcript indexing.
+///
+/// Runs on the session shutdown path (`record_session_exit`), so we
+/// `.await` the indexer inline instead of `tokio::spawn`ing. A
+/// detached task would be killed the moment the headless binary
+/// exits its tokio runtime, and no Tantivy files would hit disk.
+pub async fn maybe_index_transcript(
     cfg: &AgentConfig,
     project_dir: &std::path::Path,
     run_id: &str,
@@ -242,15 +247,13 @@ pub fn maybe_index_transcript(
     };
     let memory_dir = project_dir.join(".theo").join("memory");
     let session_id = run_id.to_string();
-    tokio::spawn(async move {
-        if let Err(err) = handle
-            .as_indexer()
-            .record_session(&memory_dir, &session_id, &events)
-            .await
-        {
-            eprintln!("[theo::transcript] indexing failed: {err}");
-        }
-    });
+    if let Err(err) = handle
+        .as_indexer()
+        .record_session(&memory_dir, &session_id, &events)
+        .await
+    {
+        eprintln!("[theo::transcript] indexing failed: {err}");
+    }
 }
 
 /// Phase 1 + 3 wiring helper: evaluate nudges at end-of-turn and spawn

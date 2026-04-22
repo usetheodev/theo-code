@@ -129,14 +129,37 @@ fn extract_event_body(payload: &serde_json::Value) -> Option<String> {
     match payload {
         serde_json::Value::String(s) => Some(s.clone()),
         serde_json::Value::Object(map) => {
-            for key in ["content", "message", "summary", "text", "body"] {
-                if let Some(v) = map.get(key).and_then(|v| v.as_str()) {
+            // Prefer conventional body keys when present so search
+            // queries hit natural text rather than JSON boilerplate.
+            for key in [
+                "content",
+                "message",
+                "summary",
+                "text",
+                "body",
+                "output_preview",
+                "preview",
+                "prompt",
+                "response",
+                "delta",
+                "hypothesis",
+                "rationale",
+                "choice",
+            ] {
+                if let Some(v) = map.get(key).and_then(|v| v.as_str())
+                    && !v.trim().is_empty()
+                {
                     return Some(v.to_string());
                 }
             }
-            None
+            // Fallback: serialize the whole payload so every event
+            // still contributes a searchable doc. Keeps the Tantivy
+            // index useful for cross-session "did I ever do X?"
+            // queries even when events don't carry prose fields.
+            serde_json::to_string(map).ok()
         }
-        _ => None,
+        serde_json::Value::Null => None,
+        other => serde_json::to_string(other).ok(),
     }
 }
 
@@ -151,25 +174,34 @@ mod tests {
     }
 
     #[test]
-    fn test_build_transcript_docs_skips_events_without_body() {
+    fn test_build_transcript_docs_prefers_body_keys_then_falls_back_to_json() {
+        // Priority order: prose body keys first (content/message/…),
+        // then full-payload JSON so every event contributes a
+        // searchable doc. Events with Null payload are dropped.
         let events = vec![
-            ev(EventType::RunInitialized, "r1", json!({"kind": "init"})),
+            // Key-based body → extracted verbatim.
             ev(
                 EventType::ToolCallCompleted,
                 "r1",
                 json!({"content": "ls output here"}),
             ),
+            // Summary key → extracted verbatim.
             ev(
                 EventType::RunStateChanged,
                 "r1",
                 json!({"summary": "done"}),
             ),
+            // No conventional key → fallback to JSON string.
+            ev(EventType::RunInitialized, "r1", json!({"kind": "init"})),
+            // Null payload → skipped.
+            ev(EventType::RunInitialized, "r1", serde_json::Value::Null),
         ];
         let docs = build_transcript_docs("s1", &events);
-        assert_eq!(docs.len(), 2);
+        assert_eq!(docs.len(), 3, "null payloads must be skipped");
         assert_eq!(docs[0].body, "ls output here");
         assert_eq!(docs[1].body, "done");
-        // All share the same hash (same session + same events).
+        assert!(docs[2].body.contains("\"kind\":\"init\""));
+        // Same session → same content hash across docs.
         assert_eq!(docs[0].content_hash, docs[1].content_hash);
     }
 

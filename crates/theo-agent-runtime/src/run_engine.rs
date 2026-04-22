@@ -274,13 +274,15 @@ impl AgentRunEngine {
 
         // PLAN_AUTO_EVOLUTION_SOTA Phase 4 — index session transcript
         // via the pluggable TranscriptIndexer trait (concrete impl
-        // lives in theo-application).
+        // lives in theo-application). Awaited inline so shutdown
+        // completes only after Tantivy has committed to disk.
         crate::memory_lifecycle::maybe_index_transcript(
             &self.config,
             &self.project_dir,
             self.run.run_id.as_str(),
             events.clone(),
-        );
+        )
+        .await;
 
         // Record session end for cross-session progress tracking
         if !self.config.is_subagent {
