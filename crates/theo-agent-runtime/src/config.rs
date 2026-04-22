@@ -355,6 +355,19 @@ pub struct AgentConfig {
     /// when the nudge counter fires. When `None`, the nudge becomes a
     /// no-op even if `memory_review_nudge_interval > 0`.
     pub memory_reviewer: Option<crate::memory_reviewer::MemoryReviewerHandle>,
+    /// Phase 2 of PLAN_AUTO_EVOLUTION_SOTA: enables post-session
+    /// memory consolidation (autodream). Default: `true` — the actual
+    /// run still respects 24h cooldown, lock file, and minimum file
+    /// count. Set to `false` to disable unconditionally.
+    pub autodream_enabled: bool,
+    /// Phase 2 of PLAN_AUTO_EVOLUTION_SOTA: max wall time for a
+    /// consolidation pass. Default: 60s. Matches OpenDev's bounded
+    /// background work pattern.
+    pub autodream_timeout_secs: u64,
+    /// Phase 2 of PLAN_AUTO_EVOLUTION_SOTA: optional executor that
+    /// runs the LLM consolidation step. When `None`, `run_autodream`
+    /// becomes a no-op even if `autodream_enabled == true`.
+    pub autodream: Option<crate::autodream::AutodreamHandle>,
 }
 
 /// Debug-friendly wrapper around `Arc<dyn MemoryProvider>` so `AgentConfig`
@@ -429,6 +442,9 @@ impl Default for AgentConfig {
             router: None,
             memory_review_nudge_interval: 10,
             memory_reviewer: None,
+            autodream_enabled: true,
+            autodream_timeout_secs: 60,
+            autodream: None,
         }
     }
 }

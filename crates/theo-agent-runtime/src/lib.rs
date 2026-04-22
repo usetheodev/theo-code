@@ -20,6 +20,7 @@ pub mod hypothesis_pipeline;
 pub mod jit_instructions;
 pub mod lesson_pipeline;
 pub mod loop_state;
+pub mod autodream;
 pub mod memory_lifecycle;
 pub mod memory_reviewer;
 pub mod metrics;
