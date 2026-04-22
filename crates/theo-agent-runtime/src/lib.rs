@@ -23,6 +23,7 @@ pub mod loop_state;
 pub mod autodream;
 pub mod memory_lifecycle;
 pub mod memory_reviewer;
+pub mod onboarding;
 pub mod metrics;
 #[doc(hidden)] // Dead code: exported but never instantiated externally
 pub mod observability;

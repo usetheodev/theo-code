@@ -179,7 +179,7 @@ mod inner {
             std::fs::create_dir_all(index_dir)
                 .map_err(|e| tantivy::TantivyError::IoError(std::sync::Arc::new(e)))?;
             let dir = MmapDirectory::open(index_dir)
-                .map_err(|e| tantivy::TantivyError::OpenDirectoryError(e))?;
+                .map_err(tantivy::TantivyError::OpenDirectoryError)?;
             let (schema, ..) = Self::build_schema();
             let index = Index::open_or_create(dir, schema)?;
             Self::from_index(index)

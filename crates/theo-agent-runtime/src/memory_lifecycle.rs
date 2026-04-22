@@ -165,7 +165,7 @@ pub fn recent_review_window(
     messages: &[theo_infra_llm::types::Message],
     interval: usize,
 ) -> Vec<theo_infra_llm::types::Message> {
-    let take = interval.min(20).max(1);
+    let take = interval.clamp(1, 20);
     let start = messages.len().saturating_sub(take);
     messages[start..].to_vec()
 }
