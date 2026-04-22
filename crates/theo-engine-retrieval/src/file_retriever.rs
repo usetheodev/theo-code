@@ -42,13 +42,25 @@ pub struct RankedFile {
 }
 
 /// Result of file retrieval including expansion context.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct FileRetrievalResult {
     pub primary_files: Vec<RankedFile>,
     pub expanded_files: Vec<String>,
     pub expanded_tests: Vec<String>,
     pub total_candidates: usize,
     pub dropped_ghost_paths: usize,
+    /// Number of candidates removed by `harm_filter::filter_harmful_chunks`.
+    /// Telemetry metric for Phase 1 of PLAN_CONTEXT_WIRING — validates that
+    /// the harm filter is actually firing on real workloads.
+    pub harm_removals: usize,
+    /// Tokens saved by compressing primary-file sources (original − compressed).
+    /// Phase 2 telemetry. Zero when compression path is not taken
+    /// (e.g. workspace_root absent).
+    pub compression_savings_tokens: usize,
+    /// Inline slices produced by `inline_builder::build_inline_slices`.
+    /// Each slice is a focal symbol + its callers/callees, ready for
+    /// injection alongside the primary files. Phase 3.
+    pub inline_slices: Vec<crate::inline_builder::InlineSlice>,
 }
 
 // ---------------------------------------------------------------------------
@@ -172,6 +184,13 @@ pub fn retrieve_files(
     });
     ranked.truncate(config.top_k);
 
+    // Stage 4.5: Harm filter (PLAN_CONTEXT_WIRING Phase 1).
+    // Removes test files when the definer is present, fixture/mock/config
+    // files, and near-duplicates. Safety-capped at 40% of the top_k list
+    // by `harm_filter::MAX_REMOVAL_FRACTION`. No LLM calls — pure heuristic
+    // over filename + graph community membership.
+    let harm_removals = apply_harm_filter(&mut ranked, graph);
+
     // Stage 5: Graph expansion from top files (Calls + Imports, depth=1)
     let seed_files: Vec<String> = ranked.iter().take(5).map(|r| r.path.clone()).collect();
     let (expanded_files, expanded_tests) =
@@ -183,7 +202,25 @@ pub fn retrieve_files(
         expanded_tests,
         total_candidates,
         dropped_ghost_paths,
+        harm_removals,
+        compression_savings_tokens: 0,
+        inline_slices: Vec::new(),
     }
+}
+
+/// Apply the harm filter to an already-ranked list, mutating it in place.
+/// Returns the number of candidates removed — caller stores in
+/// `FileRetrievalResult.harm_removals` for telemetry.
+fn apply_harm_filter(ranked: &mut Vec<RankedFile>, graph: &CodeGraph) -> usize {
+    if ranked.is_empty() {
+        return 0;
+    }
+    let pairs: Vec<(String, f64)> = ranked.iter().map(|r| (r.path.clone(), r.score)).collect();
+    let result = crate::harm_filter::filter_harmful_chunks(&pairs, graph);
+    let kept: HashSet<String> = result.kept.iter().map(|(p, _)| p.clone()).collect();
+    let before = ranked.len();
+    ranked.retain(|r| kept.contains(&r.path));
+    before - ranked.len()
 }
 
 // ---------------------------------------------------------------------------
@@ -862,5 +899,86 @@ mod tests {
             "Should respect max_per_community, got {}",
             files.len()
         );
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // Phase 1 integration — harm_filter wired into retrieve_files
+    // (PLAN_CONTEXT_WIRING Phase 1, Task 1.3)
+    // ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn retrieve_files_removes_test_file_when_definer_present() {
+        // Arrange: graph has src/auth.rs (definer) + tests/test_auth.rs (test).
+        // Both would normally rank for "verify_token" — harm filter should
+        // drop the test since the definer is already in the top list.
+        let graph = build_test_graph();
+        let communities = vec![];
+        let config = RerankConfig::default();
+        let seen = HashSet::new();
+
+        let result = retrieve_files(&graph, &communities, "verify_token", &config, &seen);
+
+        let test_file_kept = result
+            .primary_files
+            .iter()
+            .any(|r| r.path == "tests/test_auth.rs");
+        let definer_kept = result
+            .primary_files
+            .iter()
+            .any(|r| r.path == "src/auth.rs");
+        assert!(definer_kept, "definer src/auth.rs must survive");
+        assert!(
+            !test_file_kept,
+            "test file tests/test_auth.rs must be filtered when definer is present"
+        );
+        assert!(
+            result.harm_removals >= 1,
+            "harm_removals counter must reflect at least the test-file removal"
+        );
+    }
+
+    #[test]
+    fn retrieve_files_harm_removals_metric_exposed() {
+        // Smoke: on any non-empty graph, the harm_removals field is present
+        // and ≥ 0 (catches accidental removal of the telemetry field).
+        let graph = build_test_graph();
+        let communities = vec![];
+        let config = RerankConfig::default();
+        let seen = HashSet::new();
+
+        let result = retrieve_files(&graph, &communities, "query_db", &config, &seen);
+
+        // The field exists (compile-time) and is a valid usize. This test
+        // mainly guards against future refactors removing the metric.
+        let _ = result.harm_removals;
+        assert!(
+            result.primary_files.len() + result.harm_removals > 0,
+            "something must have been ranked or filtered"
+        );
+    }
+
+    #[test]
+    fn retrieve_files_respects_40pct_removal_cap() {
+        // Per harm_filter::MAX_REMOVAL_FRACTION, no more than 40% of the
+        // ranked list may be removed in one pass. This test sanity-checks
+        // that the cap survives integration.
+        let graph = build_test_graph();
+        let communities = vec![];
+        let config = RerankConfig::default();
+        let seen = HashSet::new();
+
+        let result = retrieve_files(&graph, &communities, "verify_token", &config, &seen);
+
+        // After filtering, primary_files + harm_removals == whatever ranked
+        // saw pre-filter. The ratio of removals to the pre-filter size must
+        // be ≤ 40% + 1 (ceil of MAX_REMOVAL_FRACTION).
+        let pre_filter = result.primary_files.len() + result.harm_removals;
+        if pre_filter > 0 {
+            let removal_fraction = result.harm_removals as f64 / pre_filter as f64;
+            assert!(
+                removal_fraction <= 0.5,
+                "removal fraction {removal_fraction} exceeded 50% safety bound"
+            );
+        }
     }
 }
