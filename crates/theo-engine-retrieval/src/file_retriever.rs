@@ -487,6 +487,30 @@ pub fn build_context_blocks(
     blocks
 }
 
+/// Mutating sibling of `build_context_blocks_with_compression` —
+/// populates `result.compression_savings_tokens` with the per-call
+/// savings (PLAN_CONTEXT_WIRING Task 2.4 — counter exposed on the
+/// struct, not just as a tuple return). Preferred entry point for
+/// callers that want telemetry on the result without juggling the
+/// extra return value.
+pub fn build_context_blocks_with_compression_mut(
+    result: &mut FileRetrievalResult,
+    graph: &CodeGraph,
+    budget_tokens: usize,
+    workspace_root: Option<&std::path::Path>,
+    query: &str,
+) -> Vec<theo_domain::graph_context::ContextBlock> {
+    let (blocks, savings) = build_context_blocks_with_compression(
+        result,
+        graph,
+        budget_tokens,
+        workspace_root,
+        query,
+    );
+    result.compression_savings_tokens = savings;
+    blocks
+}
+
 /// Build context blocks with optional source-compression for primary files
 /// (PLAN_CONTEXT_WIRING Phase 2).
 ///

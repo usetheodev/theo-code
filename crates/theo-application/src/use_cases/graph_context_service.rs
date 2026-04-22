@@ -452,7 +452,7 @@ impl GraphContextProvider for GraphContextService {
             // PLAN_CONTEXT_WIRING Phase 3: use the _with_inline variant so
             // queries that match a symbol name get inline slices (focal +
             // callees/callers) as high-priority context blocks.
-            let retrieval_result =
+            let mut retrieval_result =
                 theo_engine_retrieval::file_retriever::retrieve_files_with_inline(
                     &graph_state.graph,
                     &graph_state.communities,
@@ -463,12 +463,13 @@ impl GraphContextProvider for GraphContextService {
                 );
 
             if !retrieval_result.primary_files.is_empty() {
-                // File-first path with Phase 2 compression: primary files get
-                // their source read + compressed when possible, falling back to
-                // signature concatenation if any step fails.
-                let (ctx_blocks, savings) =
-                    theo_engine_retrieval::file_retriever::build_context_blocks_with_compression(
-                        &retrieval_result,
+                // File-first path with Phase 2 compression. The mutating
+                // sibling populates `compression_savings_tokens` on the
+                // result struct (PLAN_CONTEXT_WIRING Task 2.4) so the
+                // telemetry payload reads from a single source of truth.
+                let ctx_blocks = theo_engine_retrieval::file_retriever::
+                    build_context_blocks_with_compression_mut(
+                        &mut retrieval_result,
                         &graph_state.graph,
                         budget_tokens,
                         Some(&graph_state.project_dir),
@@ -483,7 +484,7 @@ impl GraphContextProvider for GraphContextService {
                     serde_json::json!({
                         "primary_files": retrieval_result.primary_files.len(),
                         "harm_removals": retrieval_result.harm_removals,
-                        "compression_savings_tokens": savings,
+                        "compression_savings_tokens": retrieval_result.compression_savings_tokens,
                         "inline_slices_count": retrieval_result.inline_slices.len(),
                         "query_len": query.len(),
                     }),
