@@ -450,7 +450,7 @@ impl GraphContextProvider for GraphContextService {
                 // File-first path with Phase 2 compression: primary files get
                 // their source read + compressed when possible, falling back to
                 // signature concatenation if any step fails.
-                let (ctx_blocks, _savings) =
+                let (ctx_blocks, savings) =
                     theo_engine_retrieval::file_retriever::build_context_blocks_with_compression(
                         &retrieval_result,
                         &graph_state.graph,
@@ -458,6 +458,17 @@ impl GraphContextProvider for GraphContextService {
                         Some(&graph_state.project_dir),
                         query,
                     );
+                // PLAN_CONTEXT_WIRING Phase 4: emit telemetry trace line.
+                // (DomainEvent fan-out would require plumbing an EventBus
+                //  down into this read-only context — a broader refactor.
+                //  stderr trace gives benchmarks a grep target today.)
+                eprintln!(
+                    "[retrieval] primary={} harm_removed={} compression_saved_tokens={} inline_slices={}",
+                    retrieval_result.primary_files.len(),
+                    retrieval_result.harm_removals,
+                    savings,
+                    retrieval_result.inline_slices.len(),
+                );
                 ctx_blocks
             } else {
                 // Fallback: community-level assembly (legacy path)
