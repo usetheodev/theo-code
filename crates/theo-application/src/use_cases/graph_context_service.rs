@@ -100,6 +100,10 @@ pub struct GraphContextService {
     state: Arc<tokio::sync::RwLock<GraphBuildState>>,
     /// Ensures only one build runs at a time.
     build_in_progress: Arc<AtomicBool>,
+    /// PLAN_CONTEXT_WIRING Phase 4 — sink for `RetrievalExecuted` events.
+    /// Defaults to `NoopEventSink`; the runtime replaces it with an adapter
+    /// around its broadcast `EventBus` via `with_event_sink`.
+    event_sink: Arc<dyn theo_domain::graph_context::EventSink>,
 }
 
 impl GraphContextService {
@@ -107,7 +111,19 @@ impl GraphContextService {
         Self {
             state: Arc::new(tokio::sync::RwLock::new(GraphBuildState::Uninitialized)),
             build_in_progress: Arc::new(AtomicBool::new(false)),
+            event_sink: Arc::new(theo_domain::graph_context::NoopEventSink),
         }
+    }
+
+    /// Attach an event sink for retrieval telemetry. The sink is called
+    /// synchronously on the read path; implementations must be cheap and
+    /// non-blocking.
+    pub fn with_event_sink(
+        mut self,
+        sink: Arc<dyn theo_domain::graph_context::EventSink>,
+    ) -> Self {
+        self.event_sink = sink;
+        self
     }
 }
 
@@ -458,17 +474,20 @@ impl GraphContextProvider for GraphContextService {
                         Some(&graph_state.project_dir),
                         query,
                     );
-                // PLAN_CONTEXT_WIRING Phase 4: emit telemetry trace line.
-                // (DomainEvent fan-out would require plumbing an EventBus
-                //  down into this read-only context — a broader refactor.
-                //  stderr trace gives benchmarks a grep target today.)
-                eprintln!(
-                    "[retrieval] primary={} harm_removed={} compression_saved_tokens={} inline_slices={}",
-                    retrieval_result.primary_files.len(),
-                    retrieval_result.harm_removals,
-                    savings,
-                    retrieval_result.inline_slices.len(),
-                );
+                // PLAN_CONTEXT_WIRING Phase 4: publish retrieval telemetry
+                // through the attached EventSink (real EventBus in prod,
+                // NoopEventSink otherwise).
+                self.event_sink.emit(theo_domain::event::DomainEvent::new(
+                    theo_domain::event::EventType::RetrievalExecuted,
+                    "graph-context",
+                    serde_json::json!({
+                        "primary_files": retrieval_result.primary_files.len(),
+                        "harm_removals": retrieval_result.harm_removals,
+                        "compression_savings_tokens": savings,
+                        "inline_slices_count": retrieval_result.inline_slices.len(),
+                        "query_len": query.len(),
+                    }),
+                ));
                 ctx_blocks
             } else {
                 // Fallback: community-level assembly (legacy path)

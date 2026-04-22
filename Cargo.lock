@@ -6473,6 +6473,7 @@ dependencies = [
  "theo-application",
  "theo-domain",
  "theo-engine-graph",
+ "theo-engine-parser",
  "theo-marklive",
  "thiserror 2.0.18",
  "toml 0.8.2",

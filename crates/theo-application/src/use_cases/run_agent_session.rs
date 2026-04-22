@@ -44,13 +44,24 @@ pub async fn run_agent_session(
     // BuiltinMemoryProvider. No-op when disabled.
     super::memory_factory::attach_memory_to_config(&mut config, project_dir);
 
+    // PLAN_CONTEXT_WIRING Phase 4 — build a shared EventBus so retrieval
+    // telemetry emitted by the graph-context service flows through the
+    // same broadcast channel the agent loop uses. Listeners subscribed
+    // to the bus (e.g. TUI renderer, benchmark collectors) observe
+    // `RetrievalExecuted` events side-by-side with LLM/tool events.
+    let shared_bus = Arc::new(theo_agent_runtime::event_bus::EventBus::new());
+    shared_bus.subscribe(event_listener.clone());
+
     // Initialize GRAPHCTX — fire-and-forget background build.
     // Disabled entirely when THEO_NO_GRAPHCTX=1.
     let graph_context: Option<Arc<dyn GraphContextProvider>> =
         if std::env::var("THEO_NO_GRAPHCTX").is_ok() {
             None // Enabled by default. Set THEO_NO_GRAPHCTX=1 to disable.
         } else {
-            let service = Arc::new(GraphContextService::new());
+            let sink: Arc<dyn theo_domain::graph_context::EventSink> = Arc::new(
+                theo_agent_runtime::event_bus::EventBusSink::new(shared_bus.clone()),
+            );
+            let service = Arc::new(GraphContextService::new().with_event_sink(sink));
             let _ = service.initialize(project_dir).await;
             eprintln!("[theo] GRAPHCTX building in background");
             Some(service)
