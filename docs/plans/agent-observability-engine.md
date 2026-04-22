@@ -13,6 +13,9 @@ Phase 0 ──▶ Phase 1 ──▶ Phase 2 ──▶ Phase 3
                 │                       │
                 │                       ▼
                 │               Phase 3.1 (summary writer)
+                │                       │
+                │                       ▼
+                │               Phase 6 (Dashboard)
                 │
                 ▼
           Phase 4 (blocked by RFC)
@@ -24,6 +27,7 @@ Phase 0 ──▶ Phase 1 ──▶ Phase 2 ──▶ Phase 3
 Phase 0 e pre-requisito de tudo.
 Phases 4 e 5 podem rodar em paralelo apos Phase 1.
 Phase 3 depende de Phase 2 (metricas computam sobre projection).
+Phase 6 depende de Phase 3 (dashboard consome metricas derivadas).
 
 ---
 
@@ -510,6 +514,169 @@ Phase 3 depende de Phase 2 (metricas computam sobre projection).
 
 ---
 
+### T3.8 — Token & cost metrics
+
+**O que**: Extrair breakdown de tokens e custo do AgentResult + RuntimeMetrics para o RunReport.
+
+**Metricas**:
+- `input_tokens: u64`
+- `output_tokens: u64`
+- `cache_read_tokens: u64`
+- `cache_write_tokens: u64`
+- `reasoning_tokens: u64`
+- `total_cost_usd: f64`
+- `cache_hit_rate: f64` — cache_read_tokens / (input_tokens + cache_read_tokens), safe_div → 0.0
+- `tokens_per_successful_edit: f64` — total_tokens / successful_edits, safe_div → 0.0
+
+**TDD**:
+1. RED: `test_token_breakdown_all_fields_populated()`
+2. RED: `test_cache_hit_rate_zero_when_no_cache()`
+3. RED: `test_cache_hit_rate_computed_correctly()` — 200 cache_read, 800 input → 0.2
+4. RED: `test_tokens_per_edit_zero_when_no_edits()`
+5. RED: `test_cost_usd_accumulated_correctly()`
+6. GREEN: `compute_token_metrics(result: &AgentResult, token_usage: &TokenUsage) -> TokenMetrics`
+7. VERIFY: `cargo test -p theo-agent-runtime`
+
+**DoD**: 5 testes passando.
+
+---
+
+### T3.9 — Agent loop phase metrics
+
+**O que**: Capturar distribuicao de tempo e contagem por fase do loop (Explore/Edit/Verify/Done).
+
+**Metricas**:
+- `phase_distribution: HashMap<LoopPhase, PhaseMetrics>` onde `PhaseMetrics { iterations: u32, duration_ms: u64, pct: f64 }`
+- `total_iterations: u32`
+- `done_blocked_count: u32` — vezes que o agente tentou convergir mas git diff vazio
+- `convergence_rate: f64` — converged_runs / total_runs
+- `budget_utilization: BudgetUtilization` — `{ iterations_pct: f64, tokens_pct: f64, time_pct: f64 }`
+- `evolution_attempts: u32` — tentativas com estrategias de correcao
+- `evolution_success: bool` — se alguma tentativa teve sucesso
+
+**TDD**:
+1. RED: `test_phase_distribution_sums_to_100_pct()`
+2. RED: `test_done_blocked_tracked()`
+3. RED: `test_budget_utilization_correct()` — 50 of 200 iterations → 25%
+4. RED: `test_evolution_attempts_counted()`
+5. GREEN: `compute_loop_metrics(loop_state: &ContextLoopState, budget: &BudgetUsage, evolution: Option<&EvolutionLoop>) -> LoopMetrics`
+6. VERIFY: `cargo test -p theo-agent-runtime`
+
+**DoD**: 4 testes passando.
+
+---
+
+### T3.10 — Per-tool breakdown metrics
+
+**O que**: Metricas individuais por tool_name extraidas dos ProjectedSteps.
+
+**Metricas** por tool:
+- `call_count: u32`
+- `success_count: u32`
+- `failure_count: u32`
+- `avg_latency_ms: f64`
+- `max_latency_ms: u64`
+- `retry_count: u32`
+- `success_rate: f64`
+
+**TDD**:
+1. RED: `test_per_tool_counts_correct()` — 5 read_file (4 success, 1 fail) → counts match
+2. RED: `test_per_tool_latency_computed()` — known durations → avg correct
+3. RED: `test_per_tool_sorted_by_call_count()` — most used first
+4. RED: `test_per_tool_empty_when_no_tools()`
+5. GREEN: `compute_tool_breakdown(steps: &[ProjectedStep]) -> Vec<ToolBreakdown>`
+6. VERIFY: `cargo test -p theo-agent-runtime`
+
+**DoD**: 4 testes passando.
+
+---
+
+### T3.11 — Context & compaction metrics
+
+**O que**: Metricas de tamanho de contexto e eficiencia de compactacao.
+
+**Metricas**:
+- `avg_context_size_tokens: f64` — media de tokens por iteracao
+- `max_context_size_tokens: u64` — pico
+- `context_growth_rate: f64` — (final_size - initial_size) / iterations
+- `compaction_count: u32` — quantas vezes compactou
+- `compaction_savings_ratio: f64` — 1.0 - (tokens_after / tokens_before), media
+- `refetch_rate: f64` — artefatos re-buscados / total fetches (direto do ContextMetrics)
+- `action_repetition_rate: f64` — acoes repetidas / total acoes (direto do ContextMetrics)
+- `usefulness_avg: f64` — media dos usefulness scores por community
+
+**TDD**:
+1. RED: `test_context_growth_positive_when_growing()`
+2. RED: `test_compaction_savings_correct()` — 10k before, 3k after → 0.7
+3. RED: `test_refetch_rate_from_context_metrics()` — round-trip from ContextMetrics
+4. RED: `test_usefulness_avg_computed()` — 3 communities [0.5, 0.8, 0.2] → avg 0.5
+5. GREEN: `compute_context_metrics(ctx: &ContextMetrics, compaction_events: &[...]) -> ContextHealthMetrics`
+6. VERIFY: `cargo test -p theo-agent-runtime`
+
+**DoD**: 4 testes passando.
+
+---
+
+### T3.12 — Memory & episode metrics
+
+**O que**: Metricas de memoria e episodios usados durante o run.
+
+**Metricas**:
+- `episodes_injected: u32` — episodios injetados no prompt
+- `episodes_created: u32` — episodios gerados neste run
+- `hypotheses_formed: u32` — hipoteses criadas
+- `hypotheses_invalidated: u32` — hipoteses descartadas
+- `hypotheses_active: u32` — hipoteses ainda ativas no final
+- `constraints_learned: u32` — constraints gerados
+- `failure_fingerprints_new: u32` — novos fingerprints este run
+- `failure_fingerprints_recurrent: u32` — fingerprints que ja tinham sido vistos antes
+
+**TDD**:
+1. RED: `test_episode_counts_from_events()`
+2. RED: `test_hypothesis_counts_from_events()`
+3. RED: `test_constraints_counted_from_events()`
+4. RED: `test_fingerprints_new_vs_recurrent()`
+5. GREEN: `compute_memory_metrics(steps: &[ProjectedStep], tracker: &FailurePatternTracker) -> MemoryMetrics`
+6. VERIFY: `cargo test -p theo-agent-runtime`
+
+**DoD**: 4 testes passando.
+
+---
+
+### T3.13 — RunReport aggregate + update compute_all
+
+**O que**: Compor todas as metricas em um unico `RunReport` e atualizar `compute_all()` e o summary line.
+
+**Struct**:
+```rust
+pub struct RunReport {
+    pub surrogate_metrics: DerivedMetrics,    // 5 metricas originais
+    pub token_metrics: TokenMetrics,          // T3.8
+    pub loop_metrics: LoopMetrics,            // T3.9
+    pub tool_breakdown: Vec<ToolBreakdown>,   // T3.10
+    pub context_health: ContextHealthMetrics, // T3.11
+    pub memory_metrics: MemoryMetrics,        // T3.12
+    pub integrity: IntegrityReport,           // T2.3
+}
+```
+
+**TDD**:
+1. RED: `test_run_report_serde_roundtrip()`
+2. RED: `test_run_report_all_sections_populated()`
+3. RED: `test_summary_line_contains_full_run_report()` — JSONL summary agora tem RunReport completo
+4. GREEN: Compor todas as sub-funcoes, atualizar writer
+5. VERIFY: `cargo test -p theo-agent-runtime`
+
+**Criterios de aceite**:
+- [ ] RunReport agrega TODAS as categorias de metricas
+- [ ] Summary line do JSONL contem RunReport completo (nao so DerivedMetrics)
+- [ ] Serde roundtrip funciona
+- [ ] Dashboard (Phase 6) consome RunReport
+
+**DoD**: 3 testes passando, summary line atualizada.
+
+---
+
 ## Phase 4: Loop Detection (BLOCKED ate RFC)
 
 > **Pre-requisito**: RFC de loop detection aprovado definindo tipos, thresholds, whitelist.
@@ -706,6 +873,416 @@ Phase 3 depende de Phase 2 (metricas computam sobre projection).
 
 ---
 
+## Phase 6: Dashboard (Visualizacao)
+
+> **Dependencias**: Phase 3 (metricas derivadas computadas), Phase 1 (writer produz JSONL)
+> **Stack**: React 18 + TypeScript + Tailwind + Radix UI + Framer Motion + Recharts
+> **Local**: `apps/theo-ui/src/features/observability/`
+> **Pagina existente**: `MonitoringPage.tsx` (stub vazio — sera substituido)
+
+### T6.1 — Tauri commands: expor trajectories para o frontend
+
+**O que**: Criar comandos Tauri (`invoke`) no backend Rust que leem JSONL e retornam dados estruturados para o frontend. Sem comandos, o frontend nao tem acesso aos dados.
+
+**Arquivos**:
+- `apps/theo-desktop/src-tauri/src/commands/observability.rs` (novo)
+- `apps/theo-desktop/src-tauri/src/commands/mod.rs` — registrar novos comandos
+
+**Comandos**:
+- `list_runs() -> Vec<RunSummary>` — lista runs com metricas resumidas (do summary line do JSONL)
+- `get_run_trajectory(run_id: String) -> TrajectoryProjection` — trajectory completa de um run
+- `get_run_metrics(run_id: String) -> DerivedMetrics` — apenas metricas derivadas
+- `compare_runs(run_ids: Vec<String>) -> Vec<DerivedMetrics>` — metricas lado a lado
+
+**TDD**:
+1. RED: `test_list_runs_returns_empty_when_no_trajectories()` — dir vazio → vec vazio
+2. RED: `test_list_runs_parses_summary_from_jsonl()` — 2 JSONL files → 2 RunSummary
+3. RED: `test_get_run_trajectory_returns_projection()` — JSONL valido → TrajectoryProjection com steps
+4. RED: `test_get_run_trajectory_not_found_returns_error()` — run_id invalido → erro tipado
+5. GREEN: Implementar comandos usando `reader.rs` (T1.5) e `projection.rs` (T2.2)
+6. VERIFY: `cargo test -p theo-desktop`
+
+**Criterios de aceite**:
+- [ ] 4 comandos Tauri registrados e invocaveis via `invoke()`
+- [ ] Comandos usam reader + projection do modulo observability (nao reimplementam)
+- [ ] Erros retornam mensagem legivel (nao panic)
+- [ ] `RunSummary` inclui: run_id, timestamp, success, total_steps, total_tool_calls, doom_loop_frequency, llm_efficiency
+
+**DoD**: 4 testes passando, comandos acessiveis via Tauri IPC.
+
+---
+
+### T6.2 — TypeScript types + IPC contract
+
+**O que**: Definir tipos TypeScript que espelham os tipos Rust do observability. Usar `ts-rs` ou definir manualmente com validacao cruzada.
+
+**Arquivos**:
+- `apps/theo-ui/src/features/observability/types.ts` (novo)
+
+**Tipos**:
+```typescript
+interface RunSummary {
+  run_id: string;
+  timestamp: number;
+  success: boolean;
+  total_steps: number;
+  total_tool_calls: number;
+  duration_ms: number;
+  metrics: DerivedMetrics;
+}
+
+interface DerivedMetrics {
+  doom_loop_frequency: SurrogateMetric;
+  llm_efficiency: SurrogateMetric;
+  context_waste_ratio: SurrogateMetric;
+  hypothesis_churn_rate: SurrogateMetric;
+  time_to_first_tool_ms: SurrogateMetric;
+}
+
+interface SurrogateMetric {
+  value: number;
+  confidence: number;
+  numerator: number;
+  denominator: number;
+  is_surrogate: boolean;
+  caveat: string;
+}
+
+interface ProjectedStep {
+  sequence: number;
+  event_type: string;
+  event_kind: EventKind;
+  timestamp: number;
+  entity_id: string;
+  payload_summary: string;
+  duration_ms: number | null;
+  tool_name: string | null;
+  outcome: StepOutcome | null;
+}
+
+type EventKind = "Lifecycle" | "Tooling" | "Reasoning" | "Context" | "Failure" | "Streaming";
+type StepOutcome = "Success" | { Failure: { retryable: boolean } } | "Timeout" | "Skipped";
+
+interface IntegrityReport {
+  complete: boolean;
+  total_events_expected: number;
+  total_events_received: number;
+  missing_sequences: Array<{ start: number; end: number }>;
+  drop_sentinels_found: number;
+  writer_recoveries_found: number;
+  confidence: number;
+  schema_version: number;
+}
+
+interface TrajectoryProjection {
+  run_id: string;
+  trajectory_id: string;
+  steps: ProjectedStep[];
+  metrics: DerivedMetrics;
+  integrity: IntegrityReport;
+}
+```
+
+**Criterios de aceite**:
+- [ ] Todos os tipos Rust do observability tem equivalente TypeScript
+- [ ] Discriminated unions para enums (EventKind, StepOutcome)
+- [ ] Nullability alinhada com `Option<T>` do Rust
+- [ ] Arquivo exporta tudo — single import point
+
+**DoD**: Tipos compilam com `tsc --noEmit`, alinham com output real dos comandos Tauri.
+
+---
+
+### T6.3 — Observability data hook + state
+
+**O que**: Custom React hook `useObservability()` que carrega dados via Tauri invoke e gerencia estado local.
+
+**Arquivos**:
+- `apps/theo-ui/src/features/observability/hooks/useObservability.ts` (novo)
+
+**API**:
+```typescript
+function useObservability() {
+  return {
+    runs: RunSummary[];           // Lista de runs
+    selectedRun: TrajectoryProjection | null;
+    loading: boolean;
+    error: string | null;
+    loadRuns: () => Promise<void>;
+    selectRun: (runId: string) => Promise<void>;
+    compareRuns: (runIds: string[]) => Promise<DerivedMetrics[]>;
+  };
+}
+```
+
+**TDD** (Vitest):
+1. RED: `test_useObservability_starts_with_empty_state()`
+2. RED: `test_loadRuns_populates_runs_array()`
+3. RED: `test_selectRun_fetches_trajectory()`
+4. RED: `test_error_state_on_invoke_failure()`
+5. GREEN: Hook com useState + invoke calls
+6. VERIFY: `cd apps/theo-ui && npm test`
+
+**Criterios de aceite**:
+- [ ] Hook encapsula TODOS os invoke calls — componentes nunca chamam invoke diretamente
+- [ ] Loading state durante fetch
+- [ ] Error state com mensagem legivel
+- [ ] Re-render minimo (nao refetch desnecessario)
+
+**DoD**: 4 testes passando (Vitest + React Testing Library ou mock de invoke).
+
+---
+
+### T6.4 — Dashboard page: metrics cards
+
+**O que**: Substituir `MonitoringPage.tsx` stub por dashboard real. Primeiro componente: 5 metric cards mostrando as surrogate metrics do run selecionado.
+
+**Arquivos**:
+- `apps/theo-ui/src/features/observability/pages/ObservabilityDashboard.tsx` (novo)
+- `apps/theo-ui/src/features/observability/components/MetricCard.tsx` (novo)
+- `apps/theo-ui/src/features/monitoring/pages/MonitoringPage.tsx` — redirecionar para dashboard
+- `apps/theo-ui/src/app/routes.tsx` — atualizar rota
+
+**Design**:
+```
+┌─────────────────────────────────────────────────────────┐
+│  Agent Observability                    [Run selector ▼] │
+├──────────┬──────────┬──────────┬──────────┬─────────────┤
+│ Doom Loop│ LLM Eff. │ Ctx Waste│ Hyp Churn│ Time to 1st │
+│   0.12   │   0.85   │   0.03   │   0.40   │   1,250ms   │
+│ ░░▓░░░░░ │ ████████░│ ░░░░░░░░ │ ░░░░▓░░░ │ ░░░███░░░░  │
+│ conf: 92%│ conf: 98%│ conf:100%│ conf: 87%│ conf: 100%  │
+└──────────┴──────────┴──────────┴──────────┴─────────────┘
+```
+
+Cada MetricCard mostra:
+- Nome da metrica
+- Valor numerico (formatado)
+- Barra de progresso colorida (verde=bom, amarelo=atencao, vermelho=problema)
+- Confidence badge
+- Tooltip com caveat (do SurrogateMetric)
+
+**TDD**:
+1. RED: `test_metric_card_renders_value()`
+2. RED: `test_metric_card_shows_confidence_badge()`
+3. RED: `test_metric_card_tooltip_shows_caveat()`
+4. RED: `test_dashboard_renders_5_cards()`
+5. RED: `test_dashboard_shows_empty_state_when_no_runs()`
+6. GREEN: Componentes com Tailwind + Radix Tooltip
+7. VERIFY: `cd apps/theo-ui && npm test`
+
+**Criterios de aceite**:
+- [ ] 5 metric cards visualmente distintos com cores semanticas
+- [ ] Confidence < 50% mostra warning visual (borda amarela)
+- [ ] Confidence < 20% mostra alerta visual (borda vermelha)
+- [ ] Hover no card mostra caveat completo via Radix Tooltip
+- [ ] Run selector dropdown lista runs disponiveis por data
+- [ ] Empty state quando nenhum run disponivel
+- [ ] Responsivo (cards empilham em tela pequena)
+
+**DoD**: 5 testes passando, dashboard renderiza com dados reais via Tauri.
+
+---
+
+### T6.5 — Timeline view: step-by-step execution
+
+**O que**: Visualizacao temporal dos steps de um run. Cada step e uma barra horizontal com cor por EventKind.
+
+**Arquivos**:
+- `apps/theo-ui/src/features/observability/components/TimelineView.tsx` (novo)
+- `apps/theo-ui/src/features/observability/components/TimelineStep.tsx` (novo)
+
+**Design**:
+```
+Timeline: Run 01HXR...
+──────────────────────────────────────────────
+00:00  ● RunInitialized               [Lifecycle]
+00:02  ● LlmCallStart                 [Context]
+00:15  ● LlmCallEnd (13s)             [Context]
+00:15  ● ToolCallDispatched: read_file [Tooling]
+00:15  ● ToolCallCompleted (42ms) ✓   [Tooling]
+00:16  ● HypothesisFormed             [Reasoning]
+00:16  ● ToolCallDispatched: edit_file [Tooling]
+00:17  ● ToolCallCompleted (850ms) ✓  [Tooling]
+00:17  ● SensorExecuted ✓             [Tooling]
+00:30  ⚠ LoopDetected (Warning)       [Failure]
+00:45  ● RunStateChanged → Converged  [Lifecycle]
+──────────────────────────────────────────────
+```
+
+Cores por EventKind:
+- `Lifecycle` → cinza
+- `Tooling` → azul
+- `Reasoning` → roxo
+- `Context` → amarelo
+- `Failure` → vermelho
+
+**TDD**:
+1. RED: `test_timeline_renders_steps_in_order()`
+2. RED: `test_timeline_step_shows_event_kind_color()`
+3. RED: `test_timeline_step_shows_duration_when_available()`
+4. RED: `test_timeline_step_shows_outcome_icon()` — ✓ para success, ✗ para failure
+5. RED: `test_timeline_highlights_failure_steps()`
+6. GREEN: Componentes com Framer Motion para animacao de entrada
+7. VERIFY: `cd apps/theo-ui && npm test`
+
+**Criterios de aceite**:
+- [ ] Steps renderizados em ordem cronologica
+- [ ] Cada step tem: timestamp relativo, icone de outcome, event_type, event_kind badge colorido
+- [ ] Tool calls mostram tool_name e duration_ms
+- [ ] Failure steps (EventKind::Failure) destacados em vermelho
+- [ ] Click em step expande payload_summary
+- [ ] Scroll virtual para runs com 500+ steps (performance)
+
+**DoD**: 5 testes passando, timeline renderiza com dados reais.
+
+---
+
+### T6.6 — Tool usage chart
+
+**O que**: Grafico de barras mostrando distribuicao de tool calls por tool_name. Requer adicionar `recharts` como dependencia.
+
+**Arquivos**:
+- `apps/theo-ui/src/features/observability/components/ToolUsageChart.tsx` (novo)
+- `apps/theo-ui/package.json` — adicionar `recharts`
+
+**Design**:
+```
+Tool Usage (23 calls)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+read_file    ████████████  12  (9 ✓, 3 ✗)
+edit_file    ████          4   (3 ✓, 1 ✗)
+bash         ███           3   (3 ✓)
+grep         ██            2   (2 ✓)
+write_file   █             1   (1 ✓)
+glob         █             1   (1 ✓)
+```
+
+**TDD**:
+1. RED: `test_tool_chart_renders_bars_per_tool()`
+2. RED: `test_tool_chart_shows_success_failure_split()`
+3. RED: `test_tool_chart_sorted_by_count_descending()`
+4. RED: `test_tool_chart_empty_when_no_tool_calls()`
+5. GREEN: Recharts BarChart horizontal com stacked success/failure
+6. VERIFY: `cd apps/theo-ui && npm test`
+
+**Criterios de aceite**:
+- [ ] Barras horizontais, ordenadas por contagem decrescente
+- [ ] Cada barra split em success (verde) e failure (vermelho)
+- [ ] Hover mostra contagem exata
+- [ ] Header mostra total de tool calls
+- [ ] Empty state quando nenhuma tool call
+
+**DoD**: 4 testes passando, `recharts` adicionado ao package.json.
+
+---
+
+### T6.7 — Failure mode indicators
+
+**O que**: Badges/alertas mostrando quais failure modes foram detectados no run.
+
+**Arquivos**:
+- `apps/theo-ui/src/features/observability/components/FailureModePanel.tsx` (novo)
+
+**Design**:
+```
+Failure Analysis
+┌──────────────────────┬──────────────────────────┐
+│ ✓ NoProgressLoop     │ Not detected             │
+│ ✓ RepeatedSameError  │ Not detected             │
+│ ⚠ PrematureTermination│ Agent converged with 0 edits │
+│ ⚠ WeakVerification   │ 2 edits without verification │
+│ ✓ TaskDerailment     │ Not detected             │
+│ ✓ HistoryLoss        │ Not detected             │
+└──────────────────────┴──────────────────────────┘
+```
+
+**TDD**:
+1. RED: `test_failure_panel_shows_6_modes()`
+2. RED: `test_failure_panel_highlights_detected_modes()`
+3. RED: `test_failure_panel_shows_description_for_detected()`
+4. GREEN: Componente com Radix icons + conditional styling
+5. VERIFY: `cd apps/theo-ui && npm test`
+
+**Criterios de aceite**:
+- [ ] 6 failure modes listados (FM-1..FM-6)
+- [ ] Modo detectado: badge amarelo/vermelho + descricao
+- [ ] Modo nao detectado: badge verde + "Not detected"
+- [ ] Visualmente claro: verde = saudavel, vermelho = problema
+
+**DoD**: 3 testes passando.
+
+---
+
+### T6.8 — Run comparison view
+
+**O que**: Selecionar 2+ runs e comparar metricas lado a lado.
+
+**Arquivos**:
+- `apps/theo-ui/src/features/observability/components/RunComparison.tsx` (novo)
+
+**Design**:
+```
+Compare Runs
+                    Run A (Apr 22)    Run B (Apr 22)    Delta
+Doom Loop Freq      0.12              0.05              -58% ↓
+LLM Efficiency      0.72              0.89              +24% ↑
+Context Waste       0.10              0.03              -70% ↓
+Hypothesis Churn    0.50              0.33              -34% ↓
+Time to 1st Tool    1,250ms           890ms             -29% ↓
+Total Steps         23                15                -35% ↓
+Total Tool Calls    18                12                -33% ↓
+Duration            45s               28s               -38% ↓
+```
+
+**TDD**:
+1. RED: `test_comparison_shows_delta_percentage()`
+2. RED: `test_comparison_colors_improvements_green()`
+3. RED: `test_comparison_colors_regressions_red()`
+4. RED: `test_comparison_handles_single_run()` — sem delta, so valores
+5. GREEN: Tabela com calculo de delta e coloracao
+6. VERIFY: `cd apps/theo-ui && npm test`
+
+**Criterios de aceite**:
+- [ ] Tabela com colunas por run + coluna delta
+- [ ] Delta mostra % de mudanca com seta ↑/↓
+- [ ] Melhorias em verde, regressoes em vermelho (invertido para doom_loop e waste onde menor = melhor)
+- [ ] Suporta 2-5 runs lado a lado
+- [ ] Scroll horizontal se necessario
+
+**DoD**: 4 testes passando, comparison funcional com dados reais.
+
+---
+
+### T6.9 — Integrity indicator
+
+**O que**: Indicador visual de integridade da trajectory (confidence, gaps, drops).
+
+**Arquivos**:
+- `apps/theo-ui/src/features/observability/components/IntegrityBadge.tsx` (novo)
+
+**Design**:
+- `confidence >= 0.95` → Badge verde "Complete"
+- `confidence >= 0.70` → Badge amarelo "Partial (87%)" com tooltip listando gaps
+- `confidence < 0.70` → Badge vermelho "Degraded (52%)" com warning
+- Drop sentinels e writer recoveries mostrados em tooltip
+
+**TDD**:
+1. RED: `test_integrity_badge_green_when_complete()`
+2. RED: `test_integrity_badge_yellow_when_partial()`
+3. RED: `test_integrity_badge_red_when_degraded()`
+4. GREEN: Componente com Radix Tooltip
+5. VERIFY: `cd apps/theo-ui && npm test`
+
+**Criterios de aceite**:
+- [ ] 3 niveis visuais: verde/amarelo/vermelho
+- [ ] Tooltip mostra: events expected/received, gaps, sentinels, schema version
+- [ ] Posicionado no header do dashboard, ao lado do run selector
+
+**DoD**: 3 testes passando.
+
+---
+
 ## Resumo de Contagem
 
 | Phase | Tasks | Testes (minimo) | Invariantes verificados |
@@ -713,35 +1290,40 @@ Phase 3 depende de Phase 2 (metricas computam sobre projection).
 | Phase 0 | 2 | 7 + 0 (refactor) | — |
 | Phase 1 | 6 | 5+7+4+4+7+1 = 28 | INV-1, INV-2, INV-3, INV-4 |
 | Phase 2 | 4 | 4+7+5+2 = 18 | P1, P2, P3, P4 |
-| Phase 3 | 7 | 3+5+4+3+4+3+5 = 27 | — |
+| Phase 3 | 13 | 3+5+4+3+4+3+5+5+4+4+4+4+3 = 51 | — |
 | Phase 4 | 4 | 8+7+3+2 = 20 | — |
 | Phase 5 | 5 | 4+4+4+3+2 = 17 | FM-1..FM-6 |
-| **Total** | **28** | **110** | **10** |
+| Phase 6 | 9 | 4+0+4+5+5+4+3+4+3 = 32 | — |
+| **Total** | **43** | **166** | **10** |
 
 ## Ordem de Execucao
 
 ```
 Sprint 1: T0.1 → T0.2 → T1.1 → T1.2 → T1.3 → T1.4
 Sprint 2: T1.5 → T1.6 → T2.1 → T2.2 → T2.3 → T2.4
-Sprint 3: T3.1 → T3.2 → T3.3 → T3.4 → T3.5 → T3.6 → T3.7
+Sprint 3: T3.1 → T3.2 → T3.3 → T3.4 → T3.5 → T3.6 → T3.7 → T3.8 → T3.9 → T3.10 → T3.11 → T3.12 → T3.13
 Sprint 4: T4.1 → T4.2 → T4.3 → T4.4 (se RFC aprovado)
 Sprint 5: T5.1 → T5.2 → T5.3 → T5.4 → T5.5
+Sprint 6: T6.1 → T6.2 → T6.3 → T6.4 → T6.5 → T6.6 → T6.7 → T6.8 → T6.9
 
 Gate de qualidade por sprint:
 - cargo test -p theo-agent-runtime → ALL GREEN
 - cargo test -p theo-domain → ALL GREEN (Sprint 1 apenas)
+- cargo test -p theo-desktop → ALL GREEN (Sprint 6)
+- cd apps/theo-ui && npm test → ALL GREEN (Sprint 6)
 - cargo clippy --workspace → ZERO warnings
 - cargo build --workspace → ZERO errors
 ```
 
 ## DoD Global do Projeto
 
-- [ ] 110+ testes novos passando
+- [ ] 166+ testes novos passando (134 Rust + 32 TypeScript)
 - [ ] 4 invariantes de pipeline (INV-1..4) com test contracts
 - [ ] 4 propriedades de projecao (P1..4) formalmente verificados
 - [ ] 6 failure modes com predicados operacionais
 - [ ] 5 metricas derivadas com formulas, edge cases, e caveats
 - [ ] JSONL storage com crash recovery e schema versioning
+- [ ] Dashboard visual com: metric cards, timeline, tool chart, failure panel, run comparison, integrity badge
 - [ ] Zero breaking changes em APIs publicas existentes
 - [ ] Zero clippy warnings no workspace
 - [ ] ADR atualizado com status "Implemented"
