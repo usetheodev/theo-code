@@ -645,10 +645,11 @@ impl AgentRunEngine {
             // Phase 0 T0.1 AC-0.1.3: pre-compression memory hook (survives truncation).
             crate::memory_lifecycle::run_engine_hooks::pre_compress_push(&self.config, &mut messages).await;
 
-            crate::compaction::compact_if_needed_with_context(
+            crate::compaction_stages::compact_staged_with_policy(
                 &mut messages,
                 self.config.context_window_tokens,
                 Some(&compaction_ctx),
+                &self.config.compaction_policy,
             );
 
             // Record context size for metrics (estimated tokens = chars/4)

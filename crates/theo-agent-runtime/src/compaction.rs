@@ -7,6 +7,7 @@
 //! - Tool call/result pairs as atomic units
 //! - A summary of compacted content
 
+use crate::config::CompactionPolicy;
 use crate::sanitizer::sanitize_tool_pairs;
 use theo_infra_llm::types::{Message, Role};
 
@@ -23,15 +24,6 @@ pub struct CompactionContext {
     /// Recent errors encountered (last 2-3, truncated).
     pub recent_errors: Vec<String>,
 }
-
-/// Number of recent messages to always preserve fully.
-const PRESERVE_TAIL: usize = 6;
-
-/// Max chars to keep in truncated tool results.
-const TRUNCATE_TOOL_RESULT_CHARS: usize = 200;
-
-/// Threshold: compact when tokens exceed this fraction of context window.
-const COMPACT_THRESHOLD: f64 = 0.80;
 
 /// Prefix for compaction summary messages (used for idempotence detection).
 const COMPACTED_PREFIX: &str = "[COMPACTED] ";
@@ -84,11 +76,12 @@ fn truncate_utf8(s: &str, max_chars: usize) -> String {
 /// Compact the message history if it exceeds the token threshold.
 ///
 /// Modifies `messages` in-place. Idempotent — safe to call every iteration.
+/// Uses [`CompactionPolicy::default()`] for all parameters.
 ///
 /// Rules:
 /// 1. System messages → always preserved integrally
-/// 2. Last PRESERVE_TAIL messages → preserved integrally
-/// 3. Tool results outside the tail → content truncated to 200 chars
+/// 2. Last `preserve_tail` messages → preserved integrally
+/// 3. Tool results outside the tail → content truncated
 /// 4. (assistant_with_tool_calls + tool_results) treated as atomic pair
 /// 5. Previous compaction summaries are replaced (idempotent)
 /// 6. A compaction summary is inserted as a user message
@@ -97,10 +90,24 @@ pub fn compact_if_needed(messages: &mut Vec<Message>, context_window_tokens: usi
 }
 
 /// Compact with optional semantic context for richer summaries.
+/// Uses [`CompactionPolicy::default()`].
 pub fn compact_if_needed_with_context(
     messages: &mut Vec<Message>,
     context_window_tokens: usize,
     context: Option<&CompactionContext>,
+) {
+    let policy = CompactionPolicy::default();
+    compact_with_policy(messages, context_window_tokens, context, &policy);
+}
+
+/// Compact with explicit policy and optional semantic context.
+///
+/// This is the canonical implementation — all other `compact_*` variants delegate here.
+pub fn compact_with_policy(
+    messages: &mut Vec<Message>,
+    context_window_tokens: usize,
+    context: Option<&CompactionContext>,
+    policy: &CompactionPolicy,
 ) {
     if messages.is_empty() || context_window_tokens == 0 {
         return;
@@ -113,7 +120,7 @@ pub fn compact_if_needed_with_context(
     // enforced on EVERY message, including those in the protected tail.
     enforce_per_message_cap(messages, context_window_tokens / 4);
 
-    let threshold = (context_window_tokens as f64 * COMPACT_THRESHOLD) as usize;
+    let threshold = (context_window_tokens as f64 * policy.compact_threshold) as usize;
     let total = estimate_total_tokens(messages);
 
     if total <= threshold {
@@ -121,27 +128,29 @@ pub fn compact_if_needed_with_context(
     }
 
     // Identify boundary: everything before this index is a candidate for compaction.
-    // We preserve: all system messages (any position) + last PRESERVE_TAIL non-system messages.
+    // We preserve: all system messages (any position) + last preserve_tail non-system messages.
     let non_system_count = messages.iter().filter(|m| m.role != Role::System).count();
 
-    if non_system_count <= PRESERVE_TAIL {
+    if non_system_count <= policy.preserve_tail {
         // Not enough messages to compact — everything is in the "preserve" zone.
         return;
     }
 
     // Find the index that separates compactable from preserved.
-    // Count non-system messages from the end to find the PRESERVE_TAIL boundary.
+    // Count non-system messages from the end to find the preserve_tail boundary.
     let mut tail_count = 0;
     let mut boundary_idx = messages.len();
     for (i, m) in messages.iter().enumerate().rev() {
         if m.role != Role::System {
             tail_count += 1;
-            if tail_count == PRESERVE_TAIL {
+            if tail_count == policy.preserve_tail {
                 boundary_idx = i;
                 break;
             }
         }
     }
+
+    let truncate_chars = policy.truncate_tool_result_chars;
 
     // Collect info for summary before modifying.
     let mut tools_used: Vec<String> = Vec::new();
@@ -175,7 +184,7 @@ pub fn compact_if_needed_with_context(
                 }
             }
             if let Some(ref content) = messages[i].content {
-                if content.len() > TRUNCATE_TOOL_RESULT_CHARS * 4 {
+                if content.len() > truncate_chars * 4 {
                     // Extract file mentions before truncating.
                     for word in content.split_whitespace() {
                         if (word.contains('/') || word.contains('.'))
@@ -194,7 +203,7 @@ pub fn compact_if_needed_with_context(
                             }
                         }
                     }
-                    messages[i].content = Some(truncate_utf8(content, TRUNCATE_TOOL_RESULT_CHARS));
+                    messages[i].content = Some(truncate_utf8(content, truncate_chars));
                     compacted = true;
                 }
             }
@@ -213,9 +222,9 @@ pub fn compact_if_needed_with_context(
                 // Truncate long arguments in tool calls.
                 if let Some(ref mut tcs) = messages[i].tool_calls {
                     for tc in tcs.iter_mut() {
-                        if tc.function.arguments.len() > TRUNCATE_TOOL_RESULT_CHARS * 4 {
+                        if tc.function.arguments.len() > truncate_chars * 4 {
                             tc.function.arguments =
-                                truncate_utf8(&tc.function.arguments, TRUNCATE_TOOL_RESULT_CHARS);
+                                truncate_utf8(&tc.function.arguments, truncate_chars);
                             compacted = true;
                         }
                     }
@@ -328,7 +337,8 @@ pub fn compact_messages_to_target(
             ..Default::default()
         })
     };
-    compact_if_needed_with_context(messages, target_tokens, ctx.as_ref());
+    let policy = CompactionPolicy::default();
+    compact_with_policy(messages, target_tokens, ctx.as_ref(), &policy);
 
     // If still over target, drop oldest non-system messages one by one.
     while estimate_total_tokens(messages) > target_tokens {
@@ -500,13 +510,15 @@ mod tests {
         // `test_t1_3_ac_6_single_oversized_message_does_not_cause_oom_loop`.
         // This test validates the OTHER invariant: tail messages within
         // the per-message cap must survive compaction unmodified.
+        let policy = CompactionPolicy::default();
         let mut msgs = make_messages(20, 100);
 
+        // Record the last preserve_tail non-system messages before compaction.
         let last_messages: Vec<String> = msgs
             .iter()
             .filter(|m| m.role != Role::System)
             .rev()
-            .take(PRESERVE_TAIL)
+            .take(policy.preserve_tail)
             .filter_map(|m| m.content.clone())
             .collect();
 
@@ -638,6 +650,61 @@ mod tests {
             content.contains("unresolved import"),
             "Summary should contain recent errors"
         );
+    }
+
+    #[test]
+    fn compaction_policy_defaults_match_previous_constants() {
+        let policy = CompactionPolicy::default();
+        assert_eq!(policy.preserve_tail, 6);
+        assert_eq!(policy.truncate_tool_result_chars, 200);
+        assert!((policy.compact_threshold - 0.80).abs() < f64::EPSILON);
+        assert_eq!(policy.prune_keep_recent, 3);
+        assert_eq!(policy.observation_mask_window, 10);
+    }
+
+    #[test]
+    fn compact_with_custom_policy_respects_threshold() {
+        let mut msgs = make_messages(20, 2000);
+        // Custom policy with threshold 0.99 — should NOT compact even with small window.
+        let policy = CompactionPolicy {
+            compact_threshold: 0.99,
+            ..Default::default()
+        };
+        let len_before = msgs.len();
+        // Window of 5000 — at 0.99 threshold (4950 tokens needed), 20 turns with
+        // 2000-char tool results will exceed, but let's use a bigger window.
+        compact_with_policy(&mut msgs, 100_000, None, &policy);
+        assert_eq!(msgs.len(), len_before, "High threshold should prevent compaction");
+    }
+
+    #[test]
+    fn compact_with_custom_preserve_tail() {
+        // Content sized to fit within the per-message cap
+        // (context_window/4 ≈ context_window bytes): the
+        // `preserve_tail` invariant and the T1.3 OOM cap are
+        // orthogonal — this test validates the former only.
+        let mut msgs = make_messages(20, 100);
+        let policy = CompactionPolicy {
+            preserve_tail: 12,
+            ..Default::default()
+        };
+        // Record last 12 non-system messages.
+        let last_messages: Vec<String> = msgs
+            .iter()
+            .filter(|m| m.role != Role::System)
+            .rev()
+            .take(12)
+            .filter_map(|m| m.content.clone())
+            .collect();
+
+        compact_with_policy(&mut msgs, 10_000, None, &policy);
+
+        for expected in &last_messages {
+            assert!(
+                msgs.iter().any(|m| m.content.as_deref() == Some(expected)),
+                "Custom preserve_tail=12 should keep last 12 non-system messages"
+            );
+        }
     }
 
     #[test]

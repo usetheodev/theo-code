@@ -236,6 +236,42 @@ impl ToolExecutionMode {
 }
 
 // ---------------------------------------------------------------------------
+// CompactionPolicy — centralized compaction parameters
+// ---------------------------------------------------------------------------
+
+/// Centralized policy for context compaction parameters.
+///
+/// Replaces scattered module-level constants across `compaction.rs` and
+/// `compaction_stages.rs`. All compaction functions receive `&CompactionPolicy`
+/// so behavior is configurable per-agent without recompilation.
+#[derive(Debug, Clone)]
+pub struct CompactionPolicy {
+    /// Number of recent messages to always preserve fully.
+    pub preserve_tail: usize,
+    /// Max chars to keep in truncated tool results.
+    pub truncate_tool_result_chars: usize,
+    /// Threshold: compact when tokens exceed this fraction of context window.
+    pub compact_threshold: f64,
+    /// How many recent tool results to preserve during Prune stage.
+    pub prune_keep_recent: usize,
+    /// How many recent tool observations to preserve during masking.
+    /// Used by `apply_observation_mask` (Fase 1).
+    pub observation_mask_window: usize,
+}
+
+impl Default for CompactionPolicy {
+    fn default() -> Self {
+        Self {
+            preserve_tail: 6,
+            truncate_tool_result_chars: 200,
+            compact_threshold: 0.80,
+            prune_keep_recent: 3,
+            observation_mask_window: 10,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // AgentConfig
 // ---------------------------------------------------------------------------
 
@@ -291,6 +327,9 @@ pub struct AgentConfig {
     /// Useful in headless/benchmark mode where losing an instance to a transient
     /// rate limit is expensive. Default: false (uses standard 3 retries, 1-30s).
     pub aggressive_retry: bool,
+    /// Compaction policy — centralized parameters for context compaction.
+    /// Default matches the previously hardcoded constants.
+    pub compaction_policy: CompactionPolicy,
     /// Master switch for the agent-memory subsystem. When `false`, every
     /// memory lifecycle hook (`prefetch`, `sync_turn`, `on_pre_compress`,
     /// `on_session_end`) short-circuits to the NullMemoryProvider — runtime
@@ -382,6 +421,7 @@ impl Default for AgentConfig {
             context_window_tokens: 128_000,
             tool_execution_mode: ToolExecutionMode::default(),
             aggressive_retry: false,
+            compaction_policy: CompactionPolicy::default(),
             memory_enabled: false,
             memory_provider: None,
             router: None,

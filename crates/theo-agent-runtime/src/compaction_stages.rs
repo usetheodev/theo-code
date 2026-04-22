@@ -7,7 +7,8 @@
 //! Mask already lives in `compaction::compact_if_needed`.
 //! Warning/Aggressive/Compact are future iterations.
 
-use crate::compaction::{CompactionContext, compact_if_needed_with_context, estimate_total_tokens};
+use crate::compaction::{CompactionContext, compact_with_policy, estimate_total_tokens};
+use crate::config::CompactionPolicy;
 use crate::sanitizer::sanitize_tool_pairs;
 use theo_infra_llm::types::{Message, Role};
 
@@ -38,8 +39,8 @@ pub fn is_already_masked(content: Option<&str>) -> bool {
     matches!(content, Some(c) if c.starts_with(MASK_SENTINEL_PREFIX))
 }
 
-/// How many recent tool results to preserve integrally during Prune.
-const PRUNE_KEEP_RECENT: usize = 3;
+/// Legacy default — callers should prefer `CompactionPolicy::prune_keep_recent`.
+const PRUNE_KEEP_RECENT_DEFAULT: usize = 3;
 
 /// Staged optimization level, determined by context-window occupancy.
 ///
@@ -106,9 +107,14 @@ pub fn apply_warning(used: usize, limit: usize) {
 }
 
 /// Prune stage: replace content of old tool results with `[pruned]`,
-/// preserving the last `PRUNE_KEEP_RECENT=3` results integrally.
+/// preserving the last `prune_keep_recent` (default 3) results integrally.
 pub fn apply_prune(messages: &mut Vec<Message>) {
-    apply_prune_with_keep(messages, PRUNE_KEEP_RECENT);
+    apply_prune_with_keep(messages, PRUNE_KEEP_RECENT_DEFAULT);
+}
+
+/// Prune stage with explicit keep count from policy.
+pub fn apply_prune_with_policy(messages: &mut Vec<Message>, policy: &CompactionPolicy) {
+    apply_prune_with_keep(messages, policy.prune_keep_recent);
 }
 
 /// Aggressive stage: same as Prune but keeps only 1 recent tool result.
@@ -157,22 +163,46 @@ fn apply_prune_with_keep(messages: &mut Vec<Message>, keep: usize) {
 /// - Compact → `apply_aggressive` + Mask pass (LLM summary deferred)
 ///
 /// Returns the level that was applied so callers can observe/metric it.
+/// Staged dispatcher — the single entry point the agent loop should use.
+/// Uses [`CompactionPolicy::default()`].
 pub fn compact_staged(
     messages: &mut Vec<Message>,
     context_window_tokens: usize,
     ctx: Option<&CompactionContext>,
+) -> OptimizationLevel {
+    let policy = CompactionPolicy::default();
+    compact_staged_with_policy(messages, context_window_tokens, ctx, &policy)
+}
+
+/// Staged dispatcher with explicit policy.
+///
+/// Checks pressure via `check_usage`, then invokes the appropriate stage:
+/// - None    → no-op
+/// - Warning → log only
+/// - Mask    → `compact_with_policy` (existing truncation logic)
+/// - Prune   → `apply_prune_with_policy`
+/// - Aggressive → `apply_aggressive` (keep=1)
+/// - Compact → `apply_aggressive` + Mask pass (LLM summary deferred)
+///
+/// Returns the level that was applied so callers can observe/metric it.
+pub fn compact_staged_with_policy(
+    messages: &mut Vec<Message>,
+    context_window_tokens: usize,
+    ctx: Option<&CompactionContext>,
+    policy: &CompactionPolicy,
 ) -> OptimizationLevel {
     let level = check_usage(messages, context_window_tokens);
     match level {
         OptimizationLevel::None => {}
         OptimizationLevel::Warning => {
             apply_warning(estimate_total_tokens(messages), context_window_tokens);
+            apply_observation_mask_with_policy(messages, policy);
         }
         OptimizationLevel::Mask => {
-            compact_if_needed_with_context(messages, context_window_tokens, ctx);
+            compact_with_policy(messages, context_window_tokens, ctx, policy);
         }
         OptimizationLevel::Prune => {
-            apply_prune(messages);
+            apply_prune_with_policy(messages, policy);
         }
         OptimizationLevel::Aggressive => {
             apply_aggressive(messages);
@@ -181,10 +211,87 @@ pub fn compact_staged(
             // LLM summarization is a future iteration. For now fall back to
             // aggressive pruning + masking on whatever survives.
             apply_aggressive(messages);
-            compact_if_needed_with_context(messages, context_window_tokens, ctx);
+            compact_with_policy(messages, context_window_tokens, ctx, policy);
         }
     }
     level
+}
+
+// ---------------------------------------------------------------------------
+// Observation Masking (Fase 1)
+// ---------------------------------------------------------------------------
+
+/// Prefix for observation mask headers.
+const OBSERVATION_MASK_PREFIX: &str = "[observation masked: ";
+
+/// Build the observation mask header for a tool result.
+fn observation_mask_header(tool_name: Option<&str>, tool_call_id: &str) -> String {
+    let name = tool_name.unwrap_or("unknown");
+    format!("{OBSERVATION_MASK_PREFIX}{name} {tool_call_id}]")
+}
+
+/// Check if a message is already observation-masked.
+fn is_observation_masked(content: Option<&str>) -> bool {
+    matches!(content, Some(c) if c.starts_with(OBSERVATION_MASK_PREFIX))
+}
+
+/// Apply observation masking to tool results outside the recent window.
+///
+/// Replaces the content of older tool observations with a compact header
+/// (`[observation masked: <tool_name> <tool_call_id>]`) while preserving
+/// the last `window` observations intact. Protected tools (read_file,
+/// graph_context, etc.) are never masked.
+///
+/// **NOT idempotent** by design — already-masked messages are skipped but
+/// the window is counted from the current state. Call BEFORE `compact_if_needed`
+/// in the staged pipeline (Warning level).
+///
+/// Ref: Complexity Trap paper — 84% of tokens are observations.
+pub fn apply_observation_mask(messages: &mut Vec<Message>, window: usize) {
+    // Collect indices of all Tool messages (observations).
+    let tool_indices: Vec<usize> = messages
+        .iter()
+        .enumerate()
+        .filter(|(_, m)| m.role == Role::Tool)
+        .map(|(i, _)| i)
+        .collect();
+
+    if tool_indices.len() <= window {
+        return; // Not enough observations to mask.
+    }
+
+    // The last `window` tool messages are preserved.
+    let cutoff = tool_indices.len() - window;
+    for &idx in &tool_indices[..cutoff] {
+        let m = &messages[idx];
+
+        // Skip already masked.
+        if is_observation_masked(m.content.as_deref()) {
+            continue;
+        }
+        // Skip already pruned.
+        if m.content.as_deref() == Some(PRUNED_SENTINEL) {
+            continue;
+        }
+        // Skip protected tools.
+        if is_protected(m.name.as_deref()) {
+            continue;
+        }
+
+        let header = observation_mask_header(
+            messages[idx].name.as_deref(),
+            messages[idx].tool_call_id.as_deref().unwrap_or("?"),
+        );
+        messages[idx].content = Some(header);
+    }
+}
+
+/// Apply observation masking using policy's `observation_mask_window`.
+pub fn apply_observation_mask_with_policy(
+    messages: &mut Vec<Message>,
+    policy: &CompactionPolicy,
+) {
+    apply_observation_mask(messages, policy.observation_mask_window);
 }
 
 #[cfg(test)]
@@ -331,5 +438,166 @@ mod tests {
         assert!(is_protected(Some("skill")));
         assert!(!is_protected(Some("bash")));
         assert!(!is_protected(None));
+    }
+
+    // -----------------------------------------------------------------------
+    // Observation masking tests
+    // -----------------------------------------------------------------------
+
+    fn build_tool_turns(count: usize, tool_name: &str) -> Vec<Message> {
+        let mut msgs = Vec::new();
+        for i in 1..=count {
+            let id = format!("c{i}");
+            msgs.push(Message::assistant_with_tool_calls(
+                None,
+                vec![ToolCall::new(id.clone(), tool_name, "{}")],
+            ));
+            msgs.push(Message::tool_result(id, tool_name, format!("output{i}")));
+        }
+        msgs
+    }
+
+    #[test]
+    fn observation_mask_preserves_last_m_observations() {
+        // 8 tool turns, window=3 → first 5 masked, last 3 preserved.
+        let mut msgs = build_tool_turns(8, "bash");
+        apply_observation_mask(&mut msgs, 3);
+
+        let tools: Vec<_> = msgs
+            .iter()
+            .filter(|m| m.role == Role::Tool)
+            .collect();
+        assert_eq!(tools.len(), 8);
+
+        // First 5 should be masked.
+        for t in &tools[..5] {
+            assert!(
+                t.content.as_deref().unwrap().starts_with(OBSERVATION_MASK_PREFIX),
+                "Expected masked, got: {:?}",
+                t.content
+            );
+        }
+        // Last 3 should be preserved.
+        assert_eq!(tools[5].content.as_deref(), Some("output6"));
+        assert_eq!(tools[6].content.as_deref(), Some("output7"));
+        assert_eq!(tools[7].content.as_deref(), Some("output8"));
+    }
+
+    #[test]
+    fn observation_mask_replaces_old_observations_with_header() {
+        let mut msgs = build_tool_turns(4, "bash");
+        apply_observation_mask(&mut msgs, 2);
+
+        let first_tool = msgs.iter().find(|m| m.role == Role::Tool).unwrap();
+        let content = first_tool.content.as_deref().unwrap();
+        assert!(content.starts_with("[observation masked: bash c1]"));
+    }
+
+    #[test]
+    fn observation_mask_preserves_non_tool_messages() {
+        let mut msgs = vec![
+            Message::system("sys"),
+            Message::user("hello"),
+        ];
+        msgs.extend(build_tool_turns(5, "bash"));
+        msgs.push(Message::assistant("thinking..."));
+
+        let len_before = msgs.len();
+        apply_observation_mask(&mut msgs, 3);
+
+        // Message count unchanged (masking replaces content, doesn't remove).
+        assert_eq!(msgs.len(), len_before);
+        // System and user messages untouched.
+        assert_eq!(msgs[0].content.as_deref(), Some("sys"));
+        assert_eq!(msgs[1].content.as_deref(), Some("hello"));
+        // Last assistant message untouched.
+        assert_eq!(
+            msgs.last().unwrap().content.as_deref(),
+            Some("thinking...")
+        );
+    }
+
+    #[test]
+    fn observation_mask_skips_protected_tools() {
+        let mut msgs = Vec::new();
+        // 3 read_file results (protected) + 3 bash results.
+        for i in 1..=3 {
+            let id = format!("rf{i}");
+            msgs.push(Message::assistant_with_tool_calls(
+                None,
+                vec![ToolCall::new(id.clone(), "read_file", "{}")],
+            ));
+            msgs.push(Message::tool_result(&id, "read_file", format!("file_content{i}")));
+        }
+        for i in 1..=3 {
+            let id = format!("b{i}");
+            msgs.push(Message::assistant_with_tool_calls(
+                None,
+                vec![ToolCall::new(id.clone(), "bash", "{}")],
+            ));
+            msgs.push(Message::tool_result(&id, "bash", format!("bash_out{i}")));
+        }
+
+        // Window=1 → mask all but last 1 observation.
+        apply_observation_mask(&mut msgs, 1);
+
+        // read_file results should be preserved (protected).
+        let read_file_tools: Vec<_> = msgs
+            .iter()
+            .filter(|m| m.role == Role::Tool && m.name.as_deref() == Some("read_file"))
+            .collect();
+        for t in &read_file_tools {
+            assert!(
+                !t.content.as_deref().unwrap().starts_with(OBSERVATION_MASK_PREFIX),
+                "Protected tool should not be masked"
+            );
+        }
+
+        // First 2 bash results masked, last 1 preserved.
+        let bash_tools: Vec<_> = msgs
+            .iter()
+            .filter(|m| m.role == Role::Tool && m.name.as_deref() == Some("bash"))
+            .collect();
+        assert!(bash_tools[0].content.as_deref().unwrap().starts_with(OBSERVATION_MASK_PREFIX));
+        assert!(bash_tools[1].content.as_deref().unwrap().starts_with(OBSERVATION_MASK_PREFIX));
+        assert_eq!(bash_tools[2].content.as_deref(), Some("bash_out3"));
+    }
+
+    #[test]
+    fn observation_mask_noop_when_under_window() {
+        let mut msgs = build_tool_turns(3, "bash");
+        let snap = msgs.clone();
+        apply_observation_mask(&mut msgs, 5); // Window bigger than tool count.
+        assert_eq!(msgs, snap);
+    }
+
+    #[test]
+    fn observation_mask_skips_already_masked() {
+        let mut msgs = build_tool_turns(5, "bash");
+        apply_observation_mask(&mut msgs, 2);
+        let snap = msgs.clone();
+        apply_observation_mask(&mut msgs, 2);
+        assert_eq!(msgs, snap, "Double masking should be idempotent");
+    }
+
+    #[test]
+    fn observation_mask_with_policy_uses_window() {
+        let mut msgs = build_tool_turns(6, "bash");
+        let policy = CompactionPolicy {
+            observation_mask_window: 2,
+            ..Default::default()
+        };
+        apply_observation_mask_with_policy(&mut msgs, &policy);
+
+        let masked_count = msgs
+            .iter()
+            .filter(|m| {
+                m.role == Role::Tool
+                    && m.content
+                        .as_deref()
+                        .is_some_and(|c| c.starts_with(OBSERVATION_MASK_PREFIX))
+            })
+            .count();
+        assert_eq!(masked_count, 4, "6 tools - 2 window = 4 masked");
     }
 }
