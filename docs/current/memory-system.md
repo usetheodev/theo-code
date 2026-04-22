@@ -8,15 +8,31 @@
 
 ## 1. O que é
 
-Sistema multi-camada de memória persistente para o agente. Mapeia 1:1 ao modelo MemGPT 3-tier (Active/Cooling/Archived) + Karpathy LLM Wiki (conhecimento compilado) + mem0-style lesson gates. Tudo construído respeitando a regra `theo-domain → nothing`.
+Sistema multi-camada de memória persistente para o agente. Na prática, ele combina tiers estilo MemGPT, wiki compilada no padrão Karpathy LLM Wiki, gates de promoção inspirados em mem0/MemoryBank e retrieval local. Tudo construído respeitando a regra `theo-domain → nothing`.
 
-O objetivo é dar ao agente:
+O ponto importante é que o desenho não veio só de papers. Ele foi calibrado contra os projetos em `referencias/`, que nos dão restrições operacionais mais úteis do que uma descrição abstrata de "agent memory":
+
+| Referência | Lição que extraímos | Decisão no Theo |
+|---|---|---|
+| `referencias/llm-wiki-compiler` | Conhecimento que reaparece vale mais quando é **compilado** para um artefato navegável, incremental e com lint, não quando é redescoberto toda hora via RAG. | Mantemos uma **memory wiki** determinística, com hash-manifest, compile em 2 fases, `[[wikilinks]]` e health checks. |
+| `referencias/opendev` | `context`, `history` e `memory` precisam ser subsistemas separados; reflection e seleção semântica vivem na camada de memória, não no domínio puro. | O pacote foi separado em `theo-domain` + `theo-infra-memory` + wiring no runtime, sem acoplar embeddings/storage ao core. |
+| `referencias/hermes-agent` | Memória injetada em todo turn precisa ser **compacta e durável**; transcript não é memória; procedural reuse deve ir para skills. | `BuiltinMemoryProvider` guarda fatos estáveis em markdown, `MemoryLesson` usa gates, e o subsistema não tenta substituir skills nem virar log de progresso. |
+| `referencias/Archon` | Sessão e memória não são a mesma coisa; trilha auditável/imutável de sessão deve permanecer separada da memória de longo prazo. | O Theo trata memory como um artefato próprio; hooks de memória não reescrevem a semântica de sessão nem misturam transcript bruto com LTM. |
+| `referencias/fff.nvim` | Recuperação boa depende de recência/hits/frecency e budgets agressivos, não só de embeddings. | O sistema usa `hit_count`, usefulness, thresholds por tipo, budgets explícitos e decay por tier como sinais de retenção/recall. |
+
+Com isso, o objetivo do subsistema é dar ao agente:
 - **LTM legível por humano** (markdown per-user) com dedup e anti-injection.
-- **Memória semântica de fatos aprendidos** (`MemoryLesson`) sob 7 gates antes de entrar no contexto.
-- **Wiki determinístico** compilado de sessões via LLM a `temperature = 0 + seed fixa`, com hash-manifest para builds incrementais e kill-switch.
+- **Memória semântica de fatos aprendidos** (`MemoryLesson`) sob gates antes de entrar no contexto.
+- **Wiki determinística** compilada de lessons/sessões com `temperature = 0`, seed fixa, hash-manifest, lint e kill-switch.
 - **Decay automático** dos tiers por idade + usefulness + hit shield.
 - **Retrieval Tantivy-backed** com threshold por tipo e budget de 15% do contexto.
-- **UI de recuperação** (3 rotas desktop + CLI lint tool).
+- **UI e observabilidade** para recuperação, revisão e lint.
+
+Também vale fixar os não-objetivos, porque as referências batem muito nisso:
+- **Não** usar memory como dump de transcript bruto ou log de progresso.
+- **Não** substituir procedural memory via skills.
+- **Não** acoplar `theo-domain` a embeddings, vector DBs ou providers externos.
+- **Não** misturar memory wiki com code wiki sem namespace explícito.
 
 ---
 
@@ -494,18 +510,23 @@ Workspace final: **2848 pass, 4 pre-existing bwrap env fails, 0 clippy warnings*
 
 ---
 
-## 13. Cross-reference com SOTA
+## 13. Cross-reference com os projetos em `referencias/`
 
-Scoring da seção 9 do [harness-crossvalidation](harness-crossvalidation.md): **50% → 85%** após cycle apr20.
+Scoring da seção 9 do [harness-crossvalidation](harness-crossvalidation.md): **50% → 85%** após cycle apr20. O score melhorou, mas o que realmente endurece o desenho são os projetos-referência abaixo.
 
-| Referência | Onde aplicamos |
-|---|---|
-| **MemGPT** [@packer2023] 3-tier | `MemoryLifecycle` + `MemoryLifecycleEnforcer::tick` (decay enforcer). |
-| **MemCoder** [@deng2026] structured memory | `MemoryLesson` tipado com lifecycle. Intent mining do git log ainda deferido. |
-| **Karpathy LLM Wiki** | `wiki::compiler` + `HashManifest` + `MemoryWikiPage` frontmatter. |
-| **hermes-agent MemoryManager** | `MemoryEngine` fan-out + `BuiltinMemoryProvider` + markdown-backed LTM per user. |
-| **mem0 / MemoryBank** write gates | `MemoryLesson` 7 gates + quarantine. |
-| **Tantivy BM25** | `MemoryTantivyIndex` como backend concreto de `MemoryRetrieval`. |
+| Referência | Padrão visto lá | Como aplicamos | O que ainda falta |
+|---|---|---|---|
+| `llm-wiki-compiler` | pipeline `sources → hash check → extract → generate → wikilinks → lint` | `wiki::hash`, `wiki::compiler`, `wiki::lint`, frontmatter estável, compile incremental | provenance mais fina por bloco/parágrafo e save-back mais explícito de respostas úteis |
+| `OpenDev` | split operacional entre `context`, `history` e `memory`, com reflection e selector próprios | `theo-domain` mantém contrato puro; `theo-infra-memory` concentra providers, retrieval e wiki compiler | fechar melhor a fronteira entre memory e history/search no runtime |
+| `Hermes Agent` | durable memory compacta + `session_search` separado + skills como procedural memory | facts em markdown, `MemoryLesson` gated, skills continuam em outro lane do sistema | falta um lane explícito de cross-session recall separado da LTM |
+| `Archon` | sessões imutáveis com audit trail e transições explícitas | memory hooks são independentes de sessão e não redefinem o modelo de transcript | atrelar episódios/lessons a um rastro de origem mais auditável |
+| `fff.nvim` | ranking guiado por sinais locais de recência e uso, com decay agressivo para fluxos de agente | `hit_count`, usefulness, thresholds por `source_type`, decay em tiers, budgets pequenos | frecency explícita no ranking de retrieval ainda não existe |
+
+As influências acadêmicas continuam válidas, mas ficam como heurística de desenho, não como fonte primária de operação:
+- **MemGPT**: tiers `Active/Cooling/Archived`.
+- **MemCoder**: lessons estruturadas com lifecycle.
+- **mem0 / MemoryBank**: write gates antes de promoção.
+- **Tantivy BM25**: backend de retrieval local e barato.
 
 ---
 
@@ -514,11 +535,14 @@ Scoring da seção 9 do [harness-crossvalidation](harness-crossvalidation.md): *
 | # | Gap | Plano |
 |---|---|---|
 | 1 | Wiring automático de `MemoryLifecycleEnforcer::tick` em runtime | Call site em `Episode::tick(now)` ou `on_session_end`. |
-| 2 | Usefulness → assembler budget loop | `context_metrics.usefulness_score` alimentando `memory_token_budget`. |
-| 3 | MemCoder git-log intent mining | Extrair padrões de `git log` para popular `MemoryLesson::Procedural`. |
-| 4 | Vitest coverage das 3 rotas React | 3 `*.spec.tsx` seguindo pattern existente. |
-| 5 | Embeddings + NLI para contradiction polarity | Substituir Jaccard em `apply_gates` gate 5. |
-| 6 | Reload-on-open do BuiltinMemoryProvider | Atualmente state in-memory é perdido entre instâncias; disco persiste. |
+| 2 | Separação explícita entre durable memory e cross-session recall | Introduzir lane/search de histórico separado da LTM, no espírito do `session_search` do Hermes. |
+| 3 | Handoff formal entre memory e skills | Quando uma lesson virar workflow reutilizável, promover para skill em vez de mantê-la só como fato. |
+| 4 | Provenance mais forte na memory wiki | Evoluir frontmatter/evidence para citar origem por bloco ou parágrafo, seguindo o espírito do `llm-wiki-compiler`. |
+| 5 | Frecency explícita no retrieval | Somar recência/uso real ao score, não só threshold + hit shield + usefulness. |
+| 6 | Usefulness → assembler budget loop | `context_metrics.usefulness_score` alimentando `memory_token_budget`. |
+| 7 | Embeddings + NLI para contradiction polarity | Substituir Jaccard em `apply_gates` por detector semântico mais robusto. |
+| 8 | Vitest coverage das 3 rotas React | 3 `*.spec.tsx` seguindo pattern existente. |
+| 9 | Reload-on-open do BuiltinMemoryProvider | Atualmente state in-memory é perdido entre instâncias; disco persiste. |
 
 Cada um é uma evolução focada.
 

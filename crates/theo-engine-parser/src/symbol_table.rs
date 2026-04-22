@@ -154,9 +154,9 @@ impl SymbolTable {
 
         // 1b. Receiver-prefix check for qualified names (e.g., "np.array" → check "np")
         // If the receiver is an imported alias, the call targets an external package member.
-        if bare_name != name {
-            if let Some(receiver) = extract_receiver(name) {
-                if let Some(target_file) = imported_symbols.get(receiver) {
+        if bare_name != name
+            && let Some(receiver) = extract_receiver(name)
+                && let Some(target_file) = imported_symbols.get(receiver) {
                     if target_file.as_os_str() == EXTERNAL_SENTINEL {
                         return ResolveResult {
                             location: None,
@@ -179,8 +179,6 @@ impl SymbolTable {
                         method: ResolutionMethod::ImportBased,
                     };
                 }
-            }
-        }
 
         // 2. Same-file resolution (0.90)
         if let Some(loc) = self.resolve_in_file(source_file, bare_name) {
@@ -218,8 +216,8 @@ impl SymbolTable {
             _ => {
                 // Prefer match in same directory as source file
                 let source_dir = source_file.parent();
-                if let Some(dir) = source_dir {
-                    if let Some(loc) = global_matches.iter().find(|l| l.file.parent() == Some(dir))
+                if let Some(dir) = source_dir
+                    && let Some(loc) = global_matches.iter().find(|l| l.file.parent() == Some(dir))
                     {
                         return ResolveResult {
                             location: Some(loc.clone()),
@@ -227,7 +225,6 @@ impl SymbolTable {
                             method: ResolutionMethod::GlobalSameDir,
                         };
                     }
-                }
 
                 // Fall back to first match (deterministic since sorted)
                 ResolveResult {
@@ -313,8 +310,8 @@ pub fn build_import_index(
             let mut resolved_specifiers = Vec::new();
 
             // 1. Python runtime resolver (per-symbol precision)
-            if is_python {
-                if let Some(py_map) = python_resolved {
+            if is_python
+                && let Some(py_map) = python_resolved {
                     for specifier in &specifiers {
                         let key = format!("{}.{}", import.source, specifier);
                         if let Some(resolved_file) = py_map.get(&key) {
@@ -323,11 +320,10 @@ pub fn build_import_index(
                         }
                     }
                 }
-            }
 
             // 2. Static Python package resolution for remaining specifiers
-            if is_python && resolved_specifiers.len() < specifiers.len() {
-                if let Some(static_file) =
+            if is_python && resolved_specifiers.len() < specifiers.len()
+                && let Some(static_file) =
                     try_resolve_python_package(&import.source, file_symbols, project_root)
                 {
                     for specifier in &specifiers {
@@ -345,7 +341,6 @@ pub fn build_import_index(
                             .or_insert_with(|| static_file.clone());
                     }
                 }
-            }
 
             // 3. External sentinel for anything still unresolved
             for specifier in &specifiers {

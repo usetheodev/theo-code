@@ -32,6 +32,7 @@
 //! blocks. Headers and lists fall through to plain text; a full
 //! implementation would pipe complete blocks through `markdown::render`.
 
+#![allow(dead_code)] // Scaffolded helpers — kept for upcoming TUI features.
 use crate::render::code_block;
 use crate::render::style::{StyleCaps, bold, code_bg, dim};
 

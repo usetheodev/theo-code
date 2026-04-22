@@ -86,19 +86,17 @@ impl ContextMembership {
         for node_id in &containing_community.node_ids {
             // Outgoing edges
             for neighbor_node in graph.neighbors(node_id) {
-                if let Some(&comm_id) = node_to_community.get(neighbor_node) {
-                    if comm_id != containing_community.id {
+                if let Some(&comm_id) = node_to_community.get(neighbor_node)
+                    && comm_id != containing_community.id {
                         neighbor_communities.insert(comm_id.to_string());
                     }
-                }
             }
             // Incoming edges (reverse neighbors)
             for neighbor_node in graph.reverse_neighbors(node_id) {
-                if let Some(&comm_id) = node_to_community.get(neighbor_node) {
-                    if comm_id != containing_community.id {
+                if let Some(&comm_id) = node_to_community.get(neighbor_node)
+                    && comm_id != containing_community.id {
                         neighbor_communities.insert(comm_id.to_string());
                     }
-                }
             }
         }
 

@@ -118,6 +118,7 @@ impl SubAgentRole {
         }
     }
 
+    #[allow(clippy::should_implement_trait)] // Returns Option, not Result; intentional API.
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "explorer" | "explore" => Some(SubAgentRole::Explorer),
@@ -187,9 +188,7 @@ impl SubAgentManager {
         objective: &str,
         context: Option<Vec<Message>>,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = AgentResult> + Send + '_>> {
-        let role = role;
         let objective = objective.to_string();
-        let context = context;
 
         Box::pin(async move {
             // Enforce max_depth

@@ -55,8 +55,8 @@ fn walk_for_calls(
     call_kinds: &[&str],
     results: &mut Vec<Reference>,
 ) {
-    if call_kinds.contains(&node.kind()) {
-        if let Some(callee) = extract_callee_name(node, source, language) {
+    if call_kinds.contains(&node.kind())
+        && let Some(callee) = extract_callee_name(node, source, language) {
             let enclosing = find_enclosing_function(node, source, language);
             let line = node.start_position().row + 1;
 
@@ -73,7 +73,6 @@ fn walk_for_calls(
                 is_test_reference: false,
             });
         }
-    }
 
     let count = node.child_count();
     for i in 0..count {
@@ -273,14 +272,13 @@ fn extract_function_name(
     }
     // Fallback: look for an identifier child
     for i in 0..node.named_child_count() {
-        if let Some(child) = node.named_child(i as u32) {
-            if child.kind() == "identifier"
+        if let Some(child) = node.named_child(i as u32)
+            && (child.kind() == "identifier"
                 || child.kind() == "property_identifier"
-                || child.kind() == "type_identifier"
+                || child.kind() == "type_identifier")
             {
                 return Some(node_text(&child, source));
             }
-        }
     }
     None
 }

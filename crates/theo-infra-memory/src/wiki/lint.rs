@@ -20,8 +20,8 @@ pub fn parse_page(slug_hint: &str, raw: &str) -> MemoryWikiPage {
     let mut body_start = 0usize;
 
     // Frontmatter delimited by `---` lines at the top.
-    if let Some(rest) = raw.strip_prefix("---\n") {
-        if let Some(end) = rest.find("\n---") {
+    if let Some(rest) = raw.strip_prefix("---\n")
+        && let Some(end) = rest.find("\n---") {
             let fm = &rest[..end];
             for line in fm.lines() {
                 let line = line.trim();
@@ -40,7 +40,6 @@ pub fn parse_page(slug_hint: &str, raw: &str) -> MemoryWikiPage {
                 body_start += 1;
             }
         }
-    }
 
     let body = raw[body_start..].to_string();
     let links = extract_links(&body);

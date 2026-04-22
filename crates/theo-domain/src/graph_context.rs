@@ -195,6 +195,27 @@ pub enum GraphContextError {
 /// and calls `query_context()` to inject code structure into the LLM prompt.
 ///
 /// Implementations live in theo-application; the runtime never sees the engines.
+/// Sink for `DomainEvent`s emitted by the graph-context pipeline.
+///
+/// PLAN_CONTEXT_WIRING Phase 4 — the context service lives in
+/// `theo-application`, which cannot depend on `theo-agent-runtime::EventBus`
+/// (apps → application → infra/domain only). This trait lets the runtime
+/// pass a lightweight adapter (e.g. `EventBusSink` in theo-agent-runtime)
+/// that forwards events into the broadcast bus.
+///
+/// Implementations must be cheap and non-blocking — the context service
+/// calls this on the read path. The default no-op impl means services
+/// can operate without telemetry and be given a sink later.
+pub trait EventSink: Send + Sync {
+    fn emit(&self, event: crate::event::DomainEvent);
+}
+
+/// No-op sink used when telemetry is disabled.
+pub struct NoopEventSink;
+impl EventSink for NoopEventSink {
+    fn emit(&self, _event: crate::event::DomainEvent) {}
+}
+
 #[async_trait::async_trait]
 pub trait GraphContextProvider: Send + Sync {
     /// Build the code graph for a project directory.

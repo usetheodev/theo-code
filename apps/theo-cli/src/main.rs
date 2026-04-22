@@ -1,13 +1,12 @@
-mod commands;
 mod config;
 mod init;
 mod input;
 mod json_output;
+mod memory_lint;
 mod permission;
 mod pilot;
 mod render;
 mod renderer;
-mod repl;
 mod status_line;
 mod tui;
 mod tty;
@@ -24,15 +23,15 @@ use theo_application::use_cases::pipeline::{Pipeline, PipelineConfig};
 
 /// Theo — autonomous coding agent
 ///
-/// Run without arguments to start the interactive REPL.
+/// Run without arguments to start the interactive TUI.
 /// Run with a prompt to execute a single task and exit.
 ///
 /// Examples:
-///   theo                          Start interactive REPL
+///   theo                          Start interactive TUI
 ///   theo "fix the bug in auth"    Execute task and exit
-///   theo --mode plan "design X"   Plan mode single-shot
 ///   theo init                     Initialize project
 ///   theo pilot "implement X"      Autonomous loop
+///   theo memory lint              Memory-subsystem lint
 #[derive(Parser)]
 #[command(name = "theo", version = "0.1.0")]
 struct Cli {
@@ -52,13 +51,9 @@ struct Cli {
     #[arg(long, global = true)]
     max_iter: Option<usize>,
 
-    /// Agent mode
+    /// Agent mode (headless only — interactive mode uses `/mode` slash command)
     #[arg(long, global = true, value_parser = ["agent", "plan", "ask"])]
     mode: Option<String>,
-
-    /// Launch TUI mode (ratatui)
-    #[arg(long, global = true)]
-    tui: bool,
 
     /// Headless mode for benchmarks/CI: read prompt from args (or stdin),
     /// emit a single JSON result line on stdout, no banners/REPL/streaming.
@@ -79,7 +74,7 @@ struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
 
-    /// Task to execute (opens REPL if omitted, ignored when using subcommands)
+    /// Task to execute (opens TUI if omitted, ignored when using subcommands)
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     prompt: Vec<String>,
 }
@@ -144,6 +139,28 @@ enum Commands {
         #[command(subcommand)]
         action: MemoryAction,
     },
+
+    /// Authenticate with a provider (OAuth device flow or API key).
+    ///
+    /// `theo login`              → OpenAI OAuth device flow (default).
+    /// `theo login --key <K>`    → Persist `K` as an API key.
+    /// `theo login --server <U>` → Generic RFC 8628 device flow.
+    Login {
+        /// API key (`sk-...` or `sess-...`). Skips OAuth entirely.
+        #[arg(long)]
+        key: Option<String>,
+
+        /// Custom RFC 8628 device-flow server URL.
+        #[arg(long)]
+        server: Option<String>,
+
+        /// Do not auto-open a browser (headless/SSH sessions).
+        #[arg(long)]
+        no_browser: bool,
+    },
+
+    /// Remove saved credentials (OpenAI provider).
+    Logout,
 }
 
 #[derive(Subcommand)]
@@ -170,15 +187,7 @@ fn main() {
                 cmd_headless(prompt, cli.repo, cli.provider, cli.model, cli.max_iter, cli.mode, cli.temperature, cli.seed);
                 return;
             }
-            cmd_agent(
-                prompt,
-                cli.repo,
-                cli.provider,
-                cli.model,
-                cli.max_iter,
-                cli.mode,
-                cli.tui,
-            );
+            cmd_agent(prompt, cli.repo, cli.provider, cli.model, cli.max_iter);
         }
         Some(Commands::Pilot {
             calls,
@@ -205,9 +214,15 @@ fn main() {
         Some(Commands::Stats { repo_path }) => {
             cmd_stats(&repo_path);
         }
+        Some(Commands::Login { key, server, no_browser }) => {
+            std::process::exit(cmd_login(key, server, no_browser));
+        }
+        Some(Commands::Logout) => {
+            std::process::exit(cmd_logout());
+        }
         Some(Commands::Memory { action }) => match action {
             MemoryAction::Lint { format } => {
-                let fmt = commands::memory_lint::LintFormat::from_str_opt(format.as_deref());
+                let fmt = memory_lint::LintFormat::from_str_opt(format.as_deref());
                 // Stub inputs — real collection belongs to a follow-up
                 // that reads hash manifest, journal timestamps, and
                 // retrieval metrics. The subcommand surface lands here
@@ -220,7 +235,7 @@ fn main() {
                     recall_p50_ms: 0.0,
                     recall_p95_ms: 0.0,
                 };
-                let code = commands::memory_lint::run(inputs, fmt);
+                let code = memory_lint::run(inputs, fmt);
                 std::process::exit(code);
             }
         },
@@ -229,16 +244,8 @@ fn main() {
                 cmd_headless(cli.prompt, cli.repo, cli.provider, cli.model, cli.max_iter, cli.mode, cli.temperature, cli.seed);
                 return;
             }
-            // Default: agent mode. REPL if no prompt, single-shot if prompt given.
-            cmd_agent(
-                cli.prompt,
-                cli.repo,
-                cli.provider,
-                cli.model,
-                cli.max_iter,
-                cli.mode,
-                cli.tui,
-            );
+            // Default: TUI (interactive or one-shot with trailing prompt).
+            cmd_agent(cli.prompt, cli.repo, cli.provider, cli.model, cli.max_iter);
         }
     }
 }
@@ -246,6 +253,112 @@ fn main() {
 // ---------------------------------------------------------------------------
 // Command handlers
 // ---------------------------------------------------------------------------
+
+/// `theo login` — OAuth device flow, API-key paste, or custom server URL.
+/// Returns the desired process exit code (0 = success, 1 = failure).
+fn cmd_login(key: Option<String>, server: Option<String>, no_browser: bool) -> i32 {
+    use theo_application::use_cases::auth;
+
+    // Path 1: API key direct persistence.
+    if let Some(raw) = key {
+        let store = theo_infra_auth::store::AuthStore::open();
+        match auth::save_api_key(&store, &raw) {
+            Ok(_) => {
+                eprintln!("✓ Saved API key: {}", auth::mask_key(raw.trim()));
+                0
+            }
+            Err(e) => {
+                eprintln!("✗ save failed: {e}");
+                1
+            }
+        }
+    } else if let Some(url) = server {
+        eprintln!("✗ `--server {url}` is not yet wired in the headless CLI.");
+        eprintln!("  Use the TUI `/login {url}` (Ctrl+C then run `theo`) for the generic RFC 8628 flow.");
+        1
+    } else {
+        // Path 2: OpenAI OAuth device flow.
+        let rt = match tokio::runtime::Runtime::new() {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("✗ failed to create tokio runtime: {e}");
+                return 1;
+            }
+        };
+        rt.block_on(async { run_oauth_device_flow(no_browser).await })
+    }
+}
+
+/// Run the OpenAI device-flow end-to-end, printing UX prompts to stderr.
+async fn run_oauth_device_flow(no_browser: bool) -> i32 {
+    let auth_client = theo_infra_auth::OpenAIAuth::with_default_store();
+    eprintln!("Contacting OpenAI authorization server...");
+    let code = match auth_client.start_device_flow().await {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("✗ device flow failed: {e}");
+            return 1;
+        }
+    };
+    eprintln!();
+    eprintln!("─────────────────────────────────────");
+    eprintln!("1. Open:  {}", code.verification_uri);
+    eprintln!("2. Enter code:  {}", code.user_code);
+    eprintln!("3. Authorize the Theo application.");
+    eprintln!("─────────────────────────────────────");
+    eprintln!();
+    if !no_browser {
+        let _ = open_browser(&code.verification_uri);
+    }
+    eprintln!("Waiting for authorization…");
+    match auth_client.poll_device_flow(&code).await {
+        Ok(_) => {
+            eprintln!("✓ Authenticated with OpenAI. Tokens saved.");
+            0
+        }
+        Err(e) => {
+            eprintln!("✗ authorization failed: {e}");
+            1
+        }
+    }
+}
+
+/// Best-effort browser opener for the device-flow URL. Linux uses
+/// `xdg-open`, macOS uses `open`. Failures are silent.
+fn open_browser(url: &str) -> std::io::Result<()> {
+    #[cfg(target_os = "linux")]
+    let program = "xdg-open";
+    #[cfg(target_os = "macos")]
+    let program = "open";
+    #[cfg(all(not(target_os = "linux"), not(target_os = "macos")))]
+    let program = "true"; // noop on unsupported platforms
+    std::process::Command::new(program)
+        .arg(url)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map(|_| ())
+}
+
+/// `theo logout` — clear saved OpenAI credentials.
+fn cmd_logout() -> i32 {
+    use theo_application::use_cases::auth;
+    let store = theo_infra_auth::store::AuthStore::open();
+    match auth::logout(&store) {
+        Ok(true) => {
+            eprintln!("✓ Logged out. Saved credentials cleared.");
+            0
+        }
+        Ok(false) => {
+            eprintln!("Nothing to log out of — no OpenAI credentials were saved.");
+            0
+        }
+        Err(e) => {
+            eprintln!("✗ logout failed: {e}");
+            1
+        }
+    }
+}
 
 fn cmd_init(repo: PathBuf) {
     let project_dir = resolve_dir(repo);
@@ -277,8 +390,6 @@ fn cmd_agent(
     provider_id: Option<String>,
     model: Option<String>,
     max_iter: Option<usize>,
-    mode: Option<String>,
-    use_tui: bool,
 ) {
     let project_dir = resolve_dir(repo);
 
@@ -293,28 +404,9 @@ fn cmd_agent(
         let (config, provider_name) =
             resolve_agent_config(provider_id.as_deref(), model.as_deref(), max_iter).await;
 
-        if use_tui {
-            if let Err(e) = tui::run(config, project_dir, provider_name, inline_prompt).await {
-                eprintln!("TUI error: {e}");
-                std::process::exit(1);
-            }
-            return;
-        }
-
-        let mut repl = repl::Repl::new(config, project_dir, provider_name);
-        if let Some(ref mode_str) = mode {
-            if let Some(m) = theo_agent_runtime::config::AgentMode::from_str(mode_str) {
-                repl = repl.with_mode(m);
-            } else {
-                eprintln!("Unknown mode: {}. Use: agent, plan, ask", mode_str);
-                std::process::exit(1);
-            }
-        }
-
-        if let Some(prompt) = inline_prompt {
-            repl.execute_single(&prompt).await;
-        } else {
-            repl.run().await;
+        if let Err(e) = tui::run(config, project_dir, provider_name, inline_prompt).await {
+            eprintln!("TUI error: {e}");
+            std::process::exit(1);
         }
     });
 }
@@ -419,6 +511,15 @@ fn cmd_headless(
 
         // Headless mode: use aggressive retry to survive rate limits
         config.aggressive_retry = true;
+
+        // Phase 0 T0.2: attach the MemoryEngine if memory_enabled=true.
+        // run_agent_session does this for the interactive path; headless
+        // bypasses that wrapper, so we must attach here or every memory
+        // hook stays at no-op despite THEO_MEMORY=1.
+        theo_application::use_cases::memory_factory::attach_memory_to_config(
+            &mut config,
+            &project_dir,
+        );
 
         let registry = theo_tooling::registry::create_default_registry();
         let agent = theo_agent_runtime::AgentLoop::new(config, registry);
@@ -693,9 +794,9 @@ fn cmd_stats(repo_path: &Path) {
     });
 
     // Try loading from cache first
-    if cache_path.exists() && cluster_cache.exists() {
-        if pipeline.load_graph(&cache_path.to_string_lossy()).is_ok() {
-            if pipeline
+    if cache_path.exists() && cluster_cache.exists()
+        && pipeline.load_graph(&cache_path.to_string_lossy()).is_ok()
+            && pipeline
                 .load_clusters(&cluster_cache.to_string_lossy())
                 .is_ok()
             {
@@ -711,8 +812,6 @@ fn cmd_stats(repo_path: &Path) {
                 println!("Time:        {}ms (cached)", ms);
                 return;
             }
-        }
-    }
 
     // Cache miss — full build
     let (files, ext_stats) = theo_application::use_cases::extraction::extract_repo(repo_path);
@@ -812,6 +911,13 @@ async fn resolve_agent_config(
     use theo_infra_llm::provider::registry::create_default_registry as create_provider_registry;
 
     let mut config = theo_agent_runtime::AgentConfig::default();
+    // Opt-in flag for the memory subsystem (G1–G10). Default stays `false`
+    // for backward-compat (test_pre5_ac_1_memory_enabled_default_false).
+    // Set `THEO_MEMORY=1` (or any non-empty value) to activate every hook.
+    if std::env::var("THEO_MEMORY").map(|v| !v.is_empty()).unwrap_or(false) {
+        config.memory_enabled = true;
+        eprintln!("[theo] THEO_MEMORY=1 detected — memory subsystem active");
+    }
     let mut provider_name = "default".to_string();
 
     let mut api_key: Option<String> = None;
@@ -819,12 +925,11 @@ async fn resolve_agent_config(
 
     if provider_id.is_none() {
         let auth = theo_infra_auth::OpenAIAuth::with_default_store();
-        if let Ok(Some(tokens)) = auth.get_tokens() {
-            if !tokens.is_expired() {
+        if let Ok(Some(tokens)) = auth.get_tokens()
+            && !tokens.is_expired() {
                 api_key = Some(tokens.access_token.clone());
                 oauth_applied = true;
             }
-        }
     }
 
     let registry = create_provider_registry();
@@ -850,22 +955,20 @@ async fn resolve_agent_config(
             provider_name = spec.display_name.to_string();
 
             let auth = theo_infra_auth::OpenAIAuth::with_default_store();
-            if let Ok(Some(tokens)) = auth.get_tokens() {
-                if let Some(ref account_id) = tokens.account_id {
+            if let Ok(Some(tokens)) = auth.get_tokens()
+                && let Some(ref account_id) = tokens.account_id {
                     config
                         .extra_headers
                         .insert("ChatGPT-Account-Id".to_string(), account_id.clone());
                 }
-            }
         }
-    } else if let Ok(key) = std::env::var("OPENAI_API_KEY") {
-        if let Some(spec) = registry.get("openai") {
+    } else if let Ok(key) = std::env::var("OPENAI_API_KEY")
+        && let Some(spec) = registry.get("openai") {
             config.base_url = spec.base_url.to_string();
             config.endpoint_override = Some(spec.endpoint_url());
             config.api_key = Some(key);
             provider_name = "OpenAI".to_string();
         }
-    }
 
     if let Some(m) = model {
         config.model = m.to_string();

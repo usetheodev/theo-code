@@ -701,6 +701,6 @@ func main() {
         assert!(ext.interfaces[0].auth.is_none()); // /health
         assert!(ext.interfaces[1].auth.is_some()); // /api/payments
         assert_eq!(ext.dependencies.len(), 1); // http.Post
-        assert!(ext.sinks.len() >= 1); // log.Printf
+        assert!(!ext.sinks.is_empty()); // log.Printf
     }
 }

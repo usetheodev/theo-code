@@ -162,7 +162,7 @@ impl CopilotAuth {
     pub async fn start_device_flow(&self) -> Result<CopilotDeviceCode, AuthError> {
         let resp = self
             .http
-            .post(&self.config.device_code_url())
+            .post(self.config.device_code_url())
             .header("Accept", "application/json")
             .header("Content-Type", "application/json")
             .json(&serde_json::json!({
@@ -208,7 +208,7 @@ impl CopilotAuth {
 
             let resp = self
                 .http
-                .post(&self.config.access_token_url())
+                .post(self.config.access_token_url())
                 .header("Accept", "application/json")
                 .header("Content-Type", "application/json")
                 .json(&serde_json::json!({

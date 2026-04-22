@@ -275,7 +275,7 @@ fn apply_landlock_in_child(
     let abi = ABI::V1; // Use V1 for maximum compatibility (kernel 5.13+)
     let all_access = AccessFs::from_all(abi);
     let to_io =
-        |e: std::fmt::Arguments<'_>| std::io::Error::new(std::io::ErrorKind::Other, e.to_string());
+        |e: std::fmt::Arguments<'_>| std::io::Error::other(e.to_string());
 
     let ruleset = Ruleset::default()
         .handle_access(all_access)

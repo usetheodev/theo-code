@@ -7,6 +7,12 @@ use theo_domain::tool::{
 
 pub struct WebSearchTool;
 
+impl Default for WebSearchTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WebSearchTool {
     pub fn new() -> Self {
         Self

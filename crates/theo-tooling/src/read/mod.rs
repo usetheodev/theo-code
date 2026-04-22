@@ -27,6 +27,12 @@ const MAX_FILE_BYTES: usize = 50 * 1024;
 
 pub struct ReadTool;
 
+impl Default for ReadTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ReadTool {
     pub fn new() -> Self {
         Self
@@ -47,15 +53,14 @@ impl ReadTool {
     }
 
     fn contains_null_bytes(content: &[u8]) -> bool {
-        content.iter().any(|&b| b == 0)
+        content.contains(&0)
     }
 
     fn is_env_file(filename: &str) -> bool {
         if filename == ".env" {
             return true;
         }
-        if filename.starts_with(".env.") {
-            let suffix = &filename[5..];
+        if let Some(suffix) = filename.strip_prefix(".env.") {
             // .env.example is NOT a sensitive env file
             if suffix == "example" || suffix == "sample" || suffix == "template" {
                 return false;
@@ -243,8 +248,8 @@ impl Tool for ReadTool {
         }
 
         // Check env file permissions
-        if let Some(filename) = resolved.file_name().and_then(|f| f.to_str()) {
-            if Self::is_env_file(filename) {
+        if let Some(filename) = resolved.file_name().and_then(|f| f.to_str())
+            && Self::is_env_file(filename) {
                 permissions.record(PermissionRequest {
                     permission: PermissionType::Read,
                     patterns: vec![file_path_str.clone()],
@@ -252,7 +257,6 @@ impl Tool for ReadTool {
                     metadata: serde_json::json!({}),
                 });
             }
-        }
 
         // Read text file
         let bytes = tokio::fs::read(&resolved)
@@ -275,13 +279,12 @@ impl Tool for ReadTool {
 
         // Handle empty file
         if content.is_empty() {
-            if let Some(off) = offset {
-                if off > 1 {
+            if let Some(off) = offset
+                && off > 1 {
                     return Err(ToolError::Execution(format!(
                         "Offset {off} is out of range for this file (0 lines)"
                     )));
                 }
-            }
             return Ok(ToolOutput {
                 title: file_path_str,
                 output: "\nEnd of file - total 0 lines".to_string(),

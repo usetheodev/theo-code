@@ -53,7 +53,7 @@ pub fn get_rlimit(resource: libc::__rlimit_resource_t) -> std::io::Result<(u64, 
     if ret != 0 {
         Err(std::io::Error::last_os_error())
     } else {
-        Ok((limit.rlim_cur as u64, limit.rlim_max as u64))
+        Ok((limit.rlim_cur, limit.rlim_max))
     }
 }
 

@@ -18,6 +18,12 @@ const QUERY_TIMEOUT_SECS: u64 = 30;
 
 pub struct CodebaseContextTool;
 
+impl Default for CodebaseContextTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CodebaseContextTool {
     pub fn new() -> Self {
         Self

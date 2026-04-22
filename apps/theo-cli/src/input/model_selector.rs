@@ -5,6 +5,7 @@
 //!
 //! Pi-mono ref: `packages/coding-agent/src/core/keybindings.ts`
 
+#![allow(dead_code)] // Scaffolded helpers — kept for upcoming TUI features.
 /// A configured model entry for cycling.
 #[derive(Debug, Clone)]
 pub struct ModelEntry {

@@ -9,6 +9,12 @@ use theo_domain::tool::{
 
 pub struct EditTool;
 
+impl Default for EditTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EditTool {
     pub fn new() -> Self {
         Self
@@ -47,9 +53,7 @@ impl EditTool {
         let normalized_new = Self::normalize_for_match(new_string);
 
         if !normalized_content.contains(&normalized_old) {
-            return Err(ToolError::Execution(format!(
-                "The old_string was not found in the file. Make sure it matches exactly."
-            )));
+            return Err(ToolError::Execution("The old_string was not found in the file. Make sure it matches exactly.".to_string()));
         }
 
         let result = if replace_all {

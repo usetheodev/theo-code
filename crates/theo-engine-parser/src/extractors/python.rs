@@ -270,11 +270,10 @@ fn try_extract_decorated_route(
         }
 
         // Check for auth decorator
-        if auth.is_none() {
-            if let Some(auth_kind) = try_parse_auth_decorator(&expr, source) {
+        if auth.is_none()
+            && let Some(auth_kind) = try_parse_auth_decorator(&expr, source) {
                 auth = Some(auth_kind);
             }
-        }
     }
 
     if let Some((method, path, anchor)) = route_info {

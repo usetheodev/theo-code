@@ -7,6 +7,8 @@
 //! or elaborate mock; the AC set targets the deterministic routing
 //! decision, not the HTTP pipeline.
 
+#![allow(clippy::field_reassign_with_default)] // Tests tweak individual fields for readability.
+
 use std::sync::{Arc, Mutex};
 
 use theo_agent_runtime::config::{AgentConfig, RouterHandle};

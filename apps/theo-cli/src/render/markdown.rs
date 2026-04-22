@@ -7,6 +7,7 @@
 //! For **streaming** LLM output, use [`crate::render::streaming`] which
 //! is built on top of these primitives. See ADR-001 for the rationale.
 
+#![allow(dead_code)] // Scaffolded helpers — kept for upcoming TUI features.
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
 use crate::render::style::{self, StyleCaps, accent, bold, code_bg, dim, warn};
@@ -162,11 +163,10 @@ impl MarkdownRenderer {
             Tag::Strong => self.bold_depth += 1,
             Tag::Strikethrough => {}
             Tag::Link { .. } => self.link_stack.push(String::new()),
-            Tag::Paragraph => {
-                if !self.out.is_empty() && !self.out.ends_with('\n') {
+            Tag::Paragraph
+                if !self.out.is_empty() && !self.out.ends_with('\n') => {
                     self.out.push('\n');
                 }
-            }
             _ => {}
         }
     }

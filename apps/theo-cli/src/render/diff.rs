@@ -4,6 +4,7 @@
 //! events), produce terminal-formatted output: `+` in green, `-` in
 //! red, context dim.
 
+#![allow(dead_code)] // Scaffolded helpers — kept for upcoming TUI features.
 use crate::render::code_block;
 use crate::render::style::{StyleCaps, bold, dim, error, success};
 
@@ -70,11 +71,10 @@ pub fn parse_unified(patch: &str) -> Vec<DiffLine> {
                 } else {
                     Some(DiffLine::Removed(rest.to_string()))
                 }
-            } else if line.starts_with(' ') {
-                Some(DiffLine::Context(line[1..].to_string()))
             } else {
-                // Ignore other metadata (diff --git, index, etc.)
-                None
+                line.strip_prefix(' ')
+                    .map(|rest| DiffLine::Context(rest.to_string()))
+                // Other metadata (diff --git, index, etc.) → None.
             }
         })
         .collect()

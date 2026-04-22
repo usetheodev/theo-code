@@ -195,8 +195,8 @@ fn detect_ts_field_visibility(node: &Node, source: &str) -> Option<Visibility> {
 fn extract_ts_interface_fields(body: &Node, source: &str, fields: &mut Vec<FieldInfo>) {
     let count = body.child_count();
     for i in 0..count {
-        if let Some(child) = body.child(i as u32) {
-            if child.kind() == "property_signature" {
+        if let Some(child) = body.child(i as u32)
+            && child.kind() == "property_signature" {
                 let name = child_by_field(&child, "name")
                     .map(|n| node_text(&n, source))
                     .unwrap_or_default();
@@ -213,7 +213,6 @@ fn extract_ts_interface_fields(body: &Node, source: &str, fields: &mut Vec<Field
                     visibility: None,
                 });
             }
-        }
     }
 }
 
@@ -224,12 +223,11 @@ fn find_ts_extends(node: &Node, source: &str) -> Option<String> {
             if child.kind() == "class_heritage" {
                 // Walk children looking for `extends_clause`
                 for j in 0..child.child_count() {
-                    if let Some(clause) = child.child(j as u32) {
-                        if clause.kind() == "extends_clause" {
+                    if let Some(clause) = child.child(j as u32)
+                        && clause.kind() == "extends_clause" {
                             // The type follows the `extends` keyword
                             return extract_first_type_from_clause(&clause, source);
                         }
-                    }
                 }
             }
             // Some grammars put extends_clause directly as a child
@@ -248,11 +246,10 @@ fn find_ts_implements(node: &Node, source: &str) -> Vec<String> {
         if let Some(child) = node.child(i as u32) {
             if child.kind() == "class_heritage" {
                 for j in 0..child.child_count() {
-                    if let Some(clause) = child.child(j as u32) {
-                        if clause.kind() == "implements_clause" {
+                    if let Some(clause) = child.child(j as u32)
+                        && clause.kind() == "implements_clause" {
                             collect_types_from_clause(&clause, source, &mut result);
                         }
-                    }
                 }
             }
             if child.kind() == "implements_clause" {
@@ -266,11 +263,10 @@ fn find_ts_implements(node: &Node, source: &str) -> Vec<String> {
 /// Find `extends` parent for TS interfaces.
 fn find_ts_interface_extends(node: &Node, source: &str) -> Option<String> {
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i as u32) {
-            if child.kind() == "extends_type_clause" || child.kind() == "extends_clause" {
+        if let Some(child) = node.child(i as u32)
+            && (child.kind() == "extends_type_clause" || child.kind() == "extends_clause") {
                 return extract_first_type_from_clause(&child, source);
             }
-        }
     }
     None
 }
@@ -355,14 +351,13 @@ fn find_python_superclass(node: &Node, source: &str) -> Option<String> {
     if let Some(superclasses) = child_by_field(node, "superclasses") {
         // argument_list containing identifiers
         for i in 0..superclasses.child_count() {
-            if let Some(child) = superclasses.child(i as u32) {
-                if child.kind() == "identifier" || child.kind() == "attribute" {
+            if let Some(child) = superclasses.child(i as u32)
+                && (child.kind() == "identifier" || child.kind() == "attribute") {
                     let text = node_text(&child, source);
                     if !text.is_empty() {
                         return Some(text);
                     }
                 }
-            }
         }
     }
     None
@@ -382,18 +377,16 @@ fn extract_python_fields(body: &Node, source: &str, fields: &mut Vec<FieldInfo>)
                 let fn_name = child_by_field(&child, "name")
                     .map(|n| node_text(&n, source))
                     .unwrap_or_default();
-                if fn_name == "__init__" {
-                    if let Some(fn_body) = child_by_field(&child, "body") {
+                if fn_name == "__init__"
+                    && let Some(fn_body) = child_by_field(&child, "body") {
                         extract_python_init_fields(&fn_body, source, fields);
                     }
-                }
             }
             // Also check class-level typed assignments (e.g., dataclass fields)
-            if child.kind() == "expression_statement" {
-                if let Some(inner) = child.child(0_u32) {
+            if child.kind() == "expression_statement"
+                && let Some(inner) = child.child(0_u32) {
                     try_extract_python_class_level_field(&inner, source, fields);
                 }
-            }
         }
     }
 }
@@ -402,15 +395,12 @@ fn extract_python_fields(body: &Node, source: &str, fields: &mut Vec<FieldInfo>)
 fn extract_python_init_fields(body: &Node, source: &str, fields: &mut Vec<FieldInfo>) {
     let count = body.child_count();
     for i in 0..count {
-        if let Some(child) = body.child(i as u32) {
-            if child.kind() == "expression_statement" {
-                if let Some(inner) = child.child(0_u32) {
-                    if inner.kind() == "assignment" {
+        if let Some(child) = body.child(i as u32)
+            && child.kind() == "expression_statement"
+                && let Some(inner) = child.child(0_u32)
+                    && inner.kind() == "assignment" {
                         try_extract_self_assignment(&inner, source, fields);
                     }
-                }
-            }
-        }
     }
 }
 
@@ -552,14 +542,13 @@ fn find_java_interfaces(node: &Node, source: &str) -> Vec<String> {
                     if kind == "type_list" {
                         // type_list contains multiple type identifiers
                         for j in 0..child.child_count() {
-                            if let Some(typ) = child.child(j as u32) {
-                                if typ.kind() == "type_identifier" || typ.kind() == "generic_type" {
+                            if let Some(typ) = child.child(j as u32)
+                                && (typ.kind() == "type_identifier" || typ.kind() == "generic_type") {
                                     let text = node_text(&typ, source);
                                     if !text.is_empty() {
                                         result.push(text);
                                     }
                                 }
-                            }
                         }
                     } else {
                         let text = node_text(&child, source);
@@ -578,8 +567,8 @@ fn find_java_interfaces(node: &Node, source: &str) -> Vec<String> {
 fn extract_java_fields(body: &Node, source: &str, fields: &mut Vec<FieldInfo>) {
     let count = body.child_count();
     for i in 0..count {
-        if let Some(child) = body.child(i as u32) {
-            if child.kind() == "field_declaration" {
+        if let Some(child) = body.child(i as u32)
+            && child.kind() == "field_declaration" {
                 let field_type = child_by_field(&child, "type").map(|n| node_text(&n, source));
 
                 let visibility = detect_java_visibility(&child, source);
@@ -599,15 +588,14 @@ fn extract_java_fields(body: &Node, source: &str, fields: &mut Vec<FieldInfo>) {
                     }
                 }
             }
-        }
     }
 }
 
 /// Detect Java visibility from modifier keywords.
 fn detect_java_visibility(node: &Node, source: &str) -> Option<Visibility> {
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i as u32) {
-            if child.kind() == "modifiers" {
+        if let Some(child) = node.child(i as u32)
+            && child.kind() == "modifiers" {
                 let text = node_text(&child, source);
                 if text.contains("public") {
                     return Some(Visibility::Public);
@@ -617,7 +605,6 @@ fn detect_java_visibility(node: &Node, source: &str) -> Option<Visibility> {
                     return Some(Visibility::Protected);
                 }
             }
-        }
     }
     None
 }
@@ -707,8 +694,8 @@ fn find_csharp_base_type(node: &Node, source: &str) -> Option<String> {
 fn extract_csharp_fields(body: &Node, source: &str, fields: &mut Vec<FieldInfo>) {
     let count = body.child_count();
     for i in 0..count {
-        if let Some(child) = body.child(i as u32) {
-            if child.kind() == "field_declaration" {
+        if let Some(child) = body.child(i as u32)
+            && child.kind() == "field_declaration" {
                 let field_type = child_by_field(&child, "type").map(|n| node_text(&n, source));
 
                 let visibility = detect_csharp_visibility(&child, source);
@@ -716,8 +703,8 @@ fn extract_csharp_fields(body: &Node, source: &str, fields: &mut Vec<FieldInfo>)
                 // variable_declaration → variable_declarator → identifier
                 if let Some(var_decl) = child_by_field(&child, "declaration") {
                     for j in 0..var_decl.child_count() {
-                        if let Some(declarator) = var_decl.child(j as u32) {
-                            if declarator.kind() == "variable_declarator" {
+                        if let Some(declarator) = var_decl.child(j as u32)
+                            && declarator.kind() == "variable_declarator" {
                                 let name = child_by_field(&declarator, "name")
                                     .or_else(|| declarator.child(0_u32))
                                     .map(|n| node_text(&n, source))
@@ -731,19 +718,17 @@ fn extract_csharp_fields(body: &Node, source: &str, fields: &mut Vec<FieldInfo>)
                                     });
                                 }
                             }
-                        }
                     }
                 }
             }
-        }
     }
 }
 
 /// Detect C# visibility from modifier nodes.
 fn detect_csharp_visibility(node: &Node, source: &str) -> Option<Visibility> {
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i as u32) {
-            if child.kind() == "modifier" {
+        if let Some(child) = node.child(i as u32)
+            && child.kind() == "modifier" {
                 let text = node_text(&child, source);
                 match text.as_str() {
                     "public" => return Some(Visibility::Public),
@@ -753,7 +738,6 @@ fn detect_csharp_visibility(node: &Node, source: &str) -> Option<Visibility> {
                     _ => {}
                 }
             }
-        }
     }
     None
 }
@@ -823,8 +807,8 @@ fn extract_go_struct_fields(struct_node: &Node, source: &str, fields: &mut Vec<F
     if let Some(field_list) = find_child_by_kind(struct_node, "field_declaration_list") {
         let count = field_list.child_count();
         for i in 0..count {
-            if let Some(field) = field_list.child(i as u32) {
-                if field.kind() == "field_declaration" {
+            if let Some(field) = field_list.child(i as u32)
+                && field.kind() == "field_declaration" {
                     let field_name = child_by_field(&field, "name")
                         .map(|n| node_text(&n, source))
                         .unwrap_or_default();
@@ -849,7 +833,6 @@ fn extract_go_struct_fields(struct_node: &Node, source: &str, fields: &mut Vec<F
                         visibility,
                     });
                 }
-            }
         }
     }
 }
@@ -881,11 +864,10 @@ fn try_extract_rust_model(
     }
 
     let mut fields = Vec::new();
-    if let Some(body) = child_by_field(node, "body") {
-        if body.kind() == "field_declaration_list" {
+    if let Some(body) = child_by_field(node, "body")
+        && body.kind() == "field_declaration_list" {
             extract_rust_fields(&body, source, &mut fields);
         }
-    }
 
     models.push(DataModel {
         name,
@@ -901,8 +883,8 @@ fn try_extract_rust_model(
 fn extract_rust_fields(list: &Node, source: &str, fields: &mut Vec<FieldInfo>) {
     let count = list.child_count();
     for i in 0..count {
-        if let Some(child) = list.child(i as u32) {
-            if child.kind() == "field_declaration" {
+        if let Some(child) = list.child(i as u32)
+            && child.kind() == "field_declaration" {
                 let name = child_by_field(&child, "name")
                     .map(|n| node_text(&n, source))
                     .unwrap_or_default();
@@ -925,18 +907,16 @@ fn extract_rust_fields(list: &Node, source: &str, fields: &mut Vec<FieldInfo>) {
                     visibility,
                 });
             }
-        }
     }
 }
 
 /// Check if a Rust node has a `visibility_modifier` child (i.e., `pub`).
 fn has_visibility_modifier(node: &Node) -> bool {
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i as u32) {
-            if child.kind() == "visibility_modifier" {
+        if let Some(child) = node.child(i as u32)
+            && child.kind() == "visibility_modifier" {
                 return true;
             }
-        }
     }
     false
 }
@@ -953,11 +933,10 @@ fn child_by_field<'a>(node: &'a Node<'a>, field_name: &str) -> Option<Node<'a>> 
 /// Find the first child with a given node kind.
 fn find_child_by_kind<'a>(node: &'a Node<'a>, kind: &str) -> Option<Node<'a>> {
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i as u32) {
-            if child.kind() == kind {
+        if let Some(child) = node.child(i as u32)
+            && child.kind() == kind {
                 return Some(child);
             }
-        }
     }
     None
 }

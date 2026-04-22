@@ -120,7 +120,7 @@ mod inner {
                 // "crates/theo-infra-llm/src/provider/registry.rs" → "infra llm provider registry"
                 let path_tokens: Vec<String> = file_path
                     .split('/')
-                    .flat_map(|seg| tokenize_code(seg))
+                    .flat_map(tokenize_code)
                     .collect();
                 let path_text = path_tokens.join(" ");
 
@@ -136,11 +136,10 @@ mod inner {
                         if let Some(sig) = &child.signature {
                             sig_parts.extend(tokenize_code(sig));
                         }
-                        if let Some(d) = &child.doc {
-                            if let Some(first_line) = d.lines().next() {
+                        if let Some(d) = &child.doc
+                            && let Some(first_line) = d.lines().next() {
                                 doc_parts.extend(tokenize_code(first_line));
                             }
-                        }
                     }
                 }
 
@@ -284,11 +283,10 @@ mod inner {
             let mut results = HashMap::new();
             for (score, doc_address) in top_docs {
                 let doc: TantivyDocument = searcher.doc(doc_address)?;
-                if let Some(path_value) = doc.get_first(self.f_path) {
-                    if let Some(path_str) = Value::as_str(&path_value) {
+                if let Some(path_value) = doc.get_first(self.f_path)
+                    && let Some(path_str) = Value::as_str(&path_value) {
                         results.insert(path_str.to_string(), score as f64);
                     }
-                }
             }
 
             Ok(results)
@@ -318,11 +316,10 @@ mod inner {
                 // Extract symbol names from top file for expansion
                 let mut expansion: Vec<String> = Vec::new();
                 for child_id in graph.contains_children(&file_id) {
-                    if let Some(child) = graph.get_node(child_id) {
-                        if child.name.len() >= 5 {
+                    if let Some(child) = graph.get_node(child_id)
+                        && child.name.len() >= 5 {
                             expansion.push(child.name.clone());
                         }
-                    }
                 }
                 expansion.truncate(5);
 
@@ -398,7 +395,7 @@ pub fn hybrid_search(
         let min = scores.values().cloned().fold(f64::INFINITY, f64::min);
         let range = max - min;
         if range <= 0.0 {
-            scores.iter().map(|(k, _)| (k.clone(), 1.0)).collect()
+            scores.keys().map(|k| (k.clone(), 1.0)).collect()
         } else {
             scores
                 .iter()

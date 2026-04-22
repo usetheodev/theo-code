@@ -38,6 +38,12 @@ enum HunkLine {
     Remove(String),
 }
 
+impl Default for ApplyPatchTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ApplyPatchTool {
     pub fn new() -> Self {
         Self
@@ -46,28 +52,26 @@ impl ApplyPatchTool {
     fn strip_heredoc(text: &str) -> &str {
         let trimmed = text.trim();
         // Strip cat <<'EOF' ... EOF wrapper
-        if let Some(rest) = trimmed.strip_prefix("cat <<") {
-            if let Some(body_start) = rest.find('\n') {
+        if let Some(rest) = trimmed.strip_prefix("cat <<")
+            && let Some(body_start) = rest.find('\n') {
                 let body = &rest[body_start + 1..];
                 if let Some(eof_pos) = body.rfind("\nEOF") {
                     return &body[..eof_pos];
                 }
-                if body.ends_with("EOF") {
-                    return &body[..body.len() - 3];
+                if let Some(stripped) = body.strip_suffix("EOF") {
+                    return stripped;
                 }
             }
-        }
-        if let Some(rest) = trimmed.strip_prefix("<<") {
-            if let Some(body_start) = rest.find('\n') {
+        if let Some(rest) = trimmed.strip_prefix("<<")
+            && let Some(body_start) = rest.find('\n') {
                 let body = &rest[body_start + 1..];
                 if let Some(eof_pos) = body.rfind("\nEOF") {
                     return &body[..eof_pos];
                 }
-                if body.ends_with("EOF") {
-                    return &body[..body.len() - 3];
+                if let Some(stripped) = body.strip_suffix("EOF") {
+                    return stripped;
                 }
             }
-        }
         trimmed
     }
 
@@ -142,12 +146,12 @@ impl ApplyPatchTool {
                             && !lines[i].starts_with("***")
                         {
                             let l = lines[i];
-                            if l.starts_with('+') {
-                                hunk_lines.push(HunkLine::Add(l[1..].to_string()));
-                            } else if l.starts_with('-') {
-                                hunk_lines.push(HunkLine::Remove(l[1..].to_string()));
-                            } else if l.starts_with(' ') {
-                                hunk_lines.push(HunkLine::Context(l[1..].to_string()));
+                            if let Some(rest) = l.strip_prefix('+') {
+                                hunk_lines.push(HunkLine::Add(rest.to_string()));
+                            } else if let Some(rest) = l.strip_prefix('-') {
+                                hunk_lines.push(HunkLine::Remove(rest.to_string()));
+                            } else if let Some(rest) = l.strip_prefix(' ') {
+                                hunk_lines.push(HunkLine::Context(rest.to_string()));
                             }
                             i += 1;
                         }

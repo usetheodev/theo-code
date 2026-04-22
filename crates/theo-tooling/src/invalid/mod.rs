@@ -7,6 +7,12 @@ use theo_domain::tool::{
 
 pub struct InvalidTool;
 
+impl Default for InvalidTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl InvalidTool {
     pub fn new() -> Self {
         Self

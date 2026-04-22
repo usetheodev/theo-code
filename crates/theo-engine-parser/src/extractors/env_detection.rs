@@ -192,17 +192,14 @@ fn try_match_java(node: Node, source: &str, file_path: &Path) -> Option<EnvDepen
     // @Value("${VAR}") annotation
     if (node.kind() == "annotation" || node.kind() == "marker_annotation")
         && text.starts_with("@Value(")
-    {
-        if let Some(start) = text.find("${") {
-            if let Some(end) = text[start..].find('}') {
+        && let Some(start) = text.find("${")
+            && let Some(end) = text[start..].find('}') {
                 let var_name = text[start + 2..start + end].to_string();
                 return Some(EnvDependency {
                     var_name,
                     anchor: anchor_from_node(&node, file_path),
                 });
             }
-        }
-    }
 
     None
 }
@@ -329,11 +326,10 @@ fn extract_first_string_arg(node: Node, source: &str) -> Option<String> {
                     }
                     // Some grammars nest in expression_statement or keyword_argument
                     for k in 0..arg.child_count() {
-                        if let Some(inner) = arg.child(k as u32) {
-                            if let Some(name) = extract_string_value(inner, source) {
+                        if let Some(inner) = arg.child(k as u32)
+                            && let Some(name) = extract_string_value(inner, source) {
                                 return Some(name);
                             }
-                        }
                     }
                 }
             }
@@ -345,11 +341,10 @@ fn extract_first_string_arg(node: Node, source: &str) -> Option<String> {
 /// Extract a string value from a subscript/index access: `obj["KEY"]`.
 fn extract_subscript_string(node: Node, source: &str) -> Option<String> {
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i as u32) {
-            if let Some(name) = extract_string_value(child, source) {
+        if let Some(child) = node.child(i as u32)
+            && let Some(name) = extract_string_value(child, source) {
                 return Some(name);
             }
-        }
     }
     None
 }
@@ -372,15 +367,12 @@ fn extract_string_value(node: Node, source: &str) -> Option<String> {
     // Some grammars wrap strings — check child string_content
     if kind == "string" || kind == "string_literal" {
         for i in 0..node.child_count() {
-            if let Some(child) = node.child(i as u32) {
-                if child.kind() == "string_content" || child.kind() == "string_fragment" {
-                    if let Ok(text) = child.utf8_text(source.as_bytes()) {
-                        if !text.is_empty() {
+            if let Some(child) = node.child(i as u32)
+                && (child.kind() == "string_content" || child.kind() == "string_fragment")
+                    && let Ok(text) = child.utf8_text(source.as_bytes())
+                        && !text.is_empty() {
                             return Some(text.to_string());
                         }
-                    }
-                }
-            }
         }
     }
     None

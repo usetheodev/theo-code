@@ -49,11 +49,10 @@ impl JitInstructionLoader {
     pub fn discover_on_access(&mut self, accessed: &Path) {
         let mut current = accessed.parent();
         while let Some(dir) = current {
-            if let Some(root) = &self.workspace_root {
-                if !dir.starts_with(root) {
+            if let Some(root) = &self.workspace_root
+                && !dir.starts_with(root) {
                     break;
                 }
-            }
             for name in INSTRUCTION_FILENAMES {
                 let candidate = dir.join(name);
                 if self.loaded.contains(&candidate) {

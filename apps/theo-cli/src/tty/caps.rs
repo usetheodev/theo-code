@@ -1,5 +1,6 @@
 //! TTY capability detection.
 
+#![allow(dead_code)] // Scaffolded helpers — kept for upcoming TUI features.
 use crate::render::style::StyleCaps;
 
 /// Full terminal capabilities detected at startup.

@@ -11,8 +11,8 @@ pub fn from_request(body: &Value) -> CommonRequest {
             if s.get("type").and_then(|t| t.as_str()) != Some("text") {
                 continue;
             }
-            if let Some(text) = s.get("text").and_then(|t| t.as_str()) {
-                if !text.is_empty() {
+            if let Some(text) = s.get("text").and_then(|t| t.as_str())
+                && !text.is_empty() {
                     messages.push(CommonMessage {
                         role: Role::System,
                         content: Some(Content::Text(text.to_string())),
@@ -21,7 +21,6 @@ pub fn from_request(body: &Value) -> CommonRequest {
                         name: None,
                     });
                 }
-            }
         }
     }
 
@@ -576,11 +575,10 @@ pub fn to_response(resp: &CommonResponse) -> Value {
     let mut content_blocks: Vec<Value> = Vec::new();
 
     if let Some(choice) = choice {
-        if let Some(text) = &choice.message.content {
-            if !text.is_empty() {
+        if let Some(text) = &choice.message.content
+            && !text.is_empty() {
                 content_blocks.push(serde_json::json!({ "type": "text", "text": text }));
             }
-        }
         if let Some(tool_calls) = &choice.message.tool_calls {
             for tc in tool_calls {
                 let input: Value = serde_json::from_str(&tc.function.arguments)
@@ -609,11 +607,10 @@ pub fn to_response(resp: &CommonResponse) -> Value {
             "input_tokens": u.prompt_tokens,
             "output_tokens": u.completion_tokens,
         });
-        if let Some(details) = &u.prompt_tokens_details {
-            if let Some(cached) = details.cached_tokens {
+        if let Some(details) = &u.prompt_tokens_details
+            && let Some(cached) = details.cached_tokens {
                 usage["cache_read_input_tokens"] = serde_json::json!(cached);
             }
-        }
         usage
     });
 
@@ -935,15 +932,14 @@ fn convert_anthropic_image_source(source: Option<&Value>) -> Option<ContentPart>
 }
 
 fn convert_url_to_anthropic_source(url: &str) -> Value {
-    if let Some(rest) = url.strip_prefix("data:") {
-        if let Some((media_type, data)) = rest.split_once(";base64,") {
+    if let Some(rest) = url.strip_prefix("data:")
+        && let Some((media_type, data)) = rest.split_once(";base64,") {
             return serde_json::json!({
                 "type": "base64",
                 "media_type": media_type,
                 "data": data,
             });
         }
-    }
     serde_json::json!({ "type": "url", "url": url })
 }
 

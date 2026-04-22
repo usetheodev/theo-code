@@ -15,6 +15,7 @@ pub mod retry_policy;
 pub mod routing;
 pub mod sandbox;
 pub mod session;
+pub mod session_search;
 pub mod session_summary;
 pub mod task;
 pub mod tokens;
@@ -32,7 +33,6 @@ pub trait StateMachine: Copy + PartialEq + std::fmt::Debug {
 
 /// Atomic transition: mutates state ONLY if valid.
 /// On Err, the original state is preserved intact.
-#[must_use]
 pub fn transition<S: StateMachine>(
     current: &mut S,
     target: S,

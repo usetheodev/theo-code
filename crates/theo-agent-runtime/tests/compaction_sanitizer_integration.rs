@@ -43,7 +43,7 @@ fn build_heavy_session(turns: usize, payload_chars: usize) -> Vec<Message> {
     let mut msgs = vec![Message::system("you are helpful")];
     let big = "x".repeat(payload_chars);
     for i in 0..turns {
-        msgs.push(Message::user(&format!("turn {i}")));
+        msgs.push(Message::user(format!("turn {i}")));
         msgs.push(Message::assistant_with_tool_calls(
             None,
             vec![ToolCall::new(

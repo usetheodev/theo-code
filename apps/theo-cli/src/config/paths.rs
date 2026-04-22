@@ -2,6 +2,7 @@
 //!
 //! See `docs/adr/ADR-003-xdg-paths.md`.
 
+#![allow(dead_code)] // Scaffolded helpers — kept for upcoming TUI features.
 use std::path::PathBuf;
 
 /// Resolved directories for theo-cli.

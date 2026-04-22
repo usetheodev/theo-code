@@ -35,6 +35,62 @@ pub struct BudgetUsage {
     pub tool_calls_used: usize,
 }
 
+/// Per-session token usage with the 6 fields required by Phase 1 T1.1
+/// (meeting 20260420-221947 §G3). Serialized into `EpisodeSummary` so
+/// cost telemetry survives across runs.
+///
+/// All counters default to 0; providers that do not emit a breakdown
+/// (e.g. older APIs) keep the fields at 0 rather than `Option` to
+/// simplify aggregation.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct TokenUsage {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub cache_write_tokens: u64,
+    pub reasoning_tokens: u64,
+    pub estimated_cost_usd: f64,
+}
+
+impl TokenUsage {
+    /// Accumulate another usage into this one (per-response → per-session).
+    pub fn accumulate(&mut self, other: &TokenUsage) {
+        self.input_tokens += other.input_tokens;
+        self.output_tokens += other.output_tokens;
+        self.cache_read_tokens += other.cache_read_tokens;
+        self.cache_write_tokens += other.cache_write_tokens;
+        self.reasoning_tokens += other.reasoning_tokens;
+        self.estimated_cost_usd += other.estimated_cost_usd;
+    }
+
+    /// Compute the estimated USD cost from a known `ModelCost` table.
+    /// The reasoning tokens are billed at the output rate (OpenAI/
+    /// Anthropic convention as of 2026-03).
+    pub fn recompute_cost(&mut self, cost: &ModelCost) {
+        let bd = CostBreakdown::calculate_with_cache(
+            cost,
+            self.input_tokens + self.reasoning_tokens,
+            self.output_tokens,
+            self.cache_read_tokens,
+            self.cache_write_tokens,
+        );
+        self.estimated_cost_usd = bd.total;
+    }
+
+    /// Short human-readable summary for CLI end-of-run banner.
+    pub fn display_line(&self) -> String {
+        format!(
+            "Tokens: {} in / {} out (cache {}r/{}w, reason {}) | ~${:.4}",
+            self.input_tokens,
+            self.output_tokens,
+            self.cache_read_tokens,
+            self.cache_write_tokens,
+            self.reasoning_tokens,
+            self.estimated_cost_usd,
+        )
+    }
+}
+
 impl BudgetUsage {
     /// Returns the first budget violation found, or None if within limits.
     pub fn exceeds(&self, budget: &Budget) -> Option<BudgetViolation> {
@@ -212,7 +268,7 @@ mod tests {
             elapsed_secs: 61,
             ..Default::default()
         };
-        let violation = usage.exceeds(&budget).unwrap();
+        let violation = usage.exceeds(&budget).expect("t");
         assert!(matches!(
             violation,
             BudgetViolation::TimeExceeded {
@@ -232,7 +288,7 @@ mod tests {
             tokens_used: 1001,
             ..Default::default()
         };
-        let violation = usage.exceeds(&budget).unwrap();
+        let violation = usage.exceeds(&budget).expect("t");
         assert!(matches!(
             violation,
             BudgetViolation::TokensExceeded {
@@ -252,7 +308,7 @@ mod tests {
             iterations_used: 11,
             ..Default::default()
         };
-        let violation = usage.exceeds(&budget).unwrap();
+        let violation = usage.exceeds(&budget).expect("t");
         assert!(matches!(
             violation,
             BudgetViolation::IterationsExceeded {
@@ -272,7 +328,7 @@ mod tests {
             tool_calls_used: 6,
             ..Default::default()
         };
-        let violation = usage.exceeds(&budget).unwrap();
+        let violation = usage.exceeds(&budget).expect("t");
         assert!(matches!(
             violation,
             BudgetViolation::ToolCallsExceeded {
@@ -303,8 +359,8 @@ mod tests {
             },
         ];
         for v in &violations {
-            let json = serde_json::to_string(v).unwrap();
-            let back: BudgetViolation = serde_json::from_str(&json).unwrap();
+            let json = serde_json::to_string(v).expect("t");
+            let back: BudgetViolation = serde_json::from_str(&json).expect("t");
             assert_eq!(*v, back);
         }
     }
@@ -312,8 +368,8 @@ mod tests {
     #[test]
     fn budget_serde_roundtrip() {
         let budget = Budget::default();
-        let json = serde_json::to_string(&budget).unwrap();
-        let back: Budget = serde_json::from_str(&json).unwrap();
+        let json = serde_json::to_string(&budget).expect("t");
+        let back: Budget = serde_json::from_str(&json).expect("t");
         assert_eq!(back.max_time_secs, budget.max_time_secs);
         assert_eq!(back.max_tokens, budget.max_tokens);
     }
@@ -409,7 +465,7 @@ mod tests {
     #[test]
     fn known_model_cost_gpt4o_pricing() {
         // Arrange & Act
-        let cost = known_model_cost("gpt-4o").unwrap();
+        let cost = known_model_cost("gpt-4o").expect("t");
 
         // Assert
         assert!((cost.input_per_million - 2.5).abs() < 1e-9);
@@ -435,8 +491,8 @@ mod tests {
             cache_write_per_million: 3.75,
         };
         let breakdown = CostBreakdown::calculate(&cost, 1_000_000, 500_000);
-        let json = serde_json::to_string(&breakdown).unwrap();
-        let back: CostBreakdown = serde_json::from_str(&json).unwrap();
+        let json = serde_json::to_string(&breakdown).expect("t");
+        let back: CostBreakdown = serde_json::from_str(&json).expect("t");
         assert!((back.total - breakdown.total).abs() < 1e-9);
     }
 
@@ -448,9 +504,89 @@ mod tests {
             cache_read_per_million: 1.5,
             cache_write_per_million: 18.75,
         };
-        let json = serde_json::to_string(&cost).unwrap();
-        let back: ModelCost = serde_json::from_str(&json).unwrap();
+        let json = serde_json::to_string(&cost).expect("t");
+        let back: ModelCost = serde_json::from_str(&json).expect("t");
         assert!((back.input_per_million - 15.0).abs() < 1e-9);
         assert!((back.output_per_million - 75.0).abs() < 1e-9);
+    }
+
+    // ── Phase 1 T1.1 — TokenUsage ────────────────────────────────
+    #[test]
+    fn test_t1_1_ac_1_six_fields_present() {
+        let u = TokenUsage {
+            input_tokens: 100,
+            output_tokens: 50,
+            cache_read_tokens: 10,
+            cache_write_tokens: 5,
+            reasoning_tokens: 25,
+            estimated_cost_usd: 0.0123,
+        };
+        assert_eq!(u.input_tokens, 100);
+        assert_eq!(u.reasoning_tokens, 25);
+        assert!((u.estimated_cost_usd - 0.0123).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_t1_1_ac_2_accumulate_sums_fields() {
+        let mut a = TokenUsage {
+            input_tokens: 100,
+            output_tokens: 50,
+            ..Default::default()
+        };
+        let b = TokenUsage {
+            input_tokens: 40,
+            output_tokens: 20,
+            reasoning_tokens: 5,
+            estimated_cost_usd: 0.01,
+            ..Default::default()
+        };
+        a.accumulate(&b);
+        assert_eq!(a.input_tokens, 140);
+        assert_eq!(a.output_tokens, 70);
+        assert_eq!(a.reasoning_tokens, 5);
+        assert!((a.estimated_cost_usd - 0.01).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_t1_1_ac_3_recompute_cost_uses_model_table() {
+        let mut u = TokenUsage {
+            input_tokens: 1_000_000,
+            output_tokens: 500_000,
+            ..Default::default()
+        };
+        let cost = ModelCost {
+            input_per_million: 3.0,
+            output_per_million: 15.0,
+            cache_read_per_million: 0.0,
+            cache_write_per_million: 0.0,
+        };
+        u.recompute_cost(&cost);
+        // 1M * $3 + 0.5M * $15 = 3 + 7.5 = 10.5
+        assert!((u.estimated_cost_usd - 10.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_t1_1_ac_6_graceful_zero_when_provider_has_no_info() {
+        let u = TokenUsage::default();
+        assert_eq!(u.input_tokens, 0);
+        assert_eq!(u.output_tokens, 0);
+        assert_eq!(u.estimated_cost_usd, 0.0);
+        let line = u.display_line();
+        assert!(line.contains("0 in"));
+    }
+
+    #[test]
+    fn test_t1_1_token_usage_serde_roundtrip() {
+        let u = TokenUsage {
+            input_tokens: 100,
+            output_tokens: 50,
+            cache_read_tokens: 10,
+            cache_write_tokens: 5,
+            reasoning_tokens: 25,
+            estimated_cost_usd: 0.0123,
+        };
+        let json = serde_json::to_string(&u).expect("t");
+        let back: TokenUsage = serde_json::from_str(&json).expect("t");
+        assert_eq!(u, back);
     }
 }

@@ -25,6 +25,7 @@ pub type MessageQueueFn =
 /// Both queues are optional — when absent, behavior is unchanged.
 ///
 /// **Pi-mono ref:** `packages/agent/src/agent-loop.ts:165-229`
+#[derive(Default)]
 pub struct MessageQueues {
     /// Messages injected mid-run between turns (e.g., user types while agent works).
     pub steering: Option<MessageQueueFn>,
@@ -32,14 +33,6 @@ pub struct MessageQueues {
     pub follow_up: Option<MessageQueueFn>,
 }
 
-impl Default for MessageQueues {
-    fn default() -> Self {
-        Self {
-            steering: None,
-            follow_up: None,
-        }
-    }
-}
 
 impl std::fmt::Debug for MessageQueues {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -57,8 +50,10 @@ impl std::fmt::Debug for MessageQueues {
 /// Interaction mode that controls how the agent approaches tasks.
 /// Implemented via system prompt — zero changes to RunEngine.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum AgentMode {
     /// Full autonomy: Read → Think → Act → Verify → Done.
+    #[default]
     Agent,
     /// Creates a detailed plan FIRST, presents it, waits for user approval.
     Plan,
@@ -66,14 +61,10 @@ pub enum AgentMode {
     Ask,
 }
 
-impl Default for AgentMode {
-    fn default() -> Self {
-        AgentMode::Agent
-    }
-}
 
 impl AgentMode {
     /// Parse mode from string (CLI --mode flag, /mode command).
+    #[allow(clippy::should_implement_trait)] // Returns Option, not Result; intentional API.
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "agent" => Some(AgentMode::Agent),
@@ -226,11 +217,48 @@ impl std::fmt::Display for ToolExecutionMode {
 
 impl ToolExecutionMode {
     /// Parse from string (CLI flag, config file).
+    #[allow(clippy::should_implement_trait)] // Returns Option, not Result; intentional API.
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "sequential" => Some(ToolExecutionMode::Sequential),
             "parallel" => Some(ToolExecutionMode::Parallel),
             _ => None,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CompactionPolicy — centralized compaction parameters
+// ---------------------------------------------------------------------------
+
+/// Centralized policy for context compaction parameters.
+///
+/// Replaces scattered module-level constants across `compaction.rs` and
+/// `compaction_stages.rs`. All compaction functions receive `&CompactionPolicy`
+/// so behavior is configurable per-agent without recompilation.
+#[derive(Debug, Clone)]
+pub struct CompactionPolicy {
+    /// Number of recent messages to always preserve fully.
+    pub preserve_tail: usize,
+    /// Max chars to keep in truncated tool results.
+    pub truncate_tool_result_chars: usize,
+    /// Threshold: compact when tokens exceed this fraction of context window.
+    pub compact_threshold: f64,
+    /// How many recent tool results to preserve during Prune stage.
+    pub prune_keep_recent: usize,
+    /// How many recent tool observations to preserve during masking.
+    /// Used by `apply_observation_mask` (Fase 1).
+    pub observation_mask_window: usize,
+}
+
+impl Default for CompactionPolicy {
+    fn default() -> Self {
+        Self {
+            preserve_tail: 6,
+            truncate_tool_result_chars: 200,
+            compact_threshold: 0.80,
+            prune_keep_recent: 3,
+            observation_mask_window: 10,
         }
     }
 }
@@ -291,6 +319,9 @@ pub struct AgentConfig {
     /// Useful in headless/benchmark mode where losing an instance to a transient
     /// rate limit is expensive. Default: false (uses standard 3 retries, 1-30s).
     pub aggressive_retry: bool,
+    /// Compaction policy — centralized parameters for context compaction.
+    /// Default matches the previously hardcoded constants.
+    pub compaction_policy: CompactionPolicy,
     /// Master switch for the agent-memory subsystem. When `false`, every
     /// memory lifecycle hook (`prefetch`, `sync_turn`, `on_pre_compress`,
     /// `on_session_end`) short-circuits to the NullMemoryProvider — runtime
@@ -314,6 +345,43 @@ pub struct AgentConfig {
     /// NullMemoryProvider (runtime behaviour identical to pre-RM0). Plan
     /// ref: `outputs/agent-memory-plan.md` RM0.
     pub memory_provider: Option<MemoryHandle>,
+    /// Phase 1 of PLAN_AUTO_EVOLUTION_SOTA: number of user turns between
+    /// background memory-reviewer spawns. `0` disables the nudge entirely.
+    /// Default: 10 (matches Hermes `run_agent.py:1418` and mitigates
+    /// Issue #8506 by design — `AtomicUsize` on `RunEngine` persists
+    /// across turns).
+    pub memory_review_nudge_interval: usize,
+    /// Phase 1 of PLAN_AUTO_EVOLUTION_SOTA: optional reviewer invoked
+    /// when the nudge counter fires. When `None`, the nudge becomes a
+    /// no-op even if `memory_review_nudge_interval > 0`.
+    pub memory_reviewer: Option<crate::memory_reviewer::MemoryReviewerHandle>,
+    /// Phase 2 of PLAN_AUTO_EVOLUTION_SOTA: enables post-session
+    /// memory consolidation (autodream). Default: `true` — the actual
+    /// run still respects 24h cooldown, lock file, and minimum file
+    /// count. Set to `false` to disable unconditionally.
+    pub autodream_enabled: bool,
+    /// Phase 2 of PLAN_AUTO_EVOLUTION_SOTA: max wall time for a
+    /// consolidation pass. Default: 60s. Matches OpenDev's bounded
+    /// background work pattern.
+    pub autodream_timeout_secs: u64,
+    /// Phase 2 of PLAN_AUTO_EVOLUTION_SOTA: optional executor that
+    /// runs the LLM consolidation step. When `None`, `run_autodream`
+    /// becomes a no-op even if `autodream_enabled == true`.
+    pub autodream: Option<crate::autodream::AutodreamHandle>,
+    /// Phase 3 of PLAN_AUTO_EVOLUTION_SOTA: tool iterations between
+    /// background skill-reviewer spawns, provided no skill was
+    /// created during the task. `0` disables. Default: 10
+    /// (`referencias/hermes-agent/run_agent.py:1517-1520`).
+    pub skill_review_nudge_interval: usize,
+    /// Phase 3 of PLAN_AUTO_EVOLUTION_SOTA: reviewer invoked when the
+    /// skill nudge counter fires. `None` disables the feature even
+    /// with a positive interval.
+    pub skill_reviewer: Option<crate::skill_reviewer::SkillReviewerHandle>,
+    /// Phase 4 of PLAN_AUTO_EVOLUTION_SOTA: optional transcript
+    /// indexer. `None` disables cross-session BM25 recall; the
+    /// concrete Tantivy-backed impl lives in `theo-application` to
+    /// keep bounded contexts intact.
+    pub transcript_indexer: Option<crate::transcript_indexer::TranscriptIndexerHandle>,
 }
 
 /// Debug-friendly wrapper around `Arc<dyn MemoryProvider>` so `AgentConfig`
@@ -382,9 +450,18 @@ impl Default for AgentConfig {
             context_window_tokens: 128_000,
             tool_execution_mode: ToolExecutionMode::default(),
             aggressive_retry: false,
+            compaction_policy: CompactionPolicy::default(),
             memory_enabled: false,
             memory_provider: None,
             router: None,
+            memory_review_nudge_interval: 10,
+            memory_reviewer: None,
+            autodream_enabled: true,
+            autodream_timeout_secs: 60,
+            autodream: None,
+            skill_review_nudge_interval: 10,
+            skill_reviewer: None,
+            transcript_indexer: None,
         }
     }
 }

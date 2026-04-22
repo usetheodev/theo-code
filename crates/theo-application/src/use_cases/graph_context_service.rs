@@ -55,6 +55,9 @@ const LEIDEN_RESOLUTION: f64 = 1.0;
 struct GraphState {
     graph: CodeGraph,
     communities: Vec<Community>,
+    /// Root of the indexed workspace. Required by the context-wiring
+    /// phases (compression, inline-builder) that read source off disk.
+    project_dir: std::path::PathBuf,
     /// MultiSignalScorer: only built when no RRF pipeline available (Tier 0 only).
     /// When tantivy-backend is active, query_context uses FileBm25 directly,
     /// saving ~200MB RAM from scorer's BM25 index + TF-IDF model.
@@ -97,6 +100,10 @@ pub struct GraphContextService {
     state: Arc<tokio::sync::RwLock<GraphBuildState>>,
     /// Ensures only one build runs at a time.
     build_in_progress: Arc<AtomicBool>,
+    /// PLAN_CONTEXT_WIRING Phase 4 — sink for `RetrievalExecuted` events.
+    /// Defaults to `NoopEventSink`; the runtime replaces it with an adapter
+    /// around its broadcast `EventBus` via `with_event_sink`.
+    event_sink: Arc<dyn theo_domain::graph_context::EventSink>,
 }
 
 impl GraphContextService {
@@ -104,7 +111,19 @@ impl GraphContextService {
         Self {
             state: Arc::new(tokio::sync::RwLock::new(GraphBuildState::Uninitialized)),
             build_in_progress: Arc::new(AtomicBool::new(false)),
+            event_sink: Arc::new(theo_domain::graph_context::NoopEventSink),
         }
+    }
+
+    /// Attach an event sink for retrieval telemetry. The sink is called
+    /// synchronously on the read path; implementations must be cheap and
+    /// non-blocking.
+    pub fn with_event_sink(
+        mut self,
+        sink: Arc<dyn theo_domain::graph_context::EventSink>,
+    ) -> Self {
+        self.event_sink = sink;
+        self
     }
 }
 
@@ -153,6 +172,7 @@ impl GraphContextProvider for GraphContextService {
             *state = GraphBuildState::Ready(GraphState {
                 graph,
                 communities,
+                project_dir: dir.clone(),
                 #[cfg(not(feature = "tantivy-backend"))]
                 scorer,
                 #[cfg(feature = "tantivy-backend")]
@@ -220,6 +240,7 @@ impl GraphContextProvider for GraphContextService {
                     *state = GraphBuildState::Ready(GraphState {
                         graph,
                         communities,
+                        project_dir: dir_for_cache.clone(),
                         #[cfg(not(feature = "tantivy-backend"))]
                         scorer,
                         #[cfg(feature = "tantivy-backend")]
@@ -317,9 +338,9 @@ impl GraphContextProvider for GraphContextService {
             let (allow, _conf, _reason) =
                 evaluate_direct_return(&wiki_results, query, DEFAULT_BM25_FLOOR);
 
-            if allow {
-                if let Some(top) = wiki_results.first() {
-                    if top.token_count <= budget_tokens {
+            if allow
+                && let Some(top) = wiki_results.first()
+                    && top.token_count <= budget_tokens {
                         let blocks: Vec<ContextBlock> = wiki_results
                             .iter()
                             .take(3)
@@ -359,8 +380,6 @@ impl GraphContextProvider for GraphContextService {
                             });
                         }
                     }
-                }
-            }
         }
 
         // Safe: we checked Ready or Building(stale) above.
@@ -406,10 +425,10 @@ impl GraphContextProvider for GraphContextService {
             // Without dense-retrieval: try Tier 1, then Tier 0
             #[cfg(all(feature = "tantivy-backend", not(feature = "dense-retrieval")))]
             {
-                if graph_state.tantivy_index.is_some() {
+                if let Some(idx) = graph_state.tantivy_index.as_ref() {
                     theo_engine_retrieval::tantivy_search::hybrid_search(
                         &graph_state.graph,
-                        graph_state.tantivy_index.as_ref().unwrap(),
+                        idx,
                         query,
                     )
                 } else {
@@ -428,21 +447,47 @@ impl GraphContextProvider for GraphContextService {
         let blocks: Vec<ContextBlock> = {
             let config = theo_engine_retrieval::file_retriever::RerankConfig::default();
             let seen = std::collections::HashSet::new();
-            let retrieval_result = theo_engine_retrieval::file_retriever::retrieve_files(
-                &graph_state.graph,
-                &graph_state.communities,
-                query,
-                &config,
-                &seen,
-            );
+            // PLAN_CONTEXT_WIRING Phase 3: use the _with_inline variant so
+            // queries that match a symbol name get inline slices (focal +
+            // callees/callers) as high-priority context blocks.
+            let mut retrieval_result =
+                theo_engine_retrieval::file_retriever::retrieve_files_with_inline(
+                    &graph_state.graph,
+                    &graph_state.communities,
+                    query,
+                    &config,
+                    &seen,
+                    &graph_state.project_dir,
+                );
 
             if !retrieval_result.primary_files.is_empty() {
-                // File-first path: build blocks from ranked files
-                theo_engine_retrieval::file_retriever::build_context_blocks(
-                    &retrieval_result,
-                    &graph_state.graph,
-                    budget_tokens,
-                )
+                // File-first path with Phase 2 compression. The mutating
+                // sibling populates `compression_savings_tokens` on the
+                // result struct (PLAN_CONTEXT_WIRING Task 2.4) so the
+                // telemetry payload reads from a single source of truth.
+                let ctx_blocks = theo_engine_retrieval::file_retriever::
+                    build_context_blocks_with_compression_mut(
+                        &mut retrieval_result,
+                        &graph_state.graph,
+                        budget_tokens,
+                        Some(&graph_state.project_dir),
+                        query,
+                    );
+                // PLAN_CONTEXT_WIRING Phase 4: publish retrieval telemetry
+                // through the attached EventSink (real EventBus in prod,
+                // NoopEventSink otherwise).
+                self.event_sink.emit(theo_domain::event::DomainEvent::new(
+                    theo_domain::event::EventType::RetrievalExecuted,
+                    "graph-context",
+                    serde_json::json!({
+                        "primary_files": retrieval_result.primary_files.len(),
+                        "harm_removals": retrieval_result.harm_removals,
+                        "compression_savings_tokens": retrieval_result.compression_savings_tokens,
+                        "inline_slices_count": retrieval_result.inline_slices.len(),
+                        "query_len": query.len(),
+                    }),
+                ));
+                ctx_blocks
             } else {
                 // Fallback: community-level assembly (legacy path)
                 let payload = assembly::assemble_files_direct(
@@ -550,7 +595,7 @@ fn parse_project_files(project_dir: &Path) -> Vec<FileData> {
         let _ = wb.add_ignore(project_dir.join(".gitignore"));
         wb.add_custom_ignore_filename(".theoignore");
         wb.filter_entry(|entry| {
-            if entry.file_type().map_or(false, |ft| ft.is_dir()) {
+            if entry.file_type().is_some_and(|ft| ft.is_dir()) {
                 let name = entry.file_name().to_str().unwrap_or("");
                 return !theo_domain::graph_context::EXCLUDED_DIRS.contains(&name);
             }
@@ -617,11 +662,10 @@ fn parse_project_files(project_dir: &Path) -> Vec<FileData> {
                     .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
                 mb.cmp(&ma) // newest first
             });
-            if let Some(f) = files.first() {
-                if selected_set.insert(f.clone()) {
+            if let Some(f) = files.first()
+                && selected_set.insert(f.clone()) {
                     selected.push(f.clone());
                 }
-            }
         }
 
         // Step 2: Fill remaining slots by mtime (newest first, across all dirs).
@@ -747,8 +791,8 @@ fn write_back_to_wiki(
         .unwrap_or(0);
 
     // Check staleness: overwrite if existing page has different graph_hash
-    if path.exists() {
-        if let Ok(existing) = std::fs::read_to_string(&path) {
+    if path.exists()
+        && let Ok(existing) = std::fs::read_to_string(&path) {
             let fm = theo_engine_retrieval::wiki::model::parse_frontmatter(&existing);
             if let Some(existing_hash) = fm.graph_hash {
                 if existing_hash == graph_hash {
@@ -759,7 +803,6 @@ fn write_back_to_wiki(
                 return Ok(()); // Legacy page without frontmatter — don't overwrite
             }
         }
-    }
 
     // Build formatted markdown page with canonical frontmatter
     let fm = theo_engine_retrieval::wiki::model::PageFrontmatter::cache(query, graph_hash);
@@ -802,15 +845,14 @@ fn write_back_to_wiki(
     std::fs::write(&path, md)?;
 
     // Log the write-back
-    if let Some(wiki_dir) = cache_dir.parent() {
-        if let Some(project_dir) = wiki_dir.parent().and_then(|p| p.parent()) {
+    if let Some(wiki_dir) = cache_dir.parent()
+        && let Some(project_dir) = wiki_dir.parent().and_then(|p| p.parent()) {
             theo_engine_retrieval::wiki::persistence::append_log(
                 project_dir,
                 "query",
                 &format!("Cached result for: {} ({} blocks)", query, blocks.len()),
             );
         }
-    }
 
     Ok(())
 }
@@ -1103,7 +1145,7 @@ fn compute_project_hash(project_dir: &Path) -> String {
     let _ = hash_wb.add_ignore(project_dir.join(".gitignore"));
     hash_wb.add_custom_ignore_filename(".theoignore");
     hash_wb.filter_entry(|entry| {
-        if entry.file_type().map_or(false, |ft| ft.is_dir()) {
+        if entry.file_type().is_some_and(|ft| ft.is_dir()) {
             let name = entry.file_name().to_str().unwrap_or("");
             return !theo_domain::graph_context::EXCLUDED_DIRS.contains(&name);
         }
@@ -1154,12 +1196,11 @@ fn compute_project_hash(project_dir: &Path) -> String {
         let current_size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
 
         // If BOTH mtime AND size match cache, reuse cached hash (skip file read)
-        if let Some((cached_mtime, cached_size, cached_hash)) = cached.get(&rel) {
-            if *cached_mtime == current_mtime && *cached_size == current_size {
+        if let Some((cached_mtime, cached_size, cached_hash)) = cached.get(&rel)
+            && *cached_mtime == current_mtime && *cached_size == current_size {
                 entries.insert(rel, cached_hash.clone());
                 continue;
             }
-        }
 
         // Mtime or size changed (or not in cache) → read and hash
         if let Ok(content) = std::fs::read(path) {

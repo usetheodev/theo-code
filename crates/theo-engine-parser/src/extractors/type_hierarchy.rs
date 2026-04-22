@@ -108,11 +108,10 @@ fn extract_ts_class_hierarchy(
 
     let child_count = node.child_count();
     for i in 0..child_count {
-        if let Some(child) = node.child(i as u32) {
-            if child.kind() == "class_heritage" {
+        if let Some(child) = node.child(i as u32)
+            && child.kind() == "class_heritage" {
                 extract_ts_heritage(&child, source, file_path, &class_name, references);
             }
-        }
     }
 }
 
@@ -367,8 +366,8 @@ fn extract_csharp_class_hierarchy(
 
     let child_count = node.child_count();
     for i in 0..child_count {
-        if let Some(child) = node.child(i as u32) {
-            if child.kind() == "base_list" {
+        if let Some(child) = node.child(i as u32)
+            && child.kind() == "base_list" {
                 let base_count = child.child_count();
                 for j in 0..base_count {
                     if let Some(base_type) = child.child(j as u32) {
@@ -402,7 +401,6 @@ fn extract_csharp_class_hierarchy(
                     }
                 }
             }
-        }
     }
 }
 
@@ -576,11 +574,10 @@ fn extract_type_identifiers_from(
 fn find_child_by_kind<'a>(node: &'a Node, kind: &str) -> Option<Node<'a>> {
     let count = node.child_count();
     for i in 0..count {
-        if let Some(child) = node.child(i as u32) {
-            if child.kind() == kind {
+        if let Some(child) = node.child(i as u32)
+            && child.kind() == kind {
                 return Some(child);
             }
-        }
     }
     None
 }

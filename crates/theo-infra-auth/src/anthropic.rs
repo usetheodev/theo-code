@@ -187,7 +187,7 @@ impl AnthropicAuth {
     pub async fn start_device_flow(&self) -> Result<AnthropicDeviceCode, AuthError> {
         let resp = self
             .http
-            .post(&self.config.device_code_url())
+            .post(self.config.device_code_url())
             .header("Accept", "application/json")
             .header("Content-Type", "application/json")
             .json(&serde_json::json!({
@@ -240,7 +240,7 @@ impl AnthropicAuth {
 
             let resp = self
                 .http
-                .post(&self.config.device_token_url())
+                .post(self.config.device_token_url())
                 .header("Accept", "application/json")
                 .header("Content-Type", "application/json")
                 .json(&serde_json::json!({
@@ -319,7 +319,7 @@ impl AnthropicAuth {
 
         let resp = self
             .http
-            .post(&self.config.device_token_url())
+            .post(self.config.device_token_url())
             .header("Accept", "application/json")
             .header("Content-Type", "application/json")
             .json(&serde_json::json!({
@@ -382,7 +382,7 @@ impl AnthropicAuth {
     async fn fetch_user_email(&self, access_token: &str) -> Result<String, AuthError> {
         let resp = self
             .http
-            .get(&self.config.user_url())
+            .get(self.config.user_url())
             .header("Authorization", format!("Bearer {access_token}"))
             .header("Accept", "application/json")
             .send()

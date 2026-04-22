@@ -113,7 +113,7 @@ pub fn render_frontmatter(
     out.push_str("---\n");
     out.push_str(&format!("slug: {slug}\n"));
     out.push_str(&format!("namespace: {namespace}\n"));
-    out.push_str(&format!("schema_version: 1\n"));
+    out.push_str("schema_version: 1\n");
     out.push_str(&format!("confidence: {confidence:.2}\n"));
     out.push_str("source_events:\n");
     let mut src_sorted = source_events.to_vec();

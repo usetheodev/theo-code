@@ -9,6 +9,12 @@ use theo_domain::tool::{
 
 pub struct WriteTool;
 
+impl Default for WriteTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WriteTool {
     pub fn new() -> Self {
         Self

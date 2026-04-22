@@ -64,6 +64,24 @@ pub struct AgentRunEngine {
     /// Steering and follow-up message queues for mid-run injection.
     /// Pi-mono ref: `packages/agent/src/agent-loop.ts:165-229`
     message_queues: MessageQueues,
+    /// Phase 1 T1.1: accumulated token usage across LLM calls.
+    session_token_usage: theo_domain::budget::TokenUsage,
+    /// PLAN_AUTO_EVOLUTION_SOTA Phase 1: turns since the last memory
+    /// reviewer spawn. `AtomicUsize` lets the counter survive fork
+    /// boundaries (eliminates Hermes Issue #8506).
+    memory_nudge_counter: Arc<crate::memory_lifecycle::MemoryNudgeCounter>,
+    /// PLAN_AUTO_EVOLUTION_SOTA Phase 3: tool iterations since the
+    /// last skill reviewer spawn. Persists across task boundaries so
+    /// short tasks don't reset accumulation mid-stream.
+    skill_nudge_counter: Arc<crate::skill_reviewer::SkillNudgeCounter>,
+    /// PLAN_AUTO_EVOLUTION_SOTA Phase 3: flipped to `true` whenever
+    /// `skill_manage.create` / `edit` / `patch` succeeds in the
+    /// current task, suppressing the reviewer for that task.
+    skill_created_this_task: std::sync::atomic::AtomicBool,
+    /// PLAN_AUTO_EVOLUTION_SOTA Phase 2: flipped once autodream has
+    /// been attempted for this session so we don't retry on every
+    /// message in long-running sessions.
+    autodream_attempted: std::sync::atomic::AtomicBool,
 }
 
 impl AgentRunEngine {
@@ -139,7 +157,17 @@ impl AgentRunEngine {
             working_set: theo_domain::working_set::WorkingSet::new(),
             context_metrics: ContextMetrics::new(),
             message_queues: MessageQueues::default(),
+            session_token_usage: theo_domain::budget::TokenUsage::default(),
+            memory_nudge_counter: Arc::new(crate::memory_lifecycle::MemoryNudgeCounter::new()),
+            skill_nudge_counter: Arc::new(crate::skill_reviewer::SkillNudgeCounter::new()),
+            skill_created_this_task: std::sync::atomic::AtomicBool::new(false),
+            autodream_attempted: std::sync::atomic::AtomicBool::new(false),
         }
+    }
+
+    /// Accumulated token usage (Phase 1 T1.1 AC-1.1.4, CLI display).
+    pub fn session_token_usage(&self) -> &theo_domain::budget::TokenUsage {
+        &self.session_token_usage
     }
 
     /// Sets the message queues for steering and follow-up injection.
@@ -149,23 +177,16 @@ impl AgentRunEngine {
     }
 
     /// Sets the graph context provider for code intelligence injection.
-    pub fn with_graph_context(
-        mut self,
-        provider: Arc<dyn theo_domain::graph_context::GraphContextProvider>,
-    ) -> Self {
+    pub fn with_graph_context(mut self, provider: Arc<dyn theo_domain::graph_context::GraphContextProvider>) -> Self {
         self.graph_context = Some(provider);
         self
     }
 
     /// Returns the run_id.
-    pub fn run_id(&self) -> &RunId {
-        &self.run.run_id
-    }
+    pub fn run_id(&self) -> &RunId { &self.run.run_id }
 
     /// Returns the current RunState.
-    pub fn state(&self) -> RunState {
-        self.run.state
-    }
+    pub fn state(&self) -> RunState { self.run.state }
 
     /// Returns the current iteration.
     pub fn iteration(&self) -> usize {
@@ -189,28 +210,33 @@ impl AgentRunEngine {
     /// Execute with fresh messages (no session history).
     pub async fn execute(&mut self) -> AgentResult {
         let result = self.execute_with_history(Vec::new()).await;
-        self.record_session_exit(&result);
+        self.record_session_exit(&result).await;
         result
     }
 
-    /// Record session exit: save failure patterns + session progress + context metrics.
-    /// Best-effort — never fails, never blocks.
-    fn record_session_exit(&mut self, result: &AgentResult) {
+    /// AgentLoop::run_with_history adapter — shares execute()'s shutdown path.
+    pub async fn record_session_exit_public(&mut self, r: &AgentResult) { self.record_session_exit(r).await; }
+
+    /// Record session exit. Phase 0 T0.1: async tokio::fs + on_session_end hook.
+    async fn record_session_exit(&mut self, result: &AgentResult) {
         // Save failure pattern tracker
         self.failure_tracker.save();
 
         // Save context metrics to .theo/metrics/{run_id}.json
         let metrics_dir = self.project_dir.join(".theo").join("metrics");
-        if std::fs::create_dir_all(&metrics_dir).is_ok() {
+        if tokio::fs::create_dir_all(&metrics_dir).await.is_ok() {
             let report = self.context_metrics.to_report();
             let metrics_path = metrics_dir.join(format!("{}.json", self.run.run_id.as_str()));
-            let _ = std::fs::write(
+            let _ = tokio::fs::write(
                 &metrics_path,
                 serde_json::to_string_pretty(&report).unwrap_or_default(),
-            );
+            )
+            .await;
         }
 
-        // Generate EpisodeSummary from run events and persist to .theo/wiki/episodes/
+        // Generate EpisodeSummary from run events and persist to .theo/memory/episodes/
+        // (decision: meeting 20260420-221947 #4 — episodes belong to memory namespace,
+        // not wiki; wiki is reserved for compiled content).
         let events = self.event_bus.events();
         if !events.is_empty() {
             let task_objective = self
@@ -218,21 +244,45 @@ impl AgentRunEngine {
                 .get(&self.task_id)
                 .map(|t| t.objective.clone())
                 .unwrap_or_else(|| "unknown".to_string());
-            let summary = theo_domain::episode::EpisodeSummary::from_events(
-                self.run.run_id.as_str(),
-                Some(self.task_id.as_str()),
-                &task_objective,
-                &events,
+            let mut summary = theo_domain::episode::EpisodeSummary::from_events(
+                self.run.run_id.as_str(), Some(self.task_id.as_str()), &task_objective, &events,
             );
-            let episodes_dir = self.project_dir.join(".theo").join("wiki").join("episodes");
-            if std::fs::create_dir_all(&episodes_dir).is_ok() {
+            // Phase 1 T1.1 (usage+cost) + Phase 2 T2.1 (lesson pipeline, G5).
+            let mut usage = self.session_token_usage.clone();
+            if let Some(c) = theo_domain::budget::known_model_cost(&self.config.model) { usage.recompute_cost(&c); }
+            summary.token_usage = Some(usage);
+            // Phase 2: T2.1 (lessons G5) + T2.3 (hypotheses G6).
+            let _ = crate::lesson_pipeline::extract_and_persist_for_outcome(&self.project_dir, summary.machine_summary.outcome, &events);
+            let _ = crate::hypothesis_pipeline::persist_unresolved(&self.project_dir, &summary);
+            let episodes_dir = self
+                .project_dir
+                .join(".theo")
+                .join("memory")
+                .join("episodes");
+            if tokio::fs::create_dir_all(&episodes_dir).await.is_ok() {
                 let episode_path = episodes_dir.join(format!("{}.json", summary.summary_id));
-                let _ = std::fs::write(
+                let _ = tokio::fs::write(
                     &episode_path,
                     serde_json::to_string_pretty(&summary).unwrap_or_default(),
-                );
+                )
+                .await;
             }
         }
+
+        // Phase 0 T0.1 AC-0.1.4: memory-provider session-end hook (every exit path).
+        crate::memory_lifecycle::MemoryLifecycle::on_session_end(&self.config).await;
+
+        // PLAN_AUTO_EVOLUTION_SOTA Phase 4 — index session transcript
+        // via the pluggable TranscriptIndexer trait (concrete impl
+        // lives in theo-application). Awaited inline so shutdown
+        // completes only after Tantivy has committed to disk.
+        crate::memory_lifecycle::maybe_index_transcript(
+            &self.config,
+            &self.project_dir,
+            self.run.run_id.as_str(),
+            events.clone(),
+        )
+        .await;
 
         // Record session end for cross-session progress tracking
         if !self.config.is_subagent {
@@ -286,72 +336,67 @@ impl AgentRunEngine {
             auto_init_project_context(&self.project_dir);
         }
 
-        // System prompt: .theo/system-prompt.md replaces default, or use config default
-        let system_prompt = if !self.config.is_subagent {
+        // PLAN_AUTO_EVOLUTION_SOTA Phase 2 — autodream at session start.
+        if !self.config.is_subagent {
+            crate::memory_lifecycle::maybe_spawn_autodream(
+                &self.config,
+                &self.autodream_attempted,
+                &self.project_dir,
+                self.run.run_id.as_str(),
+            );
+        }
+
+        // System prompt: .theo/system-prompt.md replaces default, or use config default.
+        // Phase 5 bootstrap prompt prepended when USER.md is missing/empty.
+        let base_prompt = if !self.config.is_subagent {
             crate::project_config::load_system_prompt(&self.project_dir)
                 .unwrap_or_else(|| self.config.system_prompt.clone())
         } else {
             self.config.system_prompt.clone()
         };
+        let system_prompt =
+            crate::memory_lifecycle::maybe_prepend_bootstrap(&self.config, &self.project_dir, base_prompt);
 
         let mut messages: Vec<Message> = vec![Message::system(&system_prompt)];
 
         // Project context: .theo/theo.md prepended as separate system message
-        if !self.config.is_subagent {
-            if let Some(context) = crate::project_config::load_project_context(&self.project_dir) {
-                messages.push(Message::system(&format!("## Project Context\n{context}")));
+        if !self.config.is_subagent
+            && let Some(context) = crate::project_config::load_project_context(&self.project_dir) {
+                messages.push(Message::system(format!("## Project Context\n{context}")));
             }
-        }
 
         // GRAPHCTX is available as the `codebase_context` tool — the LLM calls it on-demand.
         // No automatic injection: the LLM decides when it needs code structure context.
         // The graph_context provider is passed to tools via ToolContext.graph_context.
 
-        // Inject memories from previous runs (cross-run memory)
-        let memory_root = std::env::var("HOME")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|_| std::path::PathBuf::from("/tmp"))
-            .join(".config")
-            .join("theo")
-            .join("memory");
-
-        let memory_store =
-            theo_tooling::memory::FileMemoryStore::for_project(&memory_root, &self.project_dir);
-        if let Ok(memories) = memory_store.list().await {
-            if !memories.is_empty() {
-                let memory_context = memories
-                    .iter()
-                    .map(|m| format!("- **{}**: {}", m.key, m.value))
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                messages.push(Message::system(&format!(
-                    "## Memory from previous runs\n{memory_context}"
-                )));
-            }
+        // Memory injection (Phase 0 T0.1): prefetch when enabled (sole
+        // source), else legacy FileMemoryStore fallback. Dual-injection
+        // is prevented by this explicit branch (evolution-agent concern).
+        if self.config.memory_enabled {
+            let query = self
+                .task_manager
+                .get(&self.task_id)
+                .map(|t| t.objective.clone())
+                .unwrap_or_else(|| "session".into());
+            let _ = crate::memory_lifecycle::run_engine_hooks::inject_prefetch(
+                &self.config, &mut messages, &query,
+            )
+            .await;
+        } else {
+            crate::memory_lifecycle::run_engine_hooks::inject_legacy_file_memory(
+                &self.project_dir, &mut messages,
+            )
+            .await;
         }
 
-        // Inject episode summaries from previous runs (cross-session learning).
+        // Phase 0 T0.3: feed eligible episode summaries back into context
+        // (lifecycle != Archived, TTL not expired, 5% token budget).
         if !self.config.is_subagent {
-            let episodes = crate::state_manager::StateManager::load_episode_summaries(&self.project_dir);
-            if !episodes.is_empty() {
-                let episode_context: Vec<String> = episodes
-                    .iter()
-                    .rev()
-                    .take(5) // Most recent 5 episodes
-                    .map(|ep| {
-                        format!(
-                            "- **{}**: {} (files: {})",
-                            ep.run_id,
-                            ep.machine_summary.objective,
-                            ep.affected_files.join(", ")
-                        )
-                    })
-                    .collect();
-                messages.push(Message::system(&format!(
-                    "## Recent Episode History\n{}",
-                    episode_context.join("\n")
-                )));
-            }
+            crate::memory_lifecycle::run_engine_hooks::inject_episode_history(
+                &self.project_dir,
+                self.config.context_window_tokens,
+                &mut messages,
+            );
         }
 
         // Boot sequence: inject progress from previous sessions + recent git activity.
@@ -369,18 +414,16 @@ impl AgentRunEngine {
                 .args(["log", "--oneline", "-20"])
                 .current_dir(&self.project_dir)
                 .output()
-            {
-                if output.status.success() {
+                && output.status.success() {
                     let log = String::from_utf8_lossy(&output.stdout);
                     let log = log.trim();
                     if !log.is_empty() {
                         boot_parts.push(format!("Recent git commits:\n{log}"));
                     }
                 }
-            }
 
             if !boot_parts.is_empty() {
-                messages.push(Message::system(&format!(
+                messages.push(Message::system(format!(
                     "## Session Boot Context\n{}",
                     boot_parts.join("\n\n")
                 )));
@@ -390,9 +433,9 @@ impl AgentRunEngine {
         // Planning injection: if GRAPHCTX is Ready, inject top-5 relevant files
         // as system message so the LLM starts with structural orientation.
         // Skip if Building (don't use stale for planning), only use fresh Ready state.
-        if !self.config.is_subagent {
-            if let Some(ref provider) = self.graph_context {
-                if provider.is_ready() {
+        if !self.config.is_subagent
+            && let Some(ref provider) = self.graph_context
+                && provider.is_ready() {
                     // Use the task objective (first user message) as query
                     let planning_query = messages
                         .iter()
@@ -404,9 +447,9 @@ impl AgentRunEngine {
                         .take(200)
                         .collect::<String>();
 
-                    if !planning_query.is_empty() {
-                        if let Ok(ctx) = provider.query_context(&planning_query, 1000).await {
-                            if !ctx.blocks.is_empty() {
+                    if !planning_query.is_empty()
+                        && let Ok(ctx) = provider.query_context(&planning_query, 1000).await
+                            && !ctx.blocks.is_empty() {
                                 let file_hints: Vec<String> = ctx
                                     .blocks
                                     .iter()
@@ -419,16 +462,12 @@ impl AgentRunEngine {
                                         )
                                     })
                                     .collect();
-                                messages.push(Message::system(&format!(
+                                messages.push(Message::system(format!(
                                     "## Suggested Starting Files\nBased on code graph analysis, these areas are most relevant to your task:\n{}\n\nStart here, but verify with read/grep.",
                                     file_hints.join("\n")
                                 )));
                             }
-                        }
-                    }
                 }
-            }
-        }
 
         // Inject available skills into system context (main agent only).
         // Sub-agents do NOT receive skills — they execute their direct objective.
@@ -451,7 +490,7 @@ impl AgentRunEngine {
             }
             let skills_summary = skill_registry.triggers_summary();
             if !skills_summary.is_empty() {
-                messages.push(Message::system(&format!(
+                messages.push(Message::system(format!(
                     "## Skills\nYou have specialized skills that you SHOULD invoke when the task matches:\n{skills_summary}\n\nWhen the user's request matches a skill trigger, use the `skill` tool to invoke it."
                 )));
             }
@@ -514,7 +553,7 @@ impl AgentRunEngine {
         let mut doom_tracker = self
             .config
             .doom_loop_threshold
-            .map(|t| DoomLoopTracker::new(t));
+            .map(DoomLoopTracker::new);
 
         // Layer 1: Schema stripping — sub-agents get filtered tool definitions
         // that exclude delegation meta-tools (subagent, subagent_parallel, skill).
@@ -580,7 +619,7 @@ impl AgentRunEngine {
                     } else {
                         result.output.clone()
                     };
-                    messages.push(Message::system(&format!(
+                    messages.push(Message::system(format!(
                         "[SENSOR {severity}] {} (via {}): {preview}",
                         result.file_path, result.tool_name
                     )));
@@ -602,7 +641,7 @@ impl AgentRunEngine {
 
             // ── PLANNING phase ──
             // Context loop injection
-            if iteration > 1 && iteration % self.config.context_loop_interval == 0 {
+            if iteration > 1 && iteration.is_multiple_of(self.config.context_loop_interval) {
                 let task_objective = self
                     .task_manager
                     .get(&self.task_id)
@@ -641,17 +680,21 @@ impl AgentRunEngine {
                     .cloned()
                     .collect(),
             };
-            crate::compaction::compact_if_needed_with_context(
+            // Phase 0 T0.1 AC-0.1.3: pre-compression memory hook (survives truncation).
+            crate::memory_lifecycle::run_engine_hooks::pre_compress_push(&self.config, &mut messages).await;
+
+            crate::compaction_stages::compact_staged_with_policy(
                 &mut messages,
                 self.config.context_window_tokens,
                 Some(&compaction_ctx),
+                &self.config.compaction_policy,
             );
 
             // Record context size for metrics (estimated tokens = chars/4)
             let estimated_context_tokens: usize = messages
                 .iter()
                 .filter_map(|m| m.content.as_ref())
-                .map(|c| (c.len() + 3) / 4)
+                .map(|c| c.len().div_ceil(4))
                 .sum();
             self.context_metrics
                 .record_context_size(iteration, estimated_context_tokens);
@@ -809,6 +852,12 @@ impl AgentRunEngine {
                     self.budget_enforcer.record_tokens(total_tok);
                     self.metrics
                         .record_llm_call_detailed(llm_duration, input_tok, output_tok);
+                    // Phase 1 T1.1: accumulate the 6-field token usage
+                    // (cache / reasoning stay at 0 until providers expose
+                    // them; cost recomputed lazily at episode write time).
+                    self.session_token_usage.accumulate(&theo_domain::budget::TokenUsage {
+                        input_tokens: input_tok, output_tokens: output_tok, ..Default::default()
+                    });
                     resp
                 }
                 Err(e) if e.is_context_overflow() => {
@@ -924,6 +973,31 @@ impl AgentRunEngine {
                     }
                 }
 
+                // Phase 0 T0.1 AC-0.1.2: persist the user→assistant exchange
+                // INLINE (not fire-and-forget) — durability > latency.
+                crate::memory_lifecycle::run_engine_hooks::sync_final_turn(
+                    &self.config,
+                    &messages,
+                    &content,
+                )
+                .await;
+
+                // PLAN_AUTO_EVOLUTION_SOTA Phase 1 + Phase 3 — reviewers nudge.
+                let tool_calls_this_task = self.metrics.snapshot().total_tool_calls as usize;
+                let skill_created = self
+                    .skill_created_this_task
+                    .load(std::sync::atomic::Ordering::Relaxed);
+                crate::memory_lifecycle::maybe_spawn_reviewers(
+                    &self.config,
+                    &self.memory_nudge_counter,
+                    &self.skill_nudge_counter,
+                    &messages,
+                    tool_calls_this_task,
+                    skill_created,
+                );
+                self.skill_created_this_task
+                    .store(false, std::sync::atomic::Ordering::Relaxed);
+
                 self.transition_run(RunState::Converged);
                 let _ = self
                     .task_manager
@@ -1030,7 +1104,7 @@ impl AgentRunEngine {
                         messages.push(Message::tool_result(
                             &call.id,
                             "done",
-                            &format!(
+                            format!(
                                 "BLOCKED: convergence criteria not met: {}. Make real changes before calling done.",
                                 pending.join(", ")
                             ),
@@ -1064,7 +1138,7 @@ impl AgentRunEngine {
                                 })
                                 .sum();
                             if lines_changed > 100 {
-                                messages.push(Message::user(&format!(
+                                messages.push(Message::user(format!(
                                     "Note: This change touches {} files with ~{} lines changed. \
                                          Consider reviewing the diff carefully before finalizing.",
                                     self.context_loop_state.edits_files.len(),
@@ -1158,7 +1232,7 @@ impl AgentRunEngine {
                             messages.push(Message::tool_result(
                                 &call.id,
                                 "done",
-                                &format!(
+                                format!(
                                     "BLOCKED: `cargo {}` failed (attempt {}/{}). Fix the errors before calling done.\n\n{}",
                                     cmd_str, self.done_attempts, MAX_DONE_ATTEMPTS, error_preview
                                 ),
@@ -1348,7 +1422,7 @@ impl AgentRunEngine {
                                 messages.push(Message::tool_result(
                                     &call.id,
                                     "skill",
-                                    &format!(
+                                    format!(
                                         "Skill '{}' loaded. Follow the instructions above.",
                                         skill_name
                                     ),
@@ -1411,7 +1485,7 @@ impl AgentRunEngine {
                         messages.push(Message::tool_result(
                             &call.id,
                             "skill",
-                            &format!(
+                            format!(
                                 "Unknown skill: '{}'. Available skills: {}",
                                 skill_name,
                                 available.join(", ")
@@ -1469,13 +1543,13 @@ impl AgentRunEngine {
 
                             let reg = registry.clone();
                             let batch_tool_call = theo_infra_llm::types::ToolCall::new(
-                                &format!("batch_{}_{}", call.id, i),
+                                format!("batch_{}_{}", call.id, i),
                                 &tool_name,
-                                &tool_args.to_string(),
+                                tool_args.to_string(),
                             );
                             let batch_ctx = ToolContext {
                                 session_id: SessionId::new("batch"),
-                                message_id: MessageId::new(&format!("batch_{}", i)),
+                                message_id: MessageId::new(format!("batch_{}", i)),
                                 call_id: batch_tool_call.id.clone(),
                                 agent: "main".to_string(),
                                 abort: abort_rx.clone(),
@@ -1639,7 +1713,7 @@ impl AgentRunEngine {
                         messages.push(Message::tool_result(
                             &call.id,
                             name,
-                            &format!("BLOCKED by hook: {}", hook_result.output.trim()),
+                            format!("BLOCKED by hook: {}", hook_result.output.trim()),
                         ));
                         continue;
                     }
@@ -1653,7 +1727,7 @@ impl AgentRunEngine {
                         messages.push(Message::tool_result(
                             &call.id,
                             name,
-                            &format!(
+                            format!(
                                 "Failed to parse arguments: {e}. Please retry with valid JSON."
                             ),
                         ));
@@ -1673,7 +1747,7 @@ impl AgentRunEngine {
 
                 let ctx = ToolContext {
                     session_id: SessionId::new("agent"),
-                    message_id: MessageId::new(&format!("iter_{iteration}")),
+                    message_id: MessageId::new(format!("iter_{iteration}")),
                     call_id: call.id.clone(),
                     agent: "main".to_string(),
                     abort: abort_rx.clone(),
@@ -1761,8 +1835,8 @@ impl AgentRunEngine {
                 // This feeds the usefulness pipeline (P0: feedback data).
                 match name.as_str() {
                     "read" | "edit" | "write" | "apply_patch" => {
-                        if let Ok(args) = call.parse_arguments() {
-                            if let Some(path) = args
+                        if let Ok(args) = call.parse_arguments()
+                            && let Some(path) = args
                                 .get("filePath")
                                 .or(args.get("file_path"))
                                 .and_then(|p| p.as_str())
@@ -1772,7 +1846,6 @@ impl AgentRunEngine {
                                 // P0: Feed usefulness pipeline — record which files agent actually uses
                                 self.context_metrics.record_tool_reference(path);
                             }
-                        }
                     }
                     "grep" | "glob" | "codebase_context" => {
                         if let Ok(args) = call.parse_arguments() {
@@ -1794,18 +1867,17 @@ impl AgentRunEngine {
 
                 // Record event in working set
                 self.working_set.record_event(
-                    &format!("tool:{}:iter{}", name, iteration),
+                    format!("tool:{}:iter{}", name, iteration),
                     20, // keep last 20 events
                 );
 
                 // Update context-loop diagnostics state
                 match name.as_str() {
                     "read" => {
-                        if let Ok(args) = call.parse_arguments() {
-                            if let Some(path) = args.get("filePath").and_then(|p| p.as_str()) {
+                        if let Ok(args) = call.parse_arguments()
+                            && let Some(path) = args.get("filePath").and_then(|p| p.as_str()) {
                                 self.context_loop_state.record_read(path);
                             }
-                        }
                     }
                     "grep" | "glob" => self.context_loop_state.record_search(),
                     "edit" | "write" | "apply_patch" => {
@@ -1851,8 +1923,8 @@ impl AgentRunEngine {
                 }
 
                 // ── SENSOR FIRE: trigger computational verification after successful writes ──
-                if success && crate::sensor::is_write_tool(name) {
-                    if let Some(ref sensor_runner) = sensor_runner {
+                if success && crate::sensor::is_write_tool(name)
+                    && let Some(ref sensor_runner) = sensor_runner {
                         let file_path = call
                             .parse_arguments()
                             .ok()
@@ -1867,7 +1939,6 @@ impl AgentRunEngine {
                             sensor_runner.fire(name, &file_path, &self.project_dir);
                         }
                     }
-                }
 
                 messages.push(result_msg);
 
@@ -1903,8 +1974,8 @@ impl AgentRunEngine {
             self.transition_run(RunState::Evaluating);
 
             // Save snapshot if store is configured (Invariant 7)
-            if let Some(ref store) = self.snapshot_store {
-                if let Some(task) = self.task_manager.get(&self.task_id) {
+            if let Some(ref store) = self.snapshot_store
+                && let Some(task) = self.task_manager.get(&self.task_id) {
                     // Collect real tool calls and results for this task.
                     let tool_calls = self.tool_call_manager.calls_for_task(&self.task_id);
                     let tool_results: Vec<theo_domain::tool_call::ToolResultRecord> = tool_calls
@@ -1932,7 +2003,6 @@ impl AgentRunEngine {
                     snapshot.checksum = snapshot.compute_checksum();
                     let _ = store.save(&self.run.run_id, &snapshot).await;
                 }
-            }
 
             // After executing tools, evaluate and loop back to Planning
             self.transition_run(RunState::Replanning);
@@ -2075,22 +2145,21 @@ fn detect_project_name_simple(project_dir: &std::path::Path) -> Option<String> {
     if let Ok(content) = std::fs::read_to_string(project_dir.join("Cargo.toml")) {
         for line in content.lines() {
             let t = line.trim();
-            if t.starts_with("name") && t.contains('=') {
-                if let Some(val) = t.split('=').nth(1) {
+            if t.starts_with("name") && t.contains('=')
+                && let Some(val) = t.split('=').nth(1) {
                     let name = val.trim().trim_matches('"').trim_matches('\'');
                     if !name.is_empty() {
                         return Some(name.to_string());
                     }
                 }
-            }
         }
     }
     // Try package.json
     if let Ok(content) = std::fs::read_to_string(project_dir.join("package.json")) {
         for line in content.lines() {
             let t = line.trim().trim_start_matches('{').trim();
-            if t.starts_with("\"name\"") {
-                if let Some(val) = t.split(':').nth(1) {
+            if t.starts_with("\"name\"")
+                && let Some(val) = t.split(':').nth(1) {
                     let name = val
                         .trim()
                         .trim_end_matches('}')
@@ -2101,7 +2170,6 @@ fn detect_project_name_simple(project_dir: &std::path::Path) -> Option<String> {
                         return Some(name.to_string());
                     }
                 }
-            }
         }
     }
     None
@@ -2111,59 +2179,7 @@ fn detect_project_name_simple(project_dir: &std::path::Path) -> Option<String> {
 // Doom Loop Detection
 // ---------------------------------------------------------------------------
 
-/// Tracks recent tool calls to detect doom loops (identical calls repeated).
-/// Uses a ring buffer of (tool_name, args_hash) tuples.
-struct DoomLoopTracker {
-    recent: std::collections::VecDeque<(String, u64)>,
-    threshold: usize,
-    /// How many times the doom loop was detected consecutively.
-    /// First detection = warning. Second detection (threshold*2) = hard abort.
-    hit_count: usize,
-}
-
-impl DoomLoopTracker {
-    fn new(threshold: usize) -> Self {
-        Self {
-            recent: std::collections::VecDeque::with_capacity(threshold + 1),
-            threshold,
-            hit_count: 0,
-        }
-    }
-
-    /// Returns true if a hard abort should happen (2x threshold consecutive identical calls).
-    fn should_abort(&self) -> bool {
-        self.hit_count >= 2
-    }
-
-    /// Record a tool call. Returns true if a doom loop is detected.
-    fn record(&mut self, tool_name: &str, args: &serde_json::Value) -> bool {
-        use std::hash::{Hash, Hasher};
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        tool_name.hash(&mut hasher);
-        args.to_string().hash(&mut hasher);
-        let hash = hasher.finish();
-
-        self.recent.push_back((tool_name.to_string(), hash));
-        if self.recent.len() > self.threshold {
-            self.recent.pop_front();
-        }
-
-        // Detect: all entries in the buffer are identical
-        if self.recent.len() == self.threshold {
-            let first = &self.recent[0];
-            let is_loop = self.recent.iter().all(|entry| entry.1 == first.1);
-            if is_loop {
-                self.hit_count += 1;
-            } else {
-                self.hit_count = 0;
-            }
-            is_loop
-        } else {
-            self.hit_count = 0;
-            false
-        }
-    }
-}
+use crate::doom_loop::DoomLoopTracker;
 
 fn now_millis() -> u64 {
     std::time::SystemTime::now()
@@ -2422,54 +2438,9 @@ mod tests {
         );
     }
 
-    // -----------------------------------------------------------------------
-    // Doom loop detection
-    // -----------------------------------------------------------------------
-
     #[test]
-    fn doom_loop_detected_after_threshold_identical_calls() {
-        let mut tracker = DoomLoopTracker::new(3);
-        let args = serde_json::json!({"filePath": "/tmp/test"});
-        assert!(!tracker.record("read", &args));
-        assert!(!tracker.record("read", &args));
-        assert!(
-            tracker.record("read", &args),
-            "3rd identical call should trigger doom loop"
-        );
-    }
-
-    #[test]
-    fn doom_loop_no_false_positive_same_tool_different_inputs() {
-        let mut tracker = DoomLoopTracker::new(3);
-        assert!(!tracker.record("read", &serde_json::json!({"filePath": "a.rs"})));
-        assert!(!tracker.record("read", &serde_json::json!({"filePath": "b.rs"})));
-        assert!(!tracker.record("read", &serde_json::json!({"filePath": "c.rs"})));
-        // Different inputs → no doom loop
-    }
-
-    #[test]
-    fn doom_loop_counter_resets_on_different_tool() {
-        let mut tracker = DoomLoopTracker::new(3);
-        let args = serde_json::json!({"filePath": "/tmp/test"});
-        assert!(!tracker.record("read", &args));
-        assert!(!tracker.record("read", &args));
-        assert!(!tracker.record("bash", &serde_json::json!({"command": "ls"}))); // different tool
-        assert!(!tracker.record("read", &args)); // counter reset by interleaving
-    }
-
-    #[test]
-    fn doom_loop_threshold_configurable() {
+    fn doom_loop_threshold_config_exposes_default() {
         let config = AgentConfig::default();
         assert_eq!(config.doom_loop_threshold, Some(3));
-
-        let mut tracker = DoomLoopTracker::new(5);
-        let args = serde_json::json!({});
-        for _ in 0..4 {
-            assert!(!tracker.record("bash", &args));
-        }
-        assert!(
-            tracker.record("bash", &args),
-            "5th call should trigger with threshold=5"
-        );
     }
 }

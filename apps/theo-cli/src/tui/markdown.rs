@@ -67,7 +67,7 @@ pub fn markdown_to_lines(text: &str) -> Vec<Line<'static>> {
                         style_stack.push(base.fg(Color::Cyan).add_modifier(Modifier::UNDERLINED));
                         // Store URL for later display
                         current_spans.push(Span::styled(
-                            format!("["),
+                            "[".to_string(),
                             Style::default().fg(Color::DarkGray),
                         ));
                         let _ = dest_url; // URL displayed after text

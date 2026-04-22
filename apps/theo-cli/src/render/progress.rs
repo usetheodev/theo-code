@@ -3,6 +3,7 @@
 //! When [`StyleCaps::colors`] is false, these become no-ops — piped
 //! output remains free of terminal control sequences.
 
+#![allow(dead_code)] // Scaffolded helpers — kept for upcoming TUI features.
 use std::time::Duration;
 
 use indicatif::{ProgressBar, ProgressStyle};

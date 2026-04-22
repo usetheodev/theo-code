@@ -3,6 +3,7 @@
 //! Activates when user types `/` or `@` at the beginning of input or after space.
 //! Shows a dropdown of matching candidates below the input area.
 
+#![allow(dead_code)] // Scaffolded helpers — kept for upcoming TUI features.
 use std::path::Path;
 
 /// An autocomplete candidate.
@@ -130,7 +131,7 @@ fn walk_dir(dir: &Path, max_depth: usize) -> std::io::Result<Vec<std::path::Path
 }
 
 fn walk_dir_inner(
-    root: &Path,
+    _root: &Path,
     dir: &Path,
     max_depth: usize,
     current_depth: usize,
@@ -158,7 +159,7 @@ fn walk_dir_inner(
         if path.is_file() {
             results.push(path);
         } else if path.is_dir() {
-            walk_dir_inner(root, &path, max_depth, current_depth + 1, results)?;
+            walk_dir_inner(_root, &path, max_depth, current_depth + 1, results)?;
         }
     }
 

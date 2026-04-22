@@ -9,16 +9,13 @@ use serde::{Deserialize, Serialize};
 
 /// Decision from an extension about whether to allow a tool call.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum ToolCallDecision {
+    #[default]
     Allow,
     Block { reason: String },
 }
 
-impl Default for ToolCallDecision {
-    fn default() -> Self {
-        Self::Allow
-    }
-}
 
 /// Context provided to extension hooks.
 #[derive(Debug, Clone)]

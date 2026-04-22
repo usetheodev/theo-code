@@ -1,3 +1,4 @@
+pub mod code_compression;
 pub mod error;
 pub mod extractors;
 pub mod import_resolver;

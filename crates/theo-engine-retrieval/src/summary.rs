@@ -247,7 +247,7 @@ fn generate_one(
             (s.name.clone(), in_degree)
         })
         .collect();
-    top_functions.sort_by(|a, b| b.1.cmp(&a.1));
+    top_functions.sort_by_key(|item| std::cmp::Reverse(item.1));
     let top_functions: Vec<String> = top_functions
         .into_iter()
         .take(5)
@@ -266,13 +266,11 @@ fn generate_one(
     // Cross-community deps: external files that members import/call (max 5)
     let mut external_deps: HashSet<String> = HashSet::new();
     for edge in graph.all_edges() {
-        if member_set.contains(edge.source.as_str()) && !member_set.contains(edge.target.as_str()) {
-            if let Some(node) = graph.get_node(&edge.target) {
-                if let Some(fp) = &node.file_path {
+        if member_set.contains(edge.source.as_str()) && !member_set.contains(edge.target.as_str())
+            && let Some(node) = graph.get_node(&edge.target)
+                && let Some(fp) = &node.file_path {
                     external_deps.insert(fp.clone());
                 }
-            }
-        }
     }
     let cross_community_deps: Vec<String> = external_deps.into_iter().take(5).collect();
 
@@ -332,14 +330,12 @@ fn build_call_flow(symbols: &[SymbolInfo], graph: &CodeGraph) -> String {
         if edge.edge_type == EdgeType::Calls
             && sym_ids.contains(edge.source.as_str())
             && sym_ids.contains(edge.target.as_str())
-        {
-            if let (Some(src), Some(tgt)) = (
+            && let (Some(src), Some(tgt)) = (
                 id_to_name.get(edge.source.as_str()),
                 id_to_name.get(edge.target.as_str()),
             ) {
                 calls.push((src, tgt));
             }
-        }
     }
 
     if calls.is_empty() {
@@ -355,11 +351,10 @@ fn build_call_flow(symbols: &[SymbolInfo], graph: &CodeGraph) -> String {
         // Follow the chain
         for _ in 0..3 {
             let last = *chain.last().unwrap();
-            if let Some((_, next)) = calls.iter().find(|(s, _)| *s == last) {
-                if !chain.contains(next) {
+            if let Some((_, next)) = calls.iter().find(|(s, _)| *s == last)
+                && !chain.contains(next) {
                     chain.push(next);
                 }
-            }
         }
     }
 
@@ -375,13 +370,10 @@ fn find_dependencies(community: &Community, graph: &CodeGraph) -> Vec<String> {
         if (edge.edge_type == EdgeType::Calls || edge.edge_type == EdgeType::Imports)
             && member_ids.contains(edge.source.as_str())
             && !member_ids.contains(edge.target.as_str())
-        {
-            if let Some(node) = graph.get_node(&edge.target) {
-                if let Some(fp) = &node.file_path {
+            && let Some(node) = graph.get_node(&edge.target)
+                && let Some(fp) = &node.file_path {
                     dep_files.insert(fp.clone());
                 }
-            }
-        }
     }
 
     let mut deps: Vec<String> = dep_files.into_iter().collect();
@@ -412,14 +404,13 @@ fn find_cochanges(community: &Community, graph: &CodeGraph) -> Vec<(String, f64)
             .get_node(&edge.target)
             .and_then(|n| n.file_path.clone());
 
-        if let (Some(sf), Some(tf)) = (src_file, tgt_file) {
-            if member_files.contains(&sf) && !member_files.contains(&tf) {
+        if let (Some(sf), Some(tf)) = (src_file, tgt_file)
+            && member_files.contains(&sf) && !member_files.contains(&tf) {
                 let entry = partner_weights.entry(tf).or_insert(0.0);
                 if edge.weight > *entry {
                     *entry = edge.weight;
                 }
             }
-        }
     }
 
     let mut partners: Vec<(String, f64)> = partner_weights.into_iter().collect();

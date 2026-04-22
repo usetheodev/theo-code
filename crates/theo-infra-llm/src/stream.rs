@@ -147,22 +147,20 @@ pub fn parse_sse_line(line: &str) -> Option<StreamDelta> {
     let delta = json.get("choices")?.get(0)?.get("delta")?;
 
     // Check for reasoning/thinking (OpenAI extended thinking)
-    if let Some(reasoning) = delta.get("reasoning").and_then(|r| r.as_str()) {
-        if !reasoning.is_empty() {
+    if let Some(reasoning) = delta.get("reasoning").and_then(|r| r.as_str())
+        && !reasoning.is_empty() {
             return Some(StreamDelta::Reasoning(reasoning.to_string()));
         }
-    }
 
     // Check for content
-    if let Some(content) = delta.get("content").and_then(|c| c.as_str()) {
-        if !content.is_empty() {
+    if let Some(content) = delta.get("content").and_then(|c| c.as_str())
+        && !content.is_empty() {
             return Some(StreamDelta::Content(content.to_string()));
         }
-    }
 
     // Check for tool calls
-    if let Some(tool_calls) = delta.get("tool_calls").and_then(|t| t.as_array()) {
-        if let Some(tc) = tool_calls.first() {
+    if let Some(tool_calls) = delta.get("tool_calls").and_then(|t| t.as_array())
+        && let Some(tc) = tool_calls.first() {
             let index = tc.get("index").and_then(|i| i.as_u64()).unwrap_or(0) as usize;
             let id = tc.get("id").and_then(|i| i.as_str()).map(String::from);
             let name = tc
@@ -183,7 +181,6 @@ pub fn parse_sse_line(line: &str) -> Option<StreamDelta> {
                 arguments,
             });
         }
-    }
 
     None
 }
@@ -243,11 +240,10 @@ impl Stream for SseStream {
                     let remaining = std::mem::take(&mut self.buffer);
                     for line in remaining.lines() {
                         let line = line.trim();
-                        if !line.is_empty() {
-                            if let Some(delta) = parse_sse_line(line) {
+                        if !line.is_empty()
+                            && let Some(delta) = parse_sse_line(line) {
                                 return Poll::Ready(Some(Ok(delta)));
                             }
-                        }
                     }
                     return Poll::Ready(None);
                 }

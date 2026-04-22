@@ -202,11 +202,10 @@ fn render_transcript(frame: &mut Frame, area: Rect, state: &TuiState) {
                 let md_lines = super::markdown::markdown_to_lines(text);
                 lines.extend(md_lines);
                 // Show cursor if still streaming
-                if state.streaming_assistant && state.cursor_visible {
-                    if let Some(last) = lines.last_mut() {
+                if state.streaming_assistant && state.cursor_visible
+                    && let Some(last) = lines.last_mut() {
                         last.spans.push(Span::styled("▋", Style::default().fg(Color::White)));
                     }
-                }
             }
             TranscriptEntry::ToolCard(card) => {
                 lines.push(Line::from(""));

@@ -139,11 +139,10 @@ pub fn cleanup_orphaned_pages(
                 .and_then(|s| s.to_str())
                 .unwrap_or("")
                 .to_string();
-            if !current_slugs.contains(&slug) {
-                if std::fs::remove_file(&path).is_ok() {
+            if !current_slugs.contains(&slug)
+                && std::fs::remove_file(&path).is_ok() {
                     removed += 1;
                 }
-            }
         }
     }
     removed
@@ -174,8 +173,8 @@ pub fn mark_stale_cache(wiki_dir: &std::path::Path, current_graph_hash: u64) -> 
 
             if let Ok(content) = std::fs::read_to_string(&path) {
                 let fm = super::model::parse_frontmatter(&content);
-                if let Some(page_hash) = fm.graph_hash {
-                    if page_hash != current_graph_hash {
+                if let Some(page_hash) = fm.graph_hash
+                    && page_hash != current_graph_hash {
                         // Move to stale/
                         if std::fs::create_dir_all(&stale_dir).is_ok() {
                             let dest = stale_dir.join(path.file_name().unwrap_or_default());
@@ -184,7 +183,6 @@ pub fn mark_stale_cache(wiki_dir: &std::path::Path, current_graph_hash: u64) -> 
                             }
                         }
                     }
-                }
             }
         }
     }
@@ -217,15 +215,12 @@ pub fn gc_cold_cache(wiki_dir: &std::path::Path, max_age_secs: u64) -> usize {
 
             if let Ok(content) = std::fs::read_to_string(&path) {
                 let fm = super::model::parse_frontmatter(&content);
-                if let Some(ref gen_at) = fm.generated_at {
-                    if let Ok(ts) = gen_at.parse::<u64>() {
-                        if now.saturating_sub(ts) > max_age_secs {
-                            if std::fs::remove_file(&path).is_ok() {
+                if let Some(ref gen_at) = fm.generated_at
+                    && let Ok(ts) = gen_at.parse::<u64>()
+                        && now.saturating_sub(ts) > max_age_secs
+                            && std::fs::remove_file(&path).is_ok() {
                                 removed += 1;
                             }
-                        }
-                    }
-                }
             }
         }
     }
@@ -461,7 +456,7 @@ mod tests {
         // Recent page (generated_at = now)
         std::fs::write(
             stale_dir.join("recent.md"),
-            &format!("---\ngenerated_at: \"{}\"\n---\n# Recent\n", now),
+            format!("---\ngenerated_at: \"{}\"\n---\n# Recent\n", now),
         )
         .unwrap();
 

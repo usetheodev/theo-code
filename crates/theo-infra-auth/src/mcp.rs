@@ -134,7 +134,7 @@ impl McpAuth {
         self.get_tokens(server_name)
             .ok()
             .flatten()
-            .is_some_and(|t| t.expires_at.map_or(true, |exp| exp > now_secs()))
+            .is_some_and(|t| t.expires_at.is_none_or(|exp| exp > now_secs()))
     }
 
     /// Store tokens for an MCP server.

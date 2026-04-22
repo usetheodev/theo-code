@@ -95,8 +95,8 @@ impl ToolCallManager {
         // 0. Capability check (if gate is set)
         {
             let records = self.records.lock().expect("records lock poisoned");
-            if let Some(record) = records.get(call_id) {
-                if let Some(gate) = &self.capability_gate {
+            if let Some(record) = records.get(call_id)
+                && let Some(gate) = &self.capability_gate {
                     // Determine category from registry, default to Utility
                     let category = registry
                         .get(&record.tool_name)
@@ -104,7 +104,6 @@ impl ToolCallManager {
                         .unwrap_or(ToolCategory::Utility);
                     gate.check_tool(&record.tool_name, category)?;
                 }
-            }
         }
 
         // 1. Transition Queued → Dispatched (under lock)
@@ -130,7 +129,7 @@ impl ToolCallManager {
             ToolCall::new(
                 call_id.as_str(),
                 &record.tool_name,
-                &record.input.to_string(),
+                record.input.to_string(),
             )
         };
         // Lock is released here — safe to await
@@ -264,8 +263,8 @@ fn transition_record(
 fn truncate_input_for_event(mut input: serde_json::Value) -> serde_json::Value {
     if let Some(obj) = input.as_object_mut() {
         for (_key, value) in obj.iter_mut() {
-            if let Some(s) = value.as_str() {
-                if s.len() > 500 {
+            if let Some(s) = value.as_str()
+                && s.len() > 500 {
                     // Find the nearest char boundary at or before 500
                     let mut end = 500;
                     while end > 0 && !s.is_char_boundary(end) {
@@ -273,7 +272,6 @@ fn truncate_input_for_event(mut input: serde_json::Value) -> serde_json::Value {
                     }
                     *value = serde_json::Value::String(format!("{}...", &s[..end]));
                 }
-            }
         }
     }
     input

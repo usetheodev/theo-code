@@ -9,6 +9,12 @@ use theo_domain::tool::{
 
 pub struct LspTool;
 
+impl Default for LspTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LspTool {
     pub fn new() -> Self {
         Self

@@ -195,7 +195,7 @@ pub fn lint_with_threshold(wiki_dir: &Path, large_page_threshold: usize) -> Lint
             report.large_pages.push((slug.clone(), token_estimate));
         }
     }
-    report.large_pages.sort_by(|a, b| b.1.cmp(&a.1));
+    report.large_pages.sort_by_key(|item| std::cmp::Reverse(item.1));
 
     // Detect empty sections (## followed by ## with no content)
     for (slug, content) in &pages {
@@ -223,13 +223,13 @@ pub fn lint_with_threshold(wiki_dir: &Path, large_page_threshold: usize) -> Lint
     // wiki_dir = .theo/wiki, project_dir = wiki_dir/../../
     let project_dir = wiki_dir.parent().and_then(|p| p.parent());
     let manifest_hash = project_dir
-        .and_then(|pd| super::persistence::load_manifest(pd))
+        .and_then(super::persistence::load_manifest)
         .map(|m| m.graph_hash);
 
     if let Some(current_hash) = manifest_hash {
         let cache_dir = wiki_dir.join("cache");
-        if cache_dir.exists() {
-            if let Ok(entries) = std::fs::read_dir(&cache_dir) {
+        if cache_dir.exists()
+            && let Ok(entries) = std::fs::read_dir(&cache_dir) {
                 for entry in entries.flatten() {
                     let path = entry.path();
                     if path.extension().and_then(|e| e.to_str()) != Some("md") {
@@ -242,16 +242,14 @@ pub fn lint_with_threshold(wiki_dir: &Path, large_page_threshold: usize) -> Lint
                         .to_string();
                     if let Ok(content) = std::fs::read_to_string(&path) {
                         let fm = super::model::parse_frontmatter(&content);
-                        if let Some(page_hash) = fm.graph_hash {
-                            if page_hash != current_hash {
+                        if let Some(page_hash) = fm.graph_hash
+                            && page_hash != current_hash {
                                 report.stale_cache_pages.push(slug.clone());
                                 report.eviction_candidates.push(slug);
                             }
-                        }
                     }
                 }
             }
-        }
     }
 
     report.total_issues = report.orphan_pages.len()

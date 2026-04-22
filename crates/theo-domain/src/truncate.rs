@@ -171,15 +171,12 @@ pub fn cleanup_truncated_files() -> std::io::Result<usize> {
 
     for entry in std::fs::read_dir(&dir)? {
         let entry = entry?;
-        if let Ok(metadata) = entry.metadata() {
-            if let Ok(modified) = metadata.modified() {
-                if modified < cutoff {
-                    if std::fs::remove_file(entry.path()).is_ok() {
+        if let Ok(metadata) = entry.metadata()
+            && let Ok(modified) = metadata.modified()
+                && modified < cutoff
+                    && std::fs::remove_file(entry.path()).is_ok() {
                         removed += 1;
                     }
-                }
-            }
-        }
     }
 
     Ok(removed)

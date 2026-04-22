@@ -3,6 +3,7 @@
 //! Supports Kitty keyboard protocol (CSI u encoding) with xterm fallback.
 //! Pi-mono ref: `packages/tui/src/keys.ts`
 
+#![allow(dead_code)] // Scaffolded helpers — kept for upcoming TUI features.
 /// Detected keyboard protocol.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyboardProtocol {

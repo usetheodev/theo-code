@@ -1,9 +1,9 @@
-/// TurboQuant 2-bit vector quantization.
-///
-/// Simplified from Zandieh et al. 2025:
-/// 1. Random rotation via sign-flip + permutation (O(d) per vector)
-/// 2. Per-coordinate scalar quantization to 2 bits (4 levels, Lloyd-Max for Gaussian)
-/// 3. Unbiased inner product estimation via reconstruction
+//! TurboQuant 2-bit vector quantization.
+//!
+//! Simplified from Zandieh et al. 2025:
+//! 1. Random rotation via sign-flip + permutation (O(d) per vector)
+//! 2. Per-coordinate scalar quantization to 2 bits (4 levels, Lloyd-Max for Gaussian)
+//! 3. Unbiased inner product estimation via reconstruction
 
 // ---------------------------------------------------------------------------
 // Seeded RNG (LCG)
@@ -154,11 +154,11 @@ impl TurboQuantizer {
         let rotated = self.rotate(&normalized);
 
         // Pack 4 quantized values per byte.
-        let num_bytes = (self.dim + 3) / 4;
+        let num_bytes = self.dim.div_ceil(4);
         let mut data = vec![0u8; num_bytes];
 
-        for i in 0..self.dim {
-            let level = self.quantize_scalar(rotated[i]);
+        for (i, &r) in rotated.iter().enumerate().take(self.dim) {
+            let level = self.quantize_scalar(r);
             let byte_idx = i / 4;
             let bit_offset = (i % 4) * 2;
             data[byte_idx] |= level << bit_offset;
@@ -189,9 +189,9 @@ impl TurboQuantizer {
         let q_rotated = self.rotate(&q_normalized);
 
         let mut sum = 0.0f64;
-        for i in 0..self.dim {
+        for (i, &q) in q_rotated.iter().enumerate().take(self.dim) {
             let level = quantized.get_level(i) as usize;
-            sum += q_rotated[i] * self.levels[level];
+            sum += q * self.levels[level];
         }
 
         // Rescale by both norms: IP(a, b) = norm_a * norm_b * IP(â, b̂)
@@ -230,7 +230,7 @@ mod tests {
         let v = random_vector(dim, 123);
         let qv = quantizer.quantize(&v);
         assert_eq!(qv.dim(), dim);
-        assert_eq!(qv.data.len(), (dim + 3) / 4);
+        assert_eq!(qv.data.len(), dim.div_ceil(4));
     }
 
     #[test]
@@ -287,7 +287,7 @@ mod tests {
             let cos_sim = quantizer.cosine_similarity(&a, &qb);
 
             assert!(
-                cos_sim >= -1.1 && cos_sim <= 1.1,
+                (-1.1..=1.1).contains(&cos_sim),
                 "cosine similarity should be approximately in [-1, 1], got {cos_sim:.4}"
             );
         }

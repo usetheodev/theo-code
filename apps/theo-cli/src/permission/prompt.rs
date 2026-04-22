@@ -3,6 +3,7 @@
 //! Uses `dialoguer::Select` when the terminal is interactive. Falls
 //! back to `THEO_AUTO_ACCEPT=1` for CI / non-TTY environments.
 
+#![allow(dead_code)] // Scaffolded helpers — kept for upcoming TUI features.
 use crate::render::style::{StyleCaps, bold, warn};
 use crate::tty::TtyCaps;
 

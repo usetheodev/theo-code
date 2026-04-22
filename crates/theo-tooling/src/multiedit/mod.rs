@@ -6,6 +6,12 @@ use theo_domain::tool::{
 
 pub struct MultiEditTool;
 
+impl Default for MultiEditTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MultiEditTool {
     pub fn new() -> Self {
         Self

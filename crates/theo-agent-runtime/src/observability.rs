@@ -36,11 +36,10 @@ impl StructuredLogListener {
 
 impl EventListener for StructuredLogListener {
     fn on_event(&self, event: &DomainEvent) {
-        if let Ok(json) = serde_json::to_string(event) {
-            if let Ok(mut writer) = self.writer.lock() {
+        if let Ok(json) = serde_json::to_string(event)
+            && let Ok(mut writer) = self.writer.lock() {
                 let _ = writeln!(writer, "{}", json);
             }
-        }
     }
 }
 

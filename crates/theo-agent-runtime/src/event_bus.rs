@@ -1,6 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use theo_domain::event::DomainEvent;
+use theo_domain::graph_context::EventSink;
 
 /// Synchronous event listener trait.
 ///
@@ -137,6 +138,29 @@ impl Default for EventBus {
     }
 }
 
+/// Adapter that lets components outside `theo-agent-runtime` (e.g.
+/// `theo-application::GraphContextService`) publish through the bus
+/// without depending on the concrete `EventBus` type.
+///
+/// Implements `theo_domain::graph_context::EventSink`, so the service
+/// can accept it as `Arc<dyn EventSink>` and the runtime supplies it
+/// via `.with_event_sink(Arc::new(EventBusSink::new(bus.clone())))`.
+pub struct EventBusSink {
+    bus: Arc<EventBus>,
+}
+
+impl EventBusSink {
+    pub fn new(bus: Arc<EventBus>) -> Self {
+        Self { bus }
+    }
+}
+
+impl EventSink for EventBusSink {
+    fn emit(&self, event: DomainEvent) {
+        self.bus.publish(event);
+    }
+}
+
 /// Bridge listener: forwards events from sync EventBus to async broadcast channel.
 struct BroadcastListener {
     tx: tokio::sync::broadcast::Sender<DomainEvent>,
@@ -172,6 +196,13 @@ impl EventListener for NullEventListener {
 #[cfg(test)]
 pub struct CapturingListener {
     events: Mutex<Vec<DomainEvent>>,
+}
+
+#[cfg(test)]
+impl Default for CapturingListener {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[cfg(test)]
@@ -480,5 +511,56 @@ mod tests {
         assert_eq!(sync_listener.captured().len(), 1);
         let broadcast_event = rx.try_recv().expect("broadcast should receive");
         assert_eq!(broadcast_event.event_type, EventType::RunInitialized);
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // Phase 4 — EventBusSink adapter bridges theo-application's
+    // EventSink trait to this concrete bus (PLAN_CONTEXT_WIRING)
+    // ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn event_bus_sink_forwards_emitted_event_to_underlying_bus() {
+        use theo_domain::graph_context::EventSink;
+
+        let bus = Arc::new(EventBus::new());
+        let listener = Arc::new(CapturingListener::new());
+        bus.subscribe(listener.clone());
+
+        let sink = EventBusSink::new(bus.clone());
+        sink.emit(DomainEvent::new(
+            EventType::RetrievalExecuted,
+            "graph-context",
+            serde_json::json!({
+                "primary_files": 5,
+                "harm_removals": 1,
+                "compression_savings_tokens": 256,
+                "inline_slices_count": 0,
+            }),
+        ));
+
+        let captured = listener.captured();
+        assert_eq!(captured.len(), 1);
+        assert_eq!(captured[0].event_type, EventType::RetrievalExecuted);
+        assert_eq!(
+            captured[0].payload.get("primary_files").and_then(|v| v.as_u64()),
+            Some(5)
+        );
+    }
+
+    #[test]
+    fn event_bus_sink_is_dyn_compatible_with_event_sink_trait() {
+        // Smoke: EventBusSink is usable as Arc<dyn EventSink>, the exact
+        // shape `GraphContextService::with_event_sink` expects.
+        let bus = Arc::new(EventBus::new());
+        let sink: Arc<dyn theo_domain::graph_context::EventSink> =
+            Arc::new(EventBusSink::new(bus.clone()));
+        sink.emit(DomainEvent::new(
+            EventType::RetrievalExecuted,
+            "x",
+            serde_json::json!({}),
+        ));
+        // Publish went through: event appears in the bus log.
+        let logged = bus.events();
+        assert_eq!(logged.len(), 1);
     }
 }

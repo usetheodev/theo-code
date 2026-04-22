@@ -13,6 +13,12 @@ const MAX_MATCHES: usize = 100;
 
 pub struct GrepTool;
 
+impl Default for GrepTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GrepTool {
     pub fn new() -> Self {
         Self

@@ -71,11 +71,10 @@ pub fn check_path_denied(
 
 /// Expand ~ to the user's home directory.
 fn expand_home(path: &str) -> String {
-    if path.starts_with("~/") || path == "~" {
-        if let Ok(home) = std::env::var("HOME") {
+    if (path.starts_with("~/") || path == "~")
+        && let Ok(home) = std::env::var("HOME") {
             return path.replacen('~', &home, 1);
         }
-    }
     path.to_string()
 }
 

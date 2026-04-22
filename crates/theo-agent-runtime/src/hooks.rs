@@ -427,8 +427,10 @@ mod tests {
             .unwrap();
         }
 
-        let mut config = HookConfig::default();
-        config.timeout_secs = 1; // 1 second timeout
+        let config = HookConfig {
+            timeout_secs: 1, // 1 second timeout
+            ..HookConfig::default()
+        };
 
         let runner = HookRunner::new(dir.path(), config);
         let event = HookEvent {

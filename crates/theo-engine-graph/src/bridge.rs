@@ -442,8 +442,8 @@ pub fn build_graph(files: &[FileData]) -> (CodeGraph, BridgeStats) {
 
                 if let Some(tgt) = target_id {
                     // Only add Tests edge if target is a regular symbol (not a test)
-                    if let Some(node) = graph.get_node(&tgt) {
-                        if matches!(node.node_type, NodeType::Symbol) {
+                    if let Some(node) = graph.get_node(&tgt)
+                        && matches!(node.node_type, NodeType::Symbol) {
                             graph.add_edge(Edge {
                                 source: test_id.clone(),
                                 target: tgt,
@@ -452,7 +452,6 @@ pub fn build_graph(files: &[FileData]) -> (CodeGraph, BridgeStats) {
                             });
                             stats.edges_tests += 1;
                         }
-                    }
                 }
             }
         }
@@ -464,8 +463,8 @@ pub fn build_graph(files: &[FileData]) -> (CodeGraph, BridgeStats) {
         for dm in &file.data_models {
             let dm_id = type_node_id(&file.path, &dm.name);
 
-            if let Some(parent) = &dm.parent_type {
-                if let Some(parent_id) = resolve_by_name(parent, &symbol_index, &name_index) {
+            if let Some(parent) = &dm.parent_type
+                && let Some(parent_id) = resolve_by_name(parent, &symbol_index, &name_index) {
                     graph.add_edge(Edge {
                         source: dm_id.clone(),
                         target: parent_id,
@@ -474,7 +473,6 @@ pub fn build_graph(files: &[FileData]) -> (CodeGraph, BridgeStats) {
                     });
                     stats.edges_inherits += 1;
                 }
-            }
 
             for iface in &dm.implemented_interfaces {
                 if let Some(iface_id) = resolve_by_name(iface, &symbol_index, &name_index) {
@@ -531,11 +529,10 @@ fn resolve_by_name(
     }
 
     // Try name_index — only if unambiguous (single match)
-    if let Some(ids) = name_index.get(name) {
-        if ids.len() == 1 {
+    if let Some(ids) = name_index.get(name)
+        && ids.len() == 1 {
             return Some(ids[0].clone());
         }
-    }
 
     // Extract short name from qualified name (last segment)
     let short = name.rsplit("::").next().unwrap_or(name);
@@ -543,11 +540,10 @@ fn resolve_by_name(
         if let Some(id) = symbol_index.get(short) {
             return Some(id.clone());
         }
-        if let Some(ids) = name_index.get(short) {
-            if ids.len() == 1 {
+        if let Some(ids) = name_index.get(short)
+            && ids.len() == 1 {
                 return Some(ids[0].clone());
             }
-        }
     }
 
     None
@@ -579,7 +575,7 @@ pub fn walk_files(repo_root: &Path) -> Vec<FileData> {
         .hidden(true)
         .git_ignore(true)
         .filter_entry(|entry| {
-            if entry.file_type().map_or(false, |ft| ft.is_dir()) {
+            if entry.file_type().is_some_and(|ft| ft.is_dir()) {
                 let name = entry.file_name().to_str().unwrap_or("");
                 return !EXCLUDED_DIRS.contains(&name);
             }

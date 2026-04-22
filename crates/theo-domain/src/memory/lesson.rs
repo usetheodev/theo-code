@@ -27,17 +27,37 @@ pub enum LessonCategory {
 /// Lifecycle status. Newly written lessons start in `Quarantine` and are
 /// promoted after a successful recall hit inside the quarantine window.
 /// See `GateConfig::quarantine_days`.
+///
+/// `Invalidated` differentiates lesson retraction from
+/// `HypothesisStatus::Superseded` (causal chain). A lesson is
+/// `Invalidated` when a contradiction gate catches it post-promotion
+/// or when manual admin action retracts it. Backward compatible:
+/// legacy JSON containing `"retracted"` still deserializes via serde
+/// alias. Decision: meeting 20260420-221947 #13.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LessonStatus {
     Quarantine,
     Confirmed,
-    Retracted,
+    #[serde(alias = "retracted")]
+    Invalidated,
+}
+
+/// Current on-disk schema version for `MemoryLesson`. Incremented whenever
+/// a field is added or semantics change. Decision: meeting 20260420-221947 #11.
+pub const LESSON_SCHEMA_VERSION: u32 = 1;
+
+fn default_lesson_schema_version() -> u32 {
+    LESSON_SCHEMA_VERSION
 }
 
 /// One lesson entry. Persistent on disk as JSONL; in memory as a plain
 /// struct. `created_at_unix` / `promoted_at_unix` are wall-clock seconds
 /// to keep the on-disk format stable across time-zone changes.
+///
+/// `schema_version` is the forward-compatibility marker: readers that see
+/// `schema_version > LESSON_SCHEMA_VERSION` should emit a warning and
+/// continue rather than panic. Absent field (legacy JSON) defaults to 1.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MemoryLesson {
     pub id: String,
@@ -51,6 +71,9 @@ pub struct MemoryLesson {
     pub promoted_at_unix: Option<u64>,
     pub last_hit_at_unix: Option<u64>,
     pub hit_count: u32,
+    /// Schema version for forward compatibility. See `LESSON_SCHEMA_VERSION`.
+    #[serde(default = "default_lesson_schema_version")]
+    pub schema_version: u32,
 }
 
 /// Gate configuration. Production defaults enforce the 7 gates from the
@@ -134,12 +157,11 @@ pub fn normalize_lesson(text: &str) -> String {
                 out.push(lc);
             }
             prev_space = false;
-        } else if c.is_whitespace() {
-            if !prev_space {
+        } else if c.is_whitespace()
+            && !prev_space {
                 out.push(' ');
                 prev_space = true;
             }
-        }
     }
     out.trim().to_string()
 }
@@ -223,7 +245,7 @@ pub fn apply_gates(
 
 /// Promote a quarantine lesson to `Confirmed` if (a) it has at least one
 /// recall hit and (b) `quarantine_days` have elapsed since creation.
-/// No-op on Confirmed/Retracted lessons.
+/// No-op on Confirmed/Invalidated lessons.
 pub fn promote_if_ready(lesson: &mut MemoryLesson, config: &GateConfig) -> bool {
     if !matches!(lesson.status, LessonStatus::Quarantine) {
         return false;
@@ -263,7 +285,35 @@ mod tests {
             promoted_at_unix: None,
             last_hit_at_unix: None,
             hit_count: 0,
+            schema_version: LESSON_SCHEMA_VERSION,
         }
+    }
+
+    // ── P.3 schema_version ───────────────────────────────────────
+    #[test]
+    fn test_p3_lesson_schema_version_serialized() {
+        let l = apply_gates(candidate(), &[], &GateConfig::production()).expect("t");
+        let j = serde_json::to_value(&l).expect("t");
+        assert_eq!(j.get("schema_version").and_then(|v| v.as_u64()), Some(1));
+    }
+
+    #[test]
+    fn test_p3_lesson_legacy_json_without_schema_version_defaults_to_1() {
+        let legacy_json = r#"{
+            "id": "l-legacy",
+            "lesson": "legacy",
+            "trigger": "t",
+            "confidence": 0.75,
+            "evidence_event_ids": ["e1","e2"],
+            "category": "procedural",
+            "status": "quarantine",
+            "created_at_unix": 1,
+            "promoted_at_unix": null,
+            "last_hit_at_unix": null,
+            "hit_count": 0
+        }"#;
+        let back: MemoryLesson = serde_json::from_str(legacy_json).expect("t");
+        assert_eq!(back.schema_version, 1);
     }
 
     // ── RM4-AC-1 ─────────────────────────────────────────────────
@@ -337,7 +387,7 @@ mod tests {
     #[test]
     fn test_rm4_ac_7_clean_candidate_starts_quarantine() {
         let c = candidate();
-        let got = apply_gates(c, &[], &GateConfig::production()).unwrap();
+        let got = apply_gates(c, &[], &GateConfig::production()).expect("t");
         assert_eq!(got.status, LessonStatus::Quarantine);
         assert!(got.created_at_unix > 0);
     }
@@ -345,7 +395,7 @@ mod tests {
     // ── RM4-AC-8 ─────────────────────────────────────────────────
     #[test]
     fn test_rm4_ac_8_promote_requires_hits_and_window() {
-        let mut lesson = apply_gates(candidate(), &[], &GateConfig::production()).unwrap();
+        let mut lesson = apply_gates(candidate(), &[], &GateConfig::production()).expect("t");
         // No hits yet → no promotion even if time elapsed.
         lesson.created_at_unix = now_unix().saturating_sub(10 * 86_400);
         assert!(!promote_if_ready(&mut lesson, &GateConfig::production()));
@@ -358,20 +408,41 @@ mod tests {
 
     // ── RM4-AC-9 ─────────────────────────────────────────────────
     #[test]
-    fn test_rm4_ac_9_promote_no_op_after_retraction() {
-        let mut lesson = apply_gates(candidate(), &[], &GateConfig::production()).unwrap();
-        lesson.status = LessonStatus::Retracted;
+    fn test_rm4_ac_9_promote_no_op_after_invalidation() {
+        let mut lesson = apply_gates(candidate(), &[], &GateConfig::production()).expect("t");
+        lesson.status = LessonStatus::Invalidated;
         lesson.hit_count = 10;
         lesson.created_at_unix = 0; // ancient
         assert!(!promote_if_ready(&mut lesson, &GateConfig::production()));
     }
 
+    // ── P.4 backward compat ──────────────────────────────────────
+    #[test]
+    fn test_p4_legacy_retracted_still_deserializes_as_invalidated() {
+        let legacy_json = r#"{
+            "id": "l-legacy",
+            "lesson": "x",
+            "trigger": "t",
+            "confidence": 0.75,
+            "evidence_event_ids": ["e1","e2"],
+            "category": "procedural",
+            "status": "retracted",
+            "created_at_unix": 1,
+            "promoted_at_unix": null,
+            "last_hit_at_unix": null,
+            "hit_count": 0,
+            "schema_version": 1
+        }"#;
+        let back: MemoryLesson = serde_json::from_str(legacy_json).expect("t");
+        assert_eq!(back.status, LessonStatus::Invalidated);
+    }
+
     // ── RM4-AC-10 ────────────────────────────────────────────────
     #[test]
     fn test_rm4_ac_10_serde_roundtrip_preserves_status() {
-        let l = apply_gates(candidate(), &[], &GateConfig::production()).unwrap();
-        let j = serde_json::to_string(&l).unwrap();
-        let back: MemoryLesson = serde_json::from_str(&j).unwrap();
+        let l = apply_gates(candidate(), &[], &GateConfig::production()).expect("t");
+        let j = serde_json::to_string(&l).expect("t");
+        let back: MemoryLesson = serde_json::from_str(&j).expect("t");
         assert_eq!(back, l);
     }
 

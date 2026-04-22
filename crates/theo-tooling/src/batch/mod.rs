@@ -15,6 +15,12 @@ use theo_domain::tool::{
 
 pub struct BatchTool;
 
+impl Default for BatchTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BatchTool {
     pub fn new() -> Self {
         Self

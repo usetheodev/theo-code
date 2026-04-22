@@ -221,11 +221,10 @@ fn get_call_method_name(node: &Node, source: &str) -> Option<String> {
 
     // Fallback for method_call: first identifier child
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i as u32) {
-            if child.kind() == "identifier" {
+        if let Some(child) = node.child(i as u32)
+            && child.kind() == "identifier" {
                 return Some(node_text(&child, source));
             }
-        }
     }
 
     None
@@ -274,11 +273,10 @@ fn find_first_symbol_in_call(node: &Node, source: &str) -> Option<String> {
                 let text = node_text(&child, source);
                 return Some(text.trim_start_matches(':').to_string());
             }
-            if child.kind() == "argument_list" || child.kind() == "arguments" {
-                if let Some(sym) = find_first_symbol_in_node(&child, source) {
+            if (child.kind() == "argument_list" || child.kind() == "arguments")
+                && let Some(sym) = find_first_symbol_in_node(&child, source) {
                     return Some(sym);
                 }
-            }
         }
     }
     None
@@ -287,12 +285,11 @@ fn find_first_symbol_in_call(node: &Node, source: &str) -> Option<String> {
 /// Find the first symbol in a node's children.
 fn find_first_symbol_in_node(node: &Node, source: &str) -> Option<String> {
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i as u32) {
-            if child.kind() == "simple_symbol" || child.kind() == "symbol" {
+        if let Some(child) = node.child(i as u32)
+            && (child.kind() == "simple_symbol" || child.kind() == "symbol") {
                 let text = node_text(&child, source);
                 return Some(text.trim_start_matches(':').to_string());
             }
-        }
     }
     None
 }
@@ -320,8 +317,8 @@ fn find_to_pair_in_subtree(node: &Node, source: &str) -> Option<String> {
         if let Some(key_node) = node.child_by_field_name("key") {
             let key_text = node_text_ref(&key_node, source);
             let key_name = key_text.trim_start_matches(':').trim_end_matches(':');
-            if key_name == "to" {
-                if let Some(val_node) = node.child_by_field_name("value") {
+            if key_name == "to"
+                && let Some(val_node) = node.child_by_field_name("value") {
                     let val_text = node_text(&val_node, source);
                     let val_str = common::strip_quotes(&val_text);
                     // Extract the action part after '#'
@@ -332,17 +329,15 @@ fn find_to_pair_in_subtree(node: &Node, source: &str) -> Option<String> {
                         }
                     }
                 }
-            }
         }
     }
 
     // Recurse into children
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i as u32) {
-            if let Some(action) = find_to_pair_in_subtree(&child, source) {
+        if let Some(child) = node.child(i as u32)
+            && let Some(action) = find_to_pair_in_subtree(&child, source) {
                 return Some(action);
             }
-        }
     }
     None
 }
@@ -460,6 +455,6 @@ end
 "#,
         );
         assert_eq!(ext.interfaces.len(), 4);
-        assert!(ext.sinks.len() >= 1);
+        assert!(!ext.sinks.is_empty());
     }
 }

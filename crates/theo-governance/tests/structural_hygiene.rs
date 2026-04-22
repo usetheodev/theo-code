@@ -61,15 +61,16 @@ fn no_println_in_library_code() {
                         continue;
                     }
                     // Only flag println!, not eprintln! (eprintln is acceptable for warnings)
-                    if trimmed.contains("println!(") || trimmed.contains("print!(") {
-                        if !trimmed.contains("eprintln") && !trimmed.contains("eprint!") {
-                            violations.push(format!(
-                                "{}:{}: {}",
-                                file.strip_prefix(&root).unwrap_or(&file).display(),
-                                i + 1,
-                                trimmed
-                            ));
-                        }
+                    if (trimmed.contains("println!(") || trimmed.contains("print!("))
+                        && !trimmed.contains("eprintln")
+                        && !trimmed.contains("eprint!")
+                    {
+                        violations.push(format!(
+                            "{}:{}: {}",
+                            file.strip_prefix(&root).unwrap_or(&file).display(),
+                            i + 1,
+                            trimmed
+                        ));
                     }
                 }
             }
@@ -182,7 +183,7 @@ fn all_workspace_crates_have_package_section() {
     let workspace_members: Vec<&str> = root_cargo
         .lines()
         .filter(|l| l.trim().starts_with('"') && (l.contains("crates/") || l.contains("apps/")))
-        .filter_map(|l| l.trim().trim_matches(|c| c == '"' || c == ',').split('/').last())
+        .filter_map(|l| l.trim().trim_matches(|c| c == '"' || c == ',').split('/').next_back())
         .collect();
 
     for dir in &["crates", "apps"] {

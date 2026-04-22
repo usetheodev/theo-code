@@ -171,7 +171,7 @@ pub fn lookup(wiki_dir: &Path, query: &str, max_results: usize) -> Vec<WikiLooku
     let manifest_hash = wiki_dir
         .parent()
         .and_then(|p| p.parent())
-        .and_then(|project_dir| super::persistence::load_manifest(project_dir))
+        .and_then(super::persistence::load_manifest)
         .map(|m| m.graph_hash);
 
     // Collect all wiki pages with metadata
@@ -421,11 +421,10 @@ fn extract_source_ids_from_content(content: &str) -> HashSet<&str> {
     for line in content.lines() {
         if line.starts_with("| `") {
             // Extract content between backticks: | `source_id` | ...
-            if let Some(start) = line.find('`') {
-                if let Some(end) = line[start + 1..].find('`') {
+            if let Some(start) = line.find('`')
+                && let Some(end) = line[start + 1..].find('`') {
                     sources.insert(&line[start + 1..start + 1 + end]);
                 }
-            }
         }
     }
     sources

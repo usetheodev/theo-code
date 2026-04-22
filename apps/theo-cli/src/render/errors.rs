@@ -3,6 +3,7 @@
 //! All user-facing error messages should be constructed through this
 //! module so they consistently use styled icons, colors, and layout.
 
+#![allow(dead_code)] // Scaffolded helpers — kept for upcoming TUI features.
 use crate::render::style::{StyleCaps, bold, dim, error, warn};
 
 /// A structured error message.

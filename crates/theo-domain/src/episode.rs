@@ -61,6 +61,10 @@ pub struct EpisodeSummary {
     /// What kind of knowledge this summary represents.
     #[serde(default)]
     pub memory_kind: MemoryKind,
+    /// Token usage accumulated across LLM calls for this episode.
+    /// Added in Phase 1 T1.1 — serde default keeps legacy JSONs readable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_usage: Option<crate::budget::TokenUsage>,
 }
 
 /// Machine-readable episode summary for agent resume.
@@ -100,11 +104,13 @@ pub enum EpisodeOutcome {
 /// Knowledge Objects [arxiv 2603.17781], MemArchitect [arxiv 2603.18330].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
+#[derive(Default)]
 pub enum MemoryKind {
     /// Runtime-only context, never persisted across episodes.
     /// Evicts on turn/episode boundary.
     Ephemeral,
     /// Session-scoped learnings from execution. Evicts by LRU + staleness.
+    #[default]
     Episodic,
     /// Cross-session knowledge, persists, retrieved on demand.
     Reusable,
@@ -113,11 +119,6 @@ pub enum MemoryKind {
     Canonical,
 }
 
-impl Default for MemoryKind {
-    fn default() -> Self {
-        MemoryKind::Episodic
-    }
-}
 
 impl MemoryKind {
     /// Whether this kind of memory should survive episode compaction.
@@ -136,8 +137,10 @@ impl MemoryKind {
 /// Defines retrieval eligibility and eviction behavior per tier.
 /// Transitions: Active → Cooling → Archived (one-way, except LRU re-promotion).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum MemoryLifecycle {
     /// Runtime: always eligible for assembler, high priority.
+    #[default]
     Active,
     /// Post-episode: eligible only if usefulness > threshold.
     Cooling,
@@ -145,11 +148,6 @@ pub enum MemoryLifecycle {
     Archived,
 }
 
-impl Default for MemoryLifecycle {
-    fn default() -> Self {
-        MemoryLifecycle::Active
-    }
-}
 
 impl MemoryLifecycle {
     /// Whether this tier is eligible for automatic context assembly.
@@ -382,8 +380,10 @@ impl FailureFingerprint {
 
 /// Time-to-live policy for episode summaries.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Default)]
 pub enum TtlPolicy {
     /// Deleted when the originating run ends.
+    #[default]
     RunScoped,
     /// Deleted after the specified number of seconds.
     TimeScoped { seconds: u64 },
@@ -391,11 +391,6 @@ pub enum TtlPolicy {
     Permanent,
 }
 
-impl Default for TtlPolicy {
-    fn default() -> Self {
-        TtlPolicy::RunScoped
-    }
-}
 
 /// Infer TTL policy from constraint scopes in the event stream.
 ///
@@ -617,6 +612,7 @@ impl EpisodeSummary {
             ttl_policy,
             lifecycle: MemoryLifecycle::Active,
             memory_kind,
+            token_usage: None,
         }
     }
 }
@@ -1047,7 +1043,7 @@ mod tests {
     #[test]
     fn lifecycle_backward_compat() {
         let mut val =
-            serde_json::to_value(&EpisodeSummary::from_events("r-1", None, "t", &[])).unwrap();
+            serde_json::to_value(EpisodeSummary::from_events("r-1", None, "t", &[])).unwrap();
         val.as_object_mut().unwrap().remove("lifecycle");
         let back: EpisodeSummary = serde_json::from_value(val).unwrap();
         assert_eq!(back.lifecycle, MemoryLifecycle::Active);
@@ -1231,7 +1227,7 @@ mod tests {
     #[test]
     fn memory_kind_backward_compat_deserialization() {
         let mut val =
-            serde_json::to_value(&EpisodeSummary::from_events("r-1", None, "t", &[])).unwrap();
+            serde_json::to_value(EpisodeSummary::from_events("r-1", None, "t", &[])).unwrap();
         val.as_object_mut().unwrap().remove("memory_kind");
         let back: EpisodeSummary = serde_json::from_value(val).unwrap();
         assert_eq!(back.memory_kind, MemoryKind::Episodic);

@@ -273,9 +273,7 @@ fn extract_files_from_content(
 fn eval_graphctx_retrieval_quality() {
     use theo_engine_graph::bridge;
     use theo_engine_graph::cluster::{ClusterAlgorithm, hierarchical_cluster};
-    use theo_engine_retrieval::assembly::{
-        assemble_by_symbol, assemble_files_direct, assemble_greedy,
-    };
+    use theo_engine_retrieval::assembly::{assemble_by_symbol, assemble_files_direct};
     use theo_engine_retrieval::search::FileBm25;
     use theo_engine_retrieval::search::MultiSignalScorer;
 
@@ -293,7 +291,7 @@ fn eval_graphctx_retrieval_quality() {
         stats.files_parsed, stats.files_found, stats.symbols_extracted
     );
 
-    let (mut graph, _bridge_stats) = bridge::build_graph(&files);
+    let (graph, _bridge_stats) = bridge::build_graph(&files);
     eprintln!(
         "Graph: {} nodes, {} edges",
         graph.node_count(),
@@ -1178,7 +1176,6 @@ fn eval_hybrid_search() {
 fn eval_graph_attention_ab() {
     use theo_engine_graph::bridge;
     use theo_engine_graph::cluster::{ClusterAlgorithm, hierarchical_cluster};
-    use theo_engine_retrieval::assembly::assemble_greedy;
     use theo_engine_retrieval::search::MultiSignalScorer;
 
     let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

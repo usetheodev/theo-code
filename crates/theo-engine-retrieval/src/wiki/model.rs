@@ -211,6 +211,7 @@ impl AuthorityTier {
         }
     }
 
+    #[allow(clippy::should_implement_trait)] // Infallible variant mapper; fits return type better.
     pub fn from_str(s: &str) -> Self {
         match s {
             "deterministic" => AuthorityTier::Deterministic,

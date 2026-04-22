@@ -4,6 +4,7 @@
 //! the current value without locks. A background task listens for
 //! `Event::Resize` events and updates the atomic.
 
+#![allow(dead_code)] // Scaffolded helpers — kept for upcoming TUI features.
 use std::sync::atomic::{AtomicU16, Ordering};
 
 static TERM_WIDTH: AtomicU16 = AtomicU16::new(80);

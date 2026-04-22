@@ -330,7 +330,7 @@ mod tests {
     #[tokio::test]
     async fn test_rm1_ac_8_end_to_end_with_null_and_real_provider() {
         let mut e = MemoryEngine::new();
-        e.register(Arc::new(NullMemoryProvider::default()));
+        e.register(Arc::new(NullMemoryProvider));
         let (real, _) = Tracer::new("real");
         e.register(real);
         let out = e.prefetch("context").await;

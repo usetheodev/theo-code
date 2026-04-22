@@ -157,11 +157,10 @@ impl LanguageBehavior for TypeScriptBehavior {
         if text.starts_with("export") {
             return Some(Visibility::Public);
         }
-        if let Some(parent) = node.parent() {
-            if parent.kind() == "export_statement" {
+        if let Some(parent) = node.parent()
+            && parent.kind() == "export_statement" {
                 return Some(Visibility::Public);
             }
-        }
         None
     }
 
@@ -635,8 +634,8 @@ impl LanguageBehavior for CSharpBehavior {
     fn parse_visibility(&self, node: &Node, source: &str) -> Option<Visibility> {
         // C# uses `modifier` child nodes (includes `internal`)
         for i in 0..node.child_count() {
-            if let Some(child) = node.child(i as u32) {
-                if child.kind() == "modifier" {
+            if let Some(child) = node.child(i as u32)
+                && child.kind() == "modifier" {
                     let mod_text = match child.utf8_text(source.as_bytes()) {
                         Ok(t) => t,
                         Err(_) => continue,
@@ -645,7 +644,6 @@ impl LanguageBehavior for CSharpBehavior {
                         return Some(vis);
                     }
                 }
-            }
         }
         // Fallback: check first word of node text
         let text = node.utf8_text(source.as_bytes()).ok()?;
@@ -690,14 +688,13 @@ impl LanguageBehavior for GoBehavior {
         // Go methods have a receiver type — extract it from method_declaration
         if node.kind() == "method_declaration" {
             for i in 0..node.child_count() {
-                if let Some(child) = node.child(i as u32) {
-                    if child.kind() == "parameter_list" {
+                if let Some(child) = node.child(i as u32)
+                    && child.kind() == "parameter_list" {
                         let text = child.utf8_text(source.as_bytes()).ok()?;
                         let cleaned = text.trim_matches(|c| c == '(' || c == ')');
                         let type_name = cleaned.split_whitespace().last()?.trim_start_matches('*');
                         return Some(type_name.to_string());
                     }
-                }
             }
         }
         find_parent_generic(node, source)
@@ -806,11 +803,10 @@ impl LanguageBehavior for RustBehavior {
 
     fn parse_visibility(&self, node: &Node, _source: &str) -> Option<Visibility> {
         for i in 0..node.child_count() {
-            if let Some(child) = node.child(i as u32) {
-                if child.kind() == "visibility_modifier" {
+            if let Some(child) = node.child(i as u32)
+                && child.kind() == "visibility_modifier" {
                     return Some(Visibility::Public);
                 }
-            }
         }
         Some(Visibility::Private)
     }
@@ -1027,11 +1023,10 @@ fn has_preceding_annotation(node: &Node, source: &str, names: &[&str]) -> bool {
             if kind == "modifiers" {
                 // Walk inside modifiers for annotations
                 for j in 0..child.child_count() {
-                    if let Some(mod_child) = child.child(j as u32) {
-                        if check_annotation_node(&mod_child, source, names) {
+                    if let Some(mod_child) = child.child(j as u32)
+                        && check_annotation_node(&mod_child, source, names) {
                             return true;
                         }
-                    }
                 }
             }
             // Direct annotation child (some grammar versions)
@@ -1064,8 +1059,8 @@ fn has_preceding_annotation(node: &Node, source: &str, names: &[&str]) -> bool {
 /// Check if a single CST node is an annotation matching one of the target names.
 fn check_annotation_node(node: &Node, source: &str, names: &[&str]) -> bool {
     let kind = node.kind();
-    if kind == "marker_annotation" || kind == "annotation" {
-        if let Ok(text) = node.utf8_text(source.as_bytes()) {
+    if (kind == "marker_annotation" || kind == "annotation")
+        && let Ok(text) = node.utf8_text(source.as_bytes()) {
             let ann_name = text.trim_start_matches('@');
             for name in names {
                 if ann_name == *name || ann_name.starts_with(&format!("{name}(")) {
@@ -1073,7 +1068,6 @@ fn check_annotation_node(node: &Node, source: &str, names: &[&str]) -> bool {
                 }
             }
         }
-    }
     false
 }
 
@@ -1086,15 +1080,14 @@ fn has_preceding_attribute(node: &Node, source: &str, names: &[&str]) -> bool {
     for i in 0..node.child_count() {
         if let Some(child) = node.child(i as u32) {
             let kind = child.kind();
-            if kind == "attribute_list" || kind == "attribute" {
-                if let Ok(text) = child.utf8_text(source.as_bytes()) {
+            if (kind == "attribute_list" || kind == "attribute")
+                && let Ok(text) = child.utf8_text(source.as_bytes()) {
                     for name in names {
                         if text.contains(name) {
                             return true;
                         }
                     }
                 }
-            }
         }
     }
 
@@ -1102,15 +1095,14 @@ fn has_preceding_attribute(node: &Node, source: &str, names: &[&str]) -> bool {
     let mut sib = node.prev_named_sibling();
     while let Some(s) = sib {
         let kind = s.kind();
-        if kind == "attribute_list" || kind == "attribute" {
-            if let Ok(text) = s.utf8_text(source.as_bytes()) {
+        if (kind == "attribute_list" || kind == "attribute")
+            && let Ok(text) = s.utf8_text(source.as_bytes()) {
                 for name in names {
                     if text.contains(name) {
                         return true;
                     }
                 }
             }
-        }
         if kind != "attribute_list" && kind != "attribute" && kind != "modifier" {
             break;
         }
@@ -1126,8 +1118,8 @@ fn has_preceding_attribute(node: &Node, source: &str, names: &[&str]) -> bool {
 fn has_preceding_rust_attribute(node: &Node, source: &str, names: &[&str]) -> bool {
     let mut sib = node.prev_named_sibling();
     while let Some(s) = sib {
-        if s.kind() == "attribute_item" {
-            if let Ok(text) = s.utf8_text(source.as_bytes()) {
+        if s.kind() == "attribute_item"
+            && let Ok(text) = s.utf8_text(source.as_bytes()) {
                 // text looks like `#[test]` or `#[tokio::test]`
                 let inner = text.trim_start_matches("#[").trim_end_matches(']');
                 for name in names {
@@ -1136,7 +1128,6 @@ fn has_preceding_rust_attribute(node: &Node, source: &str, names: &[&str]) -> bo
                     }
                 }
             }
-        }
         // Attribute items can be stacked — keep walking
         if s.kind() != "attribute_item" && s.kind() != "line_comment" {
             break;
@@ -1237,22 +1228,17 @@ fn extract_block_or_line_comment(node: &Node, source: &str) -> Option<String> {
 /// Python: extract docstring from the first expression_statement in the body.
 fn extract_python_docstring(node: &Node, source: &str) -> Option<String> {
     for i in 0..node.named_child_count() {
-        if let Some(child) = node.named_child(i as u32) {
-            if child.kind() == "block" {
-                if let Some(first_stmt) = child.named_child(0) {
-                    if first_stmt.kind() == "expression_statement" {
-                        if let Some(str_node) = first_stmt.named_child(0) {
-                            if str_node.kind() == "string"
-                                || str_node.kind() == "concatenated_string"
+        if let Some(child) = node.named_child(i as u32)
+            && child.kind() == "block"
+                && let Some(first_stmt) = child.named_child(0)
+                    && first_stmt.kind() == "expression_statement"
+                        && let Some(str_node) = first_stmt.named_child(0)
+                            && (str_node.kind() == "string"
+                                || str_node.kind() == "concatenated_string")
                             {
                                 let text = str_node.utf8_text(source.as_bytes()).ok()?;
                                 return Some(clean_python_docstring(text));
                             }
-                        }
-                    }
-                }
-            }
-        }
     }
     None
 }

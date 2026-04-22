@@ -99,15 +99,12 @@ pub fn is_index_stale(project_dir: &Path) -> bool {
 
     for entry in walker.flatten() {
         let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) == Some("rs") {
-            if let Ok(meta) = std::fs::metadata(path) {
-                if let Ok(mtime) = meta.modified() {
-                    if mtime > index_mtime {
+        if path.extension().and_then(|e| e.to_str()) == Some("rs")
+            && let Ok(meta) = std::fs::metadata(path)
+                && let Ok(mtime) = meta.modified()
+                    && mtime > index_mtime {
                         return true; // Source newer than index
                     }
-                }
-            }
-        }
     }
 
     false

@@ -5,6 +5,7 @@
 //!
 //! Pi-mono ref: `packages/tui/src/stdin-buffer.ts`
 
+#![allow(dead_code)] // Scaffolded helpers — kept for upcoming TUI features.
 /// A complete input event extracted from the buffer.
 #[derive(Debug, Clone, PartialEq)]
 pub enum InputEvent {
@@ -136,8 +137,7 @@ fn csi_sequence_len(data: &[u8]) -> Option<usize> {
     if data.len() < 3 {
         return None;
     }
-    for i in 2..data.len() {
-        let b = data[i];
+    for (i, &b) in data.iter().enumerate().skip(2) {
         if (0x40..=0x7E).contains(&b) {
             return Some(i + 1);
         }

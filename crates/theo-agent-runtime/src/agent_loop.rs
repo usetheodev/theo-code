@@ -207,7 +207,14 @@ impl AgentLoop {
             engine = engine.with_graph_context(gc.clone());
         }
 
-        engine.execute_with_history(history).await
+        // Wrap execute_with_history + record_session_exit so headless
+        // callers (`theo -p "task"`, `AgentLoop::run_with_history`) hit
+        // the same shutdown path as `execute()`. Otherwise episode
+        // summaries, tokio::fs metrics, and the `on_session_end` memory
+        // hook silently skip (Phase 0 T0.1 wiring depends on this).
+        let result = engine.execute_with_history(history).await;
+        engine.record_session_exit_public(&result).await;
+        result
     }
 
     fn attach_listeners(&self, event_bus: &Arc<EventBus>) {

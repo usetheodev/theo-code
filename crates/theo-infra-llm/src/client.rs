@@ -102,11 +102,10 @@ impl LlmClient {
 
     /// Resolve the effective API key: dynamic resolver takes precedence over static.
     async fn resolve_api_key(&self) -> Option<String> {
-        if let Some(ref resolver) = self.api_key_resolver {
-            if let Some(key) = resolver.resolve(&self.model).await {
+        if let Some(ref resolver) = self.api_key_resolver
+            && let Some(key) = resolver.resolve(&self.model).await {
                 return Some(key);
             }
-        }
         self.api_key.clone()
     }
 
@@ -161,14 +160,13 @@ impl LlmClient {
                 .as_ref()
                 .is_some_and(|tc| !tc.is_empty());
 
-            if !has_tool_calls {
-                if let Some(ref content) = choice.message.content {
+            if !has_tool_calls
+                && let Some(ref content) = choice.message.content {
                     let hermes_calls = hermes::parse_hermes_tool_calls(content);
                     if !hermes_calls.is_empty() {
                         choice.message.tool_calls = Some(hermes_calls);
                     }
                 }
-            }
         }
 
         Ok(chat_response)
@@ -273,8 +271,8 @@ impl LlmClient {
                     let line = buffer[..newline_pos].to_string();
                     buffer = buffer[newline_pos + 1..].to_string();
 
-                    if let Some(data) = line.strip_prefix("data: ") {
-                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
+                    if let Some(data) = line.strip_prefix("data: ")
+                        && let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
                             let event_type =
                                 json.get("type").and_then(|v| v.as_str()).unwrap_or("");
 
@@ -302,7 +300,6 @@ impl LlmClient {
                                 _ => {}
                             }
                         }
-                    }
                 }
             }
 

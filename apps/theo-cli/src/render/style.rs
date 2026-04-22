@@ -7,6 +7,7 @@
 //! current [`StyleCaps`]. When colors are disabled (NO_COLOR, piped output),
 //! the wrappers become no-ops and the raw text is emitted unchanged.
 
+#![allow(dead_code)] // Scaffolded helpers — kept for upcoming TUI features.
 use std::fmt;
 
 use crossterm::style::Stylize;
@@ -193,6 +194,7 @@ pub fn ansi_reset() -> &'static str {
 }
 
 #[cfg(test)]
+#[allow(unused_imports)]
 mod tests {
     use super::*;
 

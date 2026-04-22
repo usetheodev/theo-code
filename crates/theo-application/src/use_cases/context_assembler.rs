@@ -84,7 +84,7 @@ impl ContextAssembler {
     /// - 10000+ files → 32000 tokens (maximum)
     pub fn compute_adaptive_budget(file_count: usize) -> usize {
         let raw = (500.0 * (file_count as f64).sqrt()) as usize;
-        raw.max(4000).min(32000)
+        raw.clamp(4000, 32000)
     }
 
     /// Compute budget allocation ratios.
@@ -410,7 +410,7 @@ impl ContextAssembler {
 /// Simple token estimation: ~4 chars per token (industry heuristic).
 fn estimate_tokens(text: &str) -> usize {
     // Ceiling division to be conservative
-    (text.len() + 3) / 4
+    text.len().div_ceil(4)
 }
 
 /// Extract a brief summary from an event payload for context display.
@@ -425,12 +425,11 @@ fn summarize_payload(payload: &serde_json::Value) -> String {
             "constraint",
             "error",
         ] {
-            if let Some(val) = obj.get(*key) {
-                if let Some(s) = val.as_str() {
+            if let Some(val) = obj.get(*key)
+                && let Some(s) = val.as_str() {
                     let truncated = if s.len() > 80 { &s[..80] } else { s };
                     return truncated.to_string();
                 }
-            }
         }
     }
     if payload.is_null() {

@@ -77,14 +77,13 @@ fn detect_project_name(project_dir: &Path, project_type: ProjectType) -> String 
             if let Ok(content) = std::fs::read_to_string(project_dir.join("Cargo.toml")) {
                 for line in content.lines() {
                     let trimmed = line.trim();
-                    if trimmed.starts_with("name") && trimmed.contains('=') {
-                        if let Some(val) = trimmed.split('=').nth(1) {
+                    if trimmed.starts_with("name") && trimmed.contains('=')
+                        && let Some(val) = trimmed.split('=').nth(1) {
                             let name = val.trim().trim_matches('"').trim_matches('\'');
                             if !name.is_empty() {
                                 return name.to_string();
                             }
                         }
-                    }
                 }
             }
         }
@@ -93,8 +92,8 @@ fn detect_project_name(project_dir: &Path, project_type: ProjectType) -> String 
                 // Simple JSON extraction for "name" field.
                 for line in content.lines() {
                     let trimmed = line.trim().trim_start_matches('{').trim();
-                    if trimmed.starts_with("\"name\"") {
-                        if let Some(val) = trimmed.split(':').nth(1) {
+                    if trimmed.starts_with("\"name\"")
+                        && let Some(val) = trimmed.split(':').nth(1) {
                             let name = val
                                 .trim()
                                 .trim_end_matches('}')
@@ -105,7 +104,6 @@ fn detect_project_name(project_dir: &Path, project_type: ProjectType) -> String 
                                 return name.to_string();
                             }
                         }
-                    }
                 }
             }
         }
@@ -113,25 +111,22 @@ fn detect_project_name(project_dir: &Path, project_type: ProjectType) -> String 
             if let Ok(content) = std::fs::read_to_string(project_dir.join("pyproject.toml")) {
                 for line in content.lines() {
                     let trimmed = line.trim();
-                    if trimmed.starts_with("name") && trimmed.contains('=') {
-                        if let Some(val) = trimmed.split('=').nth(1) {
+                    if trimmed.starts_with("name") && trimmed.contains('=')
+                        && let Some(val) = trimmed.split('=').nth(1) {
                             let name = val.trim().trim_matches('"').trim_matches('\'');
                             if !name.is_empty() {
                                 return name.to_string();
                             }
                         }
-                    }
                 }
             }
         }
         ProjectType::Go => {
-            if let Ok(content) = std::fs::read_to_string(project_dir.join("go.mod")) {
-                if let Some(line) = content.lines().next() {
-                    if let Some(module) = line.strip_prefix("module ") {
+            if let Ok(content) = std::fs::read_to_string(project_dir.join("go.mod"))
+                && let Some(line) = content.lines().next()
+                    && let Some(module) = line.strip_prefix("module ") {
                         return module.trim().to_string();
                     }
-                }
-            }
         }
         ProjectType::Unknown => {}
     }

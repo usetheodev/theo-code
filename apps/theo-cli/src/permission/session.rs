@@ -3,6 +3,7 @@
 //! The session is keyed by `(tool_name, summary_key)`. Any request
 //! matching a persistent decision skips the prompt entirely.
 
+#![allow(dead_code)] // Scaffolded helpers — kept for upcoming TUI features.
 use std::collections::HashMap;
 use std::sync::RwLock;
 
