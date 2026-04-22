@@ -368,6 +368,15 @@ pub struct AgentConfig {
     /// runs the LLM consolidation step. When `None`, `run_autodream`
     /// becomes a no-op even if `autodream_enabled == true`.
     pub autodream: Option<crate::autodream::AutodreamHandle>,
+    /// Phase 3 of PLAN_AUTO_EVOLUTION_SOTA: tool iterations between
+    /// background skill-reviewer spawns, provided no skill was
+    /// created during the task. `0` disables. Default: 10
+    /// (`referencias/hermes-agent/run_agent.py:1517-1520`).
+    pub skill_review_nudge_interval: usize,
+    /// Phase 3 of PLAN_AUTO_EVOLUTION_SOTA: reviewer invoked when the
+    /// skill nudge counter fires. `None` disables the feature even
+    /// with a positive interval.
+    pub skill_reviewer: Option<crate::skill_reviewer::SkillReviewerHandle>,
 }
 
 /// Debug-friendly wrapper around `Arc<dyn MemoryProvider>` so `AgentConfig`
@@ -445,6 +454,8 @@ impl Default for AgentConfig {
             autodream_enabled: true,
             autodream_timeout_secs: 60,
             autodream: None,
+            skill_review_nudge_interval: 10,
+            skill_reviewer: None,
         }
     }
 }

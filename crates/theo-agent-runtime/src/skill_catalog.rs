@@ -161,6 +161,221 @@ fn collect_linked_files(skill_dir: &Path) -> Vec<PathBuf> {
     out
 }
 
+// ---------------------------------------------------------------------------
+// Phase 3 (PLAN_AUTO_EVOLUTION_SOTA) — CRUD operations + origin tracking.
+// ---------------------------------------------------------------------------
+
+/// Constants lifted from Hermes's skill_manager_tool.py:83-104.
+pub const MAX_SKILL_NAME_LENGTH: usize = 64;
+pub const MAX_SKILL_DESCRIPTION_LENGTH: usize = 1024;
+pub const MAX_SKILL_CONTENT_CHARS: usize = 100_000;
+pub const ALLOWED_SUPPORTING_SUBDIRS: &[&str] = &["references", "templates", "scripts", "assets"];
+
+/// Error type for catalog write operations.
+#[derive(Debug, thiserror::Error)]
+pub enum SkillCatalogError {
+    #[error("skill name is empty")]
+    EmptyName,
+    #[error("skill name exceeds {max} characters: {name}")]
+    NameTooLong { name: String, max: usize },
+    #[error(
+        "skill name '{name}' must match [a-z0-9][a-z0-9._-]* (lowercase letters, digits, . _ -)"
+    )]
+    InvalidName { name: String },
+    #[error("skill '{name}' not found")]
+    NotFound { name: String },
+    #[error("skill '{name}' already exists — use 'edit' or 'patch' instead")]
+    AlreadyExists { name: String },
+    #[error("skill description exceeds {max} characters")]
+    DescriptionTooLong { max: usize },
+    #[error("skill body exceeds {max} characters")]
+    BodyTooLong { max: usize },
+    #[error("supporting directory must be one of {allowed:?}, got '{got}'")]
+    InvalidSubdir { got: String, allowed: &'static [&'static str] },
+    #[error("patch target not found: {needle}")]
+    PatchTargetMissing { needle: String },
+    #[error("io error: {0}")]
+    Io(#[from] std::io::Error),
+}
+
+/// Validate a proposed skill name against the Hermes-compatible regex.
+/// We do not take `regex` as a dep just for this — the validation is
+/// simple enough to unroll by hand.
+fn validate_skill_name(name: &str) -> Result<(), SkillCatalogError> {
+    if name.is_empty() {
+        return Err(SkillCatalogError::EmptyName);
+    }
+    if name.len() > MAX_SKILL_NAME_LENGTH {
+        return Err(SkillCatalogError::NameTooLong {
+            name: name.to_string(),
+            max: MAX_SKILL_NAME_LENGTH,
+        });
+    }
+    let mut chars = name.chars();
+    let first = chars.next().unwrap();
+    let first_ok = first.is_ascii_lowercase() || first.is_ascii_digit();
+    if !first_ok {
+        return Err(SkillCatalogError::InvalidName {
+            name: name.to_string(),
+        });
+    }
+    for c in chars {
+        let ok = c.is_ascii_lowercase() || c.is_ascii_digit() || c == '.' || c == '_' || c == '-';
+        if !ok {
+            return Err(SkillCatalogError::InvalidName {
+                name: name.to_string(),
+            });
+        }
+    }
+    Ok(())
+}
+
+/// Create a new skill under `<home>/skills/<name>/SKILL.md`.
+///
+/// `frontmatter` is passed as a borrowed map so callers can hand us the
+/// exact keys they want serialized (description, category, origin,
+/// etc.). The `origin` key is the only one we treat as semantically
+/// meaningful — its value is persisted verbatim so downstream policy
+/// checks can read it back. Matches Hermes `_create_skill`
+/// (`skill_manager_tool.py:304-355`).
+pub fn create_skill(
+    home: &Path,
+    name: &str,
+    frontmatter: &BTreeMap<String, String>,
+    body: &str,
+) -> Result<PathBuf, SkillCatalogError> {
+    validate_skill_name(name)?;
+    if let Some(desc) = frontmatter.get("description")
+        && desc.len() > MAX_SKILL_DESCRIPTION_LENGTH
+    {
+        return Err(SkillCatalogError::DescriptionTooLong {
+            max: MAX_SKILL_DESCRIPTION_LENGTH,
+        });
+    }
+    if body.len() > MAX_SKILL_CONTENT_CHARS {
+        return Err(SkillCatalogError::BodyTooLong {
+            max: MAX_SKILL_CONTENT_CHARS,
+        });
+    }
+    let dir = home.join("skills").join(name);
+    if dir.exists() {
+        return Err(SkillCatalogError::AlreadyExists {
+            name: name.to_string(),
+        });
+    }
+    fs::create_dir_all(&dir)?;
+    let mut raw = String::from("---\n");
+    for (k, v) in frontmatter {
+        raw.push_str(&format!("{k}: {v}\n"));
+    }
+    raw.push_str("---\n");
+    raw.push_str(body);
+    let path = dir.join("SKILL.md");
+    fs::write(&path, raw)?;
+    Ok(path)
+}
+
+/// Replace an existing SKILL.md content entirely. Keeps the directory
+/// and any supporting files intact.
+pub fn edit_skill(
+    home: &Path,
+    name: &str,
+    frontmatter: &BTreeMap<String, String>,
+    body: &str,
+) -> Result<PathBuf, SkillCatalogError> {
+    let dir = home.join("skills").join(name);
+    let path = dir.join("SKILL.md");
+    if !path.is_file() {
+        return Err(SkillCatalogError::NotFound {
+            name: name.to_string(),
+        });
+    }
+    if body.len() > MAX_SKILL_CONTENT_CHARS {
+        return Err(SkillCatalogError::BodyTooLong {
+            max: MAX_SKILL_CONTENT_CHARS,
+        });
+    }
+    let mut raw = String::from("---\n");
+    for (k, v) in frontmatter {
+        raw.push_str(&format!("{k}: {v}\n"));
+    }
+    raw.push_str("---\n");
+    raw.push_str(body);
+    fs::write(&path, raw)?;
+    Ok(path)
+}
+
+/// Find-and-replace inside SKILL.md (or a supporting file). Matches
+/// Hermes `_patch_skill` (`skill_manager_tool.py:397-470`).
+pub fn patch_skill(
+    home: &Path,
+    name: &str,
+    old_string: &str,
+    new_string: &str,
+    file_path: Option<&str>,
+) -> Result<PathBuf, SkillCatalogError> {
+    let dir = home.join("skills").join(name);
+    let target = match file_path {
+        Some(rel) => {
+            let rel_path = PathBuf::from(rel);
+            // Sanity check: only the allowed subdirs (and SKILL.md) may
+            // be patched. This prevents a malicious agent from using
+            // patch to escape into .. or absolute paths.
+            if rel != "SKILL.md" {
+                let first = rel_path
+                    .components()
+                    .next()
+                    .and_then(|c| c.as_os_str().to_str())
+                    .unwrap_or_default();
+                if !ALLOWED_SUPPORTING_SUBDIRS.contains(&first) {
+                    return Err(SkillCatalogError::InvalidSubdir {
+                        got: first.to_string(),
+                        allowed: ALLOWED_SUPPORTING_SUBDIRS,
+                    });
+                }
+            }
+            dir.join(rel_path)
+        }
+        None => dir.join("SKILL.md"),
+    };
+    if !target.is_file() {
+        return Err(SkillCatalogError::NotFound {
+            name: name.to_string(),
+        });
+    }
+    let raw = fs::read_to_string(&target)?;
+    if !raw.contains(old_string) {
+        return Err(SkillCatalogError::PatchTargetMissing {
+            needle: old_string.to_string(),
+        });
+    }
+    let patched = raw.replacen(old_string, new_string, 1);
+    fs::write(&target, patched)?;
+    Ok(target)
+}
+
+/// Delete an entire skill directory. Callers are responsible for
+/// origin checks (only agent/user-created skills should be deletable).
+pub fn delete_skill(home: &Path, name: &str) -> Result<(), SkillCatalogError> {
+    validate_skill_name(name)?;
+    let dir = home.join("skills").join(name);
+    if !dir.is_dir() {
+        return Err(SkillCatalogError::NotFound {
+            name: name.to_string(),
+        });
+    }
+    fs::remove_dir_all(&dir)?;
+    Ok(())
+}
+
+/// Read the `origin` frontmatter value for a skill. Returns `None`
+/// when the skill is missing or the field is absent.
+pub fn skill_origin(home: &Path, name: &str) -> Option<String> {
+    let path = home.join("skills").join(name).join("SKILL.md");
+    let raw = fs::read_to_string(&path).ok()?;
+    parse_frontmatter(&raw).get("origin").cloned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -270,5 +485,242 @@ mod tests {
         fs::write(dir.join("SKILL.md"), "body only, no frontmatter").unwrap();
         let skills = list_skills(tmp.path());
         assert_eq!(skills[0].category, "general");
+    }
+
+    // ── Phase 3: CRUD operations ────────────────────────────────────
+
+    fn fm(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn test_validate_skill_name_accepts_kebab_case() {
+        assert!(validate_skill_name("deploy-staging").is_ok());
+        assert!(validate_skill_name("0-prefix-digit").is_ok());
+        assert!(validate_skill_name("a.b.c").is_ok());
+        assert!(validate_skill_name("under_score").is_ok());
+    }
+
+    #[test]
+    fn test_validate_skill_name_rejects_uppercase() {
+        assert!(matches!(
+            validate_skill_name("Deploy"),
+            Err(SkillCatalogError::InvalidName { .. })
+        ));
+    }
+
+    #[test]
+    fn test_validate_skill_name_rejects_empty() {
+        assert!(matches!(
+            validate_skill_name(""),
+            Err(SkillCatalogError::EmptyName)
+        ));
+    }
+
+    #[test]
+    fn test_create_skill_writes_frontmatter_and_body() {
+        let tmp = TempDir::new().unwrap();
+        create_skill(
+            tmp.path(),
+            "deploy-staging",
+            &fm(&[
+                ("description", "Deploy to staging"),
+                ("category", "deploy"),
+                ("origin", "agent"),
+            ]),
+            "## Steps\n1. Build\n2. Push",
+        )
+        .expect("create");
+        let v = view_skill(tmp.path(), "deploy-staging").expect("exists");
+        assert_eq!(v.metadata.category, "deploy");
+        assert!(v.body.contains("Steps"));
+        assert_eq!(
+            skill_origin(tmp.path(), "deploy-staging").as_deref(),
+            Some("agent")
+        );
+    }
+
+    #[test]
+    fn test_create_skill_fails_when_already_exists() {
+        let tmp = TempDir::new().unwrap();
+        create_skill(
+            tmp.path(),
+            "dup",
+            &fm(&[("description", "x"), ("category", "y")]),
+            "body",
+        )
+        .unwrap();
+        let err = create_skill(
+            tmp.path(),
+            "dup",
+            &fm(&[("description", "x2")]),
+            "body2",
+        )
+        .unwrap_err();
+        assert!(matches!(err, SkillCatalogError::AlreadyExists { .. }));
+    }
+
+    #[test]
+    fn test_edit_skill_rewrites_body_without_touching_supporting_files() {
+        let tmp = TempDir::new().unwrap();
+        create_skill(
+            tmp.path(),
+            "edit-me",
+            &fm(&[("description", "d"), ("category", "c"), ("origin", "user")]),
+            "original",
+        )
+        .unwrap();
+        let skill_dir = tmp.path().join("skills").join("edit-me");
+        fs::create_dir_all(skill_dir.join("references")).unwrap();
+        fs::write(skill_dir.join("references").join("a.md"), "kept").unwrap();
+
+        edit_skill(
+            tmp.path(),
+            "edit-me",
+            &fm(&[("description", "d"), ("category", "c"), ("origin", "user")]),
+            "rewritten",
+        )
+        .unwrap();
+
+        let v = view_skill(tmp.path(), "edit-me").unwrap();
+        assert!(v.body.contains("rewritten"));
+        assert!(skill_dir.join("references").join("a.md").exists());
+    }
+
+    #[test]
+    fn test_edit_skill_fails_when_missing() {
+        let tmp = TempDir::new().unwrap();
+        let err = edit_skill(
+            tmp.path(),
+            "ghost",
+            &fm(&[("description", "d")]),
+            "body",
+        )
+        .unwrap_err();
+        assert!(matches!(err, SkillCatalogError::NotFound { .. }));
+    }
+
+    #[test]
+    fn test_patch_skill_replaces_first_occurrence() {
+        let tmp = TempDir::new().unwrap();
+        create_skill(
+            tmp.path(),
+            "patch-me",
+            &fm(&[("description", "d"), ("category", "c")]),
+            "old text appears twice: old text",
+        )
+        .unwrap();
+        patch_skill(tmp.path(), "patch-me", "old text", "new text", None).unwrap();
+        let v = view_skill(tmp.path(), "patch-me").unwrap();
+        // replacen(1) replaces only the first occurrence.
+        assert!(
+            v.body.contains("new text appears twice"),
+            "first occurrence replaced; body: {:?}",
+            v.body
+        );
+        assert!(
+            v.body.contains("old text"),
+            "second occurrence preserved; body: {:?}",
+            v.body
+        );
+    }
+
+    #[test]
+    fn test_patch_skill_rejects_escape_to_parent_dir() {
+        let tmp = TempDir::new().unwrap();
+        create_skill(
+            tmp.path(),
+            "safe",
+            &fm(&[("description", "d"), ("category", "c")]),
+            "body",
+        )
+        .unwrap();
+        let err = patch_skill(
+            tmp.path(),
+            "safe",
+            "body",
+            "x",
+            Some("../../etc/passwd"),
+        )
+        .unwrap_err();
+        assert!(matches!(err, SkillCatalogError::InvalidSubdir { .. }));
+    }
+
+    #[test]
+    fn test_patch_skill_fails_when_needle_missing() {
+        let tmp = TempDir::new().unwrap();
+        create_skill(
+            tmp.path(),
+            "no-needle",
+            &fm(&[("description", "d"), ("category", "c")]),
+            "body",
+        )
+        .unwrap();
+        let err = patch_skill(tmp.path(), "no-needle", "missing", "x", None).unwrap_err();
+        assert!(matches!(err, SkillCatalogError::PatchTargetMissing { .. }));
+    }
+
+    #[test]
+    fn test_delete_skill_removes_directory() {
+        let tmp = TempDir::new().unwrap();
+        create_skill(
+            tmp.path(),
+            "to-delete",
+            &fm(&[("description", "d")]),
+            "body",
+        )
+        .unwrap();
+        delete_skill(tmp.path(), "to-delete").unwrap();
+        assert!(view_skill(tmp.path(), "to-delete").is_none());
+    }
+
+    #[test]
+    fn test_skill_origin_reads_frontmatter_field() {
+        let tmp = TempDir::new().unwrap();
+        create_skill(
+            tmp.path(),
+            "with-origin",
+            &fm(&[
+                ("description", "d"),
+                ("category", "c"),
+                ("origin", "community"),
+            ]),
+            "body",
+        )
+        .unwrap();
+        assert_eq!(
+            skill_origin(tmp.path(), "with-origin").as_deref(),
+            Some("community")
+        );
+    }
+
+    #[test]
+    fn test_skill_origin_returns_none_when_absent() {
+        let tmp = TempDir::new().unwrap();
+        create_skill(
+            tmp.path(),
+            "no-origin",
+            &fm(&[("description", "d"), ("category", "c")]),
+            "body",
+        )
+        .unwrap();
+        assert!(skill_origin(tmp.path(), "no-origin").is_none());
+    }
+
+    #[test]
+    fn test_create_skill_rejects_oversize_body() {
+        let tmp = TempDir::new().unwrap();
+        let big = "x".repeat(MAX_SKILL_CONTENT_CHARS + 1);
+        let err = create_skill(
+            tmp.path(),
+            "huge",
+            &fm(&[("description", "d")]),
+            &big,
+        )
+        .unwrap_err();
+        assert!(matches!(err, SkillCatalogError::BodyTooLong { .. }));
     }
 }
