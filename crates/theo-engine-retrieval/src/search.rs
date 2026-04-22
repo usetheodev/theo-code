@@ -213,15 +213,9 @@ fn split_identifier(word: &str, out: &mut Vec<String>) {
         let curr = chars[i];
         let split = if prev.is_lowercase() && curr.is_uppercase() {
             true
-        } else if prev.is_uppercase()
+        } else { prev.is_uppercase()
             && curr.is_uppercase()
-            && i + 1 < len
-            && chars[i + 1].is_lowercase()
-        {
-            true
-        } else {
-            false
-        };
+            && i + 1 < len && chars[i + 1].is_lowercase() };
 
         if split {
             let part: String = chars[start..i].iter().collect();
@@ -262,11 +256,10 @@ fn community_document(community: &Community, graph: &CodeGraph) -> String {
             if let Some(sig) = &node.signature {
                 parts.push(sig.clone());
             }
-            if let Some(doc) = &node.doc {
-                if let Some(first_line) = doc.lines().next() {
+            if let Some(doc) = &node.doc
+                && let Some(first_line) = doc.lines().next() {
                     parts.push(first_line.to_string());
                 }
-            }
 
             // Follow CONTAINS edges to get child symbols
             if matches!(node.node_type, NodeType::File) {
@@ -276,11 +269,10 @@ fn community_document(community: &Community, graph: &CodeGraph) -> String {
                         if let Some(sig) = &child.signature {
                             parts.push(sig.clone());
                         }
-                        if let Some(doc) = &child.doc {
-                            if let Some(first_line) = doc.lines().next() {
+                        if let Some(doc) = &child.doc
+                            && let Some(first_line) = doc.lines().next() {
                                 parts.push(first_line.to_string());
                             }
-                        }
                     }
                 }
             }
@@ -416,11 +408,10 @@ fn community_pagerank(communities: &[Community], graph: &CodeGraph) -> HashMap<S
     for edge in graph.all_edges() {
         let src_idx = node_to_idx.get(edge.source.as_str()).copied();
         let tgt_idx = node_to_idx.get(edge.target.as_str()).copied();
-        if let (Some(s), Some(t)) = (src_idx, tgt_idx) {
-            if s != t {
+        if let (Some(s), Some(t)) = (src_idx, tgt_idx)
+            && s != t {
                 *adj_raw.entry((s, t)).or_insert(0.0) += edge.weight;
             }
-        }
     }
 
     // Row-normalize to get sparse transition: transition[i] = Vec<(j, prob)>.
@@ -690,28 +681,26 @@ impl FileBm25 {
                         }
                     }
                     // Doc first line: 1x
-                    if let Some(doc) = &child.doc {
-                        if let Some(fl) = doc.lines().next() {
+                    if let Some(doc) = &child.doc
+                        && let Some(fl) = doc.lines().next() {
                             for token in tokenise(fl) {
                                 if !is_stop_word(&token) {
                                     *weighted_tf.entry(token).or_default() += 1.0;
                                 }
                             }
                         }
-                    }
                     // 2-hop import enrichment: symbols this child CALLS/IMPORTS.
                     // Low boost (0.15x) to minimize IDF dilution in BM25.
                     // Higher values tested (0.3x, 0.5x) hurt BM25 baseline.
                     for target_id in graph.neighbors(child_id) {
-                        if let Some(target) = graph.get_node(target_id) {
-                            if target.node_type == NodeType::Symbol {
+                        if let Some(target) = graph.get_node(target_id)
+                            && target.node_type == NodeType::Symbol {
                                 for token in tokenise(&target.name) {
                                     if !is_stop_word(&token) {
                                         *weighted_tf.entry(token).or_default() += 0.15;
                                     }
                                 }
                             }
-                        }
                     }
                 }
             }

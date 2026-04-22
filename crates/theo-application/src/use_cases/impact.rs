@@ -68,13 +68,11 @@ fn collect_seed_symbols(edited_file: &str, graph: &CodeGraph) -> Vec<String> {
     let mut seeds: Vec<String> = Vec::new();
 
     for edge in graph.edges_of_type(&EdgeType::Contains) {
-        if edge.source == edited_file {
-            if let Some(node) = graph.get_node(&edge.target) {
-                if matches!(node.node_type, NodeType::Symbol) {
+        if edge.source == edited_file
+            && let Some(node) = graph.get_node(&edge.target)
+                && matches!(node.node_type, NodeType::Symbol) {
                     seeds.push(node.id.clone());
                 }
-            }
-        }
     }
 
     if seeds.is_empty() {
@@ -100,11 +98,10 @@ fn bfs_reachable<'a>(seeds: &[String], graph: &'a CodeGraph, max_depth: usize) -
     let mut queue: VecDeque<(&str, usize)> = VecDeque::new();
 
     for seed_id in seeds {
-        if let Some(node) = graph.get_node(seed_id) {
-            if visited.insert(node.id.as_str()) {
+        if let Some(node) = graph.get_node(seed_id)
+            && visited.insert(node.id.as_str()) {
                 queue.push_back((node.id.as_str(), 0));
             }
-        }
     }
 
     if max_depth == 0 {
@@ -123,29 +120,26 @@ fn bfs_reachable<'a>(seeds: &[String], graph: &'a CodeGraph, max_depth: usize) -
             if !is_propagation_edge(&edge.edge_type) {
                 continue;
             }
-            if let Some(target_node) = graph.get_node(&edge.target) {
-                if visited.insert(target_node.id.as_str()) {
+            if let Some(target_node) = graph.get_node(&edge.target)
+                && visited.insert(target_node.id.as_str()) {
                     queue.push_back((target_node.id.as_str(), depth + 1));
                 }
-            }
         }
     }
 
     visited
 }
 
-fn find_covering_tests<'a>(reached: &HashSet<&str>, graph: &'a CodeGraph) -> Vec<String> {
+fn find_covering_tests(reached: &HashSet<&str>, graph: &CodeGraph) -> Vec<String> {
     let mut tests: Vec<String> = Vec::new();
     let mut seen: HashSet<&str> = HashSet::new();
 
     for edge in graph.edges_of_type(&EdgeType::Tests) {
-        if reached.contains(edge.target.as_str()) {
-            if let Some(test_node) = graph.get_node(&edge.source) {
-                if seen.insert(test_node.id.as_str()) {
+        if reached.contains(edge.target.as_str())
+            && let Some(test_node) = graph.get_node(&edge.source)
+                && seen.insert(test_node.id.as_str()) {
                     tests.push(test_node.id.clone());
                 }
-            }
-        }
     }
     tests
 }

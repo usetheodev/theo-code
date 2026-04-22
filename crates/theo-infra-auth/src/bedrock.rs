@@ -136,7 +136,7 @@ pub fn apply_region_prefix(model_id: &str, region: &str) -> String {
         || model_id.contains("nova");
 
     if !needs_prefix
-        || model_id.contains('.') && model_id.split('.').next().map_or(false, |p| p.len() <= 3)
+        || model_id.contains('.') && model_id.split('.').next().is_some_and(|p| p.len() <= 3)
     {
         return model_id.to_string();
     }

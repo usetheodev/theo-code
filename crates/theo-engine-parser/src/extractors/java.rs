@@ -240,11 +240,10 @@ fn extract_kotlin_annotation_name(node: &Node, source: &str) -> Option<String> {
                             // Nested in simple_user_type
                             if type_child.kind() == "simple_user_type" {
                                 for k in 0..type_child.child_count() {
-                                    if let Some(id) = type_child.child(k as u32) {
-                                        if id.kind() == "simple_identifier" {
+                                    if let Some(id) = type_child.child(k as u32)
+                                        && id.kind() == "simple_identifier" {
                                             return Some(node_text(&id, source));
                                         }
-                                    }
                                 }
                             }
                         }
@@ -297,11 +296,10 @@ fn collect_annotations(
                 "modifiers" => {
                     // Annotations can be inside a modifiers node
                     for j in 0..child.child_count() {
-                        if let Some(mod_child) = child.child(j as u32) {
-                            if mod_child.kind() == "marker_annotation"
-                                || mod_child.kind() == "annotation"
-                            {
-                                if let Some(name) = extract_annotation_name(&mod_child, source) {
+                        if let Some(mod_child) = child.child(j as u32)
+                            && (mod_child.kind() == "marker_annotation"
+                                || mod_child.kind() == "annotation")
+                                && let Some(name) = extract_annotation_name(&mod_child, source) {
                                     let text = node_text(&mod_child, source);
                                     result.push((
                                         name,
@@ -309,8 +307,6 @@ fn collect_annotations(
                                         anchor_from_node(&mod_child, file_path),
                                     ));
                                 }
-                            }
-                        }
                     }
                 }
                 _ => {}
@@ -348,11 +344,10 @@ fn extract_annotation_name(node: &Node, source: &str) -> Option<String> {
 
     // Fallback: find the first identifier child after @
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i as u32) {
-            if child.kind() == "identifier" {
+        if let Some(child) = node.child(i as u32)
+            && child.kind() == "identifier" {
                 return Some(node_text(&child, source));
             }
-        }
     }
 
     None
@@ -383,11 +378,10 @@ fn try_parse_mapping_annotation(ann_name: &str, ann_text: &str) -> Option<(HttpM
 fn extract_path_from_annotation_text(ann_text: &str) -> Option<String> {
     // Find the first quoted string in the annotation text
     for quote in ['"', '\''] {
-        if let Some(start) = ann_text.find(quote) {
-            if let Some(end) = ann_text[start + 1..].find(quote) {
+        if let Some(start) = ann_text.find(quote)
+            && let Some(end) = ann_text[start + 1..].find(quote) {
                 return Some(ann_text[start + 1..start + 1 + end].to_string());
             }
-        }
     }
     None
 }
@@ -668,6 +662,6 @@ public class ProductController {
         assert_eq!(ext.interfaces.len(), 3);
         let authed: Vec<_> = ext.interfaces.iter().filter(|i| i.auth.is_some()).collect();
         assert_eq!(authed.len(), 2); // @PreAuthorize on create + delete
-        assert!(ext.sinks.len() >= 1);
+        assert!(!ext.sinks.is_empty());
     }
 }

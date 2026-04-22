@@ -562,7 +562,7 @@ mod tests {
     #[test]
     fn optional_bool_returns_value() {
         let args = serde_json::json!({"replaceAll": true});
-        assert_eq!(optional_bool(&args, "replaceAll").unwrap(), true);
+        assert!(optional_bool(&args, "replaceAll").unwrap());
     }
 
     // ── ToolSchema tests ────────────────────────────────────────

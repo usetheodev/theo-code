@@ -158,17 +158,15 @@ pub fn validate_cognitive_event_in_context(
     validate_cognitive_event(event_type, payload)?;
 
     // Referential integrity for invalidation events
-    if event_type == EventType::HypothesisInvalidated {
-        if let Some(prior_id) = payload.get("prior_event_id").and_then(|v| v.as_str()) {
-            if !known_event_ids.contains(prior_id) {
+    if event_type == EventType::HypothesisInvalidated
+        && let Some(prior_id) = payload.get("prior_event_id").and_then(|v| v.as_str())
+            && !known_event_ids.contains(prior_id) {
                 return Err(EventValidationError::InvalidValue {
                     event_type: "HypothesisInvalidated".into(),
                     field: "prior_event_id".into(),
                     reason: format!("referenced event '{}' not found in known events", prior_id),
                 });
             }
-        }
-    }
     Ok(())
 }
 
@@ -527,7 +525,7 @@ mod tests {
 
     #[test]
     fn legacy_event_without_supersedes_deserializes_to_none() {
-        let mut val: serde_json::Value = serde_json::to_value(&DomainEvent::new(
+        let mut val: serde_json::Value = serde_json::to_value(DomainEvent::new(
             EventType::TaskCreated,
             "t-1",
             serde_json::json!({}),

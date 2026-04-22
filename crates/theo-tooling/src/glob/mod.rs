@@ -11,6 +11,12 @@ const MAX_RESULTS: usize = 100;
 
 pub struct GlobTool;
 
+impl Default for GlobTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GlobTool {
     pub fn new() -> Self {
         Self

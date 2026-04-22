@@ -43,8 +43,8 @@ pub fn generate_wiki_with_root(
     let crate_meta = extract_crate_metadata(project_dir);
 
     for doc in &mut docs {
-        if let Some(crate_name) = find_crate_for_doc(doc, &crate_meta) {
-            if let Some(meta) = crate_meta.get(&crate_name) {
+        if let Some(crate_name) = find_crate_for_doc(doc, &crate_meta)
+            && let Some(meta) = crate_meta.get(&crate_name) {
                 // Title: crate name (clean, no community ID)
                 if let Some(ref name) = meta.name {
                     doc.title = name.clone();
@@ -64,18 +64,16 @@ pub fn generate_wiki_with_root(
                     doc.module_doc = Some(module_doc);
                 }
                 // README fallback for summary if no Cargo.toml description
-                if doc.crate_description.is_none() {
-                    if let Some(readme) = extract_readme_summary(project_dir, crate_dir) {
+                if doc.crate_description.is_none()
+                    && let Some(readme) = extract_readme_summary(project_dir, crate_dir) {
                         doc.summary = readme.clone();
                         doc.crate_description = Some(readme);
                     }
-                }
             }
-        }
     }
 
     // Sort by file count descending (largest modules first)
-    docs.sort_by(|a, b| b.file_count.cmp(&a.file_count));
+    docs.sort_by_key(|doc| std::cmp::Reverse(doc.file_count));
 
     let now = chrono_now();
     let graph_hash = compute_graph_hash(graph);
@@ -437,11 +435,10 @@ fn compute_test_coverage(
             continue;
         }
         // If the target (tested symbol) is in our community, mark it
-        if member_id_set.contains(edge.target.as_str()) {
-            if let Some(target_node) = graph.get_node(&edge.target) {
+        if member_id_set.contains(edge.target.as_str())
+            && let Some(target_node) = graph.get_node(&edge.target) {
                 tested_set.insert(target_node.name.clone());
             }
-        }
     }
 
     // Also count Test nodes that share the same file_path as our community files
@@ -459,11 +456,10 @@ fn compute_test_coverage(
         if node.node_type != NodeType::Test {
             continue;
         }
-        if let Some(fp) = &node.file_path {
-            if community_files.contains(fp) {
+        if let Some(fp) = &node.file_path
+            && community_files.contains(fp) {
                 community_test_count += 1;
             }
-        }
     }
 
     let total = production_symbols.len();
@@ -530,8 +526,8 @@ pub fn extract_crate_metadata(project_dir: &std::path::Path) -> HashMap<String, 
                 }
                 // Check for Cargo.toml in this directory
                 let cargo_path = path.join("Cargo.toml");
-                if cargo_path.exists() {
-                    if let Some(meta) = parse_cargo_toml(&cargo_path) {
+                if cargo_path.exists()
+                    && let Some(meta) = parse_cargo_toml(&cargo_path) {
                         let key = meta.name.clone().unwrap_or_else(|| name.clone());
                         metadata.insert(
                             key,
@@ -541,15 +537,14 @@ pub fn extract_crate_metadata(project_dir: &std::path::Path) -> HashMap<String, 
                             },
                         );
                     }
-                }
             }
         }
     }
 
     // Also check root Cargo.toml (single-crate projects)
     let root_cargo = project_dir.join("Cargo.toml");
-    if root_cargo.exists() {
-        if let Some(meta) = parse_cargo_toml(&root_cargo) {
+    if root_cargo.exists()
+        && let Some(meta) = parse_cargo_toml(&root_cargo) {
             let key = meta.name.clone().unwrap_or_else(|| {
                 project_dir
                     .file_name()
@@ -557,16 +552,13 @@ pub fn extract_crate_metadata(project_dir: &std::path::Path) -> HashMap<String, 
                     .unwrap_or("project")
                     .to_string()
             });
-            if !metadata.contains_key(&key) {
-                metadata.insert(key, meta);
-            }
+            metadata.entry(key).or_insert(meta);
         }
-    }
 
     // Check pyproject.toml for Python projects
     let pyproject = project_dir.join("pyproject.toml");
-    if pyproject.exists() {
-        if let Ok(content) = std::fs::read_to_string(&pyproject) {
+    if pyproject.exists()
+        && let Ok(content) = std::fs::read_to_string(&pyproject) {
             let name = extract_toml_value(&content, "name");
             let desc = extract_toml_value(&content, "description");
             if name.is_some() || desc.is_some() {
@@ -578,7 +570,6 @@ pub fn extract_crate_metadata(project_dir: &std::path::Path) -> HashMap<String, 
                 });
             }
         }
-    }
 
     metadata
 }
@@ -603,8 +594,8 @@ fn extract_toml_value(content: &str, key: &str) -> Option<String> {
         if trimmed.starts_with('[') {
             in_package = trimmed == "[package]" || trimmed == "[project]";
         }
-        if in_package {
-            if let Some(rest) = trimmed.strip_prefix(key) {
+        if in_package
+            && let Some(rest) = trimmed.strip_prefix(key) {
                 let rest = rest.trim();
                 if let Some(rest) = rest.strip_prefix('=') {
                     let val = rest.trim().trim_matches('"').trim_matches('\'');
@@ -613,7 +604,6 @@ fn extract_toml_value(content: &str, key: &str) -> Option<String> {
                     }
                 }
             }
-        }
     }
     None
 }
@@ -657,7 +647,7 @@ pub fn extract_module_doc(project_dir: &std::path::Path, crate_dir: &str) -> Opt
 
         if !doc_lines.is_empty() {
             // Trim trailing empty lines
-            while doc_lines.last().map_or(false, |l| l.is_empty()) {
+            while doc_lines.last().is_some_and(|l| l.is_empty()) {
                 doc_lines.pop();
             }
             return Some(doc_lines.join("\n"));
@@ -722,7 +712,7 @@ fn find_crate_for_doc(
             (name, dir)
         })
         .collect();
-    dirs.sort_by(|a, b| b.1.len().cmp(&a.1.len())); // longest prefix first
+    dirs.sort_by_key(|item| std::cmp::Reverse(item.1.len())); // longest prefix first
 
     // Check majority of files — which crate dir has most file matches?
     let mut best_match: Option<(String, usize)> = None;
@@ -733,14 +723,13 @@ fn find_crate_for_doc(
             .iter()
             .filter(|f| f.path.starts_with(&prefix))
             .count();
-        if count > 0 {
-            if best_match
+        if count > 0
+            && best_match
                 .as_ref()
-                .map_or(true, |(_, best_count)| count > *best_count)
+                .is_none_or(|(_, best_count)| count > *best_count)
             {
                 best_match = Some(((*name).clone(), count));
             }
-        }
     }
     if let Some((name, _)) = best_match {
         return Some(name);
@@ -923,11 +912,10 @@ fn build_file_community_map(
     for community in communities {
         let slug = slugify(&community.name);
         for node_id in &community.node_ids {
-            if let Some(node) = graph.get_node(node_id) {
-                if let Some(fp) = &node.file_path {
+            if let Some(node) = graph.get_node(node_id)
+                && let Some(fp) = &node.file_path {
                     map.insert(fp.clone(), slug.clone());
                 }
-            }
         }
     }
     map
@@ -971,12 +959,11 @@ pub fn compute_community_hash(community: &Community, graph: &CodeGraph) -> u64 {
 
     let mut file_info: BTreeMap<String, u64> = BTreeMap::new();
     for node_id in &community.node_ids {
-        if let Some(node) = graph.get_node(node_id) {
-            if node.node_type == NodeType::File {
+        if let Some(node) = graph.get_node(node_id)
+            && node.node_type == NodeType::File {
                 let path = node.file_path.as_deref().unwrap_or(&node.name);
                 file_info.insert(path.to_string(), node.last_modified.to_bits());
             }
-        }
     }
 
     let mut hasher = std::hash::DefaultHasher::new();
@@ -1164,7 +1151,7 @@ pub fn generate_wiki_incremental(
         }
     }
 
-    final_docs.sort_by(|a, b| b.file_count.cmp(&a.file_count));
+    final_docs.sort_by_key(|doc| std::cmp::Reverse(doc.file_count));
 
     let now = chrono_now();
     let stats = IncrementalStats {
@@ -1258,11 +1245,10 @@ pub fn detect_concepts(docs: &[super::model::WikiDoc]) -> Vec<ConceptCandidate> 
     let mut adj = vec![vec![0u32; n]; n];
     for (i, doc) in filtered.iter().enumerate() {
         for dep in &doc.dependencies {
-            if let Some(&j) = slug_to_idx.get(&dep.target_slug) {
-                if i != j {
+            if let Some(&j) = slug_to_idx.get(&dep.target_slug)
+                && i != j {
                     adj[i][j] += 1;
                 }
-            }
         }
     }
 
@@ -1276,7 +1262,9 @@ pub fn detect_concepts(docs: &[super::model::WikiDoc]) -> Vec<ConceptCandidate> 
         x
     };
 
-    // Merge communities with >= 3 mutual edges
+    // Merge communities with >= 3 mutual edges.
+    // Index-based loop needed: we read adj[i][j] and adj[j][i] in both directions.
+    #[allow(clippy::needless_range_loop)]
     for i in 0..n {
         for j in (i + 1)..n {
             let mutual = adj[i][j] + adj[j][i];
@@ -1332,7 +1320,7 @@ pub fn detect_concepts(docs: &[super::model::WikiDoc]) -> Vec<ConceptCandidate> 
         }
         let key = doc
             .title
-            .split(|c: char| c == '(' || c == ' ')
+            .split(['(', ' '])
             .next()
             .unwrap_or(&doc.title)
             .trim()
@@ -1345,7 +1333,7 @@ pub fn detect_concepts(docs: &[super::model::WikiDoc]) -> Vec<ConceptCandidate> 
         }
     }
 
-    for (_, group_docs) in &prefix_groups {
+    for group_docs in prefix_groups.values() {
         if group_docs.len() < 2 {
             continue;
         }
@@ -1359,7 +1347,7 @@ pub fn detect_concepts(docs: &[super::model::WikiDoc]) -> Vec<ConceptCandidate> 
         });
     }
 
-    concepts.sort_by(|a, b| b.related_modules.len().cmp(&a.related_modules.len()));
+    concepts.sort_by_key(|c| std::cmp::Reverse(c.related_modules.len()));
     concepts.truncate(8);
     concepts
 }
@@ -1371,7 +1359,7 @@ fn derive_concept_name(docs: &[&super::model::WikiDoc]) -> String {
         .iter()
         .map(|d| {
             d.title
-                .split(|c: char| c == '(' || c == ' ')
+                .split(['(', ' '])
                 .next()
                 .unwrap_or(&d.title)
                 .trim()
@@ -1585,7 +1573,7 @@ mod tests {
         let (graph, communities) = test_graph();
         let wiki = generate_wiki(&communities, &graph, "test");
         let auth = wiki.docs.iter().find(|d| d.slug == "auth").unwrap();
-        assert!(auth.files.len() >= 1);
+        assert!(!auth.files.is_empty());
         assert!(auth.files.iter().any(|f| f.path == "src/auth.rs"));
     }
 

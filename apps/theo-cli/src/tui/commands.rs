@@ -130,19 +130,16 @@ pub fn process_command(input: &str, state: &TuiState) -> Option<Vec<Msg>> {
             let mut found = Vec::new();
             if let Ok(entries) = std::fs::read_dir(&sessions_dir) {
                 for entry in entries.flatten() {
-                    if entry.path().extension().is_some_and(|e| e == "json") {
-                        if let Ok(data) = std::fs::read_to_string(entry.path()) {
-                            if let Ok(msgs) = serde_json::from_str::<Vec<serde_json::Value>>(&data) {
+                    if entry.path().extension().is_some_and(|e| e == "json")
+                        && let Ok(data) = std::fs::read_to_string(entry.path())
+                            && let Ok(msgs) = serde_json::from_str::<Vec<serde_json::Value>>(&data) {
                                 for msg in &msgs {
-                                    if let Some(content) = msg.get("content").and_then(|v| v.as_str()) {
-                                        if !arg.is_empty() && content.to_lowercase().contains(&arg.to_lowercase()) {
+                                    if let Some(content) = msg.get("content").and_then(|v| v.as_str())
+                                        && !arg.is_empty() && content.to_lowercase().contains(&arg.to_lowercase()) {
                                             found.push(format!("  {}", &content[..content.len().min(80)]));
                                         }
-                                    }
                                 }
                             }
-                        }
-                    }
                 }
             }
             if found.is_empty() {

@@ -254,15 +254,9 @@ fn split_camel_case(word: &str) -> Vec<String> {
         let next_lower = i + 1 < chars.len() && chars[i + 1].is_lowercase();
 
         // Split before: lowercase→uppercase (getUserById: get|User|By|Id)
-        if !prev_upper && curr_upper {
-            let part: String = chars[start..i].iter().collect();
-            if !part.is_empty() {
-                parts.push(part);
-            }
-            start = i;
-        }
-        // Split before: uppercase→uppercase+lowercase (HTMLParser: HTML|Parser)
-        else if prev_upper && curr_upper && next_lower {
+        // or uppercase→uppercase+lowercase (HTMLParser: HTML|Parser).
+        let boundary = curr_upper && (!prev_upper || next_lower);
+        if boundary {
             let part: String = chars[start..i].iter().collect();
             if !part.is_empty() {
                 parts.push(part);

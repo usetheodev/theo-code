@@ -3,6 +3,7 @@
 //! `TuiState` holds all UI state. `Msg` represents all possible state transitions.
 //! `update()` is a pure function: (state, msg) → mutated state, no IO.
 
+#![allow(dead_code)] // Scaffolded helpers — kept for upcoming TUI features.
 use std::collections::HashMap;
 use std::time::Instant;
 
@@ -483,12 +484,11 @@ pub fn update(state: &mut TuiState, msg: Msg) {
             }
         }
         Msg::RestoreLastPrompt => {
-            if state.input_text.is_empty() {
-                if let Some(last) = state.prompt_history.last() {
+            if state.input_text.is_empty()
+                && let Some(last) = state.prompt_history.last() {
                     state.input_text = last.clone();
                     state.input_cursor = state.input_text.len();
                 }
-            }
         }
         Msg::Notify(message) => {
             state.transcript.push(TranscriptEntry::SystemMessage(message));
@@ -809,9 +809,8 @@ fn update_autocomplete(state: &mut TuiState) {
 
     let input = &state.input_text;
 
-    if input.starts_with('/') {
+    if let Some(query) = input.strip_prefix('/') {
         // Slash command autocomplete
-        let query = &input[1..];
         let all = autocomplete::slash_commands();
         let filtered = autocomplete::filter_candidates(&all, query);
         state.autocomplete.active = !filtered.is_empty();
@@ -973,28 +972,25 @@ fn handle_domain_event(state: &mut TuiState, event: DomainEvent) {
             state.status.tools_running += 1;
         }
         EventType::ToolCallProgress => {
-            if let Some(line) = event.payload.get("line").and_then(|v| v.as_str()) {
-                if let Some(&idx) = state.active_tool_cards.get(&event.entity_id) {
-                    if let Some(TranscriptEntry::ToolCard(card)) = state.transcript.get_mut(idx) {
+            if let Some(line) = event.payload.get("line").and_then(|v| v.as_str())
+                && let Some(&idx) = state.active_tool_cards.get(&event.entity_id)
+                    && let Some(TranscriptEntry::ToolCard(card)) = state.transcript.get_mut(idx) {
                         card.stdout_lines.push(line.to_string());
                         // Keep only last 5 lines visible
                         if card.stdout_lines.len() > 5 {
                             card.stdout_lines.drain(..card.stdout_lines.len() - 5);
                         }
                     }
-                }
-            }
         }
         EventType::ToolCallCompleted => {
             let success = event.payload.get("success").and_then(|v| v.as_bool()).unwrap_or(false);
             let duration_ms = event.payload.get("duration_ms").and_then(|v| v.as_u64());
 
-            if let Some(&idx) = state.active_tool_cards.get(&event.entity_id) {
-                if let Some(TranscriptEntry::ToolCard(card)) = state.transcript.get_mut(idx) {
+            if let Some(&idx) = state.active_tool_cards.get(&event.entity_id)
+                && let Some(TranscriptEntry::ToolCard(card)) = state.transcript.get_mut(idx) {
                     card.status = if success { ToolCardStatus::Succeeded } else { ToolCardStatus::Failed };
                     card.duration_ms = duration_ms;
                 }
-            }
             // Track in tool chain for timeline
             let tool_name = event.payload.get("tool_name")
                 .and_then(|v| v.as_str())

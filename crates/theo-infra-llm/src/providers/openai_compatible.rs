@@ -13,8 +13,8 @@ pub fn from_request(body: &Value) -> CommonRequest {
 
             match role {
                 "system" => {
-                    if let Some(text) = m.get("content").and_then(|c| c.as_str()) {
-                        if !text.is_empty() {
+                    if let Some(text) = m.get("content").and_then(|c| c.as_str())
+                        && !text.is_empty() {
                             messages.push(CommonMessage {
                                 role: Role::System,
                                 content: Some(Content::Text(text.to_string())),
@@ -23,7 +23,6 @@ pub fn from_request(body: &Value) -> CommonRequest {
                                 name: None,
                             });
                         }
-                    }
                 }
                 "user" => {
                     let content = m.get("content");
@@ -63,8 +62,8 @@ pub fn from_request(body: &Value) -> CommonRequest {
                             })
                             .collect();
 
-                        if content_parts.len() == 1 {
-                            if let ContentPart::Text { text } = &content_parts[0] {
+                        if content_parts.len() == 1
+                            && let ContentPart::Text { text } = &content_parts[0] {
                                 messages.push(CommonMessage {
                                     role: Role::User,
                                     content: Some(Content::Text(text.clone())),
@@ -74,7 +73,6 @@ pub fn from_request(body: &Value) -> CommonRequest {
                                 });
                                 continue;
                             }
-                        }
                         if !content_parts.is_empty() {
                             messages.push(CommonMessage {
                                 role: Role::User,

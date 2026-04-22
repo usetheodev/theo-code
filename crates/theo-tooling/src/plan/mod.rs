@@ -6,6 +6,12 @@ use theo_domain::tool::{
 
 pub struct PlanExitTool;
 
+impl Default for PlanExitTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PlanExitTool {
     pub fn new() -> Self {
         Self

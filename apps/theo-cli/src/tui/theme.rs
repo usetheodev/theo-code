@@ -3,6 +3,7 @@
 //! Supports dark, light, and high-contrast presets.
 //! Can be extended with custom themes via ~/.config/theo/tui.toml.
 
+#![allow(dead_code)] // Scaffolded helpers — kept for upcoming TUI features.
 use ratatui::prelude::*;
 #[derive(Debug, Clone)]
 pub struct Theme {

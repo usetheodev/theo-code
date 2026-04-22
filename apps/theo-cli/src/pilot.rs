@@ -214,8 +214,8 @@ impl EventListener for PilotRenderer {
             }
             EventType::RunStateChanged => {
                 // Pilot loop summary: "PilotLoopComplete:N:files:tokens:iters"
-                if let Some(to) = event.payload.get("to").and_then(|v| v.as_str()) {
-                    if let Some(data) = to.strip_prefix("PilotLoopComplete:") {
+                if let Some(to) = event.payload.get("to").and_then(|v| v.as_str())
+                    && let Some(data) = to.strip_prefix("PilotLoopComplete:") {
                         let parts: Vec<&str> = data.split(':').collect();
                         if parts.len() >= 4 {
                             let loop_n = parts[0];
@@ -237,7 +237,6 @@ impl EventListener for PilotRenderer {
                             );
                         }
                     }
-                }
             }
             _ => {} // CliRenderer handles all other events
         }

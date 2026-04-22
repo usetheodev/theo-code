@@ -306,8 +306,8 @@ fn try_extract_nestjs_controller(
 
     // Walk class body for method definitions
     for i in 0..body.child_count() {
-        if let Some(child) = body.child(i as u32) {
-            if child.kind() == "method_definition" {
+        if let Some(child) = body.child(i as u32)
+            && child.kind() == "method_definition" {
                 try_extract_nestjs_method(
                     &child,
                     source,
@@ -317,7 +317,6 @@ fn try_extract_nestjs_controller(
                     extraction,
                 );
             }
-        }
     }
 }
 
@@ -382,13 +381,11 @@ fn collect_decorators(node: &Node, source: &str) -> Vec<(String, Option<String>,
 
     // Strategy 1: Check direct children (works for class_declaration)
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i as u32) {
-            if child.kind() == "decorator" {
-                if let Some(entry) = parse_decorator_node(&child, source) {
+        if let Some(child) = node.child(i as u32)
+            && child.kind() == "decorator"
+                && let Some(entry) = parse_decorator_node(&child, source) {
                     result.push(entry);
                 }
-            }
-        }
     }
 
     // Strategy 2: Check preceding siblings (works for method_definition)
@@ -482,11 +479,10 @@ fn compose_nestjs_path(prefix: &str, subpath: Option<&str>) -> String {
 /// Find a direct child node by its kind.
 fn find_child_by_kind<'a>(node: &Node<'a>, kind: &str) -> Option<Node<'a>> {
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i as u32) {
-            if child.kind() == kind {
+        if let Some(child) = node.child(i as u32)
+            && child.kind() == kind {
                 return Some(child);
             }
-        }
     }
     None
 }
@@ -838,8 +834,8 @@ class ArticlesController {
         );
         assert_eq!(ext.interfaces[0].path, "/api/articles");
         assert_eq!(ext.interfaces[1].path, "/api/articles/:slug");
-        assert!(ext.sinks.len() >= 1, "should detect console.log sinks");
-        assert!(ext.imports.len() >= 1, "should detect imports");
+        assert!(!ext.sinks.is_empty(), "should detect console.log sinks");
+        assert!(!ext.imports.is_empty(), "should detect imports");
     }
 
     #[test]

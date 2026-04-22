@@ -60,11 +60,10 @@ impl Content {
         match self {
             Content::Text(s) => Some(s),
             Content::Parts(parts) => {
-                if parts.len() == 1 {
-                    if let ContentPart::Text { text } = &parts[0] {
+                if parts.len() == 1
+                    && let ContentPart::Text { text } = &parts[0] {
                         return Some(text);
                     }
-                }
                 None
             }
         }

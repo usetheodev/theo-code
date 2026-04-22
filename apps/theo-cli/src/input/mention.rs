@@ -5,6 +5,7 @@
 //! in meeting 20260411-103954), and produces a contextual attachment
 //! that the agent can consume alongside the user's prompt.
 
+#![allow(dead_code)] // Scaffolded helpers — kept for upcoming TUI features.
 use std::path::{Path, PathBuf};
 
 /// Max bytes per mention. Enforced at read time to avoid saturating

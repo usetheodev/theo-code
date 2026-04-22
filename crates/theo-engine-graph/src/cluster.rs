@@ -409,7 +409,7 @@ fn compute_modularity_resolution(
     }
 
     let degree_penalty: f64 = comm_degree_sq_sum.iter().sum();
-    q = q - resolution * degree_penalty / m2;
+    q -= resolution * degree_penalty / m2;
     q / m2
 }
 
@@ -807,9 +807,9 @@ pub fn dir_seed_labels(node_ids: &[String]) -> HashMap<String, usize> {
         // "crates/<name>/..." or "apps/<name>/..." → use <name>
         // "src/<dir>/..." → use <dir>
         // Otherwise → use parent directory
-        let dir = if parts.len() >= 2 && (parts[0] == "crates" || parts[0] == "apps") {
-            parts[1].to_string()
-        } else if parts.len() >= 2 && parts[0] == "src" {
+        let dir = if parts.len() >= 2
+            && (parts[0] == "crates" || parts[0] == "apps" || parts[0] == "src")
+        {
             parts[1].to_string()
         } else if parts.len() >= 2 {
             // Use the first non-trivial directory
@@ -974,11 +974,10 @@ pub fn detect_file_communities(graph: &CodeGraph, resolution: f64) -> ClusterRes
     for edge in graph.all_edges() {
         if edge.edge_type == EdgeType::Contains {
             // source is file, target is symbol/import/type/test
-            if let Some(source_node) = graph.get_node(&edge.source) {
-                if matches!(source_node.node_type, NodeType::File) {
+            if let Some(source_node) = graph.get_node(&edge.source)
+                && matches!(source_node.node_type, NodeType::File) {
                     sym_to_file.insert(edge.target.clone(), edge.source.clone());
                 }
-            }
         }
     }
 
@@ -1277,7 +1276,7 @@ fn subdivide_with_lpa_seeded(graph: &CodeGraph, parent: &Community) -> Vec<Commu
     let mut tiny_nodes: Vec<String> = Vec::new();
     buckets.retain(|label, nodes| {
         if nodes.len() < 3 && *label != largest_label {
-            tiny_nodes.extend(nodes.drain(..));
+            tiny_nodes.append(nodes);
             false
         } else {
             true
@@ -1343,19 +1342,17 @@ fn merge_small_communities(
         let mut neighbor_counts: HashMap<usize, usize> = HashMap::new();
         for nid in &comm.node_ids {
             for neighbor_id in graph.neighbors(nid) {
-                if let Some(&neigh_comm) = node_to_comm.get(neighbor_id) {
-                    if neigh_comm != idx {
+                if let Some(&neigh_comm) = node_to_comm.get(neighbor_id)
+                    && neigh_comm != idx {
                         *neighbor_counts.entry(neigh_comm).or_insert(0) += 1;
                     }
-                }
             }
             // Also check reverse edges.
             for neighbor_id in graph.reverse_neighbors(nid) {
-                if let Some(&neigh_comm) = node_to_comm.get(neighbor_id) {
-                    if neigh_comm != idx {
+                if let Some(&neigh_comm) = node_to_comm.get(neighbor_id)
+                    && neigh_comm != idx {
                         *neighbor_counts.entry(neigh_comm).or_insert(0) += 1;
                     }
-                }
             }
         }
 
@@ -1413,11 +1410,10 @@ fn subdivide_file_community(graph: &CodeGraph, community: &Community) -> Vec<Com
     // Build sub-graph weight map (only edges between files in this community)
     let mut sym_to_file: HashMap<String, String> = HashMap::new();
     for edge in graph.all_edges() {
-        if edge.edge_type == EdgeType::Contains {
-            if file_set.contains(edge.source.as_str()) {
+        if edge.edge_type == EdgeType::Contains
+            && file_set.contains(edge.source.as_str()) {
                 sym_to_file.insert(edge.target.clone(), edge.source.clone());
             }
-        }
     }
 
     let mut sub_weights: HashMap<(String, String), f64> = HashMap::new();
@@ -1537,8 +1533,8 @@ fn name_community(community: &Community, graph: &CodeGraph) -> String {
     };
 
     // Extract meaningful name: try crate/package name, then deepest directory.
-    let clean = extract_meaningful_name(&prefix, &paths, community.node_ids.len());
-    clean
+    
+    extract_meaningful_name(&prefix, &paths, community.node_ids.len())
 }
 
 /// Extract a meaningful community name from file paths.

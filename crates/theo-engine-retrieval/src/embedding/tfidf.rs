@@ -155,8 +155,8 @@ impl TfidfModel {
         let mut dense = vec![0.0f64; self.target_dim];
         for &(vocab_idx, value) in &sparse {
             let row_start = vocab_idx * self.target_dim;
-            for j in 0..self.target_dim {
-                dense[j] += value * self.projection[row_start + j];
+            for (j, d) in dense.iter_mut().enumerate() {
+                *d += value * self.projection[row_start + j];
             }
         }
 

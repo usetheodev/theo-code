@@ -91,11 +91,10 @@ impl ModelRouter for RuleBasedRouter {
                 if ctx.requires_vision {
                     return self.resolve_slot("vision", "vision_required");
                 }
-                if let Some(msg) = ctx.latest_user_message {
-                    if Self::is_simple_turn(msg) {
+                if let Some(msg) = ctx.latest_user_message
+                    && Self::is_simple_turn(msg) {
                         return self.resolve_slot("cheap", "simple_turn");
                     }
-                }
                 self.default_or_error("complex_turn_default")
             }
             // `#[non_exhaustive]` on RoutingPhase forces this arm; new
@@ -164,11 +163,10 @@ impl ModelRouter for RuleBasedRouter {
 /// table. Returns `"default"` if no exact match is found.
 fn infer_tier(table: &PricingTable, previous: &ModelChoice) -> String {
     for name in ["cheap", "default", "strong", "vision", "compact"] {
-        if let Ok(c) = table.resolve(name) {
-            if c.provider_id == previous.provider_id && c.model_id == previous.model_id {
+        if let Ok(c) = table.resolve(name)
+            && c.provider_id == previous.provider_id && c.model_id == previous.model_id {
                 return name.to_string();
             }
-        }
     }
     "default".to_string()
 }

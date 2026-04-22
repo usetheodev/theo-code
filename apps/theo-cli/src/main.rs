@@ -794,9 +794,9 @@ fn cmd_stats(repo_path: &Path) {
     });
 
     // Try loading from cache first
-    if cache_path.exists() && cluster_cache.exists() {
-        if pipeline.load_graph(&cache_path.to_string_lossy()).is_ok() {
-            if pipeline
+    if cache_path.exists() && cluster_cache.exists()
+        && pipeline.load_graph(&cache_path.to_string_lossy()).is_ok()
+            && pipeline
                 .load_clusters(&cluster_cache.to_string_lossy())
                 .is_ok()
             {
@@ -812,8 +812,6 @@ fn cmd_stats(repo_path: &Path) {
                 println!("Time:        {}ms (cached)", ms);
                 return;
             }
-        }
-    }
 
     // Cache miss — full build
     let (files, ext_stats) = theo_application::use_cases::extraction::extract_repo(repo_path);
@@ -927,12 +925,11 @@ async fn resolve_agent_config(
 
     if provider_id.is_none() {
         let auth = theo_infra_auth::OpenAIAuth::with_default_store();
-        if let Ok(Some(tokens)) = auth.get_tokens() {
-            if !tokens.is_expired() {
+        if let Ok(Some(tokens)) = auth.get_tokens()
+            && !tokens.is_expired() {
                 api_key = Some(tokens.access_token.clone());
                 oauth_applied = true;
             }
-        }
     }
 
     let registry = create_provider_registry();
@@ -958,22 +955,20 @@ async fn resolve_agent_config(
             provider_name = spec.display_name.to_string();
 
             let auth = theo_infra_auth::OpenAIAuth::with_default_store();
-            if let Ok(Some(tokens)) = auth.get_tokens() {
-                if let Some(ref account_id) = tokens.account_id {
+            if let Ok(Some(tokens)) = auth.get_tokens()
+                && let Some(ref account_id) = tokens.account_id {
                     config
                         .extra_headers
                         .insert("ChatGPT-Account-Id".to_string(), account_id.clone());
                 }
-            }
         }
-    } else if let Ok(key) = std::env::var("OPENAI_API_KEY") {
-        if let Some(spec) = registry.get("openai") {
+    } else if let Ok(key) = std::env::var("OPENAI_API_KEY")
+        && let Some(spec) = registry.get("openai") {
             config.base_url = spec.base_url.to_string();
             config.endpoint_override = Some(spec.endpoint_url());
             config.api_key = Some(key);
             provider_name = "OpenAI".to_string();
         }
-    }
 
     if let Some(m) = model {
         config.model = m.to_string();

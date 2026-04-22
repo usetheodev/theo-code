@@ -56,14 +56,12 @@ impl Tool for EnvInfoTool {
             .arg("--version")
             .output()
             .await
-        {
-            if output.status.success() {
+            && output.status.success() {
                 info.push_str(&format!(
                     "Rust: {}",
                     String::from_utf8_lossy(&output.stdout).trim()
                 ));
             }
-        }
 
         Ok(ToolOutput {
             title: "Environment Info".into(),

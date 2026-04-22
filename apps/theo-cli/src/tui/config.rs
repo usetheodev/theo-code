@@ -2,6 +2,7 @@
 //!
 //! Stores theme, keybinds, and display preferences.
 
+#![allow(dead_code)] // Scaffolded helpers — kept for upcoming TUI features.
 use std::path::PathBuf;
 
 /// TUI configuration loaded from disk.

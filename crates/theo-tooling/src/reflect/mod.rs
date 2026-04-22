@@ -12,6 +12,12 @@ use theo_domain::tool::{
 
 pub struct ReflectTool;
 
+impl Default for ReflectTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ReflectTool {
     pub fn new() -> Self {
         Self

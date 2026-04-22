@@ -37,14 +37,13 @@ pub fn to_codex_body(request: &ChatRequest) -> serde_json::Value {
             }
             Role::Assistant => {
                 // Text content
-                if let Some(ref content) = msg.content {
-                    if !content.is_empty() {
+                if let Some(ref content) = msg.content
+                    && !content.is_empty() {
                         input.push(serde_json::json!({
                             "role": "assistant",
                             "content": [{"type": "output_text", "text": content}]
                         }));
                     }
-                }
                 // Tool calls become function_call items
                 if let Some(ref tool_calls) = msg.tool_calls {
                     for tc in tool_calls {
@@ -130,11 +129,10 @@ pub fn from_codex_response(body: &serde_json::Value) -> Option<ChatResponse> {
             "message" => {
                 if let Some(content_arr) = item.get("content").and_then(|c| c.as_array()) {
                     for part in content_arr {
-                        if part.get("type").and_then(|t| t.as_str()) == Some("output_text") {
-                            if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
+                        if part.get("type").and_then(|t| t.as_str()) == Some("output_text")
+                            && let Some(text) = part.get("text").and_then(|t| t.as_str()) {
                                 content_parts.push(text.to_string());
                             }
-                        }
                     }
                 }
             }
@@ -199,16 +197,14 @@ pub fn from_codex_response(body: &serde_json::Value) -> Option<ChatResponse> {
             },
             finish_reason,
         }],
-        usage: body.get("usage").and_then(|u| {
-            Some(Usage {
+        usage: body.get("usage").map(|u| Usage {
                 prompt_tokens: u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32,
                 completion_tokens: u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0)
                     as u32,
                 total_tokens: (u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0)
                     + u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0))
                     as u32,
-            })
-        }),
+            }),
     })
 }
 
@@ -307,14 +303,13 @@ pub fn from_codex_stream(stream_body: &str) -> Option<ChatResponse> {
                     ));
                 }
 
-                if let Some(item) = json.get("item") {
-                    if item.get("type").and_then(|t| t.as_str()) == Some("function_call") {
+                if let Some(item) = json.get("item")
+                    && item.get("type").and_then(|t| t.as_str()) == Some("function_call") {
                         current_tc_name =
                             item.get("name").and_then(|n| n.as_str()).map(String::from);
                         current_tc_id = item.get("id").and_then(|i| i.as_str()).map(String::from);
                         current_tc_args.clear();
                     }
-                }
             }
             "response.function_call_arguments.delta" => {
                 if let Some(d) = json.get("delta").and_then(|d| d.as_str()) {

@@ -18,6 +18,12 @@ pub struct BashTool {
     sandbox_config: Option<SandboxConfig>,
 }
 
+impl Default for BashTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BashTool {
     pub fn new() -> Self {
         Self {
@@ -58,9 +64,9 @@ impl BashTool {
         for token in command.split_whitespace() {
             let token = token.trim_matches(|c: char| c == '\'' || c == '"');
             if token.starts_with('/') || token.starts_with("~/") {
-                let path = if token.starts_with("~/") {
+                let path = if let Some(rest) = token.strip_prefix("~/") {
                     if let Ok(home) = std::env::var("HOME") {
-                        PathBuf::from(home).join(&token[2..])
+                        PathBuf::from(home).join(rest)
                     } else {
                         PathBuf::from(token)
                     }

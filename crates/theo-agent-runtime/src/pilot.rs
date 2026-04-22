@@ -437,7 +437,7 @@ impl PilotLoop {
 
                 let strategy = if self.loop_count <= 1 {
                     theo_domain::retry_policy::CorrectionStrategy::RetryLocal
-                } else if let Some(ref r) = self.evolution.reflections().last() {
+                } else if let Some(r) = self.evolution.reflections().last() {
                     r.recommended_strategy
                 } else {
                     theo_domain::retry_policy::CorrectionStrategy::RetryLocal
@@ -453,9 +453,9 @@ impl PilotLoop {
                 );
 
                 // Generate reflection after failure and inject into session
-                if !result.success {
-                    if let Some(reflection) = self.evolution.reflect() {
-                        self.session_messages.push(Message::system(&format!(
+                if !result.success
+                    && let Some(reflection) = self.evolution.reflect() {
+                        self.session_messages.push(Message::system(format!(
                             "## Evolution Reflection (after attempt {})\n\
                              **What failed:** {}\n\
                              **Why:** {}\n\
@@ -467,7 +467,6 @@ impl PilotLoop {
                             reflection.what_to_change,
                         )));
                     }
-                }
             }
 
             // Publish loop summary for CLI display

@@ -173,7 +173,7 @@ fn eval_per_case_mrr_computed() {
         eprintln!("[{}] MRR = {:.3}", case.name, m);
         // Individual MRR can be 0 for misses — we check aggregate below
         assert!(
-            m >= 0.0 && m <= 1.0,
+            (0.0..=1.0).contains(&m),
             "[{}] MRR out of range: {}",
             case.name,
             m

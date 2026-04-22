@@ -338,9 +338,9 @@ impl GraphContextProvider for GraphContextService {
             let (allow, _conf, _reason) =
                 evaluate_direct_return(&wiki_results, query, DEFAULT_BM25_FLOOR);
 
-            if allow {
-                if let Some(top) = wiki_results.first() {
-                    if top.token_count <= budget_tokens {
+            if allow
+                && let Some(top) = wiki_results.first()
+                    && top.token_count <= budget_tokens {
                         let blocks: Vec<ContextBlock> = wiki_results
                             .iter()
                             .take(3)
@@ -380,8 +380,6 @@ impl GraphContextProvider for GraphContextService {
                             });
                         }
                     }
-                }
-            }
         }
 
         // Safe: we checked Ready or Building(stale) above.
@@ -427,10 +425,10 @@ impl GraphContextProvider for GraphContextService {
             // Without dense-retrieval: try Tier 1, then Tier 0
             #[cfg(all(feature = "tantivy-backend", not(feature = "dense-retrieval")))]
             {
-                if graph_state.tantivy_index.is_some() {
+                if let Some(idx) = graph_state.tantivy_index.as_ref() {
                     theo_engine_retrieval::tantivy_search::hybrid_search(
                         &graph_state.graph,
-                        graph_state.tantivy_index.as_ref().unwrap(),
+                        idx,
                         query,
                     )
                 } else {
@@ -597,7 +595,7 @@ fn parse_project_files(project_dir: &Path) -> Vec<FileData> {
         let _ = wb.add_ignore(project_dir.join(".gitignore"));
         wb.add_custom_ignore_filename(".theoignore");
         wb.filter_entry(|entry| {
-            if entry.file_type().map_or(false, |ft| ft.is_dir()) {
+            if entry.file_type().is_some_and(|ft| ft.is_dir()) {
                 let name = entry.file_name().to_str().unwrap_or("");
                 return !theo_domain::graph_context::EXCLUDED_DIRS.contains(&name);
             }
@@ -664,11 +662,10 @@ fn parse_project_files(project_dir: &Path) -> Vec<FileData> {
                     .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
                 mb.cmp(&ma) // newest first
             });
-            if let Some(f) = files.first() {
-                if selected_set.insert(f.clone()) {
+            if let Some(f) = files.first()
+                && selected_set.insert(f.clone()) {
                     selected.push(f.clone());
                 }
-            }
         }
 
         // Step 2: Fill remaining slots by mtime (newest first, across all dirs).
@@ -794,8 +791,8 @@ fn write_back_to_wiki(
         .unwrap_or(0);
 
     // Check staleness: overwrite if existing page has different graph_hash
-    if path.exists() {
-        if let Ok(existing) = std::fs::read_to_string(&path) {
+    if path.exists()
+        && let Ok(existing) = std::fs::read_to_string(&path) {
             let fm = theo_engine_retrieval::wiki::model::parse_frontmatter(&existing);
             if let Some(existing_hash) = fm.graph_hash {
                 if existing_hash == graph_hash {
@@ -806,7 +803,6 @@ fn write_back_to_wiki(
                 return Ok(()); // Legacy page without frontmatter — don't overwrite
             }
         }
-    }
 
     // Build formatted markdown page with canonical frontmatter
     let fm = theo_engine_retrieval::wiki::model::PageFrontmatter::cache(query, graph_hash);
@@ -849,15 +845,14 @@ fn write_back_to_wiki(
     std::fs::write(&path, md)?;
 
     // Log the write-back
-    if let Some(wiki_dir) = cache_dir.parent() {
-        if let Some(project_dir) = wiki_dir.parent().and_then(|p| p.parent()) {
+    if let Some(wiki_dir) = cache_dir.parent()
+        && let Some(project_dir) = wiki_dir.parent().and_then(|p| p.parent()) {
             theo_engine_retrieval::wiki::persistence::append_log(
                 project_dir,
                 "query",
                 &format!("Cached result for: {} ({} blocks)", query, blocks.len()),
             );
         }
-    }
 
     Ok(())
 }
@@ -1150,7 +1145,7 @@ fn compute_project_hash(project_dir: &Path) -> String {
     let _ = hash_wb.add_ignore(project_dir.join(".gitignore"));
     hash_wb.add_custom_ignore_filename(".theoignore");
     hash_wb.filter_entry(|entry| {
-        if entry.file_type().map_or(false, |ft| ft.is_dir()) {
+        if entry.file_type().is_some_and(|ft| ft.is_dir()) {
             let name = entry.file_name().to_str().unwrap_or("");
             return !theo_domain::graph_context::EXCLUDED_DIRS.contains(&name);
         }
@@ -1201,12 +1196,11 @@ fn compute_project_hash(project_dir: &Path) -> String {
         let current_size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
 
         // If BOTH mtime AND size match cache, reuse cached hash (skip file read)
-        if let Some((cached_mtime, cached_size, cached_hash)) = cached.get(&rel) {
-            if *cached_mtime == current_mtime && *cached_size == current_size {
+        if let Some((cached_mtime, cached_size, cached_hash)) = cached.get(&rel)
+            && *cached_mtime == current_mtime && *cached_size == current_size {
                 entries.insert(rel, cached_hash.clone());
                 continue;
             }
-        }
 
         // Mtime or size changed (or not in cache) → read and hash
         if let Ok(content) = std::fs::read(path) {

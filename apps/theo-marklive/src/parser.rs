@@ -161,8 +161,8 @@ fn resolve_wiki_links(html: &str) -> String {
     let mut i = 0;
 
     while i < bytes.len() {
-        if i + 1 < bytes.len() && bytes[i] == b'[' && bytes[i + 1] == b'[' {
-            if let Some(end) = html[i + 2..].find("]]") {
+        if i + 1 < bytes.len() && bytes[i] == b'[' && bytes[i + 1] == b'['
+            && let Some(end) = html[i + 2..].find("]]") {
                 let inner = &html[i + 2..i + 2 + end];
                 let parts: Vec<&str> = inner.splitn(2, '|').collect();
 
@@ -179,7 +179,6 @@ fn resolve_wiki_links(html: &str) -> String {
                 i = i + 2 + end + 2;
                 continue;
             }
-        }
         result.push(bytes[i] as char);
         i += 1;
     }
@@ -473,8 +472,8 @@ fn transform_quick_links_section(section: &str) -> String {
             let slug = search[slug_start..slug_start + slug_end].to_string();
             // Find the title text after >
             let after = &search[slug_start + slug_end..];
-            if let Some(title_start) = after.find('>') {
-                if let Some(title_end) = after[title_start + 1..].find('<') {
+            if let Some(title_start) = after.find('>')
+                && let Some(title_end) = after[title_start + 1..].find('<') {
                     let title = after[title_start + 1..title_start + 1 + title_end]
                         .trim()
                         .to_string();
@@ -482,7 +481,6 @@ fn transform_quick_links_section(section: &str) -> String {
                         links.push((slug, title));
                     }
                 }
-            }
             search = search[slug_start + slug_end + 3..].to_string();
         } else {
             break;

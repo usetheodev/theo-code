@@ -295,10 +295,11 @@ mod tests {
     }
 
     fn cfg_with(provider: Arc<dyn MemoryProvider>, enabled: bool) -> AgentConfig {
-        let mut cfg = AgentConfig::default();
-        cfg.memory_enabled = enabled;
-        cfg.memory_provider = Some(MemoryHandle::new(provider));
-        cfg
+        AgentConfig {
+            memory_enabled: enabled,
+            memory_provider: Some(MemoryHandle::new(provider)),
+            ..AgentConfig::default()
+        }
     }
 
     // ── RM0-AC-1 ─────────────────────────────────────────────────
@@ -369,7 +370,7 @@ mod tests {
     #[tokio::test]
     async fn test_rm0_ac_6_null_provider_preserves_behavior() {
         // With NullMemoryProvider + enabled, hooks complete without side effects.
-        let null: Arc<dyn MemoryProvider> = Arc::new(NullMemoryProvider::default());
+        let null: Arc<dyn MemoryProvider> = Arc::new(NullMemoryProvider);
         let cfg = cfg_with(null, true);
 
         let block = MemoryLifecycle::prefetch(&cfg, "anything").await;
@@ -406,9 +407,11 @@ mod tests {
     // ── Bonus: no provider + enabled also short-circuits ─────────
     #[tokio::test]
     async fn test_rm0_bonus_enabled_without_provider_is_noop() {
-        let mut cfg = AgentConfig::default();
-        cfg.memory_enabled = true;
-        cfg.memory_provider = None;
+        let cfg = AgentConfig {
+            memory_enabled: true,
+            memory_provider: None,
+            ..AgentConfig::default()
+        };
 
         assert_eq!(MemoryLifecycle::prefetch(&cfg, "q").await, "");
         MemoryLifecycle::sync_turn(&cfg, "u", "a").await; // no panic
@@ -551,7 +554,7 @@ mod tests {
         fn test_t0_3_ac_6_respects_5pct_token_budget() {
             let dir = tempfile::tempdir().expect("t");
             // Write a huge constraint string to force truncation.
-            let huge: String = std::iter::repeat('x').take(100_000).collect();
+            let huge: String = "x".repeat(100_000);
             write_episode(
                 dir.path(),
                 "ep-big",

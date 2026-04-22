@@ -315,11 +315,10 @@ impl AgentRunEngine {
         let mut messages: Vec<Message> = vec![Message::system(&system_prompt)];
 
         // Project context: .theo/theo.md prepended as separate system message
-        if !self.config.is_subagent {
-            if let Some(context) = crate::project_config::load_project_context(&self.project_dir) {
-                messages.push(Message::system(&format!("## Project Context\n{context}")));
+        if !self.config.is_subagent
+            && let Some(context) = crate::project_config::load_project_context(&self.project_dir) {
+                messages.push(Message::system(format!("## Project Context\n{context}")));
             }
-        }
 
         // GRAPHCTX is available as the `codebase_context` tool — the LLM calls it on-demand.
         // No automatic injection: the LLM decides when it needs code structure context.
@@ -370,18 +369,16 @@ impl AgentRunEngine {
                 .args(["log", "--oneline", "-20"])
                 .current_dir(&self.project_dir)
                 .output()
-            {
-                if output.status.success() {
+                && output.status.success() {
                     let log = String::from_utf8_lossy(&output.stdout);
                     let log = log.trim();
                     if !log.is_empty() {
                         boot_parts.push(format!("Recent git commits:\n{log}"));
                     }
                 }
-            }
 
             if !boot_parts.is_empty() {
-                messages.push(Message::system(&format!(
+                messages.push(Message::system(format!(
                     "## Session Boot Context\n{}",
                     boot_parts.join("\n\n")
                 )));
@@ -391,9 +388,9 @@ impl AgentRunEngine {
         // Planning injection: if GRAPHCTX is Ready, inject top-5 relevant files
         // as system message so the LLM starts with structural orientation.
         // Skip if Building (don't use stale for planning), only use fresh Ready state.
-        if !self.config.is_subagent {
-            if let Some(ref provider) = self.graph_context {
-                if provider.is_ready() {
+        if !self.config.is_subagent
+            && let Some(ref provider) = self.graph_context
+                && provider.is_ready() {
                     // Use the task objective (first user message) as query
                     let planning_query = messages
                         .iter()
@@ -405,9 +402,9 @@ impl AgentRunEngine {
                         .take(200)
                         .collect::<String>();
 
-                    if !planning_query.is_empty() {
-                        if let Ok(ctx) = provider.query_context(&planning_query, 1000).await {
-                            if !ctx.blocks.is_empty() {
+                    if !planning_query.is_empty()
+                        && let Ok(ctx) = provider.query_context(&planning_query, 1000).await
+                            && !ctx.blocks.is_empty() {
                                 let file_hints: Vec<String> = ctx
                                     .blocks
                                     .iter()
@@ -420,16 +417,12 @@ impl AgentRunEngine {
                                         )
                                     })
                                     .collect();
-                                messages.push(Message::system(&format!(
+                                messages.push(Message::system(format!(
                                     "## Suggested Starting Files\nBased on code graph analysis, these areas are most relevant to your task:\n{}\n\nStart here, but verify with read/grep.",
                                     file_hints.join("\n")
                                 )));
                             }
-                        }
-                    }
                 }
-            }
-        }
 
         // Inject available skills into system context (main agent only).
         // Sub-agents do NOT receive skills — they execute their direct objective.
@@ -452,7 +445,7 @@ impl AgentRunEngine {
             }
             let skills_summary = skill_registry.triggers_summary();
             if !skills_summary.is_empty() {
-                messages.push(Message::system(&format!(
+                messages.push(Message::system(format!(
                     "## Skills\nYou have specialized skills that you SHOULD invoke when the task matches:\n{skills_summary}\n\nWhen the user's request matches a skill trigger, use the `skill` tool to invoke it."
                 )));
             }
@@ -515,7 +508,7 @@ impl AgentRunEngine {
         let mut doom_tracker = self
             .config
             .doom_loop_threshold
-            .map(|t| DoomLoopTracker::new(t));
+            .map(DoomLoopTracker::new);
 
         // Layer 1: Schema stripping — sub-agents get filtered tool definitions
         // that exclude delegation meta-tools (subagent, subagent_parallel, skill).
@@ -581,7 +574,7 @@ impl AgentRunEngine {
                     } else {
                         result.output.clone()
                     };
-                    messages.push(Message::system(&format!(
+                    messages.push(Message::system(format!(
                         "[SENSOR {severity}] {} (via {}): {preview}",
                         result.file_path, result.tool_name
                     )));
@@ -603,7 +596,7 @@ impl AgentRunEngine {
 
             // ── PLANNING phase ──
             // Context loop injection
-            if iteration > 1 && iteration % self.config.context_loop_interval == 0 {
+            if iteration > 1 && iteration.is_multiple_of(self.config.context_loop_interval) {
                 let task_objective = self
                     .task_manager
                     .get(&self.task_id)
@@ -656,7 +649,7 @@ impl AgentRunEngine {
             let estimated_context_tokens: usize = messages
                 .iter()
                 .filter_map(|m| m.content.as_ref())
-                .map(|c| (c.len() + 3) / 4)
+                .map(|c| c.len().div_ceil(4))
                 .sum();
             self.context_metrics
                 .record_context_size(iteration, estimated_context_tokens);
@@ -1050,7 +1043,7 @@ impl AgentRunEngine {
                         messages.push(Message::tool_result(
                             &call.id,
                             "done",
-                            &format!(
+                            format!(
                                 "BLOCKED: convergence criteria not met: {}. Make real changes before calling done.",
                                 pending.join(", ")
                             ),
@@ -1084,7 +1077,7 @@ impl AgentRunEngine {
                                 })
                                 .sum();
                             if lines_changed > 100 {
-                                messages.push(Message::user(&format!(
+                                messages.push(Message::user(format!(
                                     "Note: This change touches {} files with ~{} lines changed. \
                                          Consider reviewing the diff carefully before finalizing.",
                                     self.context_loop_state.edits_files.len(),
@@ -1178,7 +1171,7 @@ impl AgentRunEngine {
                             messages.push(Message::tool_result(
                                 &call.id,
                                 "done",
-                                &format!(
+                                format!(
                                     "BLOCKED: `cargo {}` failed (attempt {}/{}). Fix the errors before calling done.\n\n{}",
                                     cmd_str, self.done_attempts, MAX_DONE_ATTEMPTS, error_preview
                                 ),
@@ -1368,7 +1361,7 @@ impl AgentRunEngine {
                                 messages.push(Message::tool_result(
                                     &call.id,
                                     "skill",
-                                    &format!(
+                                    format!(
                                         "Skill '{}' loaded. Follow the instructions above.",
                                         skill_name
                                     ),
@@ -1431,7 +1424,7 @@ impl AgentRunEngine {
                         messages.push(Message::tool_result(
                             &call.id,
                             "skill",
-                            &format!(
+                            format!(
                                 "Unknown skill: '{}'. Available skills: {}",
                                 skill_name,
                                 available.join(", ")
@@ -1489,13 +1482,13 @@ impl AgentRunEngine {
 
                             let reg = registry.clone();
                             let batch_tool_call = theo_infra_llm::types::ToolCall::new(
-                                &format!("batch_{}_{}", call.id, i),
+                                format!("batch_{}_{}", call.id, i),
                                 &tool_name,
-                                &tool_args.to_string(),
+                                tool_args.to_string(),
                             );
                             let batch_ctx = ToolContext {
                                 session_id: SessionId::new("batch"),
-                                message_id: MessageId::new(&format!("batch_{}", i)),
+                                message_id: MessageId::new(format!("batch_{}", i)),
                                 call_id: batch_tool_call.id.clone(),
                                 agent: "main".to_string(),
                                 abort: abort_rx.clone(),
@@ -1659,7 +1652,7 @@ impl AgentRunEngine {
                         messages.push(Message::tool_result(
                             &call.id,
                             name,
-                            &format!("BLOCKED by hook: {}", hook_result.output.trim()),
+                            format!("BLOCKED by hook: {}", hook_result.output.trim()),
                         ));
                         continue;
                     }
@@ -1673,7 +1666,7 @@ impl AgentRunEngine {
                         messages.push(Message::tool_result(
                             &call.id,
                             name,
-                            &format!(
+                            format!(
                                 "Failed to parse arguments: {e}. Please retry with valid JSON."
                             ),
                         ));
@@ -1693,7 +1686,7 @@ impl AgentRunEngine {
 
                 let ctx = ToolContext {
                     session_id: SessionId::new("agent"),
-                    message_id: MessageId::new(&format!("iter_{iteration}")),
+                    message_id: MessageId::new(format!("iter_{iteration}")),
                     call_id: call.id.clone(),
                     agent: "main".to_string(),
                     abort: abort_rx.clone(),
@@ -1781,8 +1774,8 @@ impl AgentRunEngine {
                 // This feeds the usefulness pipeline (P0: feedback data).
                 match name.as_str() {
                     "read" | "edit" | "write" | "apply_patch" => {
-                        if let Ok(args) = call.parse_arguments() {
-                            if let Some(path) = args
+                        if let Ok(args) = call.parse_arguments()
+                            && let Some(path) = args
                                 .get("filePath")
                                 .or(args.get("file_path"))
                                 .and_then(|p| p.as_str())
@@ -1792,7 +1785,6 @@ impl AgentRunEngine {
                                 // P0: Feed usefulness pipeline — record which files agent actually uses
                                 self.context_metrics.record_tool_reference(path);
                             }
-                        }
                     }
                     "grep" | "glob" | "codebase_context" => {
                         if let Ok(args) = call.parse_arguments() {
@@ -1814,18 +1806,17 @@ impl AgentRunEngine {
 
                 // Record event in working set
                 self.working_set.record_event(
-                    &format!("tool:{}:iter{}", name, iteration),
+                    format!("tool:{}:iter{}", name, iteration),
                     20, // keep last 20 events
                 );
 
                 // Update context-loop diagnostics state
                 match name.as_str() {
                     "read" => {
-                        if let Ok(args) = call.parse_arguments() {
-                            if let Some(path) = args.get("filePath").and_then(|p| p.as_str()) {
+                        if let Ok(args) = call.parse_arguments()
+                            && let Some(path) = args.get("filePath").and_then(|p| p.as_str()) {
                                 self.context_loop_state.record_read(path);
                             }
-                        }
                     }
                     "grep" | "glob" => self.context_loop_state.record_search(),
                     "edit" | "write" | "apply_patch" => {
@@ -1871,8 +1862,8 @@ impl AgentRunEngine {
                 }
 
                 // ── SENSOR FIRE: trigger computational verification after successful writes ──
-                if success && crate::sensor::is_write_tool(name) {
-                    if let Some(ref sensor_runner) = sensor_runner {
+                if success && crate::sensor::is_write_tool(name)
+                    && let Some(ref sensor_runner) = sensor_runner {
                         let file_path = call
                             .parse_arguments()
                             .ok()
@@ -1887,7 +1878,6 @@ impl AgentRunEngine {
                             sensor_runner.fire(name, &file_path, &self.project_dir);
                         }
                     }
-                }
 
                 messages.push(result_msg);
 
@@ -1923,8 +1913,8 @@ impl AgentRunEngine {
             self.transition_run(RunState::Evaluating);
 
             // Save snapshot if store is configured (Invariant 7)
-            if let Some(ref store) = self.snapshot_store {
-                if let Some(task) = self.task_manager.get(&self.task_id) {
+            if let Some(ref store) = self.snapshot_store
+                && let Some(task) = self.task_manager.get(&self.task_id) {
                     // Collect real tool calls and results for this task.
                     let tool_calls = self.tool_call_manager.calls_for_task(&self.task_id);
                     let tool_results: Vec<theo_domain::tool_call::ToolResultRecord> = tool_calls
@@ -1952,7 +1942,6 @@ impl AgentRunEngine {
                     snapshot.checksum = snapshot.compute_checksum();
                     let _ = store.save(&self.run.run_id, &snapshot).await;
                 }
-            }
 
             // After executing tools, evaluate and loop back to Planning
             self.transition_run(RunState::Replanning);
@@ -2095,22 +2084,21 @@ fn detect_project_name_simple(project_dir: &std::path::Path) -> Option<String> {
     if let Ok(content) = std::fs::read_to_string(project_dir.join("Cargo.toml")) {
         for line in content.lines() {
             let t = line.trim();
-            if t.starts_with("name") && t.contains('=') {
-                if let Some(val) = t.split('=').nth(1) {
+            if t.starts_with("name") && t.contains('=')
+                && let Some(val) = t.split('=').nth(1) {
                     let name = val.trim().trim_matches('"').trim_matches('\'');
                     if !name.is_empty() {
                         return Some(name.to_string());
                     }
                 }
-            }
         }
     }
     // Try package.json
     if let Ok(content) = std::fs::read_to_string(project_dir.join("package.json")) {
         for line in content.lines() {
             let t = line.trim().trim_start_matches('{').trim();
-            if t.starts_with("\"name\"") {
-                if let Some(val) = t.split(':').nth(1) {
+            if t.starts_with("\"name\"")
+                && let Some(val) = t.split(':').nth(1) {
                     let name = val
                         .trim()
                         .trim_end_matches('}')
@@ -2121,7 +2109,6 @@ fn detect_project_name_simple(project_dir: &std::path::Path) -> Option<String> {
                         return Some(name.to_string());
                     }
                 }
-            }
         }
     }
     None

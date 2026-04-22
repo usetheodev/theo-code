@@ -79,15 +79,13 @@ fn parse_git_log(raw: &str) -> Result<Vec<ParsedCommit>, GitError> {
     for line in raw.lines() {
         let line = line.trim();
 
-        if line.starts_with("COMMIT:") {
+        if let Some(rest) = line.strip_prefix("COMMIT:") {
             // Flush previous commit.
-            if let Some(c) = current.take() {
-                if !c.files.is_empty() {
+            if let Some(c) = current.take()
+                && !c.files.is_empty() {
                     commits.push(c);
                 }
-            }
 
-            let rest = &line["COMMIT:".len()..];
             let parts: Vec<&str> = rest.splitn(2, ' ').collect();
             if parts.len() < 2 {
                 return Err(GitError::ParseError(format!(
@@ -115,11 +113,10 @@ fn parse_git_log(raw: &str) -> Result<Vec<ParsedCommit>, GitError> {
     }
 
     // Flush last commit.
-    if let Some(c) = current {
-        if !c.files.is_empty() {
+    if let Some(c) = current
+        && !c.files.is_empty() {
             commits.push(c);
         }
-    }
 
     Ok(commits)
 }
@@ -293,15 +290,13 @@ fn parse_git_log_with_messages(raw: &str) -> Result<Vec<ParsedCommitWithMessage>
     for line in raw.lines() {
         let line = line.trim();
 
-        if line.starts_with("COMMIT:") {
+        if let Some(rest) = line.strip_prefix("COMMIT:") {
             // Flush previous commit.
-            if let Some(c) = current.take() {
-                if !c.files.is_empty() {
+            if let Some(c) = current.take()
+                && !c.files.is_empty() {
                     commits.push(c);
                 }
-            }
 
-            let rest = &line["COMMIT:".len()..];
             let parts: Vec<&str> = rest.splitn(2, ' ').collect();
             if parts.len() < 2 {
                 return Err(GitError::ParseError(format!(
@@ -319,19 +314,17 @@ fn parse_git_log_with_messages(raw: &str) -> Result<Vec<ParsedCommitWithMessage>
                 message,
                 files: Vec::new(),
             });
-        } else if !line.is_empty() {
-            if let Some(ref mut c) = current {
+        } else if !line.is_empty()
+            && let Some(ref mut c) = current {
                 c.files.push(line.to_string());
             }
-        }
     }
 
     // Flush last commit.
-    if let Some(c) = current {
-        if !c.files.is_empty() {
+    if let Some(c) = current
+        && !c.files.is_empty() {
             commits.push(c);
         }
-    }
 
     Ok(commits)
 }

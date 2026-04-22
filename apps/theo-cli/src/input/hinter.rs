@@ -1,5 +1,6 @@
 //! Rustyline-style hints based on command history + known commands.
 
+#![allow(dead_code)] // Scaffolded helpers — kept for upcoming TUI features.
 /// Suggest a completion hint for a partial input line.
 ///
 /// Returns the **tail** that would complete the input (the portion

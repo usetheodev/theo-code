@@ -156,8 +156,8 @@ fn load_single_plugin(plugin_dir: &Path) -> Result<LoadedPlugin, String> {
     // Discover hook scripts
     let mut hook_scripts = Vec::new();
     let hooks_dir = plugin_dir.join("hooks");
-    if hooks_dir.exists() {
-        if let Ok(entries) = std::fs::read_dir(&hooks_dir) {
+    if hooks_dir.exists()
+        && let Ok(entries) = std::fs::read_dir(&hooks_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.extension().and_then(|e| e.to_str()) == Some("sh") {
@@ -165,7 +165,6 @@ fn load_single_plugin(plugin_dir: &Path) -> Result<LoadedPlugin, String> {
                 }
             }
         }
-    }
 
     Ok(LoadedPlugin {
         manifest,

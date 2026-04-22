@@ -97,10 +97,9 @@ pub async fn input_loop(tx: mpsc::Sender<Msg>) {
             _ => None,
         };
 
-        if let Some(msg) = msg {
-            if tx.send(msg).await.is_err() {
+        if let Some(msg) = msg
+            && tx.send(msg).await.is_err() {
                 break; // render loop closed
             }
-        }
     }
 }

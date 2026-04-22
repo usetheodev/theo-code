@@ -500,7 +500,7 @@ impl CodeGraph {
             .iter()
             .filter_map(|id| self.nodes.get(id))
             .filter(|node| matches!(node.node_type, NodeType::Symbol))
-            .map(|node| Self::symbol_content_hash(node))
+            .map(Self::symbol_content_hash)
             .collect();
 
         if member_hashes.is_empty() {
@@ -580,15 +580,12 @@ impl CodeGraph {
         for child_id in self.contains_children(file_id) {
             // Reverse: who tests this symbol?
             for src_id in self.reverse_neighbors(child_id) {
-                if let Some(src_node) = self.get_node(src_id) {
-                    if src_node.node_type == NodeType::Test {
-                        if let Some(ref fp) = src_node.file_path {
-                            if seen.insert(fp.clone()) {
+                if let Some(src_node) = self.get_node(src_id)
+                    && src_node.node_type == NodeType::Test
+                        && let Some(ref fp) = src_node.file_path
+                            && seen.insert(fp.clone()) {
                                 tests.push(fp.clone());
                             }
-                        }
-                    }
-                }
             }
         }
         tests

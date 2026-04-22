@@ -8,6 +8,12 @@ use theo_domain::tool::{
 
 pub struct WebFetchTool;
 
+impl Default for WebFetchTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WebFetchTool {
     pub fn new() -> Self {
         Self
@@ -278,7 +284,7 @@ fn strip_inline_event_handlers(input: &str) -> String {
                 if quote == Some(b'"') || quote == Some(b'\'') {
                     // Find the matching closing quote
                     let q = quote.unwrap();
-                    if let Some(end) = input[j + 2..].as_bytes().iter().position(|&b| b == q) {
+                    if let Some(end) = bytes[j + 2..].iter().position(|&b| b == q) {
                         i = j + 2 + end + 1;
                         continue;
                     }

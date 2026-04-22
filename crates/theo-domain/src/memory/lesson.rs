@@ -157,12 +157,11 @@ pub fn normalize_lesson(text: &str) -> String {
                 out.push(lc);
             }
             prev_space = false;
-        } else if c.is_whitespace() {
-            if !prev_space {
+        } else if c.is_whitespace()
+            && !prev_space {
                 out.push(' ');
                 prev_space = true;
             }
-        }
     }
     out.trim().to_string()
 }

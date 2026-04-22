@@ -127,6 +127,12 @@ impl Default for TodoList {
 // ---------------------------------------------------------------------------
 
 pub struct TaskCreateTool;
+impl Default for TaskCreateTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TaskCreateTool {
     pub fn new() -> Self {
         Self
@@ -191,6 +197,12 @@ impl Tool for TaskCreateTool {
 // ---------------------------------------------------------------------------
 
 pub struct TaskUpdateTool;
+impl Default for TaskUpdateTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TaskUpdateTool {
     pub fn new() -> Self {
         Self

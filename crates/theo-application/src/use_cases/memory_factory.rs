@@ -8,6 +8,8 @@
 //! `AgentConfig::memory_provider`. Keeps provider construction out of
 //! the runtime crate so `theo-application` stays the composition root.
 
+#![allow(clippy::field_reassign_with_default)] // Test helpers build large configs step by step for readability.
+
 use std::path::Path;
 use std::sync::Arc;
 

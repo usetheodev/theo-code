@@ -161,12 +161,11 @@ pub fn filter_harmful_chunks(
         }
 
         // Signal 4: Redundancy within same community.
-        if let Some(community_id) = community_of.get(path.as_str()) {
-            if is_redundant_in_community(idx, *community_id, candidates, &community_of) {
+        if let Some(community_id) = community_of.get(path.as_str())
+            && is_redundant_in_community(idx, *community_id, candidates, &community_of) {
                 removals.push((idx, HarmReason::Redundant));
                 continue;
             }
-        }
     }
 
     // Build result.
@@ -205,13 +204,11 @@ fn has_definer_for_test(
     // in one of the definer files.
     for test_sym_id in test_symbols {
         for neighbor_id in graph.neighbors(test_sym_id) {
-            if let Some(neighbor) = graph.get_node(neighbor_id) {
-                if let Some(ref fp) = neighbor.file_path {
-                    if definer_files.contains(fp.as_str()) {
+            if let Some(neighbor) = graph.get_node(neighbor_id)
+                && let Some(ref fp) = neighbor.file_path
+                    && definer_files.contains(fp.as_str()) {
                         return true;
                     }
-                }
-            }
         }
     }
 
@@ -270,16 +267,14 @@ fn is_redundant_in_community(
     }
 
     // Check higher-ranked candidates (lower index = higher rank).
-    for prev_idx in 0..idx {
-        let (prev_path, prev_score) = &candidates[prev_idx];
-        if let Some(&prev_community) = community_of.get(prev_path.as_str()) {
-            if prev_community == community_id && *prev_score > 0.0 {
+    for (prev_path, prev_score) in candidates.iter().take(idx) {
+        if let Some(&prev_community) = community_of.get(prev_path.as_str())
+            && prev_community == community_id && *prev_score > 0.0 {
                 let ratio = my_score / prev_score;
                 if ratio >= REDUNDANCY_SCORE_RATIO {
                     return true;
                 }
             }
-        }
     }
 
     false

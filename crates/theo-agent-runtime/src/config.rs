@@ -25,6 +25,7 @@ pub type MessageQueueFn =
 /// Both queues are optional — when absent, behavior is unchanged.
 ///
 /// **Pi-mono ref:** `packages/agent/src/agent-loop.ts:165-229`
+#[derive(Default)]
 pub struct MessageQueues {
     /// Messages injected mid-run between turns (e.g., user types while agent works).
     pub steering: Option<MessageQueueFn>,
@@ -32,14 +33,6 @@ pub struct MessageQueues {
     pub follow_up: Option<MessageQueueFn>,
 }
 
-impl Default for MessageQueues {
-    fn default() -> Self {
-        Self {
-            steering: None,
-            follow_up: None,
-        }
-    }
-}
 
 impl std::fmt::Debug for MessageQueues {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -57,8 +50,10 @@ impl std::fmt::Debug for MessageQueues {
 /// Interaction mode that controls how the agent approaches tasks.
 /// Implemented via system prompt — zero changes to RunEngine.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum AgentMode {
     /// Full autonomy: Read → Think → Act → Verify → Done.
+    #[default]
     Agent,
     /// Creates a detailed plan FIRST, presents it, waits for user approval.
     Plan,
@@ -66,14 +61,10 @@ pub enum AgentMode {
     Ask,
 }
 
-impl Default for AgentMode {
-    fn default() -> Self {
-        AgentMode::Agent
-    }
-}
 
 impl AgentMode {
     /// Parse mode from string (CLI --mode flag, /mode command).
+    #[allow(clippy::should_implement_trait)] // Returns Option, not Result; intentional API.
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "agent" => Some(AgentMode::Agent),
@@ -226,6 +217,7 @@ impl std::fmt::Display for ToolExecutionMode {
 
 impl ToolExecutionMode {
     /// Parse from string (CLI flag, config file).
+    #[allow(clippy::should_implement_trait)] // Returns Option, not Result; intentional API.
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "sequential" => Some(ToolExecutionMode::Sequential),

@@ -171,13 +171,11 @@ fn outgoing_targets(graph: &CodeGraph, node_id: &str, edge_type: &EdgeType) -> V
     let mut seen: HashSet<String> = HashSet::new();
 
     for edge in graph.all_edges() {
-        if edge.source == node_id && &edge.edge_type == edge_type {
-            if let Some(target_node) = graph.get_node(&edge.target) {
-                if seen.insert(target_node.name.clone()) {
+        if edge.source == node_id && &edge.edge_type == edge_type
+            && let Some(target_node) = graph.get_node(&edge.target)
+                && seen.insert(target_node.name.clone()) {
                     targets.push(target_node.name.clone());
                 }
-            }
-        }
     }
     targets
 }
@@ -188,13 +186,11 @@ fn incoming_sources(graph: &CodeGraph, node_id: &str, edge_type: &EdgeType) -> V
     let mut seen: HashSet<String> = HashSet::new();
 
     for edge in graph.all_edges() {
-        if edge.target == node_id && &edge.edge_type == edge_type {
-            if let Some(source_node) = graph.get_node(&edge.source) {
-                if seen.insert(source_node.name.clone()) {
+        if edge.target == node_id && &edge.edge_type == edge_type
+            && let Some(source_node) = graph.get_node(&edge.source)
+                && seen.insert(source_node.name.clone()) {
                     sources.push(source_node.name.clone());
                 }
-            }
-        }
     }
     sources
 }
@@ -207,13 +203,11 @@ fn find_node_id_by_name(
     edge_type: &EdgeType,
 ) -> Option<String> {
     for edge in graph.all_edges() {
-        if edge.source == source_id && &edge.edge_type == edge_type {
-            if let Some(target_node) = graph.get_node(&edge.target) {
-                if target_node.name == target_name {
+        if edge.source == source_id && &edge.edge_type == edge_type
+            && let Some(target_node) = graph.get_node(&edge.target)
+                && target_node.name == target_name {
                     return Some(edge.target.clone());
                 }
-            }
-        }
     }
     None
 }
@@ -292,12 +286,11 @@ fn file_co_changes(graph: &CodeGraph, node_id: &str) -> Vec<(String, f64)> {
             } else {
                 None
             };
-            if let Some(other) = other_id {
-                if let Some(other_node) = graph.get_node(other) {
+            if let Some(other) = other_id
+                && let Some(other_node) = graph.get_node(other) {
                     let name = other_node.file_path.as_deref().unwrap_or(&other_node.name);
                     co_changes.push((name.to_string(), edge.weight));
                 }
-            }
         }
     }
 

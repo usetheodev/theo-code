@@ -63,12 +63,12 @@ pub fn compress_for_context(
     relevant_symbols: &HashSet<String>,
     file_path: &str,
 ) -> CompressedSource {
-    let original_tokens = (source.len() + 3) / 4;
+    let original_tokens = source.len().div_ceil(4);
 
     if symbols.is_empty() {
         // No symbols extracted — return source as-is with header.
         let text = format!("// {file_path}\n{source}");
-        let compressed_tokens = (text.len() + 3) / 4;
+        let compressed_tokens = text.len().div_ceil(4);
         return CompressedSource {
             text,
             original_tokens,
@@ -141,7 +141,7 @@ pub fn compress_for_context(
         last_end = end;
     }
 
-    let compressed_tokens = (output.len() + 3) / 4;
+    let compressed_tokens = output.len().div_ceil(4);
 
     CompressedSource {
         text: output,

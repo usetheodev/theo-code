@@ -53,7 +53,7 @@ impl OpenAITokens {
 /// Device code response from OpenAI.
 ///
 /// ChatGPT's device flow is two-phase: first we exchange `device_auth_id`
-/// + `user_code` for an `authorization_code`, then that code is traded
+/// and `user_code` for an `authorization_code`, then that code is traded
 /// for OAuth tokens at `/oauth/token`. The `device_auth_id` is what the
 /// server calls `device_code` in RFC 8628 terms.
 #[derive(Debug, Clone)]
@@ -539,20 +539,17 @@ fn extract_account_id_from_jwt(token: &str) -> Option<String> {
     }
 
     // Priority 2: namespaced claim
-    if let Some(auth) = claims.get("https://api.openai.com/auth") {
-        if let Some(id) = auth.get("chatgpt_account_id").and_then(|v| v.as_str()) {
+    if let Some(auth) = claims.get("https://api.openai.com/auth")
+        && let Some(id) = auth.get("chatgpt_account_id").and_then(|v| v.as_str()) {
             return Some(id.to_string());
         }
-    }
 
     // Priority 3: org ID
-    if let Some(orgs) = claims.get("organizations").and_then(|v| v.as_array()) {
-        if let Some(first) = orgs.first() {
-            if let Some(id) = first.get("id").and_then(|v| v.as_str()) {
+    if let Some(orgs) = claims.get("organizations").and_then(|v| v.as_array())
+        && let Some(first) = orgs.first()
+            && let Some(id) = first.get("id").and_then(|v| v.as_str()) {
                 return Some(id.to_string());
             }
-        }
-    }
 
     None
 }

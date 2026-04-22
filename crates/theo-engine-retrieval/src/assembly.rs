@@ -304,22 +304,19 @@ fn collect_file_symbols(
     // Collect file paths from file nodes in the community
     let mut community_files: HashSet<String> = HashSet::new();
     for node_id in &community.node_ids {
-        if let Some(node) = graph.get_node(node_id) {
-            if let Some(fp) = &node.file_path {
+        if let Some(node) = graph.get_node(node_id)
+            && let Some(fp) = &node.file_path {
                 community_files.insert(fp.clone());
             }
-        }
     }
 
     // Also find files via Contains edges from file nodes
     for node_id in &community.node_ids {
-        if let Some(node) = graph.get_node(node_id) {
-            if node.node_type == NodeType::File {
-                if let Some(fp) = &node.file_path {
+        if let Some(node) = graph.get_node(node_id)
+            && node.node_type == NodeType::File
+                && let Some(fp) = &node.file_path {
                     community_files.insert(fp.clone());
                 }
-            }
-        }
     }
 
     // Collect symbol ranges per file.
@@ -329,8 +326,8 @@ fn collect_file_symbols(
     for node_id in &community.node_ids {
         if let Some(node) = graph.get_node(node_id) {
             // Direct symbol/test nodes (symbol-level communities)
-            if node.node_type == NodeType::Symbol || node.node_type == NodeType::Test {
-                if let (Some(fp), Some(ls), Some(le)) =
+            if (node.node_type == NodeType::Symbol || node.node_type == NodeType::Test)
+                && let (Some(fp), Some(ls), Some(le)) =
                     (&node.file_path, node.line_start, node.line_end)
                 {
                     file_symbols
@@ -342,13 +339,12 @@ fn collect_file_symbols(
                             line_end: le,
                         });
                 }
-            }
             // File nodes — follow CONTAINS edges to get their symbols
             if node.node_type == NodeType::File {
                 for edge in graph.all_edges() {
-                    if edge.edge_type == EdgeType::Contains && edge.source == *node_id {
-                        if let Some(child) = graph.get_node(&edge.target) {
-                            if let (Some(fp), Some(ls), Some(le)) =
+                    if edge.edge_type == EdgeType::Contains && edge.source == *node_id
+                        && let Some(child) = graph.get_node(&edge.target)
+                            && let (Some(fp), Some(ls), Some(le)) =
                                 (&child.file_path, child.line_start, child.line_end)
                             {
                                 file_symbols
@@ -360,8 +356,6 @@ fn collect_file_symbols(
                                         line_end: le,
                                     });
                             }
-                        }
-                    }
                 }
             }
         }
@@ -560,12 +554,12 @@ fn build_code_content_filtered(
             // Get symbol names for this file
             let mut match_count = 0usize;
             for node_id in &community.node_ids {
-                if let Some(node) = graph.get_node(node_id) {
-                    if node.file_path.as_deref() == Some(path.as_str()) {
+                if let Some(node) = graph.get_node(node_id)
+                    && node.file_path.as_deref() == Some(path.as_str()) {
                         // Check CONTAINS children
                         for edge in graph.all_edges() {
-                            if edge.edge_type == EdgeType::Contains && edge.source == *node_id {
-                                if let Some(child) = graph.get_node(&edge.target) {
+                            if edge.edge_type == EdgeType::Contains && edge.source == *node_id
+                                && let Some(child) = graph.get_node(&edge.target) {
                                     let name_tokens: HashSet<String> =
                                         crate::search::tokenise(&child.name).into_iter().collect();
                                     match_count += query_tokens
@@ -573,10 +567,8 @@ fn build_code_content_filtered(
                                         .filter(|qt| name_tokens.contains(*qt))
                                         .count();
                                 }
-                            }
                         }
                     }
-                }
             }
             // Also check the file name itself
             let path_tokens: HashSet<String> = crate::search::tokenise(path).into_iter().collect();
@@ -590,7 +582,7 @@ fn build_code_content_filtered(
         .collect();
 
     // Sort by match count descending, take top 3 files
-    file_scores.sort_by(|a, b| b.2.cmp(&a.2));
+    file_scores.sort_by_key(|item| std::cmp::Reverse(item.2));
     let top_files: Vec<_> = file_scores
         .into_iter()
         .filter(|(_, _, score)| *score > 0)
@@ -651,13 +643,11 @@ fn build_signature_content(community: &Community, graph: &CodeGraph) -> String {
 
     // Collect unique signatures from community nodes
     for node_id in &community.node_ids {
-        if let Some(node) = graph.get_node(node_id) {
-            if node.node_type == NodeType::Symbol || node.node_type == NodeType::Test {
-                if let Some(sig) = &node.signature {
+        if let Some(node) = graph.get_node(node_id)
+            && (node.node_type == NodeType::Symbol || node.node_type == NodeType::Test)
+                && let Some(sig) = &node.signature {
                     lines.push(sig.clone());
                 }
-            }
-        }
     }
 
     lines.join("\n")
@@ -773,7 +763,7 @@ pub fn assemble_with_code(
                     .filter(|id| {
                         graph
                             .get_node(id)
-                            .map_or(false, |n| n.node_type == NodeType::Symbol)
+                            .is_some_and(|n| n.node_type == NodeType::Symbol)
                     })
                     .count();
                 let file_count = collect_file_symbols(&s.community, graph).len();
@@ -1047,11 +1037,10 @@ pub fn assemble_files_direct_with_inline_skip(
         std::collections::HashMap::new();
     for comm in communities {
         for nid in &comm.node_ids {
-            if let Some(node) = graph.get_node(nid) {
-                if let Some(fp) = node.file_path.as_deref() {
+            if let Some(node) = graph.get_node(nid)
+                && let Some(fp) = node.file_path.as_deref() {
                     file_to_community.entry(fp).or_insert(&comm.name);
                 }
-            }
         }
     }
 
@@ -1163,15 +1152,12 @@ pub fn assemble_files_direct_with_inline_skip(
         // Also check FILE-level reverse edges (added by SCIP merge).
         // SCIP adds precise file:A → file:B edges for cross-file references.
         for rev_id in graph.reverse_neighbors(&file_id) {
-            if let Some(rev_node) = graph.get_node(rev_id) {
-                if rev_node.node_type == NodeType::File {
-                    if let Some(fp) = rev_node.file_path.as_deref() {
-                        if fp != *seed_path && !is_hub_file(fp) {
+            if let Some(rev_node) = graph.get_node(rev_id)
+                && rev_node.node_type == NodeType::File
+                    && let Some(fp) = rev_node.file_path.as_deref()
+                        && fp != *seed_path && !is_hub_file(fp) {
                             *reverse_boost.entry(fp).or_insert(0.0) += REVERSE_BOOST_PER_CALLER;
                         }
-                    }
-                }
-            }
         }
     }
 
@@ -1572,7 +1558,7 @@ mod tests {
         };
 
         let scored = vec![ScoredCommunity {
-            community: community,
+            community,
             score: 5.0,
         }];
 

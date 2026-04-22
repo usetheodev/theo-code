@@ -78,13 +78,12 @@ fn extract_recursive(
         "class_declaration" => {
             try_extract_controller_routes(node, source, file_path, extraction);
         }
-        "method_declaration" => {
+        "method_declaration"
             // Only extract standalone methods (not inside a class with [Route] prefix).
             // Methods inside a [Route] class are handled by try_extract_controller_routes.
-            if !is_inside_route_class(node, source, file_path) {
+            if !is_inside_route_class(node, source, file_path) => {
                 try_extract_attributed_route(node, source, file_path, extraction, "", &None);
             }
-        }
         "local_declaration_statement" => {
             try_track_map_group(node, source, group_prefixes);
         }
@@ -181,8 +180,8 @@ fn try_extract_controller_routes(
     };
 
     for i in 0..body.child_count() {
-        if let Some(child) = body.child(i as u32) {
-            if child.kind() == "method_declaration" {
+        if let Some(child) = body.child(i as u32)
+            && child.kind() == "method_declaration" {
                 try_extract_attributed_route(
                     &child,
                     source,
@@ -192,7 +191,6 @@ fn try_extract_controller_routes(
                     &class_auth,
                 );
             }
-        }
     }
 }
 
@@ -304,20 +302,17 @@ fn collect_attributes(
 
     // Check direct children for attribute_list
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i as u32) {
-            if child.kind() == "attribute_list" {
+        if let Some(child) = node.child(i as u32)
+            && child.kind() == "attribute_list" {
                 for j in 0..child.child_count() {
-                    if let Some(attr) = child.child(j as u32) {
-                        if attr.kind() == "attribute" {
-                            if let Some(name) = extract_attribute_name(&attr, source) {
+                    if let Some(attr) = child.child(j as u32)
+                        && attr.kind() == "attribute"
+                            && let Some(name) = extract_attribute_name(&attr, source) {
                                 let text = node_text(&attr, source);
                                 result.push((name, text, anchor_from_node(&attr, file_path)));
                             }
-                        }
-                    }
                 }
             }
-        }
     }
 
     // Also check preceding siblings — attribute_list can be siblings
@@ -325,14 +320,12 @@ fn collect_attributes(
     while let Some(sibling) = prev {
         if sibling.kind() == "attribute_list" {
             for j in 0..sibling.child_count() {
-                if let Some(attr) = sibling.child(j as u32) {
-                    if attr.kind() == "attribute" {
-                        if let Some(name) = extract_attribute_name(&attr, source) {
+                if let Some(attr) = sibling.child(j as u32)
+                    && attr.kind() == "attribute"
+                        && let Some(name) = extract_attribute_name(&attr, source) {
                             let text = node_text(&attr, source);
                             result.push((name, text, anchor_from_node(&attr, file_path)));
                         }
-                    }
-                }
             }
         } else {
             break;
@@ -354,11 +347,10 @@ fn extract_attribute_name(node: &Node, source: &str) -> Option<String> {
 
     // Fallback: find the first identifier child
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i as u32) {
-            if child.kind() == "identifier" || child.kind() == "generic_name" {
+        if let Some(child) = node.child(i as u32)
+            && (child.kind() == "identifier" || child.kind() == "generic_name") {
                 return Some(node_text(&child, source));
             }
-        }
     }
 
     // Text-based fallback
@@ -387,8 +379,8 @@ fn try_parse_http_attribute(attr_name: &str, attr_text: &str) -> Option<(HttpMet
 fn extract_path_from_attribute_text(attr_text: &str) -> Option<String> {
     // Find quoted string in attribute
     for quote in ['"', '\''] {
-        if let Some(start) = attr_text.find(quote) {
-            if let Some(end) = attr_text[start + 1..].find(quote) {
+        if let Some(start) = attr_text.find(quote)
+            && let Some(end) = attr_text[start + 1..].find(quote) {
                 let path = &attr_text[start + 1..start + 1 + end];
                 // Normalize: add leading / if missing
                 return if path.starts_with('/') {
@@ -397,7 +389,6 @@ fn extract_path_from_attribute_text(attr_text: &str) -> Option<String> {
                     Some(format!("/{path}"))
                 };
             }
-        }
     }
     None
 }
@@ -487,14 +478,13 @@ fn try_extract_minimal_api_route(
 fn extract_invocation_method_name(node: &Node, source: &str) -> Option<String> {
     // The function child is a member_access_expression
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i as u32) {
-            if child.kind() == "member_access_expression" {
+        if let Some(child) = node.child(i as u32)
+            && child.kind() == "member_access_expression" {
                 // The method name is the `name` field
                 if let Some(name_node) = child.child_by_field_name("name") {
                     return Some(node_text(&name_node, source));
                 }
             }
-        }
     }
     None
 }
@@ -507,15 +497,12 @@ fn extract_invocation_method_name(node: &Node, source: &str) -> Option<String> {
 /// Returns the identifier text of the receiver, if it is a simple identifier.
 fn extract_invocation_receiver(node: &Node, source: &str) -> Option<String> {
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i as u32) {
-            if child.kind() == "member_access_expression" {
-                if let Some(expr) = child.child_by_field_name("expression") {
-                    if expr.kind() == "identifier" {
+        if let Some(child) = node.child(i as u32)
+            && child.kind() == "member_access_expression"
+                && let Some(expr) = child.child_by_field_name("expression")
+                    && expr.kind() == "identifier" {
                         return Some(node_text(&expr, source));
                     }
-                }
-            }
-        }
     }
     None
 }
@@ -615,12 +602,11 @@ fn try_track_map_group(node: &Node, source: &str, group_prefixes: &mut HashMap<S
             // The initializer may be in an equals_value_clause or directly
             // as a child of the variable_declarator (C# tree-sitter grammar).
             // Try equals_value_clause first, then fall back to direct children.
-            if let Some(eq) = find_child_by_kind(&declarator, "equals_value_clause") {
-                if let Some(info) = try_extract_map_group_from_expr(&eq, source, group_prefixes) {
+            if let Some(eq) = find_child_by_kind(&declarator, "equals_value_clause")
+                && let Some(info) = try_extract_map_group_from_expr(&eq, source, group_prefixes) {
                     group_prefixes.insert(var_name.clone(), info);
                     continue;
                 }
-            }
 
             // Direct child: variable_declarator → invocation_expression
             if let Some(info) = try_extract_map_group_from_expr(&declarator, source, group_prefixes)
@@ -667,11 +653,10 @@ fn try_extract_map_group_from_expr(
     group_prefixes: &HashMap<String, GroupInfo>,
 ) -> Option<GroupInfo> {
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i as u32) {
-            if let Some(info) = try_extract_map_group_from_node(&child, source, group_prefixes) {
+        if let Some(child) = node.child(i as u32)
+            && let Some(info) = try_extract_map_group_from_node(&child, source, group_prefixes) {
                 return Some(info);
             }
-        }
     }
     None
 }
@@ -714,18 +699,15 @@ fn try_extract_map_group_from_node(
         // CST: invocation_expression(RequireAuthorization) → member_access_expression
         //        → invocation_expression(MapGroup)
         for i in 0..node.child_count() {
-            if let Some(child) = node.child(i as u32) {
-                if child.kind() == "member_access_expression" {
-                    if let Some(expr) = child.child_by_field_name("expression") {
-                        if let Some(mut info) =
+            if let Some(child) = node.child(i as u32)
+                && child.kind() == "member_access_expression"
+                    && let Some(expr) = child.child_by_field_name("expression")
+                        && let Some(mut info) =
                             try_extract_map_group_from_node(&expr, source, group_prefixes)
                         {
                             info.auth = Some(AuthKind::Attribute("RequireAuthorization".into()));
                             return Some(info);
                         }
-                    }
-                }
-            }
         }
     }
 
@@ -735,21 +717,19 @@ fn try_extract_map_group_from_node(
 /// Find a descendant node by kind (up to 2 levels deep).
 fn find_descendant_by_kind<'a>(node: &Node<'a>, kind: &str) -> Option<Node<'a>> {
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i as u32) {
-            if child.kind() == kind {
+        if let Some(child) = node.child(i as u32)
+            && child.kind() == kind {
                 return Some(child);
             }
-        }
     }
     // One level deeper
     for i in 0..node.child_count() {
         if let Some(child) = node.child(i as u32) {
             for j in 0..child.child_count() {
-                if let Some(grandchild) = child.child(j as u32) {
-                    if grandchild.kind() == kind {
+                if let Some(grandchild) = child.child(j as u32)
+                    && grandchild.kind() == kind {
                         return Some(grandchild);
                     }
-                }
             }
         }
     }
@@ -759,11 +739,10 @@ fn find_descendant_by_kind<'a>(node: &Node<'a>, kind: &str) -> Option<Node<'a>> 
 /// Find a direct child node by its kind.
 fn find_child_by_kind<'a>(node: &Node<'a>, kind: &str) -> Option<Node<'a>> {
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i as u32) {
-            if child.kind() == kind {
+        if let Some(child) = node.child(i as u32)
+            && child.kind() == kind {
                 return Some(child);
             }
-        }
     }
     None
 }

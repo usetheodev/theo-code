@@ -8,6 +8,7 @@
 //! See `docs/roadmap/cli-professionalization.md` (T1.1) and
 //! `docs/adr/ADR-001-streaming-markdown.md`.
 
+#![allow(dead_code)] // Scaffolded helpers — kept for upcoming TUI features.
 use std::sync::Mutex;
 
 use theo_agent_runtime::event_bus::EventListener;
@@ -93,15 +94,14 @@ impl EventListener for CliRenderer {
                 }
             }
             EventType::ContentDelta => {
-                if let Some(text) = event.payload.get("text").and_then(|v| v.as_str()) {
-                    if let Ok(mut r) = self.streaming.lock() {
+                if let Some(text) = event.payload.get("text").and_then(|v| v.as_str())
+                    && let Ok(mut r) = self.streaming.lock() {
                         r.push(text);
                         let chunk = r.take_output();
                         if !chunk.is_empty() {
                             eprint!("{chunk}");
                         }
                     }
-                }
             }
             EventType::BudgetExceeded => {
                 let violation = tr::json_str(&event.payload, "violation", "budget exceeded");

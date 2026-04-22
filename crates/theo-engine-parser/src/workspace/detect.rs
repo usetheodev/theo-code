@@ -58,13 +58,11 @@ fn expand_globs(root: &Path, patterns: &[String]) -> Vec<PathBuf> {
 /// Returns the `"name"` field if present, otherwise derives from the path.
 fn read_npm_package_name(package_dir: &Path, workspace_root: &Path) -> String {
     let pkg_json_path = package_dir.join("package.json");
-    if let Ok(contents) = std::fs::read_to_string(&pkg_json_path) {
-        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&contents) {
-            if let Some(name) = parsed.get("name").and_then(|v| v.as_str()) {
+    if let Ok(contents) = std::fs::read_to_string(&pkg_json_path)
+        && let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&contents)
+            && let Some(name) = parsed.get("name").and_then(|v| v.as_str()) {
                 return name.to_string();
             }
-        }
-    }
     name_from_relative_path(workspace_root, package_dir)
 }
 
@@ -253,17 +251,15 @@ pub(crate) fn detect_cargo(root: &Path) -> Option<WorkspaceLayout> {
 /// Falls back to deriving the name from the directory path.
 fn read_cargo_package_name(member_dir: &Path, workspace_root: &Path) -> String {
     let cargo_path = member_dir.join("Cargo.toml");
-    if let Ok(contents) = std::fs::read_to_string(&cargo_path) {
-        if let Ok(parsed) = contents.parse::<toml::Value>() {
-            if let Some(name) = parsed
+    if let Ok(contents) = std::fs::read_to_string(&cargo_path)
+        && let Ok(parsed) = contents.parse::<toml::Value>()
+            && let Some(name) = parsed
                 .get("package")
                 .and_then(|p| p.get("name"))
                 .and_then(|n| n.as_str())
             {
                 return name.to_string();
             }
-        }
-    }
     name_from_relative_path(workspace_root, member_dir)
 }
 
@@ -432,17 +428,15 @@ pub(crate) fn detect_uv(root: &Path) -> Option<WorkspaceLayout> {
 /// Falls back to deriving from the directory path.
 fn read_python_package_name(member_dir: &Path, workspace_root: &Path) -> String {
     let pyproject_path = member_dir.join("pyproject.toml");
-    if let Ok(contents) = std::fs::read_to_string(&pyproject_path) {
-        if let Ok(parsed) = contents.parse::<toml::Value>() {
-            if let Some(name) = parsed
+    if let Ok(contents) = std::fs::read_to_string(&pyproject_path)
+        && let Ok(parsed) = contents.parse::<toml::Value>()
+            && let Some(name) = parsed
                 .get("project")
                 .and_then(|p| p.get("name"))
                 .and_then(|n| n.as_str())
             {
                 return name.to_string();
             }
-        }
-    }
     name_from_relative_path(workspace_root, member_dir)
 }
 

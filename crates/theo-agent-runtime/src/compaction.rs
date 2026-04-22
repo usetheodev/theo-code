@@ -53,7 +53,7 @@ fn estimate_message_tokens(m: &Message) -> usize {
 
 /// Estimate total tokens in a message vec.
 pub fn estimate_total_tokens(messages: &[Message]) -> usize {
-    messages.iter().map(|m| estimate_message_tokens(m)).sum()
+    messages.iter().map(estimate_message_tokens).sum()
 }
 
 // ---------------------------------------------------------------------------
@@ -159,6 +159,8 @@ pub fn compact_with_policy(
 
     // Process messages before the boundary — compact them.
     let mut compacted = false;
+    // Index-based loop needed: we read and mutate messages[i] across branches.
+    #[allow(clippy::needless_range_loop)]
     for i in 0..boundary_idx {
         let m = &messages[i];
 
@@ -168,23 +170,20 @@ pub fn compact_with_policy(
         }
 
         // Skip already-compacted summaries.
-        if m.role == Role::User {
-            if let Some(ref c) = m.content {
-                if c.starts_with(COMPACTED_PREFIX) {
+        if m.role == Role::User
+            && let Some(ref c) = m.content
+                && c.starts_with(COMPACTED_PREFIX) {
                     continue;
                 }
-            }
-        }
 
         // Tool results: truncate content.
         if m.role == Role::Tool {
-            if let Some(ref name) = messages[i].name {
-                if !tools_used.contains(name) {
+            if let Some(ref name) = messages[i].name
+                && !tools_used.contains(name) {
                     tools_used.push(name.clone());
                 }
-            }
-            if let Some(ref content) = messages[i].content {
-                if content.len() > truncate_chars * 4 {
+            if let Some(ref content) = messages[i].content
+                && content.len() > truncate_chars * 4 {
                     // Extract file mentions before truncating.
                     for word in content.split_whitespace() {
                         if (word.contains('/') || word.contains('.'))
@@ -206,7 +205,6 @@ pub fn compact_with_policy(
                     messages[i].content = Some(truncate_utf8(content, truncate_chars));
                     compacted = true;
                 }
-            }
             compacted_turns += 1;
             continue;
         }
@@ -375,8 +373,8 @@ fn enforce_per_message_cap(messages: &mut [Message], max_tokens_per_message: usi
     // tokens ≈ chars/4 (matches theo_domain::tokens::estimate_message_tokens).
     let max_chars = max_tokens_per_message.saturating_mul(4);
     for m in messages.iter_mut() {
-        if let Some(ref content) = m.content {
-            if content.len() > max_chars {
+        if let Some(ref content) = m.content
+            && content.len() > max_chars {
                 m.content = Some(format!(
                     "{}\n… [truncated from {} to {} chars by per-message cap]",
                     truncate_utf8(content, max_chars.saturating_sub(80).max(1)),
@@ -384,7 +382,6 @@ fn enforce_per_message_cap(messages: &mut [Message], max_tokens_per_message: usi
                     max_chars
                 ));
             }
-        }
     }
 }
 
@@ -400,7 +397,7 @@ mod tests {
         let mut msgs = vec![Message::system("You are helpful.")];
         let big_content = "x".repeat(content_size);
         for i in 0..count {
-            msgs.push(Message::user(&format!("task {i}")));
+            msgs.push(Message::user(format!("task {i}")));
             msgs.push(Message::assistant_with_tool_calls(
                 None,
                 vec![theo_infra_llm::types::ToolCall::new(
@@ -412,7 +409,7 @@ mod tests {
             msgs.push(Message::tool_result(
                 format!("call_{i}"),
                 "read",
-                &big_content,
+                big_content.clone(),
             ));
         }
         msgs
@@ -482,11 +479,11 @@ mod tests {
         ];
         // Add enough messages to trigger compaction.
         for i in 0..20 {
-            msgs.push(Message::user(&format!("task {i}")));
+            msgs.push(Message::user(format!("task {i}")));
             msgs.push(Message::tool_result(
                 format!("c{i}"),
                 "read",
-                &"x".repeat(2000),
+                "x".repeat(2000),
             ));
         }
 
@@ -538,11 +535,11 @@ mod tests {
         let emoji_content = "🎉".repeat(300); // 4 bytes per emoji.
         let mut msgs = vec![Message::system("s")];
         for i in 0..10 {
-            msgs.push(Message::user(&format!("task {i}")));
+            msgs.push(Message::user(format!("task {i}")));
             msgs.push(Message::tool_result(
                 format!("c{i}"),
                 "read",
-                &emoji_content,
+                emoji_content.clone(),
             ));
         }
 

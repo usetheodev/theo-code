@@ -1,5 +1,6 @@
 //! Status line segment layout and rendering.
 
+#![allow(dead_code)] // Scaffolded helpers — kept for upcoming TUI features.
 use crate::render::style::{StyleCaps, accent, dim};
 
 /// A single labeled segment in the status line.

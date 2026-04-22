@@ -119,11 +119,10 @@ impl GoogleVertexAuth {
                 ..
             }) => {
                 // Check if expired
-                if let Some(exp) = expires_at {
-                    if exp <= now_secs() {
+                if let Some(exp) = expires_at
+                    && exp <= now_secs() {
                         return Ok(None); // Expired, need refresh
                     }
-                }
                 Ok(Some(VertexTokens {
                     access_token,
                     project: self.config.project.clone(),

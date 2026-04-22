@@ -33,7 +33,6 @@ pub trait StateMachine: Copy + PartialEq + std::fmt::Debug {
 
 /// Atomic transition: mutates state ONLY if valid.
 /// On Err, the original state is preserved intact.
-#[must_use]
 pub fn transition<S: StateMachine>(
     current: &mut S,
     target: S,

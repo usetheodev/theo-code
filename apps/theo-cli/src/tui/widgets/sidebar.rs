@@ -48,7 +48,7 @@ pub fn render_sidebar(frame: &mut Frame, area: Rect, state: &TuiState, tab: Side
     // Tab bar
     let titles: Vec<Line> = SidebarTab::titles()
         .into_iter()
-        .map(|t| Line::from(t))
+        .map(Line::from)
         .collect();
     let tabs = Tabs::new(titles)
         .select(tab.index())

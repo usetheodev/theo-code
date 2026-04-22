@@ -102,8 +102,8 @@ impl AuditTrail {
         };
 
         // Persist to JSONL (best-effort, never blocks)
-        if let Some(ref path) = self.persist_path {
-            if let Ok(json) = serde_json::to_string(&record) {
+        if let Some(ref path) = self.persist_path
+            && let Ok(json) = serde_json::to_string(&record) {
                 use std::io::Write;
                 if let Ok(mut file) = std::fs::OpenOptions::new()
                     .create(true)
@@ -113,7 +113,6 @@ impl AuditTrail {
                     let _ = writeln!(file, "{json}");
                 }
             }
-        }
 
         if let Ok(mut records) = self.records.lock() {
             records.push(record);

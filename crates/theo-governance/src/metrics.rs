@@ -1,4 +1,4 @@
-/// Session quality metrics for GRAPHCTX governance.
+//! Session quality metrics for GRAPHCTX governance.
 
 // ---------------------------------------------------------------------------
 // Public types

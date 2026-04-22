@@ -123,13 +123,12 @@ impl StateManager {
                     if path.extension().and_then(|e| e.to_str()) != Some("json") {
                         continue;
                     }
-                    if let Ok(content) = std::fs::read_to_string(&path) {
-                        if let Ok(summary) =
+                    if let Ok(content) = std::fs::read_to_string(&path)
+                        && let Ok(summary) =
                             serde_json::from_str::<theo_domain::episode::EpisodeSummary>(&content)
                         {
                             seen.insert(summary.summary_id.clone(), summary);
                         }
-                    }
                 }
             }
         }

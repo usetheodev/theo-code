@@ -12,7 +12,7 @@
 use std::collections::{HashMap, HashSet};
 
 use theo_engine_graph::cluster::Community;
-use theo_engine_graph::model::{CodeGraph, EdgeType, NodeType};
+use theo_engine_graph::model::{CodeGraph, NodeType};
 
 use crate::search::{FileBm25, tokenise};
 
@@ -436,8 +436,8 @@ fn expand_from_files(
             for neighbor_id in graph.neighbors(child_id) {
                 if let Some(neighbor) = graph.get_node(neighbor_id) {
                     // Find the file that contains this neighbor
-                    if let Some(ref file_path) = neighbor.file_path {
-                        if !seed_set.contains(file_path.as_str()) && seen.insert(file_path.clone())
+                    if let Some(ref file_path) = neighbor.file_path
+                        && !seed_set.contains(file_path.as_str()) && seen.insert(file_path.clone())
                         {
                             if neighbor.node_type == NodeType::Test {
                                 expanded_tests.push(file_path.clone());
@@ -445,7 +445,6 @@ fn expand_from_files(
                                 expanded_files.push(file_path.clone());
                             }
                         }
-                    }
                 }
             }
 
@@ -609,7 +608,7 @@ pub fn build_context_blocks_with_compression(
             }
         }
 
-        let token_count = (content.len() + 3) / 4;
+        let token_count = content.len().div_ceil(4);
         if tokens_used + token_count > budget_tokens {
             break;
         }
@@ -627,7 +626,7 @@ pub fn build_context_blocks_with_compression(
     // Expanded tests
     for path in &result.expanded_tests {
         let content = format!("## {} (test)\n", path);
-        let token_count = (content.len() + 3) / 4;
+        let token_count = content.len().div_ceil(4);
         if tokens_used + token_count > budget_tokens {
             break;
         }
@@ -653,14 +652,13 @@ fn fallback_signatures_only(
 ) -> (String, usize, usize) {
     let mut content = format!("## {}\n", path);
     for child_id in graph.contains_children(file_id) {
-        if let Some(node) = graph.get_node(child_id) {
-            if let Some(ref sig) = node.signature {
+        if let Some(node) = graph.get_node(child_id)
+            && let Some(ref sig) = node.signature {
                 content.push_str(sig);
                 content.push('\n');
             }
-        }
     }
-    let token_count = (content.len() + 3) / 4;
+    let token_count = content.len().div_ceil(4);
     (content, token_count, 0)
 }
 
@@ -992,8 +990,8 @@ mod tests {
         if let (Some(fresh), Some(penalized)) = (
             result_fresh.primary_files.first(),
             result_seen.primary_files.first(),
-        ) {
-            if fresh.path == penalized.path {
+        )
+            && fresh.path == penalized.path {
                 assert!(
                     penalized.score <= fresh.score,
                     "Seen penalty should reduce score: fresh={}, seen={}",
@@ -1001,7 +999,6 @@ mod tests {
                     penalized.score
                 );
             }
-        }
     }
 
     #[test]

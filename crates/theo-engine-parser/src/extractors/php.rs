@@ -213,11 +213,10 @@ fn collect_chain_context(group_node: &Node, source: &str) -> GroupContext {
                                 ctx.prefix = find_first_string_arg(&args, source);
                             }
                             "middleware" => {
-                                if let Some(mw_name) = find_first_string_arg(&args, source) {
-                                    if patterns::is_auth_indicator(&mw_name) {
+                                if let Some(mw_name) = find_first_string_arg(&args, source)
+                                    && patterns::is_auth_indicator(&mw_name) {
                                         ctx.auth = Some(AuthKind::Middleware(mw_name));
                                     }
-                                }
                             }
                             _ => {}
                         }
@@ -239,11 +238,10 @@ fn collect_chain_context(group_node: &Node, source: &str) -> GroupContext {
                                 ctx.prefix = find_first_string_arg(&args, source);
                             }
                             "middleware" => {
-                                if let Some(mw_name) = find_first_string_arg(&args, source) {
-                                    if patterns::is_auth_indicator(&mw_name) {
+                                if let Some(mw_name) = find_first_string_arg(&args, source)
+                                    && patterns::is_auth_indicator(&mw_name) {
                                         ctx.auth = Some(AuthKind::Middleware(mw_name));
                                     }
-                                }
                             }
                             _ => {}
                         }
@@ -518,11 +516,10 @@ fn detect_middleware_chain(node: &Node, source: &str) -> Option<AuthKind> {
         let full_text = node_text_ref(&parent, source);
         if full_text.contains("middleware") {
             // Extract the middleware name from the full text
-            if let Some(mw_name) = extract_middleware_name(full_text) {
-                if patterns::is_auth_indicator(&mw_name) {
+            if let Some(mw_name) = extract_middleware_name(full_text)
+                && patterns::is_auth_indicator(&mw_name) {
                     return Some(AuthKind::Middleware(mw_name));
                 }
-            }
         }
     }
 
@@ -535,11 +532,10 @@ fn extract_middleware_name(text: &str) -> Option<String> {
     let rest = &text[idx + "middleware(".len()..];
     // Find the first quoted string
     for quote in ['\'', '"'] {
-        if let Some(start) = rest.find(quote) {
-            if let Some(end) = rest[start + 1..].find(quote) {
+        if let Some(start) = rest.find(quote)
+            && let Some(end) = rest[start + 1..].find(quote) {
                 return Some(rest[start + 1..start + 1 + end].to_string());
             }
-        }
     }
     None
 }

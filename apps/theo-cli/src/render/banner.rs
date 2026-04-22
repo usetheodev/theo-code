@@ -3,6 +3,7 @@
 //! Replaces the inline `print_banner` in `repl.rs` with a testable
 //! pure function that returns a fully styled string.
 
+#![allow(dead_code)] // Scaffolded helpers — kept for upcoming TUI features.
 use crate::render::style::{StyleCaps, accent, bold, dim};
 
 /// Input to the banner renderer.

@@ -6,6 +6,7 @@
 //! - TTY with unicode: UTF8_BORDERS_ONLY with rounded corners.
 //! - Piped output: ASCII_MARKDOWN for pipe-friendly text.
 
+#![allow(dead_code)] // Scaffolded helpers — kept for upcoming TUI features.
 use comfy_table::presets::{ASCII_MARKDOWN, UTF8_BORDERS_ONLY};
 use comfy_table::{Cell, ContentArrangement, Row, Table};
 

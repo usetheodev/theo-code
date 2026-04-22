@@ -87,29 +87,25 @@ impl ProjectConfig {
         if let Ok(v) = std::env::var("THEO_MODEL") {
             self.model = Some(v);
         }
-        if let Ok(v) = std::env::var("THEO_TEMPERATURE") {
-            if let Ok(t) = v.parse::<f32>() {
+        if let Ok(v) = std::env::var("THEO_TEMPERATURE")
+            && let Ok(t) = v.parse::<f32>() {
                 self.temperature = Some(t);
             }
-        }
-        if let Ok(v) = std::env::var("THEO_MAX_ITERATIONS") {
-            if let Ok(n) = v.parse::<usize>() {
+        if let Ok(v) = std::env::var("THEO_MAX_ITERATIONS")
+            && let Ok(n) = v.parse::<usize>() {
                 self.max_iterations = Some(n);
             }
-        }
-        if let Ok(v) = std::env::var("THEO_MAX_TOKENS") {
-            if let Ok(n) = v.parse::<u32>() {
+        if let Ok(v) = std::env::var("THEO_MAX_TOKENS")
+            && let Ok(n) = v.parse::<u32>() {
                 self.max_tokens = Some(n);
             }
-        }
         if let Ok(v) = std::env::var("THEO_REASONING_EFFORT") {
             self.reasoning_effort = Some(v);
         }
-        if let Ok(v) = std::env::var("THEO_DOOM_LOOP_THRESHOLD") {
-            if let Ok(n) = v.parse::<usize>() {
+        if let Ok(v) = std::env::var("THEO_DOOM_LOOP_THRESHOLD")
+            && let Ok(n) = v.parse::<usize>() {
                 self.doom_loop_threshold = Some(n);
             }
-        }
         self
     }
 }
@@ -169,11 +165,10 @@ pub fn load_custom_agents(project_dir: &Path) -> Vec<CustomAgentDef> {
             continue;
         }
 
-        if let Ok(content) = std::fs::read_to_string(&path) {
-            if let Some(agent) = parse_agent_file(&content) {
+        if let Ok(content) = std::fs::read_to_string(&path)
+            && let Some(agent) = parse_agent_file(&content) {
                 agents.push(agent);
             }
-        }
     }
     agents
 }

@@ -64,11 +64,10 @@ impl SnapshotStore {
 
         // Try disk fallback
         let disk_path = self.base_dir.join(format!("{call_id}.bak"));
-        if disk_path.exists() {
-            if let Ok(content) = std::fs::read_to_string(&disk_path) {
+        if disk_path.exists()
+            && let Ok(content) = std::fs::read_to_string(&disk_path) {
                 return Some((PathBuf::new(), content)); // path unknown from disk
             }
-        }
 
         None
     }

@@ -12,8 +12,10 @@ use serde::{Deserialize, Serialize};
 /// Reference: OpenDev SubAgentSpec IsolationMode, Anthropic Managed Agents.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
+#[derive(Default)]
 pub enum WorkingSetIsolation {
     /// Inherits parent's WorkingSet (current default behavior).
+    #[default]
     Shared,
     /// Has its own private WorkingSet, merges results back to parent.
     Owned,
@@ -21,11 +23,6 @@ pub enum WorkingSetIsolation {
     ReadOnly,
 }
 
-impl Default for WorkingSetIsolation {
-    fn default() -> Self {
-        WorkingSetIsolation::Shared
-    }
-}
 
 /// The agent's active context scope during execution.
 ///

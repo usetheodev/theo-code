@@ -11,6 +11,8 @@
 //! - `docs/pesquisas/harness-engineering-openai.md:133-137`
 //!   (OpenAI exec-plans/active/ pattern)
 
+#![allow(clippy::field_reassign_with_default)] // Test builders tweak individual fields for readability.
+
 use serde::{Deserialize, Serialize};
 
 /// Max chars allowed per field to keep serialized size under the 2k-token budget.

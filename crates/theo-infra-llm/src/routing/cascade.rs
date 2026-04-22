@@ -241,16 +241,13 @@ mod tests {
         ];
         for prev in &previouses {
             for hint in hints {
-                match r.fallback(prev, hint) {
-                    Some(next) => {
-                        assert!(
-                            next.provider_id != prev.provider_id
-                                || next.model_id != prev.model_id,
-                            "fallback must not return the same (provider, model) pair; \
-                             prev={prev:?} hint={hint:?} next={next:?}"
-                        );
-                    }
-                    None => {}
+                if let Some(next) = r.fallback(prev, hint) {
+                    assert!(
+                        next.provider_id != prev.provider_id
+                            || next.model_id != prev.model_id,
+                        "fallback must not return the same (provider, model) pair; \
+                         prev={prev:?} hint={hint:?} next={next:?}"
+                    );
                 }
             }
         }

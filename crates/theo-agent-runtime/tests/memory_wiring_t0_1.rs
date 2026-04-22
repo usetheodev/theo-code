@@ -9,6 +9,8 @@
 //! LLM mock and is out of scope for this change — the finer-grained
 //! sequence assertions live inside `memory_lifecycle.rs` (RM0-AC-1..7).
 
+#![allow(clippy::field_reassign_with_default)] // Tests tweak individual fields for readability.
+
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;

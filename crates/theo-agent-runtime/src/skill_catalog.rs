@@ -151,11 +151,10 @@ fn collect_linked_files(skill_dir: &Path) -> Vec<PathBuf> {
         };
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_file() {
-                if let Ok(rel) = path.strip_prefix(skill_dir) {
+            if path.is_file()
+                && let Ok(rel) = path.strip_prefix(skill_dir) {
                     out.push(rel.to_path_buf());
                 }
-            }
         }
     }
     out.sort();

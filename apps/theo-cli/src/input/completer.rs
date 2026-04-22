@@ -1,5 +1,6 @@
 //! Tab completion for slash commands and @file mentions.
 
+#![allow(dead_code)] // Scaffolded helpers — kept for upcoming TUI features.
 /// Complete a token that may be a slash command prefix.
 ///
 /// Given a line and cursor position, return the list of candidate

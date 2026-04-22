@@ -206,7 +206,7 @@ mod tests {
     fn test_t2_1_ac_3_approved_persisted_with_schema_version() {
         let dir = tempfile::tempdir().expect("t");
         // 2 evidence events for the same constraint so gate 3 passes.
-        let evs = vec![
+        let evs = [
             ev_constraint("avoid mutex inside async", "workspace-local"),
             ev_constraint("avoid mutex inside async", "workspace-local"),
         ];

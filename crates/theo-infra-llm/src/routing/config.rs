@@ -88,7 +88,7 @@ impl RoutingConfig {
 /// value is considered truthy.
 pub fn env_disables_routing() -> bool {
     match std::env::var("THEO_ROUTING_DISABLED") {
-        Ok(v) => !v.is_empty() && v != "0" && v.to_ascii_lowercase() != "false",
+        Ok(v) => !v.is_empty() && v != "0" && !v.eq_ignore_ascii_case("false"),
         Err(_) => false,
     }
 }

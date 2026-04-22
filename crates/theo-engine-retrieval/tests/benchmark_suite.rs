@@ -224,7 +224,7 @@ fn emit_report(repo: &RepoInfo, results: &[QueryResult], pipeline_name: &str) {
                 "    Expected: {:?}",
                 r.expected_files
                     .iter()
-                    .map(|f| f.split('/').last().unwrap_or(f))
+                    .map(|f| f.split('/').next_back().unwrap_or(f))
                     .collect::<Vec<_>>()
             );
             eprintln!(
@@ -232,7 +232,7 @@ fn emit_report(repo: &RepoInfo, results: &[QueryResult], pipeline_name: &str) {
                 r.returned_top_10
                     .iter()
                     .take(5)
-                    .map(|f| f.split('/').last().unwrap_or(f))
+                    .map(|f| f.split('/').next_back().unwrap_or(f))
                     .collect::<Vec<_>>()
             );
         }
@@ -750,7 +750,7 @@ fn wiki_e2e() {
     let test_nodes = graph
         .node_ids()
         .filter(|id| {
-            graph.get_node(id).map_or(false, |n| {
+            graph.get_node(id).is_some_and(|n| {
                 n.node_type == theo_engine_graph::model::NodeType::Test
             })
         })
@@ -1260,8 +1260,8 @@ fn wiki_eval() {
     // ═══════════════════════════════════════════
     eprintln!("\n─── PER-QUERY DECISIONS (first 15) ───\n");
     eprintln!(
-        "{:>10} | {:>12} | {:>5} | {:>6} | {:>5} | {:>12} | {}",
-        "ID", "Category", "Allow", "Conf", "BM25", "Reason", "Top Slug"
+        "{:>10} | {:>12} | {:>5} | {:>6} | {:>5} | {:>12} | Top Slug",
+        "ID", "Category", "Allow", "Conf", "BM25", "Reason"
     );
     eprintln!("{}", "-".repeat(80));
 
@@ -1308,9 +1308,9 @@ fn wiki_eval() {
         let actual = if allow { "direct_return" } else { "fallback" };
         let correct = if q.should_hit_layer0 {
             if allow {
-                q.expected_slug_contains.as_ref().map_or(true, |exp| {
+                q.expected_slug_contains.as_ref().is_none_or(|exp| {
                     top1_slug.contains(exp.as_str())
-                        || results.first().map_or(false, |r| {
+                        || results.first().is_some_and(|r| {
                             r.title.to_lowercase().contains(&exp.to_lowercase())
                         })
                 })
@@ -1365,7 +1365,7 @@ fn wiki_eval() {
                 total_direct += 1;
                 if q.should_hit_layer0 {
                     let top = &results[0];
-                    let ok = q.expected_slug_contains.as_ref().map_or(true, |exp| {
+                    let ok = q.expected_slug_contains.as_ref().is_none_or(|exp| {
                         top.slug.contains(exp.as_str())
                             || top.title.to_lowercase().contains(&exp.to_lowercase())
                     });
@@ -1391,19 +1391,19 @@ fn wiki_eval() {
             0.0
         };
 
-        let mut md = format!("# Wiki Eval Summary\n\n");
+        let mut md = "# Wiki Eval Summary\n\n".to_string();
         md += &format!("**Commit**: `{}`\n", env!("CARGO_PKG_VERSION"));
-        md += &format!("**Policy**: absolute_confidence_v1\n");
+        md += "**Policy**: absolute_confidence_v1\n";
         md += &format!("**BM25 Floor**: {:.1}\n", DEFAULT_BM25_FLOOR);
         md += &format!("**Total Queries**: {}\n\n", total);
 
         md += "## Overall Metrics\n\n";
-        md += &format!("| Metric | Value |\n|--------|-------|\n");
+        md += "| Metric | Value |\n|--------|-------|\n";
         md += &format!("| Direct Return Rate | {:.0}% |\n", direct_rate * 100.0);
         md += &format!("| Direct Return Precision | {:.0}% |\n", precision * 100.0);
         md += &format!("| Fallback Rate | {:.0}% |\n", (1.0 - direct_rate) * 100.0);
         md += &format!("| Negative FP Rate | {:.0}% |\n", fp_rate * 100.0);
-        md += &format!("| Stale Direct Return | 0% |\n\n");
+        md += "| Stale Direct Return | 0% |\n\n";
 
         md += "## Per-Category Thresholds\n\n";
         md += "| Category | Threshold | Direct% | Precision |\n|----------|-----------|---------|----------|\n";
@@ -1417,7 +1417,7 @@ fn wiki_eval() {
                 if allow {
                     cd += 1;
                     if q.should_hit_layer0 {
-                        let ok = q.expected_slug_contains.as_ref().map_or(true, |exp| {
+                        let ok = q.expected_slug_contains.as_ref().is_none_or(|exp| {
                             results[0].slug.contains(exp.as_str())
                                 || results[0]
                                     .title
@@ -1696,7 +1696,7 @@ fn wiki_external() {
     let test_nodes = graph
         .node_ids()
         .filter(|id| {
-            graph.get_node(id).map_or(false, |n| {
+            graph.get_node(id).is_some_and(|n| {
                 n.node_type == theo_engine_graph::model::NodeType::Test
             })
         })

@@ -199,6 +199,13 @@ pub struct CapturingListener {
 }
 
 #[cfg(test)]
+impl Default for CapturingListener {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
 impl CapturingListener {
     pub fn new() -> Self {
         Self {

@@ -5,6 +5,7 @@
 //!
 //! Pi-mono ref: `packages/coding-agent/src/modes/json-mode.ts`
 
+#![allow(dead_code)] // Scaffolded helpers — kept for upcoming TUI features.
 use serde::Serialize;
 use theo_domain::event::{DomainEvent, EventType};
 

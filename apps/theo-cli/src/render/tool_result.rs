@@ -8,6 +8,7 @@
 //! stdout required) and enforces the "no raw ANSI outside style.rs"
 //! invariant.
 
+#![allow(dead_code)] // Scaffolded helpers — kept for upcoming TUI features.
 use serde_json::Value;
 
 use crate::render::style::{

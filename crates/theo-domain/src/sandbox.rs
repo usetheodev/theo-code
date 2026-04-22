@@ -127,6 +127,7 @@ impl Default for FilesystemPolicy {
 
 /// Network access control policy. Default: everything denied.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct NetworkPolicy {
     /// Whether network access is allowed at all. Default: false.
     pub allow_network: bool,
@@ -143,16 +144,6 @@ pub struct NetworkPolicy {
     pub allow_dns: bool,
 }
 
-impl Default for NetworkPolicy {
-    fn default() -> Self {
-        Self {
-            allow_network: false,
-            allowed_domains: vec![],
-            denied_domains: vec![],
-            allow_dns: false,
-        }
-    }
-}
 
 // ── Process Policy ──────────────────────────────────────────────────
 
@@ -259,6 +250,7 @@ impl Default for AuditPolicy {
 /// When locked=true, the sandbox config cannot be changed by the user.
 /// Only an admin can modify the locked config.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct PolicyLock {
     /// Whether the sandbox config is locked against local changes.
     pub locked: bool,
@@ -273,16 +265,6 @@ pub struct PolicyLock {
     pub reason: Option<String>,
 }
 
-impl Default for PolicyLock {
-    fn default() -> Self {
-        Self {
-            locked: false,
-            locked_fields: vec![],
-            locked_by: None,
-            reason: None,
-        }
-    }
-}
 
 impl PolicyLock {
     /// Check if a specific field is locked.

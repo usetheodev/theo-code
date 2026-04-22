@@ -246,8 +246,8 @@ fn resolve_single_import(
         let is_python = importing_file
             .extension()
             .is_some_and(|ext| ext == "py" || ext == "pyi");
-        if is_python {
-            if let Some(resolved_path) =
+        if is_python
+            && let Some(resolved_path) =
                 try_resolve_python_package_import(&import.source, file_symbols, project_root)
             {
                 return resolve_intra_project_import(
@@ -257,7 +257,6 @@ fn resolve_single_import(
                     file_symbols,
                 );
             }
-        }
         resolve_external_import(importing_file, import, symbol_index)
     }
 }

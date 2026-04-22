@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 /// Real-world benchmark: runs GraphCTX pipeline on 14 external repos.
 ///
 /// Measures: extraction time, graph build, clustering, query scoring, assembly.
@@ -10,10 +9,7 @@ use std::path::Path;
 use std::time::Instant;
 
 use theo_application::use_cases::extraction;
-use theo_application::use_cases::pipeline::{Pipeline, PipelineConfig};
-use theo_engine_retrieval::metrics::{
-    DepEdge, RetrievalMetrics, hit_at_k, mrr, precision_at_k, recall_at_k,
-};
+use theo_application::use_cases::pipeline::Pipeline;
 
 // ---------------------------------------------------------------------------
 // Ground truth: curated queries per repo with expected files
@@ -297,7 +293,7 @@ fn run_benchmark(case: &BenchCase) -> Option<RepoBenchResult> {
     // Phase 2: Build graph + cluster
     let mut pipeline = Pipeline::with_defaults();
     let build_start = Instant::now();
-    let bridge_stats = pipeline.build_graph(&files);
+    let _bridge_stats = pipeline.build_graph(&files);
     let build_ms = build_start.elapsed().as_millis() as u64;
 
     let cluster_start = Instant::now();
@@ -348,7 +344,7 @@ fn run_benchmark(case: &BenchCase) -> Option<RepoBenchResult> {
             .collect();
 
         // For standard metrics, use community IDs + fuzzy matches as "returned"
-        let effective_returned: Vec<String> = returned_files
+        let _effective_returned: Vec<String> = returned_files
             .iter()
             .chain(fuzzy_returned.iter())
             .cloned()
@@ -357,11 +353,11 @@ fn run_benchmark(case: &BenchCase) -> Option<RepoBenchResult> {
         // Compute metrics with fuzzy matching
         let hit_count = fuzzy_returned.len();
         let expected_count = qcase.expected_files.len();
-        let m = if hit_count > 0 { 1.0 / 1.0 } else { 0.0 }; // Simplified MRR
+        let m = if hit_count > 0 { 1.0 } else { 0.0 }; // Simplified MRR
         let r5 = hit_count as f64 / expected_count.max(1) as f64;
         let r10 = r5; // Same for fuzzy
         let h5 = if hit_count > 0 { 1.0 } else { 0.0 };
-        let p5 = if payload.items.len() > 0 {
+        let p5 = if !payload.items.is_empty() {
             hit_count as f64 / payload.items.len().min(5) as f64
         } else {
             0.0
@@ -412,6 +408,8 @@ fn run_benchmark(case: &BenchCase) -> Option<RepoBenchResult> {
     })
 }
 
+#[allow(dead_code)] // Fields kept for benchmark report completeness; some not yet
+                    // surfaced in reports below. Removing breaks future readers.
 struct RepoBenchResult {
     name: String,
     lang: String,
@@ -430,6 +428,7 @@ struct RepoBenchResult {
     queries: Vec<QueryResult>,
 }
 
+#[allow(dead_code)] // recall_at_5 used in some reports, kept for symmetry with recall_at_10.
 struct QueryResult {
     query: String,
     returned_count: usize,

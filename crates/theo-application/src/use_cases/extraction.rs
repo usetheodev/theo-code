@@ -44,11 +44,10 @@ pub fn extract_repo(repo_root: &Path) -> (Vec<FileData>, ExtractionStats) {
     walker_builder.add_custom_ignore_filename(".theoignore");
     walker_builder.filter_entry(|entry| {
         // Skip excluded directories (but not files with those names, e.g. build.rs)
-        if entry.file_type().is_some_and(|ft| ft.is_dir()) {
-            if let Some(name) = entry.file_name().to_str() {
+        if entry.file_type().is_some_and(|ft| ft.is_dir())
+            && let Some(name) = entry.file_name().to_str() {
                 return !theo_domain::graph_context::EXCLUDED_DIRS.contains(&name);
             }
-        }
         true
     });
     let walker = walker_builder.build();

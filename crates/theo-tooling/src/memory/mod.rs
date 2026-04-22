@@ -104,13 +104,11 @@ impl FileMemoryStore {
 
         while let Ok(Some(entry)) = dir.next_entry().await {
             let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) == Some("json") {
-                if let Ok(json) = tokio::fs::read_to_string(&path).await {
-                    if let Ok(mem) = serde_json::from_str::<AgentMemoryEntry>(&json) {
+            if path.extension().and_then(|e| e.to_str()) == Some("json")
+                && let Ok(json) = tokio::fs::read_to_string(&path).await
+                    && let Ok(mem) = serde_json::from_str::<AgentMemoryEntry>(&json) {
                         entries.push(mem);
                     }
-                }
-            }
         }
 
         entries.sort_by(|a, b| a.key.cmp(&b.key));
@@ -161,6 +159,12 @@ fn sanitize_key(key: &str) -> String {
 // ---------------------------------------------------------------------------
 
 pub struct MemoryTool;
+
+impl Default for MemoryTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl MemoryTool {
     pub fn new() -> Self {

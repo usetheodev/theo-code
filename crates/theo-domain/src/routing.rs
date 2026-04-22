@@ -123,9 +123,10 @@ pub struct ModelChoice {
 }
 
 impl ModelChoice {
-    /// Build a ModelChoice for the "default" path with the given provider
-    /// + model. Consumers tweak other fields through the struct fields
-    /// directly.
+    /// Build a `ModelChoice` for the "default" path with the given provider
+    /// + model.
+    ///
+    /// Consumers tweak other fields through the struct fields directly.
     pub fn new(
         provider_id: impl Into<String>,
         model_id: impl Into<String>,

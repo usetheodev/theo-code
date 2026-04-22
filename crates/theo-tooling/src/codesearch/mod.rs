@@ -7,6 +7,12 @@ use theo_domain::tool::{
 
 pub struct CodeSearchTool;
 
+impl Default for CodeSearchTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CodeSearchTool {
     pub fn new() -> Self {
         Self

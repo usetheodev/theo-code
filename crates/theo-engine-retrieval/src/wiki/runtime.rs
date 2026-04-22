@@ -12,7 +12,6 @@ use std::path::Path;
 use super::model::*;
 
 const MAX_INSIGHT_LINES: usize = 10_000;
-const EXCERPT_MAX_CHARS: usize = 500;
 
 // ---------------------------------------------------------------------------
 // Ingest
@@ -95,7 +94,7 @@ pub fn query_insights(wiki_dir: &Path, query: &str, max: usize) -> Vec<RuntimeIn
                     .any(|s| s.to_lowercase().contains(&query_lower))
                 || i.error_summary
                     .as_ref()
-                    .map_or(false, |e| e.to_lowercase().contains(&query_lower))
+                    .is_some_and(|e| e.to_lowercase().contains(&query_lower))
                 || i.source.to_lowercase().contains(&query_lower)
         })
         .collect();
@@ -136,13 +135,11 @@ pub fn extract_affected_entities(stdout: &str, stderr: &str) -> (Vec<String>, Ve
         // or "test auth::tests::verify_token ... ok"
         if line.starts_with("test ") || line.contains("test ") {
             let parts: Vec<&str> = line.split_whitespace().collect();
-            if let Some(idx) = parts.iter().position(|&p| p == "test") {
-                if let Some(name) = parts.get(idx + 1) {
-                    if name.contains("::") && !name.starts_with('-') {
+            if let Some(idx) = parts.iter().position(|&p| p == "test")
+                && let Some(name) = parts.get(idx + 1)
+                    && name.contains("::") && !name.starts_with('-') {
                         symbols.push(name.to_string());
                     }
-                }
-            }
         }
 
         // Generic file:line pattern (e.g., "src/lib.rs:42")
@@ -153,23 +150,21 @@ pub fn extract_affected_entities(stdout: &str, stderr: &str) -> (Vec<String>, Ve
                 });
                 if let Some(colon) = clean.find(':') {
                     let path = &clean[..colon];
-                    if path.ends_with(".rs")
+                    if (path.ends_with(".rs")
                         || path.ends_with(".py")
                         || path.ends_with(".ts")
                         || path.ends_with(".go")
-                        || path.ends_with(".js")
-                    {
-                        if path.contains('/') || path.contains('\\') {
+                        || path.ends_with(".js"))
+                        && (path.contains('/') || path.contains('\\')) {
                             files.push(path.to_string());
                         }
-                    }
                 }
             }
         }
 
         // Cargo "Compiling crate vX.Y.Z"
         if line.trim_start().starts_with("Compiling ") {
-            let parts: Vec<&str> = line.trim().split_whitespace().collect();
+            let parts: Vec<&str> = line.split_whitespace().collect();
             if parts.len() >= 2 {
                 symbols.push(format!("crate:{}", parts[1]));
             }
@@ -575,8 +570,8 @@ pub fn enforce_limits(
 
     // 1. Check raw events size
     let jsonl_path = wiki_dir.join("runtime").join("insights.jsonl");
-    if let Ok(meta) = std::fs::metadata(&jsonl_path) {
-        if meta.len() as usize > limits.max_raw_event_bytes {
+    if let Ok(meta) = std::fs::metadata(&jsonl_path)
+        && meta.len() as usize > limits.max_raw_event_bytes {
             // Keep last half
             if let Ok(content) = std::fs::read_to_string(&jsonl_path) {
                 let lines: Vec<&str> = content.lines().collect();
@@ -585,14 +580,13 @@ pub fn enforce_limits(
                 report.raw_events_rotated = true;
             }
         }
-    }
 
     // 2. Check episode summaries count
     let episodes_dir = wiki_dir.join("episodes");
     if episodes_dir.exists() {
         let mut entries: Vec<std::fs::DirEntry> = std::fs::read_dir(&episodes_dir)?
             .filter_map(|e| e.ok())
-            .filter(|e| e.path().extension().map_or(false, |ext| ext == "json"))
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "json"))
             .collect();
 
         if entries.len() > limits.max_active_summaries {
@@ -878,7 +872,7 @@ test router::tests::basic_route ... ok
         .unwrap();
 
         let learnings = distill_learnings(&wiki_dir);
-        assert!(learnings.len() >= 1, "should promote repeated pattern");
+        assert!(!learnings.is_empty(), "should promote repeated pattern");
         assert!(learnings.iter().any(|l| l.occurrences >= 3));
     }
 

@@ -5,6 +5,7 @@
 //!
 //! See `docs/adr/ADR-003-xdg-paths.md` for the XDG rationale.
 
+#![allow(dead_code)] // Scaffolded helpers — kept for upcoming TUI features.
 pub mod paths;
 
 use std::fs;

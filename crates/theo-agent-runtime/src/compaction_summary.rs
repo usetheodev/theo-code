@@ -179,7 +179,7 @@ mod tests {
 
     #[test]
     fn fallback_caps_tool_content() {
-        let msgs = vec![Message::tool_result("c1", "read", &"x".repeat(500))];
+        let msgs = vec![Message::tool_result("c1", "read", "x".repeat(500))];
         let s = fallback_summary(&msgs);
         // 120 char cap plus ellipsis
         assert!(!s.contains(&"x".repeat(200)));

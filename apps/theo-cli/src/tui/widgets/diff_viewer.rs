@@ -3,6 +3,7 @@
 //! Uses the `similar` crate for computing diffs.
 //! Renders as ratatui Lines with green (+), red (-), and gray (context) styling.
 
+#![allow(dead_code)] // Scaffolded helpers — kept for upcoming TUI features.
 use ratatui::prelude::*;
 use similar::{ChangeTag, TextDiff};
 

@@ -70,18 +70,17 @@ pub fn parse_roadmap_content(content: &str) -> Vec<RoadmapTask> {
         // Detect task header: ### Task N: title or ### Task N: ✅ title
         if trimmed.starts_with("### Task ") {
             // Flush previous task
-            if let Some(builder) = current.take() {
-                if let Some(task) = builder.build() {
+            if let Some(builder) = current.take()
+                && let Some(task) = builder.build() {
                     tasks.push(task);
                 }
-            }
             current = Some(parse_task_header(trimmed));
             continue;
         }
 
         // Parse field lines within a task
-        if let Some(ref mut builder) = current {
-            if let Some((key, value)) = parse_field_line(trimmed) {
+        if let Some(ref mut builder) = current
+            && let Some((key, value)) = parse_field_line(trimmed) {
                 match key.to_lowercase().as_str() {
                     k if k.contains("arquivo") || k.contains("file") => {
                         builder.files = value.to_string();
@@ -104,15 +103,13 @@ pub fn parse_roadmap_content(content: &str) -> Vec<RoadmapTask> {
                     _ => {}
                 }
             }
-        }
     }
 
     // Flush last task
-    if let Some(builder) = current {
-        if let Some(task) = builder.build() {
+    if let Some(builder) = current
+        && let Some(task) = builder.build() {
             tasks.push(task);
         }
-    }
 
     tasks
 }

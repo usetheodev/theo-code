@@ -247,7 +247,7 @@ fn is_observation_masked(content: Option<&str>) -> bool {
 /// in the staged pipeline (Warning level).
 ///
 /// Ref: Complexity Trap paper — 84% of tokens are observations.
-pub fn apply_observation_mask(messages: &mut Vec<Message>, window: usize) {
+pub fn apply_observation_mask(messages: &mut [Message], window: usize) {
     // Collect indices of all Tool messages (observations).
     let tool_indices: Vec<usize> = messages
         .iter()
@@ -288,7 +288,7 @@ pub fn apply_observation_mask(messages: &mut Vec<Message>, window: usize) {
 
 /// Apply observation masking using policy's `observation_mask_window`.
 pub fn apply_observation_mask_with_policy(
-    messages: &mut Vec<Message>,
+    messages: &mut [Message],
     policy: &CompactionPolicy,
 ) {
     apply_observation_mask(messages, policy.observation_mask_window);
@@ -302,7 +302,7 @@ mod tests {
     fn user_of(filler_chars: usize) -> Vec<Message> {
         vec![
             Message::system("sys"),
-            Message::user(&"x".repeat(filler_chars)),
+            Message::user("x".repeat(filler_chars)),
         ]
     }
 

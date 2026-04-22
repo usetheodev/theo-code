@@ -3,10 +3,13 @@
 //! Used by the REPL to detect when the user started a fenced block
 //! and should keep reading lines until the fence closes.
 
+#![allow(dead_code)] // Scaffolded helpers — kept for upcoming TUI features.
 /// State of the multi-line detector.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum State {
     /// Not inside a fenced block; a single `Enter` submits.
+    #[default]
     Idle,
     /// Inside a fenced block; `Enter` adds a newline until the fence closes.
     Fenced,
@@ -52,11 +55,6 @@ impl MultilineDetector {
     }
 }
 
-impl Default for State {
-    fn default() -> Self {
-        State::Idle
-    }
-}
 
 /// Count the number of triple-backtick fences in a line.
 fn count_fences(line: &str) -> usize {

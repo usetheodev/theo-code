@@ -14,8 +14,8 @@ pub fn from_request(body: &Value) -> CommonRequest {
 
     for m in &input {
         // Responses API items without role (function_call, function_call_output)
-        if m.get("role").is_none() {
-            if let Some(item_type) = m.get("type").and_then(|t| t.as_str()) {
+        if m.get("role").is_none()
+            && let Some(item_type) = m.get("type").and_then(|t| t.as_str()) {
                 match item_type {
                     "function_call" => {
                         let name = m.get("name").and_then(|n| n.as_str()).unwrap_or_default();
@@ -72,7 +72,6 @@ pub fn from_request(body: &Value) -> CommonRequest {
                 }
                 continue;
             }
-        }
 
         let Some(role) = m.get("role").and_then(|r| r.as_str()) else {
             continue;
@@ -89,8 +88,8 @@ pub fn from_request(body: &Value) -> CommonRequest {
                 } else {
                     None
                 };
-                if let Some(text) = text {
-                    if !text.is_empty() {
+                if let Some(text) = text
+                    && !text.is_empty() {
                         messages.push(CommonMessage {
                             role: Role::System,
                             content: Some(Content::Text(text)),
@@ -99,7 +98,6 @@ pub fn from_request(body: &Value) -> CommonRequest {
                             name: None,
                         });
                     }
-                }
             }
             "user" => {
                 let content = m.get("content");
@@ -139,8 +137,8 @@ pub fn from_request(body: &Value) -> CommonRequest {
                         })
                         .collect();
 
-                    if parts.len() == 1 {
-                        if let ContentPart::Text { text } = &parts[0] {
+                    if parts.len() == 1
+                        && let ContentPart::Text { text } = &parts[0] {
                             messages.push(CommonMessage {
                                 role: Role::User,
                                 content: Some(Content::Text(text.clone())),
@@ -150,7 +148,6 @@ pub fn from_request(body: &Value) -> CommonRequest {
                             });
                             continue;
                         }
-                    }
                     if !parts.is_empty() {
                         messages.push(CommonMessage {
                             role: Role::User,
@@ -336,11 +333,10 @@ pub fn to_request(body: &CommonRequest) -> Value {
                 }
             }
             Role::Assistant => {
-                if let Some(text) = m.content.as_ref().map(|c| c.to_text()) {
-                    if !text.is_empty() {
+                if let Some(text) = m.content.as_ref().map(|c| c.to_text())
+                    && !text.is_empty() {
                         input.push(serde_json::json!({"role": "assistant", "content": [{"type": "output_text", "text": text}]}));
                     }
-                }
                 if let Some(tool_calls) = &m.tool_calls {
                     for tc in tool_calls {
                         input.push(serde_json::json!({
@@ -548,8 +544,8 @@ pub fn to_response(resp: &CommonResponse) -> Value {
     let mut output_items: Vec<Value> = Vec::new();
 
     if let Some(choice) = choice {
-        if let Some(text) = &choice.message.content {
-            if !text.is_empty() {
+        if let Some(text) = &choice.message.content
+            && !text.is_empty() {
                 output_items.push(serde_json::json!({
                     "type": "message",
                     "status": "completed",
@@ -557,7 +553,6 @@ pub fn to_response(resp: &CommonResponse) -> Value {
                     "content": [{"type": "output_text", "text": text}],
                 }));
             }
-        }
         if let Some(tool_calls) = &choice.message.tool_calls {
             for tc in tool_calls {
                 output_items.push(serde_json::json!({
@@ -586,11 +581,10 @@ pub fn to_response(resp: &CommonResponse) -> Value {
             "output_tokens": u.completion_tokens,
             "total_tokens": u.total_tokens,
         });
-        if let Some(details) = &u.prompt_tokens_details {
-            if let Some(cached) = details.cached_tokens {
+        if let Some(details) = &u.prompt_tokens_details
+            && let Some(cached) = details.cached_tokens {
                 usage["input_tokens_details"] = serde_json::json!({"cached_tokens": cached});
             }
-        }
         usage
     });
 
@@ -654,8 +648,8 @@ pub fn from_chunk(chunk: &str) -> Result<CommonChunk, String> {
                 .get("delta")
                 .or_else(|| json.get("text"))
                 .and_then(|d| d.as_str());
-            if let Some(d) = delta {
-                if !d.is_empty() {
+            if let Some(d) = delta
+                && !d.is_empty() {
                     out.choices.push(CommonChunkChoice {
                         index: 0,
                         delta: ChunkDelta {
@@ -665,15 +659,14 @@ pub fn from_chunk(chunk: &str) -> Result<CommonChunk, String> {
                         finish_reason: None,
                     });
                 }
-            }
         }
-        "response.output_item.added" => {
+        "response.output_item.added"
             if json
                 .get("item")
                 .and_then(|i| i.get("type"))
                 .and_then(|t| t.as_str())
                 == Some("function_call")
-            {
+            => {
                 let name = json
                     .get("item")
                     .and_then(|i| i.get("name"))
@@ -701,14 +694,13 @@ pub fn from_chunk(chunk: &str) -> Result<CommonChunk, String> {
                     });
                 }
             }
-        }
         "response.function_call_arguments.delta" => {
             let args = json
                 .get("delta")
                 .or_else(|| json.get("arguments_delta"))
                 .and_then(|a| a.as_str());
-            if let Some(a) = args {
-                if !a.is_empty() {
+            if let Some(a) = args
+                && !a.is_empty() {
                     out.choices.push(CommonChunkChoice {
                         index: 0,
                         delta: ChunkDelta {
@@ -726,7 +718,6 @@ pub fn from_chunk(chunk: &str) -> Result<CommonChunk, String> {
                         finish_reason: None,
                     });
                 }
-            }
         }
         "response.completed" => {
             let sr = resp_obj

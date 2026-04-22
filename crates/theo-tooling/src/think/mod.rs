@@ -12,6 +12,12 @@ use theo_domain::tool::{
 
 pub struct ThinkTool;
 
+impl Default for ThinkTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ThinkTool {
     pub fn new() -> Self {
         Self

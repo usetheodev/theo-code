@@ -61,13 +61,12 @@ impl SkillRegistry {
                 continue;
             }
 
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                if let Some(skill) = parse_skill_file(&content) {
+            if let Ok(content) = std::fs::read_to_string(&path)
+                && let Some(skill) = parse_skill_file(&content) {
                     // Override existing skill with same name
                     self.skills.retain(|s| s.name != skill.name);
                     self.skills.push(skill);
                 }
-            }
         }
     }
 

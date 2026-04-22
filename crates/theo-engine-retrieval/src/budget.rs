@@ -1,8 +1,8 @@
-/// Token budget allocation for the GRAPHCTX pipeline.
-///
-/// Divides a total token budget into named buckets using percentage allocation.
-/// All percentages must sum to 1.0. Allocation uses floor division so the sum
-/// never exceeds the input budget.
+//! Token budget allocation for the GRAPHCTX pipeline.
+//!
+//! Divides a total token budget into named buckets using percentage allocation.
+//! All percentages must sum to 1.0. Allocation uses floor division so the sum
+//! never exceeds the input budget.
 
 // ---------------------------------------------------------------------------
 // Public types

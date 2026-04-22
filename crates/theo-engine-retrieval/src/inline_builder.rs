@@ -171,13 +171,12 @@ pub fn build_inline_slices(
             content.push('\n');
         } else {
             // Fallback: use signature from graph.
-            if let Some(node) = graph.get_node(focal_id) {
-                if let Some(ref sig) = node.signature {
+            if let Some(node) = graph.get_node(focal_id)
+                && let Some(ref sig) = node.signature {
                     content.push_str(&format!("// [focal] {}\n", node.name));
                     content.push_str(sig);
                     content.push_str(" { ... }\n");
                 }
-            }
         }
 
         // Step 2: Inline callees (depth-limited BFS).
@@ -202,7 +201,7 @@ pub fn build_inline_slices(
                 let callee_source =
                     source_provider.get_lines(callee_file, callee_start, callee_end);
                 if !callee_source.is_empty() {
-                    let tokens = (callee_source.len() + 3) / 4;
+                    let tokens = callee_source.len().div_ceil(4);
                     content.push_str(&format!(
                         "\n// [callee] {callee_file}:{callee_start}-{callee_end}\n"
                     ));
@@ -213,14 +212,13 @@ pub fn build_inline_slices(
                     total_inlined += 1;
                 } else {
                     // Degraded: use signature.
-                    if let Some(node) = graph.get_node(callee_id) {
-                        if let Some(ref sig) = node.signature {
+                    if let Some(node) = graph.get_node(callee_id)
+                        && let Some(ref sig) = node.signature {
                             content
                                 .push_str(&format!("\n// [callee:unresolved] {}\n", node.name));
                             content.push_str(sig);
                             content.push_str(" { ... }\n");
                         }
-                    }
                     unresolved.push(callee_id.to_string());
                 }
             } else {
@@ -250,7 +248,7 @@ pub fn build_inline_slices(
                 let caller_source =
                     source_provider.get_lines(caller_file, caller_start, caller_end);
                 if !caller_source.is_empty() {
-                    let tokens = (caller_source.len() + 3) / 4;
+                    let tokens = caller_source.len().div_ceil(4);
                     content.push_str(&format!(
                         "\n// [caller] {caller_file}:{caller_start}-{caller_end}\n"
                     ));
@@ -263,7 +261,7 @@ pub fn build_inline_slices(
             }
         }
 
-        let token_count = (content.len() + 3) / 4;
+        let token_count = content.len().div_ceil(4);
 
         slices.push(InlineSlice {
             focal_symbol_id: focal_id.clone(),

@@ -228,6 +228,6 @@ fn main() {
         // Rust uses generic extractor — no routes, but log sinks detected
         assert!(ext.interfaces.is_empty());
         // log.info should be detected as a sink
-        assert!(ext.sinks.len() >= 1);
+        assert!(!ext.sinks.is_empty());
     }
 }
