@@ -82,6 +82,10 @@ pub struct AgentRunEngine {
     /// been attempted for this session so we don't retry on every
     /// message in long-running sessions.
     autodream_attempted: std::sync::atomic::AtomicBool,
+    observability: Option<crate::observability::ObservabilityPipeline>,
+    episodes_injected: u32, episodes_created: u32,
+    initial_context_files: std::collections::HashSet<String>,
+    pre_compaction_hot_files: std::collections::HashSet<String>,
 }
 
 impl AgentRunEngine {
@@ -107,6 +111,16 @@ impl AgentRunEngine {
             created_at: now,
             updated_at: now,
         };
+
+        // Observability pipeline + LoopDetectingListener (T1.6 + T4.4) installed
+        // BEFORE RunInitialized so the event is captured.
+        let observability = (!config.is_subagent).then(|| {
+            crate::observability::install_observability(
+                &event_bus,
+                run.run_id.as_str(),
+                project_dir.join(".theo").join("trajectories"),
+            )
+        });
 
         event_bus.publish(DomainEvent::new(
             EventType::RunInitialized,
@@ -162,6 +176,8 @@ impl AgentRunEngine {
             skill_nudge_counter: Arc::new(crate::skill_reviewer::SkillNudgeCounter::new()),
             skill_created_this_task: std::sync::atomic::AtomicBool::new(false),
             autodream_attempted: std::sync::atomic::AtomicBool::new(false),
+            observability, episodes_injected: 0, episodes_created: 0,
+            initial_context_files: Default::default(), pre_compaction_hot_files: Default::default(),
         }
     }
 
@@ -312,6 +328,33 @@ impl AgentRunEngine {
                 last_error,
             );
         }
+
+        // Observability: drain writer, compute RunReport, append summary line.
+        self.finalize_observability(result, !events.is_empty());
+    }
+
+    fn finalize_observability(&mut self, result: &AgentResult, had_events: bool) {
+        let Some(pipeline) = self.observability.take() else { return };
+        let file_path = pipeline.finalize();
+        self.episodes_created = if had_events { 1 } else { 0 };
+        let detected = crate::observability::finalize_run_observability(
+            &file_path,
+            self.run.run_id.as_str(),
+            result.success,
+            result.files_edited.len() as u64,
+            &self.session_token_usage,
+            self.config.max_iterations,
+            self.budget_enforcer.usage(),
+            &self.context_metrics.to_report(),
+            self.done_attempts,
+            self.episodes_injected,
+            self.episodes_created,
+            self.failure_tracker.new_fingerprint_count(),
+            self.failure_tracker.recurrent_fingerprint_count(),
+            &self.initial_context_files,
+            &self.pre_compaction_hot_files,
+        );
+        detected.publish_events(&self.event_bus, self.run.run_id.as_str());
     }
 
     /// Execute with session history from previous REPL prompts.
@@ -392,11 +435,12 @@ impl AgentRunEngine {
         // Phase 0 T0.3: feed eligible episode summaries back into context
         // (lifecycle != Archived, TTL not expired, 5% token budget).
         if !self.config.is_subagent {
-            crate::memory_lifecycle::run_engine_hooks::inject_episode_history(
+            let injected = crate::memory_lifecycle::run_engine_hooks::inject_episode_history(
                 &self.project_dir,
                 self.config.context_window_tokens,
                 &mut messages,
             );
+            self.episodes_injected = self.episodes_injected.saturating_add(injected as u32);
         }
 
         // Boot sequence: inject progress from previous sessions + recent git activity.
@@ -450,6 +494,11 @@ impl AgentRunEngine {
                     if !planning_query.is_empty()
                         && let Ok(ctx) = provider.query_context(&planning_query, 1000).await
                             && !ctx.blocks.is_empty() {
+                                // T5.5 FM-5: record initial context files for
+                                // the task-derailment sensor.
+                                for b in ctx.blocks.iter().take(5) {
+                                    self.initial_context_files.insert(b.source_id.clone());
+                                }
                                 let file_hints: Vec<String> = ctx
                                     .blocks
                                     .iter()
@@ -861,6 +910,10 @@ impl AgentRunEngine {
                     resp
                 }
                 Err(e) if e.is_context_overflow() => {
+                    // T5.5 FM-6: snapshot hot files BEFORE compaction destroys them.
+                    for f in &self.working_set.hot_files {
+                        self.pre_compaction_hot_files.insert(f.clone());
+                    }
                     // Reactive context overflow recovery: emergency compact at 50%
                     // and retry once. Pi-mono ref: packages/ai/src/utils/overflow.ts
                     self.event_bus.publish(DomainEvent::new(
@@ -2231,6 +2284,7 @@ mod tests {
                 PathBuf::from("/tmp"),
             )
         }
+
     }
 
     // -----------------------------------------------------------------------

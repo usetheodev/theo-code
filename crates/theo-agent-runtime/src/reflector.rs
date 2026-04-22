@@ -15,11 +15,20 @@
 /// Only patterns with concrete observable signals are included (YAGNI).
 /// New variants are added when sensors to detect them are implemented.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum FailurePattern {
-    /// Agent ran multiple loops without editing any files.
+    /// FM-1: Agent ran multiple loops without editing any files.
     NoProgressLoop,
-    /// Agent keeps hitting the same error repeatedly.
+    /// FM-2: Agent keeps hitting the same error repeatedly.
     RepeatedSameError,
+    /// FM-3: Agent converged without producing successful edits.
+    PrematureTermination,
+    /// FM-4: Agent made edits without verifying them (no bash/sensor).
+    WeakVerification,
+    /// FM-5: Agent stopped referencing initial-context files for 5+ calls.
+    TaskDerailment,
+    /// FM-6: Agent re-read pre-compaction hot files after ContextOverflowRecovery.
+    ConversationHistoryLoss,
 }
 
 // ---------------------------------------------------------------------------
@@ -89,6 +98,26 @@ pub fn guidance_for_pattern(
                 consecutive_same_error, err_preview
             )
         }
+        FailurePattern::PrematureTermination => {
+            "WARNING: You converged without producing any edits. The task is not complete \
+             without concrete file changes. Review what the task is asking and make edits."
+                .to_string()
+        }
+        FailurePattern::WeakVerification => {
+            "WARNING: You made edits without running verification (bash/sensor). \
+             Always verify edits by running tests or checking types."
+                .to_string()
+        }
+        FailurePattern::TaskDerailment => {
+            "WARNING: You have performed multiple tool calls without referencing any \
+             file from the initial context. Revisit the task and the files in scope."
+                .to_string()
+        }
+        FailurePattern::ConversationHistoryLoss => {
+            "WARNING: Context was compacted and you immediately re-read files that were \
+             already hot before compaction. Summarize existing knowledge instead of re-reading."
+                .to_string()
+        }
     }
 }
 
@@ -98,14 +127,24 @@ pub fn guidance_for_pattern(
 
 /// Heuristic reflector that classifies failures and generates guidance.
 ///
-/// Stateless — all state comes from PilotLoop fields passed as arguments.
-/// Designed to be replaced by LLM-based reflector in Phase 4 (same interface).
-#[derive(Debug, Default)]
-pub struct HeuristicReflector;
+/// Stateless for the legacy `corrective_guidance` API, but holds an internal
+/// `LoopDetector` (Phase 4, T4.4) that consumes normalized tool calls and
+/// returns corrective guidance when the detector reports a verdict other
+/// than `Ok`.
+#[derive(Default)]
+pub struct HeuristicReflector {
+    loop_detector: std::sync::Mutex<crate::observability::LoopDetector>,
+}
+
+impl std::fmt::Debug for HeuristicReflector {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HeuristicReflector").finish()
+    }
+}
 
 impl HeuristicReflector {
     pub fn new() -> Self {
-        Self
+        Self::default()
     }
 
     /// Classify failure and generate guidance if applicable.
@@ -131,6 +170,35 @@ impl HeuristicReflector {
             consecutive_same_error,
             last_error,
         ))
+    }
+
+    /// T4.4: Record a tool invocation through the loop detector and return
+    /// guidance if the verdict is `Correct` or `HardStop`.
+    pub fn record_tool_call(
+        &self,
+        tool_name: &str,
+        normalized_args: &serde_json::Value,
+        normalized_output: &str,
+    ) -> Option<String> {
+        use crate::observability::LoopVerdict;
+        let verdict = self
+            .loop_detector
+            .lock()
+            .expect("loop detector mutex poisoned")
+            .record(tool_name, normalized_args, normalized_output);
+        match verdict {
+            LoopVerdict::Ok | LoopVerdict::Warning => None,
+            LoopVerdict::Correct => Some(format!(
+                "WARNING: You have called `{}` with the same arguments multiple times \
+                 in a row. The output appears to be identical. Try a DIFFERENT approach.",
+                tool_name
+            )),
+            LoopVerdict::HardStop => Some(format!(
+                "HARD STOP: You have called `{}` identically 5+ times. Abort this \
+                 approach and reconsider the task.",
+                tool_name
+            )),
+        }
     }
 }
 
@@ -242,5 +310,43 @@ mod tests {
     fn reflector_returns_none_for_success() {
         let r = HeuristicReflector::new();
         assert!(r.corrective_guidance(5, 5, Some("err"), true).is_none());
+    }
+
+    // --- T4.4: LoopDetector integration ---
+
+    #[test]
+    fn test_reflector_emits_corrective_guidance_on_loop() {
+        let r = HeuristicReflector::new();
+        assert!(r.record_tool_call("grep", &serde_json::json!({"q": "x"}), "").is_none());
+        assert!(r.record_tool_call("grep", &serde_json::json!({"q": "x"}), "").is_none());
+        let out = r.record_tool_call("grep", &serde_json::json!({"q": "x"}), "");
+        assert!(out.is_some());
+    }
+
+    #[test]
+    fn test_reflector_loop_verdict_correct_contains_message() {
+        let r = HeuristicReflector::new();
+        r.record_tool_call("grep", &serde_json::json!({"q": "x"}), "");
+        r.record_tool_call("grep", &serde_json::json!({"q": "x"}), "");
+        let out = r.record_tool_call("grep", &serde_json::json!({"q": "x"}), "").unwrap();
+        assert!(out.contains("grep"));
+    }
+
+    // --- T5.5: exhaustive match over 6 failure variants ---
+
+    #[test]
+    fn test_failure_pattern_has_6_variants() {
+        fn match_all(p: FailurePattern) -> &'static str {
+            match p {
+                FailurePattern::NoProgressLoop => "no_progress",
+                FailurePattern::RepeatedSameError => "repeated_error",
+                FailurePattern::PrematureTermination => "premature",
+                FailurePattern::WeakVerification => "weak_verify",
+                FailurePattern::TaskDerailment => "derailment",
+                FailurePattern::ConversationHistoryLoss => "history_loss",
+            }
+        }
+        assert_eq!(match_all(FailurePattern::NoProgressLoop), "no_progress");
+        assert_eq!(match_all(FailurePattern::PrematureTermination), "premature");
     }
 }

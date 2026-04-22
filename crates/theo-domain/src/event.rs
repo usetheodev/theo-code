@@ -2,6 +2,28 @@ use serde::{Deserialize, Serialize};
 
 use crate::identifiers::EventId;
 
+/// High-level classification of domain events for observability filtering.
+///
+/// The observability pipeline uses `EventKind` to decide which events to
+/// persist into a trajectory. `Streaming` events are explicitly excluded from
+/// trajectories because they carry volatile partial output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[non_exhaustive]
+pub enum EventKind {
+    /// Lifecycle transitions for tasks, runs, and todos.
+    Lifecycle,
+    /// Tool and sensor invocations.
+    Tooling,
+    /// Agent cognition — hypotheses, decisions, constraints.
+    Reasoning,
+    /// Context retrieval, LLM calls, overflow recovery.
+    Context,
+    /// Explicit failure signals — budget exhaustion, errors.
+    Failure,
+    /// Partial streaming output (excluded from trajectories by default).
+    Streaming,
+}
+
 /// Type-safe classification of domain events.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
@@ -168,6 +190,49 @@ pub fn validate_cognitive_event_in_context(
                 });
             }
     Ok(())
+}
+
+impl EventType {
+    /// Returns the `EventKind` classification of this event type.
+    ///
+    /// The mapping is total (every variant has a kind) and deterministic.
+    pub fn kind(&self) -> EventKind {
+        match self {
+            // Lifecycle — state transitions and task management
+            EventType::TaskCreated => EventKind::Lifecycle,
+            EventType::TaskStateChanged => EventKind::Lifecycle,
+            EventType::RunInitialized => EventKind::Lifecycle,
+            EventType::RunStateChanged => EventKind::Lifecycle,
+            EventType::TodoUpdated => EventKind::Lifecycle,
+
+            // Tooling — tool invocations and sensors
+            EventType::ToolCallQueued => EventKind::Tooling,
+            EventType::ToolCallDispatched => EventKind::Tooling,
+            EventType::ToolCallCompleted => EventKind::Tooling,
+            EventType::ToolCallProgress => EventKind::Tooling,
+            EventType::SensorExecuted => EventKind::Tooling,
+
+            // Reasoning — cognitive events
+            EventType::HypothesisFormed => EventKind::Reasoning,
+            EventType::HypothesisInvalidated => EventKind::Reasoning,
+            EventType::DecisionMade => EventKind::Reasoning,
+            EventType::ConstraintLearned => EventKind::Reasoning,
+
+            // Context — retrieval and LLM
+            EventType::LlmCallStart => EventKind::Context,
+            EventType::LlmCallEnd => EventKind::Context,
+            EventType::ContextOverflowRecovery => EventKind::Context,
+            EventType::RetrievalExecuted => EventKind::Context,
+
+            // Failure — budget exhaustion, errors
+            EventType::BudgetExceeded => EventKind::Failure,
+            EventType::Error => EventKind::Failure,
+
+            // Streaming — partial output (excluded from trajectories)
+            EventType::ReasoningDelta => EventKind::Streaming,
+            EventType::ContentDelta => EventKind::Streaming,
+        }
+    }
 }
 
 impl std::fmt::Display for EventType {
@@ -589,5 +654,84 @@ mod tests {
             result.is_ok(),
             "Non-cognitive events pass without context check"
         );
+    }
+
+    // --- T0.1: EventKind mapping tests ---
+
+    #[test]
+    fn test_event_kind_mapping_is_exhaustive() {
+        for et in &ALL_EVENT_TYPES {
+            let kind = et.kind();
+            let _ = kind; // must return without panic for every variant
+        }
+    }
+
+    #[test]
+    fn test_event_kind_is_deterministic() {
+        for et in &ALL_EVENT_TYPES {
+            assert_eq!(et.kind(), et.kind(), "EventKind not deterministic for {:?}", et);
+        }
+    }
+
+    #[test]
+    fn test_event_kind_lifecycle_variants() {
+        assert_eq!(EventType::TaskCreated.kind(), EventKind::Lifecycle);
+        assert_eq!(EventType::TaskStateChanged.kind(), EventKind::Lifecycle);
+        assert_eq!(EventType::RunInitialized.kind(), EventKind::Lifecycle);
+        assert_eq!(EventType::RunStateChanged.kind(), EventKind::Lifecycle);
+        assert_eq!(EventType::TodoUpdated.kind(), EventKind::Lifecycle);
+    }
+
+    #[test]
+    fn test_event_kind_tooling_variants() {
+        assert_eq!(EventType::ToolCallQueued.kind(), EventKind::Tooling);
+        assert_eq!(EventType::ToolCallDispatched.kind(), EventKind::Tooling);
+        assert_eq!(EventType::ToolCallCompleted.kind(), EventKind::Tooling);
+        assert_eq!(EventType::ToolCallProgress.kind(), EventKind::Tooling);
+        assert_eq!(EventType::SensorExecuted.kind(), EventKind::Tooling);
+    }
+
+    #[test]
+    fn test_event_kind_reasoning_variants() {
+        assert_eq!(EventType::HypothesisFormed.kind(), EventKind::Reasoning);
+        assert_eq!(EventType::HypothesisInvalidated.kind(), EventKind::Reasoning);
+        assert_eq!(EventType::DecisionMade.kind(), EventKind::Reasoning);
+        assert_eq!(EventType::ConstraintLearned.kind(), EventKind::Reasoning);
+    }
+
+    #[test]
+    fn test_event_kind_context_variants() {
+        assert_eq!(EventType::LlmCallStart.kind(), EventKind::Context);
+        assert_eq!(EventType::LlmCallEnd.kind(), EventKind::Context);
+        assert_eq!(EventType::ContextOverflowRecovery.kind(), EventKind::Context);
+        assert_eq!(EventType::RetrievalExecuted.kind(), EventKind::Context);
+    }
+
+    #[test]
+    fn test_event_kind_failure_variants() {
+        assert_eq!(EventType::BudgetExceeded.kind(), EventKind::Failure);
+        assert_eq!(EventType::Error.kind(), EventKind::Failure);
+    }
+
+    #[test]
+    fn test_event_kind_streaming_excluded_from_trajectory() {
+        assert_eq!(EventType::ContentDelta.kind(), EventKind::Streaming);
+        assert_eq!(EventType::ReasoningDelta.kind(), EventKind::Streaming);
+    }
+
+    #[test]
+    fn test_event_kind_serde_roundtrip() {
+        for kind in &[
+            EventKind::Lifecycle,
+            EventKind::Tooling,
+            EventKind::Reasoning,
+            EventKind::Context,
+            EventKind::Failure,
+            EventKind::Streaming,
+        ] {
+            let json = serde_json::to_string(kind).unwrap();
+            let back: EventKind = serde_json::from_str(&json).unwrap();
+            assert_eq!(*kind, back);
+        }
     }
 }

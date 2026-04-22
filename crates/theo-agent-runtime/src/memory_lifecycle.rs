@@ -603,16 +603,18 @@ pub mod run_engine_hooks {
     /// - Caps the injected block at 5% of the context window using a
     ///   rough chars/4 token estimate (AC-0.3.6).
     /// - No episodes → no message pushed (AC-0.3.7).
+    /// Returns the number of episodes actually injected (0 if none were
+    /// eligible or the run had no prior episode history).
     pub fn inject_episode_history(
         project_dir: &std::path::Path,
         context_window_tokens: usize,
         messages: &mut Vec<Message>,
-    ) {
+    ) -> usize {
         use theo_domain::episode::{MemoryLifecycle as Lc, TtlPolicy};
 
         let all = crate::state_manager::StateManager::load_episode_summaries(project_dir);
         if all.is_empty() {
-            return;
+            return 0;
         }
 
         let now_ms = std::time::SystemTime::now()
@@ -635,9 +637,10 @@ pub mod run_engine_hooks {
             .collect();
 
         if eligible.is_empty() {
-            return;
+            return 0;
         }
 
+        let injected_count = eligible.len();
         let mut parts: Vec<String> = Vec::new();
         for ep in &eligible {
             let mut piece = format!(
@@ -669,6 +672,7 @@ pub mod run_engine_hooks {
             body.push_str("\n… [truncated to 5% context budget]");
         }
         messages.push(Message::system(&body));
+        injected_count
     }
 }
 

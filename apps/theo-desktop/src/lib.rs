@@ -48,6 +48,11 @@ pub fn run() {
             commands::memory::trigger_wiki_compile,
             commands::memory::get_memory_settings,
             commands::memory::save_memory_settings,
+            // Observability dashboard
+            commands::observability::list_runs,
+            commands::observability::get_run_trajectory,
+            commands::observability::get_run_metrics,
+            commands::observability::compare_runs,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Theo Code");
