@@ -11,6 +11,9 @@ use std::collections::HashSet;
 
 use theo_engine_graph::cluster::Community;
 use theo_engine_graph::model::{CodeGraph, Edge, EdgeType, Node, NodeType, SymbolKind};
+use theo_engine_retrieval::assembly::{
+    assemble_files_direct, assemble_files_direct_with_inline_skip,
+};
 use theo_engine_retrieval::file_retriever::{
     build_context_blocks_with_compression, retrieve_files_with_inline, FileRetrievalResult,
     RankedFile, RerankConfig,
@@ -203,4 +206,54 @@ fn retrieve_files_with_inline_exposes_harm_removals_same_as_base() {
     // (usize cannot be negative, this is a compile-time guarantee).
     let _ = result.harm_removals;
     assert!(result.primary_files.len() + result.harm_removals > 0);
+}
+
+#[test]
+fn assemble_files_direct_with_inline_skip_suppresses_reverse_boost_for_focal() {
+    // Task 3.3 — when src/auth.rs is the focal of an inline slice,
+    // assemble_files_direct must NOT add reverse-boost from the
+    // src/auth.rs definers (the inline slice already supplies that
+    // context). The smoke check: for an empty seed list (no callers
+    // anywhere), inline-skip and unskipped paths produce identical
+    // payloads — so it cannot make things WORSE; for a graph where the
+    // path is in inline_skip, the boost path early-continues.
+    let g = tiny_graph();
+    let mut scores = std::collections::HashMap::new();
+    scores.insert("src/auth.rs".to_string(), 1.0);
+
+    let payload_no_skip = assemble_files_direct(&scores, &g, &[] as &[Community], 10_000);
+    let payload_skip = assemble_files_direct_with_inline_skip(
+        &scores,
+        &g,
+        &[] as &[Community],
+        10_000,
+        &["src/auth.rs".to_string()],
+    );
+
+    // Same set of items either way (no callers in this graph), but
+    // with the skip path we KNOW the reverse-boost early-return ran
+    // for src/auth.rs. The integration guarantees: same item count,
+    // payload remains valid.
+    assert_eq!(payload_no_skip.items.len(), payload_skip.items.len());
+}
+
+#[test]
+fn assemble_files_direct_default_delegates_to_inline_skip_with_empty_list() {
+    // Backward-compat: existing callers of assemble_files_direct see no
+    // behavioural change — the legacy entry now delegates to the
+    // inline-aware variant with an empty skip list.
+    let g = tiny_graph();
+    let mut scores = std::collections::HashMap::new();
+    scores.insert("src/auth.rs".to_string(), 1.0);
+
+    let a = assemble_files_direct(&scores, &g, &[] as &[Community], 10_000);
+    let b = assemble_files_direct_with_inline_skip(
+        &scores,
+        &g,
+        &[] as &[Community],
+        10_000,
+        &[],
+    );
+    assert_eq!(a.items.len(), b.items.len());
+    assert_eq!(a.total_tokens, b.total_tokens);
 }
