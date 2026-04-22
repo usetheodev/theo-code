@@ -345,6 +345,43 @@ pub struct AgentConfig {
     /// NullMemoryProvider (runtime behaviour identical to pre-RM0). Plan
     /// ref: `outputs/agent-memory-plan.md` RM0.
     pub memory_provider: Option<MemoryHandle>,
+    /// Phase 1 of PLAN_AUTO_EVOLUTION_SOTA: number of user turns between
+    /// background memory-reviewer spawns. `0` disables the nudge entirely.
+    /// Default: 10 (matches Hermes `run_agent.py:1418` and mitigates
+    /// Issue #8506 by design — `AtomicUsize` on `RunEngine` persists
+    /// across turns).
+    pub memory_review_nudge_interval: usize,
+    /// Phase 1 of PLAN_AUTO_EVOLUTION_SOTA: optional reviewer invoked
+    /// when the nudge counter fires. When `None`, the nudge becomes a
+    /// no-op even if `memory_review_nudge_interval > 0`.
+    pub memory_reviewer: Option<crate::memory_reviewer::MemoryReviewerHandle>,
+    /// Phase 2 of PLAN_AUTO_EVOLUTION_SOTA: enables post-session
+    /// memory consolidation (autodream). Default: `true` — the actual
+    /// run still respects 24h cooldown, lock file, and minimum file
+    /// count. Set to `false` to disable unconditionally.
+    pub autodream_enabled: bool,
+    /// Phase 2 of PLAN_AUTO_EVOLUTION_SOTA: max wall time for a
+    /// consolidation pass. Default: 60s. Matches OpenDev's bounded
+    /// background work pattern.
+    pub autodream_timeout_secs: u64,
+    /// Phase 2 of PLAN_AUTO_EVOLUTION_SOTA: optional executor that
+    /// runs the LLM consolidation step. When `None`, `run_autodream`
+    /// becomes a no-op even if `autodream_enabled == true`.
+    pub autodream: Option<crate::autodream::AutodreamHandle>,
+    /// Phase 3 of PLAN_AUTO_EVOLUTION_SOTA: tool iterations between
+    /// background skill-reviewer spawns, provided no skill was
+    /// created during the task. `0` disables. Default: 10
+    /// (`referencias/hermes-agent/run_agent.py:1517-1520`).
+    pub skill_review_nudge_interval: usize,
+    /// Phase 3 of PLAN_AUTO_EVOLUTION_SOTA: reviewer invoked when the
+    /// skill nudge counter fires. `None` disables the feature even
+    /// with a positive interval.
+    pub skill_reviewer: Option<crate::skill_reviewer::SkillReviewerHandle>,
+    /// Phase 4 of PLAN_AUTO_EVOLUTION_SOTA: optional transcript
+    /// indexer. `None` disables cross-session BM25 recall; the
+    /// concrete Tantivy-backed impl lives in `theo-application` to
+    /// keep bounded contexts intact.
+    pub transcript_indexer: Option<crate::transcript_indexer::TranscriptIndexerHandle>,
 }
 
 /// Debug-friendly wrapper around `Arc<dyn MemoryProvider>` so `AgentConfig`
@@ -417,6 +454,14 @@ impl Default for AgentConfig {
             memory_enabled: false,
             memory_provider: None,
             router: None,
+            memory_review_nudge_interval: 10,
+            memory_reviewer: None,
+            autodream_enabled: true,
+            autodream_timeout_secs: 60,
+            autodream: None,
+            skill_review_nudge_interval: 10,
+            skill_reviewer: None,
+            transcript_indexer: None,
         }
     }
 }
