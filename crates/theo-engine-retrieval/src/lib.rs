@@ -6,6 +6,7 @@ pub mod code_tokenizer;
 pub mod dense_search;
 pub mod escape;
 pub mod file_retriever;
+pub mod fs_source_provider;
 pub mod graph_attention;
 pub mod harm_filter;
 pub mod inline_builder;

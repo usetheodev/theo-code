@@ -64,6 +64,8 @@ pub struct AgentRunEngine {
     /// Steering and follow-up message queues for mid-run injection.
     /// Pi-mono ref: `packages/agent/src/agent-loop.ts:165-229`
     message_queues: MessageQueues,
+    /// Phase 1 T1.1: accumulated token usage across LLM calls.
+    session_token_usage: theo_domain::budget::TokenUsage,
 }
 
 impl AgentRunEngine {
@@ -139,7 +141,13 @@ impl AgentRunEngine {
             working_set: theo_domain::working_set::WorkingSet::new(),
             context_metrics: ContextMetrics::new(),
             message_queues: MessageQueues::default(),
+            session_token_usage: theo_domain::budget::TokenUsage::default(),
         }
+    }
+
+    /// Accumulated token usage (Phase 1 T1.1 AC-1.1.4, CLI display).
+    pub fn session_token_usage(&self) -> &theo_domain::budget::TokenUsage {
+        &self.session_token_usage
     }
 
     /// Sets the message queues for steering and follow-up injection.
@@ -149,23 +157,16 @@ impl AgentRunEngine {
     }
 
     /// Sets the graph context provider for code intelligence injection.
-    pub fn with_graph_context(
-        mut self,
-        provider: Arc<dyn theo_domain::graph_context::GraphContextProvider>,
-    ) -> Self {
+    pub fn with_graph_context(mut self, provider: Arc<dyn theo_domain::graph_context::GraphContextProvider>) -> Self {
         self.graph_context = Some(provider);
         self
     }
 
     /// Returns the run_id.
-    pub fn run_id(&self) -> &RunId {
-        &self.run.run_id
-    }
+    pub fn run_id(&self) -> &RunId { &self.run.run_id }
 
     /// Returns the current RunState.
-    pub fn state(&self) -> RunState {
-        self.run.state
-    }
+    pub fn state(&self) -> RunState { self.run.state }
 
     /// Returns the current iteration.
     pub fn iteration(&self) -> usize {
@@ -189,28 +190,33 @@ impl AgentRunEngine {
     /// Execute with fresh messages (no session history).
     pub async fn execute(&mut self) -> AgentResult {
         let result = self.execute_with_history(Vec::new()).await;
-        self.record_session_exit(&result);
+        self.record_session_exit(&result).await;
         result
     }
 
-    /// Record session exit: save failure patterns + session progress + context metrics.
-    /// Best-effort — never fails, never blocks.
-    fn record_session_exit(&mut self, result: &AgentResult) {
+    /// AgentLoop::run_with_history adapter — shares execute()'s shutdown path.
+    pub async fn record_session_exit_public(&mut self, r: &AgentResult) { self.record_session_exit(r).await; }
+
+    /// Record session exit. Phase 0 T0.1: async tokio::fs + on_session_end hook.
+    async fn record_session_exit(&mut self, result: &AgentResult) {
         // Save failure pattern tracker
         self.failure_tracker.save();
 
         // Save context metrics to .theo/metrics/{run_id}.json
         let metrics_dir = self.project_dir.join(".theo").join("metrics");
-        if std::fs::create_dir_all(&metrics_dir).is_ok() {
+        if tokio::fs::create_dir_all(&metrics_dir).await.is_ok() {
             let report = self.context_metrics.to_report();
             let metrics_path = metrics_dir.join(format!("{}.json", self.run.run_id.as_str()));
-            let _ = std::fs::write(
+            let _ = tokio::fs::write(
                 &metrics_path,
                 serde_json::to_string_pretty(&report).unwrap_or_default(),
-            );
+            )
+            .await;
         }
 
-        // Generate EpisodeSummary from run events and persist to .theo/wiki/episodes/
+        // Generate EpisodeSummary from run events and persist to .theo/memory/episodes/
+        // (decision: meeting 20260420-221947 #4 — episodes belong to memory namespace,
+        // not wiki; wiki is reserved for compiled content).
         let events = self.event_bus.events();
         if !events.is_empty() {
             let task_objective = self
@@ -218,21 +224,33 @@ impl AgentRunEngine {
                 .get(&self.task_id)
                 .map(|t| t.objective.clone())
                 .unwrap_or_else(|| "unknown".to_string());
-            let summary = theo_domain::episode::EpisodeSummary::from_events(
-                self.run.run_id.as_str(),
-                Some(self.task_id.as_str()),
-                &task_objective,
-                &events,
+            let mut summary = theo_domain::episode::EpisodeSummary::from_events(
+                self.run.run_id.as_str(), Some(self.task_id.as_str()), &task_objective, &events,
             );
-            let episodes_dir = self.project_dir.join(".theo").join("wiki").join("episodes");
-            if std::fs::create_dir_all(&episodes_dir).is_ok() {
+            // Phase 1 T1.1 (usage+cost) + Phase 2 T2.1 (lesson pipeline, G5).
+            let mut usage = self.session_token_usage.clone();
+            if let Some(c) = theo_domain::budget::known_model_cost(&self.config.model) { usage.recompute_cost(&c); }
+            summary.token_usage = Some(usage);
+            // Phase 2: T2.1 (lessons G5) + T2.3 (hypotheses G6).
+            let _ = crate::lesson_pipeline::extract_and_persist_for_outcome(&self.project_dir, summary.machine_summary.outcome, &events);
+            let _ = crate::hypothesis_pipeline::persist_unresolved(&self.project_dir, &summary);
+            let episodes_dir = self
+                .project_dir
+                .join(".theo")
+                .join("memory")
+                .join("episodes");
+            if tokio::fs::create_dir_all(&episodes_dir).await.is_ok() {
                 let episode_path = episodes_dir.join(format!("{}.json", summary.summary_id));
-                let _ = std::fs::write(
+                let _ = tokio::fs::write(
                     &episode_path,
                     serde_json::to_string_pretty(&summary).unwrap_or_default(),
-                );
+                )
+                .await;
             }
         }
+
+        // Phase 0 T0.1 AC-0.1.4: memory-provider session-end hook (every exit path).
+        crate::memory_lifecycle::MemoryLifecycle::on_session_end(&self.config).await;
 
         // Record session end for cross-session progress tracking
         if !self.config.is_subagent {
@@ -307,51 +325,34 @@ impl AgentRunEngine {
         // No automatic injection: the LLM decides when it needs code structure context.
         // The graph_context provider is passed to tools via ToolContext.graph_context.
 
-        // Inject memories from previous runs (cross-run memory)
-        let memory_root = std::env::var("HOME")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|_| std::path::PathBuf::from("/tmp"))
-            .join(".config")
-            .join("theo")
-            .join("memory");
-
-        let memory_store =
-            theo_tooling::memory::FileMemoryStore::for_project(&memory_root, &self.project_dir);
-        if let Ok(memories) = memory_store.list().await {
-            if !memories.is_empty() {
-                let memory_context = memories
-                    .iter()
-                    .map(|m| format!("- **{}**: {}", m.key, m.value))
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                messages.push(Message::system(&format!(
-                    "## Memory from previous runs\n{memory_context}"
-                )));
-            }
+        // Memory injection (Phase 0 T0.1): prefetch when enabled (sole
+        // source), else legacy FileMemoryStore fallback. Dual-injection
+        // is prevented by this explicit branch (evolution-agent concern).
+        if self.config.memory_enabled {
+            let query = self
+                .task_manager
+                .get(&self.task_id)
+                .map(|t| t.objective.clone())
+                .unwrap_or_else(|| "session".into());
+            let _ = crate::memory_lifecycle::run_engine_hooks::inject_prefetch(
+                &self.config, &mut messages, &query,
+            )
+            .await;
+        } else {
+            crate::memory_lifecycle::run_engine_hooks::inject_legacy_file_memory(
+                &self.project_dir, &mut messages,
+            )
+            .await;
         }
 
-        // Inject episode summaries from previous runs (cross-session learning).
+        // Phase 0 T0.3: feed eligible episode summaries back into context
+        // (lifecycle != Archived, TTL not expired, 5% token budget).
         if !self.config.is_subagent {
-            let episodes = crate::state_manager::StateManager::load_episode_summaries(&self.project_dir);
-            if !episodes.is_empty() {
-                let episode_context: Vec<String> = episodes
-                    .iter()
-                    .rev()
-                    .take(5) // Most recent 5 episodes
-                    .map(|ep| {
-                        format!(
-                            "- **{}**: {} (files: {})",
-                            ep.run_id,
-                            ep.machine_summary.objective,
-                            ep.affected_files.join(", ")
-                        )
-                    })
-                    .collect();
-                messages.push(Message::system(&format!(
-                    "## Recent Episode History\n{}",
-                    episode_context.join("\n")
-                )));
-            }
+            crate::memory_lifecycle::run_engine_hooks::inject_episode_history(
+                &self.project_dir,
+                self.config.context_window_tokens,
+                &mut messages,
+            );
         }
 
         // Boot sequence: inject progress from previous sessions + recent git activity.
@@ -641,6 +642,9 @@ impl AgentRunEngine {
                     .cloned()
                     .collect(),
             };
+            // Phase 0 T0.1 AC-0.1.3: pre-compression memory hook (survives truncation).
+            crate::memory_lifecycle::run_engine_hooks::pre_compress_push(&self.config, &mut messages).await;
+
             crate::compaction_stages::compact_staged_with_policy(
                 &mut messages,
                 self.config.context_window_tokens,
@@ -810,6 +814,12 @@ impl AgentRunEngine {
                     self.budget_enforcer.record_tokens(total_tok);
                     self.metrics
                         .record_llm_call_detailed(llm_duration, input_tok, output_tok);
+                    // Phase 1 T1.1: accumulate the 6-field token usage
+                    // (cache / reasoning stay at 0 until providers expose
+                    // them; cost recomputed lazily at episode write time).
+                    self.session_token_usage.accumulate(&theo_domain::budget::TokenUsage {
+                        input_tokens: input_tok, output_tokens: output_tok, ..Default::default()
+                    });
                     resp
                 }
                 Err(e) if e.is_context_overflow() => {
@@ -924,6 +934,15 @@ impl AgentRunEngine {
                         continue;
                     }
                 }
+
+                // Phase 0 T0.1 AC-0.1.2: persist the user→assistant exchange
+                // INLINE (not fire-and-forget) — durability > latency.
+                crate::memory_lifecycle::run_engine_hooks::sync_final_turn(
+                    &self.config,
+                    &messages,
+                    &content,
+                )
+                .await;
 
                 self.transition_run(RunState::Converged);
                 let _ = self

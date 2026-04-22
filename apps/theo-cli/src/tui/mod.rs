@@ -433,8 +433,15 @@ pub async fn run(
                 tui_log("=== AGENT LAUNCH START ===");
                 tui_log(&format!("Prompt: {}", &prompt[..prompt.len().min(80)]));
 
-                // Re-resolve config to pick up tokens from login
-                let (fresh_config, fresh_provider) = crate::resolve_agent_config(None, None, None).await;
+                // Re-resolve config to pick up tokens from login, then attach
+                // the memory provider if memory is enabled (Phase 0 T0.2 —
+                // run_agent_session's attach is on the outer config, which
+                // we discard here, so redo it).
+                let (mut fresh_config, fresh_provider) = crate::resolve_agent_config(None, None, None).await;
+                theo_application::use_cases::memory_factory::attach_memory_to_config(
+                    &mut fresh_config,
+                    &project_dir,
+                );
                 tui_log(&format!("Resolved provider: {fresh_provider}"));
                 tui_log(&format!("Model: {}", fresh_config.model));
                 tui_log(&format!("Base URL: {}", fresh_config.base_url));

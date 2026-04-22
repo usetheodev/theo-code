@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 theo-domain.workspace = true
 theo-engine-graph = { path = "../theo-engine-graph" }
+theo-engine-parser = { path = "../theo-engine-parser" }
 serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true

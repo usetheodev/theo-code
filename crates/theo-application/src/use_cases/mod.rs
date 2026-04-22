@@ -1,8 +1,10 @@
+pub mod auth;
 pub mod context_assembler;
 pub mod conversion;
 pub mod extraction;
 pub mod graph_context_service;
 pub mod impact;
+pub mod memory_factory;
 pub mod memory_lint;
 pub mod memory_ui;
 pub mod pipeline;

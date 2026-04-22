@@ -14,6 +14,7 @@ pub mod fs_util;
 pub mod lint;
 pub mod retrieval;
 pub mod security;
+pub mod session_search_fs;
 pub mod wiki;
 
 pub use builtin::BuiltinMemoryProvider;
@@ -25,4 +26,5 @@ pub use retrieval::{
     pack_within_budget,
 };
 pub use security::{InjectionReason, scan as security_scan};
+pub use session_search_fs::{FsSessionSearch, render_hits};
 pub use wiki::{HashManifest, SourceHash, lint_pages, parse_page};

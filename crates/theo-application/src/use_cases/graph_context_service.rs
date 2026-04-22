@@ -55,6 +55,9 @@ const LEIDEN_RESOLUTION: f64 = 1.0;
 struct GraphState {
     graph: CodeGraph,
     communities: Vec<Community>,
+    /// Root of the indexed workspace. Required by the context-wiring
+    /// phases (compression, inline-builder) that read source off disk.
+    project_dir: std::path::PathBuf,
     /// MultiSignalScorer: only built when no RRF pipeline available (Tier 0 only).
     /// When tantivy-backend is active, query_context uses FileBm25 directly,
     /// saving ~200MB RAM from scorer's BM25 index + TF-IDF model.
@@ -97,6 +100,10 @@ pub struct GraphContextService {
     state: Arc<tokio::sync::RwLock<GraphBuildState>>,
     /// Ensures only one build runs at a time.
     build_in_progress: Arc<AtomicBool>,
+    /// PLAN_CONTEXT_WIRING Phase 4 — sink for `RetrievalExecuted` events.
+    /// Defaults to `NoopEventSink`; the runtime replaces it with an adapter
+    /// around its broadcast `EventBus` via `with_event_sink`.
+    event_sink: Arc<dyn theo_domain::graph_context::EventSink>,
 }
 
 impl GraphContextService {
@@ -104,7 +111,19 @@ impl GraphContextService {
         Self {
             state: Arc::new(tokio::sync::RwLock::new(GraphBuildState::Uninitialized)),
             build_in_progress: Arc::new(AtomicBool::new(false)),
+            event_sink: Arc::new(theo_domain::graph_context::NoopEventSink),
         }
+    }
+
+    /// Attach an event sink for retrieval telemetry. The sink is called
+    /// synchronously on the read path; implementations must be cheap and
+    /// non-blocking.
+    pub fn with_event_sink(
+        mut self,
+        sink: Arc<dyn theo_domain::graph_context::EventSink>,
+    ) -> Self {
+        self.event_sink = sink;
+        self
     }
 }
 
@@ -153,6 +172,7 @@ impl GraphContextProvider for GraphContextService {
             *state = GraphBuildState::Ready(GraphState {
                 graph,
                 communities,
+                project_dir: dir.clone(),
                 #[cfg(not(feature = "tantivy-backend"))]
                 scorer,
                 #[cfg(feature = "tantivy-backend")]
@@ -220,6 +240,7 @@ impl GraphContextProvider for GraphContextService {
                     *state = GraphBuildState::Ready(GraphState {
                         graph,
                         communities,
+                        project_dir: dir_for_cache.clone(),
                         #[cfg(not(feature = "tantivy-backend"))]
                         scorer,
                         #[cfg(feature = "tantivy-backend")]
@@ -428,21 +449,47 @@ impl GraphContextProvider for GraphContextService {
         let blocks: Vec<ContextBlock> = {
             let config = theo_engine_retrieval::file_retriever::RerankConfig::default();
             let seen = std::collections::HashSet::new();
-            let retrieval_result = theo_engine_retrieval::file_retriever::retrieve_files(
-                &graph_state.graph,
-                &graph_state.communities,
-                query,
-                &config,
-                &seen,
-            );
+            // PLAN_CONTEXT_WIRING Phase 3: use the _with_inline variant so
+            // queries that match a symbol name get inline slices (focal +
+            // callees/callers) as high-priority context blocks.
+            let mut retrieval_result =
+                theo_engine_retrieval::file_retriever::retrieve_files_with_inline(
+                    &graph_state.graph,
+                    &graph_state.communities,
+                    query,
+                    &config,
+                    &seen,
+                    &graph_state.project_dir,
+                );
 
             if !retrieval_result.primary_files.is_empty() {
-                // File-first path: build blocks from ranked files
-                theo_engine_retrieval::file_retriever::build_context_blocks(
-                    &retrieval_result,
-                    &graph_state.graph,
-                    budget_tokens,
-                )
+                // File-first path with Phase 2 compression. The mutating
+                // sibling populates `compression_savings_tokens` on the
+                // result struct (PLAN_CONTEXT_WIRING Task 2.4) so the
+                // telemetry payload reads from a single source of truth.
+                let ctx_blocks = theo_engine_retrieval::file_retriever::
+                    build_context_blocks_with_compression_mut(
+                        &mut retrieval_result,
+                        &graph_state.graph,
+                        budget_tokens,
+                        Some(&graph_state.project_dir),
+                        query,
+                    );
+                // PLAN_CONTEXT_WIRING Phase 4: publish retrieval telemetry
+                // through the attached EventSink (real EventBus in prod,
+                // NoopEventSink otherwise).
+                self.event_sink.emit(theo_domain::event::DomainEvent::new(
+                    theo_domain::event::EventType::RetrievalExecuted,
+                    "graph-context",
+                    serde_json::json!({
+                        "primary_files": retrieval_result.primary_files.len(),
+                        "harm_removals": retrieval_result.harm_removals,
+                        "compression_savings_tokens": retrieval_result.compression_savings_tokens,
+                        "inline_slices_count": retrieval_result.inline_slices.len(),
+                        "query_len": query.len(),
+                    }),
+                ));
+                ctx_blocks
             } else {
                 // Fallback: community-level assembly (legacy path)
                 let payload = assembly::assemble_files_direct(

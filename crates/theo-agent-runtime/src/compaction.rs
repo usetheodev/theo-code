@@ -113,6 +113,13 @@ pub fn compact_with_policy(
         return;
     }
 
+    // Phase 1 T1.3 AC-1.3.5: per-message oversize cap of context_window/4.
+    // Runs BEFORE the threshold check so a single pathological message
+    // cannot keep the total above the threshold forever (OOM loop — the
+    // scenario validator flagged in meeting 20260420-221947). The cap is
+    // enforced on EVERY message, including those in the protected tail.
+    enforce_per_message_cap(messages, context_window_tokens / 4);
+
     let threshold = (context_window_tokens as f64 * policy.compact_threshold) as usize;
     let total = estimate_total_tokens(messages);
 
@@ -355,6 +362,32 @@ pub fn compact_messages_to_target(
     sanitize_tool_pairs(messages);
 }
 
+/// Phase 1 T1.3 AC-1.3.5: cap any single message content at
+/// `max_chars_per_message` chars. The cap is expressed in chars because
+/// token estimation uses chars/4 and the limit we enforce is
+/// `context_window/4` tokens — so chars ≈ `context_window` bytes per
+/// message. Running this pass BEFORE the threshold check prevents a
+/// single oversized message from thrashing the compactor indefinitely.
+fn enforce_per_message_cap(messages: &mut [Message], max_tokens_per_message: usize) {
+    if max_tokens_per_message == 0 {
+        return;
+    }
+    // tokens ≈ chars/4 (matches theo_domain::tokens::estimate_message_tokens).
+    let max_chars = max_tokens_per_message.saturating_mul(4);
+    for m in messages.iter_mut() {
+        if let Some(ref content) = m.content {
+            if content.len() > max_chars {
+                m.content = Some(format!(
+                    "{}\n… [truncated from {} to {} chars by per-message cap]",
+                    truncate_utf8(content, max_chars.saturating_sub(80).max(1)),
+                    content.len(),
+                    max_chars
+                ));
+            }
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -463,15 +496,22 @@ mod tests {
         let systems: Vec<_> = msgs.iter().filter(|m| m.role == Role::System).collect();
         assert_eq!(systems.len(), 2);
         assert_eq!(
-            systems[0].content.as_deref().unwrap(),
+            systems[0].content.as_deref().expect("t"),
             "IMPORTANT SYSTEM PROMPT WITH LOTS OF TEXT"
         );
     }
 
     #[test]
     fn last_n_messages_preserved() {
+        // Use content that fits within the per-message cap
+        // (context_window/4 tokens ≈ context_window bytes). Plan T1.3
+        // AC-1.3.5 deliberately truncates oversized tail messages to
+        // prevent OOM — that path is covered by
+        // `test_t1_3_ac_6_single_oversized_message_does_not_cause_oom_loop`.
+        // This test validates the OTHER invariant: tail messages within
+        // the per-message cap must survive compaction unmodified.
         let policy = CompactionPolicy::default();
-        let mut msgs = make_messages(20, 2000);
+        let mut msgs = make_messages(20, 100);
 
         // Record the last preserve_tail non-system messages before compaction.
         let last_messages: Vec<String> = msgs
@@ -482,9 +522,8 @@ mod tests {
             .filter_map(|m| m.content.clone())
             .collect();
 
-        compact_if_needed(&mut msgs, 1_000);
+        compact_if_needed(&mut msgs, 10_000);
 
-        // Those messages must still be present and unmodified.
         for expected in &last_messages {
             assert!(
                 msgs.iter().any(|m| m.content.as_deref() == Some(expected)),
@@ -594,7 +633,7 @@ mod tests {
             })
             .expect("Expected compaction summary");
 
-        let content = summary.content.as_deref().unwrap();
+        let content = summary.content.as_deref().expect("t");
         assert!(
             content.contains("Fix authentication bug"),
             "Summary should contain task objective"
@@ -640,7 +679,11 @@ mod tests {
 
     #[test]
     fn compact_with_custom_preserve_tail() {
-        let mut msgs = make_messages(20, 2000);
+        // Content sized to fit within the per-message cap
+        // (context_window/4 ≈ context_window bytes): the
+        // `preserve_tail` invariant and the T1.3 OOM cap are
+        // orthogonal — this test validates the former only.
+        let mut msgs = make_messages(20, 100);
         let policy = CompactionPolicy {
             preserve_tail: 12,
             ..Default::default()
@@ -654,7 +697,7 @@ mod tests {
             .filter_map(|m| m.content.clone())
             .collect();
 
-        compact_with_policy(&mut msgs, 1_000, None, &policy);
+        compact_with_policy(&mut msgs, 10_000, None, &policy);
 
         for expected in &last_messages {
             assert!(
@@ -689,5 +732,70 @@ mod tests {
             summary_without.and_then(|m| m.content.as_deref()),
             "compact_if_needed should be identical to compact_if_needed_with_context(None)"
         );
+    }
+
+    // ── Phase 1 T1.3 — Oversized-message protection ──────────────
+    #[test]
+    fn test_t1_3_ac_6_single_oversized_message_does_not_cause_oom_loop() {
+        // Scenario from validator (meeting 20260420-221947 #concern):
+        // single assistant message has >> context_window characters of
+        // content. Without the per-message cap, total tokens stay above
+        // threshold even after compaction, causing the next LLM call to
+        // re-trigger compaction indefinitely and eventually OOM.
+        let context_window = 1_000; // tokens
+        let huge_content = "x".repeat(1_000_000); // 1M chars ≈ 250k tokens
+        let mut msgs = vec![
+            Message::system("sys"),
+            Message::user("start"),
+            Message::assistant(&huge_content),
+        ];
+        compact_if_needed(&mut msgs, context_window);
+
+        // After one pass: total must fit (per-message cap enforced).
+        let total = estimate_total_tokens(&msgs);
+        assert!(
+            total <= context_window,
+            "per-message cap must bring total under context_window on first pass, got {total} > {context_window}"
+        );
+        // And the offending message must be truncated.
+        let offending = msgs
+            .iter()
+            .find(|m| m.role == Role::Assistant)
+            .and_then(|m| m.content.as_deref())
+            .unwrap_or_default();
+        assert!(
+            offending.contains("per-message cap"),
+            "must carry truncation marker, got: {}",
+            &offending[..offending.len().min(200)]
+        );
+    }
+
+    #[test]
+    fn test_t1_3_per_message_cap_idempotent() {
+        let context_window = 1_000;
+        let huge = "y".repeat(500_000);
+        let mut msgs = vec![Message::system("s"), Message::user(&huge)];
+        compact_if_needed(&mut msgs, context_window);
+        let first_pass = estimate_total_tokens(&msgs);
+        compact_if_needed(&mut msgs, context_window);
+        let second_pass = estimate_total_tokens(&msgs);
+        assert_eq!(
+            first_pass, second_pass,
+            "per-message cap must be idempotent across passes"
+        );
+    }
+
+    #[test]
+    fn test_t1_3_per_message_cap_preserves_small_messages() {
+        let context_window = 10_000;
+        let mut msgs = vec![
+            Message::system("sys"),
+            Message::user("small message 1"),
+            Message::assistant("small reply"),
+        ];
+        compact_if_needed(&mut msgs, context_window);
+        // Nothing should be truncated — all messages well below cap.
+        assert_eq!(msgs[1].content.as_deref(), Some("small message 1"));
+        assert_eq!(msgs[2].content.as_deref(), Some("small reply"));
     }
 }

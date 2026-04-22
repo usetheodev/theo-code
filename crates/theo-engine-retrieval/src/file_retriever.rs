@@ -42,13 +42,25 @@ pub struct RankedFile {
 }
 
 /// Result of file retrieval including expansion context.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct FileRetrievalResult {
     pub primary_files: Vec<RankedFile>,
     pub expanded_files: Vec<String>,
     pub expanded_tests: Vec<String>,
     pub total_candidates: usize,
     pub dropped_ghost_paths: usize,
+    /// Number of candidates removed by `harm_filter::filter_harmful_chunks`.
+    /// Telemetry metric for Phase 1 of PLAN_CONTEXT_WIRING — validates that
+    /// the harm filter is actually firing on real workloads.
+    pub harm_removals: usize,
+    /// Tokens saved by compressing primary-file sources (original − compressed).
+    /// Phase 2 telemetry. Zero when compression path is not taken
+    /// (e.g. workspace_root absent).
+    pub compression_savings_tokens: usize,
+    /// Inline slices produced by `inline_builder::build_inline_slices`.
+    /// Each slice is a focal symbol + its callers/callees, ready for
+    /// injection alongside the primary files. Phase 3.
+    pub inline_slices: Vec<crate::inline_builder::InlineSlice>,
 }
 
 // ---------------------------------------------------------------------------
@@ -172,6 +184,13 @@ pub fn retrieve_files(
     });
     ranked.truncate(config.top_k);
 
+    // Stage 4.5: Harm filter (PLAN_CONTEXT_WIRING Phase 1).
+    // Removes test files when the definer is present, fixture/mock/config
+    // files, and near-duplicates. Safety-capped at 40% of the top_k list
+    // by `harm_filter::MAX_REMOVAL_FRACTION`. No LLM calls — pure heuristic
+    // over filename + graph community membership.
+    let harm_removals = apply_harm_filter(&mut ranked, graph);
+
     // Stage 5: Graph expansion from top files (Calls + Imports, depth=1)
     let seed_files: Vec<String> = ranked.iter().take(5).map(|r| r.path.clone()).collect();
     let (expanded_files, expanded_tests) =
@@ -183,7 +202,59 @@ pub fn retrieve_files(
         expanded_tests,
         total_candidates,
         dropped_ghost_paths,
+        harm_removals,
+        compression_savings_tokens: 0,
+        inline_slices: Vec::new(),
     }
+}
+
+/// PLAN_CONTEXT_WIRING Phase 3 — wrapper around `retrieve_files` that
+/// also tries to produce inline slices (focal symbol + callers/callees)
+/// when the query has an exact hit in the graph's `name_index`.
+///
+/// The inline path is purely additive: on no match the result is
+/// identical to `retrieve_files`. When slices ARE produced, the caller
+/// can render them as high-priority context blocks and MUST skip the
+/// reverse-dependency boost for files whose focal symbol already
+/// appears in `inline_slices` (avoid double counting).
+pub fn retrieve_files_with_inline(
+    graph: &CodeGraph,
+    communities: &[Community],
+    query: &str,
+    config: &RerankConfig,
+    previously_seen: &HashSet<String>,
+    workspace_root: &std::path::Path,
+) -> FileRetrievalResult {
+    let mut result = retrieve_files(graph, communities, query, config, previously_seen);
+
+    // Stage 4.5b: Inline expansion. Trigger only when the query resolves
+    // to a symbol in the graph (exact hit in name_index) — otherwise the
+    // inline builder is a cheap no-op.
+    let source_provider = crate::fs_source_provider::FsSourceProvider::new(workspace_root);
+    let policy = crate::inline_builder::InliningPolicy::default();
+    let inline = crate::inline_builder::build_inline_slices(
+        query,
+        graph,
+        &source_provider,
+        &policy,
+    );
+    result.inline_slices = inline.slices;
+    result
+}
+
+/// Apply the harm filter to an already-ranked list, mutating it in place.
+/// Returns the number of candidates removed — caller stores in
+/// `FileRetrievalResult.harm_removals` for telemetry.
+fn apply_harm_filter(ranked: &mut Vec<RankedFile>, graph: &CodeGraph) -> usize {
+    if ranked.is_empty() {
+        return 0;
+    }
+    let pairs: Vec<(String, f64)> = ranked.iter().map(|r| (r.path.clone(), r.score)).collect();
+    let result = crate::harm_filter::filter_harmful_chunks(&pairs, graph);
+    let kept: HashSet<String> = result.kept.iter().map(|(p, _)| p.clone()).collect();
+    let before = ranked.len();
+    ranked.retain(|r| kept.contains(&r.path));
+    before - ranked.len()
 }
 
 // ---------------------------------------------------------------------------
@@ -401,29 +472,117 @@ fn expand_from_files(
 ///
 /// For each ranked file: extract symbol signatures as content.
 /// For expanded files: lighter content (just path + top symbols).
+///
+/// This thin wrapper keeps the pre-PLAN_CONTEXT_WIRING interface intact.
+/// Callers that can supply a workspace root should use
+/// [`build_context_blocks_with_compression`] for the Phase 2 path that
+/// compresses primary-file sources via `code_compression::compress_for_context`.
 pub fn build_context_blocks(
     result: &FileRetrievalResult,
     graph: &CodeGraph,
     budget_tokens: usize,
 ) -> Vec<theo_domain::graph_context::ContextBlock> {
+    let (blocks, _savings) =
+        build_context_blocks_with_compression(result, graph, budget_tokens, None, "");
+    blocks
+}
+
+/// Mutating sibling of `build_context_blocks_with_compression` —
+/// populates `result.compression_savings_tokens` with the per-call
+/// savings (PLAN_CONTEXT_WIRING Task 2.4 — counter exposed on the
+/// struct, not just as a tuple return). Preferred entry point for
+/// callers that want telemetry on the result without juggling the
+/// extra return value.
+pub fn build_context_blocks_with_compression_mut(
+    result: &mut FileRetrievalResult,
+    graph: &CodeGraph,
+    budget_tokens: usize,
+    workspace_root: Option<&std::path::Path>,
+    query: &str,
+) -> Vec<theo_domain::graph_context::ContextBlock> {
+    let (blocks, savings) = build_context_blocks_with_compression(
+        result,
+        graph,
+        budget_tokens,
+        workspace_root,
+        query,
+    );
+    result.compression_savings_tokens = savings;
+    blocks
+}
+
+/// Build context blocks with optional source-compression for primary files
+/// (PLAN_CONTEXT_WIRING Phase 2).
+///
+/// When `workspace_root` is `Some`, each primary file's source is read from
+/// disk, parsed via Tree-Sitter, and passed through
+/// `code_compression::compress_for_context` — query-relevant symbols keep
+/// their full bodies, others collapse to signatures. Savings = original −
+/// compressed tokens, reported back as the second return value so callers
+/// can attach it to `FileRetrievalResult.compression_savings_tokens`.
+///
+/// When `workspace_root` is `None` (or any path-read fails), falls back to
+/// the pre-Phase-2 behaviour of concatenating each child's signature —
+/// identical output to `build_context_blocks`.
+pub fn build_context_blocks_with_compression(
+    result: &FileRetrievalResult,
+    graph: &CodeGraph,
+    budget_tokens: usize,
+    workspace_root: Option<&std::path::Path>,
+    query: &str,
+) -> (Vec<theo_domain::graph_context::ContextBlock>, usize) {
     let mut blocks = Vec::new();
     let mut tokens_used = 0;
+    let mut compression_savings = 0usize;
+    let query_tokens: HashSet<String> = tokenise(query).into_iter().collect();
 
-    // Primary files: full signature content
-    for ranked in &result.primary_files {
-        let file_id = format!("file:{}", ranked.path);
-        let mut content = format!("## {}\n", ranked.path);
+    // PLAN_CONTEXT_WIRING Phase 3 — inline slices first.
+    // A slice bundles a focal symbol with its callees/callers already
+    // resolved, so it deserves the highest score (1.0). When a slice
+    // exists for a primary file, the primary loop below skips that file
+    // to avoid double counting (mutual exclusion with reverse boost).
+    let inline_focal_files: HashSet<String> = result
+        .inline_slices
+        .iter()
+        .map(|s| s.focal_file.clone())
+        .collect();
 
-        for child_id in graph.contains_children(&file_id) {
-            if let Some(node) = graph.get_node(child_id) {
-                if let Some(ref sig) = node.signature {
-                    content.push_str(sig);
-                    content.push('\n');
-                }
-            }
+    for slice in &result.inline_slices {
+        if tokens_used + slice.token_count > budget_tokens {
+            break;
         }
+        blocks.push(theo_domain::graph_context::ContextBlock {
+            block_id: format!("blk-inline-{}", slice.focal_symbol_id),
+            source_id: slice.focal_file.clone(),
+            content: slice.content.clone(),
+            token_count: slice.token_count,
+            score: 1.0,
+        });
+        tokens_used += slice.token_count;
+    }
 
-        let token_count = (content.len() + 3) / 4; // ~4 chars per token
+    // Primary files: full signature content (or compressed source when
+    // workspace_root is available and parsing succeeds).
+    for ranked in &result.primary_files {
+        // Skip primary files that already appear in an inline slice —
+        // avoids the reverse-dependency-boost double counting flagged
+        // by the original plan (PLAN_CONTEXT_WIRING line 249-257).
+        if inline_focal_files.contains(&ranked.path) {
+            continue;
+        }
+        let file_id = format!("file:{}", ranked.path);
+        let (content, token_count, saved) = match workspace_root {
+            Some(root) => compress_primary_or_fallback(
+                root,
+                ranked,
+                &file_id,
+                graph,
+                &query_tokens,
+            ),
+            None => fallback_signatures_only(&ranked.path, &file_id, graph),
+        };
+        compression_savings += saved;
+
         if tokens_used + token_count > budget_tokens {
             break;
         }
@@ -483,7 +642,75 @@ pub fn build_context_blocks(
         tokens_used += token_count;
     }
 
-    blocks
+    (blocks, compression_savings)
+}
+
+/// Fallback: concatenate child-symbol signatures (pre-Phase-2 behaviour).
+fn fallback_signatures_only(
+    path: &str,
+    file_id: &str,
+    graph: &CodeGraph,
+) -> (String, usize, usize) {
+    let mut content = format!("## {}\n", path);
+    for child_id in graph.contains_children(file_id) {
+        if let Some(node) = graph.get_node(child_id) {
+            if let Some(ref sig) = node.signature {
+                content.push_str(sig);
+                content.push('\n');
+            }
+        }
+    }
+    let token_count = (content.len() + 3) / 4;
+    (content, token_count, 0)
+}
+
+/// Try to read + compress `ranked.path` from disk. On any failure
+/// (fs read / language detection / parser / no symbols) falls back
+/// to `fallback_signatures_only` — graceful degradation.
+fn compress_primary_or_fallback(
+    workspace_root: &std::path::Path,
+    ranked: &RankedFile,
+    file_id: &str,
+    graph: &CodeGraph,
+    query_tokens: &HashSet<String>,
+) -> (String, usize, usize) {
+    use theo_engine_parser::extractors::symbols::extract_symbols;
+    use theo_engine_parser::tree_sitter::{detect_language, parse_source};
+
+    let full_path = workspace_root.join(&ranked.path);
+    let Ok(source) = std::fs::read_to_string(&full_path) else {
+        return fallback_signatures_only(&ranked.path, file_id, graph);
+    };
+    let Some(language) = detect_language(&full_path) else {
+        return fallback_signatures_only(&ranked.path, file_id, graph);
+    };
+    let Ok(parsed) = parse_source(&full_path, &source, language, None) else {
+        return fallback_signatures_only(&ranked.path, file_id, graph);
+    };
+    let symbols = extract_symbols(&source, &parsed.tree, language, &full_path);
+    if symbols.is_empty() {
+        return fallback_signatures_only(&ranked.path, file_id, graph);
+    }
+
+    // Relevant symbols = symbols whose name (case-insensitive) matches any
+    // query token. Keeps them in full body; others get signature-only.
+    let mut relevant: HashSet<String> = HashSet::new();
+    for sym in &symbols {
+        if query_tokens.contains(&sym.name.to_lowercase()) {
+            relevant.insert(sym.name.clone());
+        }
+    }
+
+    let compressed = theo_engine_parser::code_compression::compress_for_context(
+        &source,
+        &symbols,
+        &relevant,
+        &ranked.path,
+    );
+    let savings = compressed
+        .original_tokens
+        .saturating_sub(compressed.compressed_tokens);
+    (compressed.text, compressed.compressed_tokens, savings)
 }
 
 // ---------------------------------------------------------------------------
@@ -862,5 +1089,333 @@ mod tests {
             "Should respect max_per_community, got {}",
             files.len()
         );
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // Phase 1 integration — harm_filter wired into retrieve_files
+    // (PLAN_CONTEXT_WIRING Phase 1, Task 1.3)
+    // ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn retrieve_files_removes_test_file_when_definer_present() {
+        // Arrange: graph has src/auth.rs (definer) + tests/test_auth.rs (test).
+        // Both would normally rank for "verify_token" — harm filter should
+        // drop the test since the definer is already in the top list.
+        let graph = build_test_graph();
+        let communities = vec![];
+        let config = RerankConfig::default();
+        let seen = HashSet::new();
+
+        let result = retrieve_files(&graph, &communities, "verify_token", &config, &seen);
+
+        let test_file_kept = result
+            .primary_files
+            .iter()
+            .any(|r| r.path == "tests/test_auth.rs");
+        let definer_kept = result
+            .primary_files
+            .iter()
+            .any(|r| r.path == "src/auth.rs");
+        assert!(definer_kept, "definer src/auth.rs must survive");
+        assert!(
+            !test_file_kept,
+            "test file tests/test_auth.rs must be filtered when definer is present"
+        );
+        assert!(
+            result.harm_removals >= 1,
+            "harm_removals counter must reflect at least the test-file removal"
+        );
+    }
+
+    #[test]
+    fn retrieve_files_harm_removals_metric_exposed() {
+        // Smoke: on any non-empty graph, the harm_removals field is present
+        // and ≥ 0 (catches accidental removal of the telemetry field).
+        let graph = build_test_graph();
+        let communities = vec![];
+        let config = RerankConfig::default();
+        let seen = HashSet::new();
+
+        let result = retrieve_files(&graph, &communities, "query_db", &config, &seen);
+
+        // The field exists (compile-time) and is a valid usize. This test
+        // mainly guards against future refactors removing the metric.
+        let _ = result.harm_removals;
+        assert!(
+            result.primary_files.len() + result.harm_removals > 0,
+            "something must have been ranked or filtered"
+        );
+    }
+
+    #[test]
+    fn retrieve_files_respects_40pct_removal_cap() {
+        // Per harm_filter::MAX_REMOVAL_FRACTION, no more than 40% of the
+        // ranked list may be removed in one pass. This test sanity-checks
+        // that the cap survives integration.
+        let graph = build_test_graph();
+        let communities = vec![];
+        let config = RerankConfig::default();
+        let seen = HashSet::new();
+
+        let result = retrieve_files(&graph, &communities, "verify_token", &config, &seen);
+
+        // After filtering, primary_files + harm_removals == whatever ranked
+        // saw pre-filter. The ratio of removals to the pre-filter size must
+        // be ≤ 40% + 1 (ceil of MAX_REMOVAL_FRACTION).
+        let pre_filter = result.primary_files.len() + result.harm_removals;
+        if pre_filter > 0 {
+            let removal_fraction = result.harm_removals as f64 / pre_filter as f64;
+            assert!(
+                removal_fraction <= 0.5,
+                "removal fraction {removal_fraction} exceeded 50% safety bound"
+            );
+        }
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // Phase 2 integration — code_compression wired into
+    // build_context_blocks_with_compression (PLAN_CONTEXT_WIRING Phase 2)
+    // ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn build_context_blocks_without_workspace_root_uses_signatures() {
+        // None workspace_root keeps the pre-Phase-2 behaviour: content is
+        // concatenated signatures, savings = 0.
+        let graph = build_test_graph();
+        let communities = vec![];
+        let config = RerankConfig::default();
+        let seen = HashSet::new();
+        let result = retrieve_files(&graph, &communities, "verify_token", &config, &seen);
+
+        let (blocks, savings) =
+            build_context_blocks_with_compression(&result, &graph, 10_000, None, "verify_token");
+
+        assert!(!blocks.is_empty(), "must produce at least one block");
+        assert_eq!(savings, 0, "no compression attempted without workspace_root");
+    }
+
+    #[test]
+    fn build_context_blocks_compression_falls_back_when_file_missing() {
+        // Points workspace_root at a non-existent directory: every fs::read
+        // should fail → graceful fallback to signatures, savings = 0.
+        let graph = build_test_graph();
+        let communities = vec![];
+        let config = RerankConfig::default();
+        let seen = HashSet::new();
+        let result = retrieve_files(&graph, &communities, "verify_token", &config, &seen);
+
+        let fake_root = std::path::Path::new("/tmp/theo-no-such-dir-xyz-999");
+        let (blocks, savings) = build_context_blocks_with_compression(
+            &result,
+            &graph,
+            10_000,
+            Some(fake_root),
+            "verify_token",
+        );
+
+        assert!(!blocks.is_empty(), "fallback must still produce blocks");
+        assert_eq!(
+            savings, 0,
+            "missing-file fallback must yield zero compression savings"
+        );
+    }
+
+    #[test]
+    fn build_context_blocks_compression_saves_tokens_on_real_source() {
+        // Arrange: write a Rust file with one relevant function and four
+        // irrelevant functions. Compression should keep the relevant body
+        // and reduce the others to signatures, yielding savings > 0.
+        let tmp = tempfile::tempdir().expect("tmpdir");
+        let file_name = "demo.rs";
+        let path = tmp.path().join(file_name);
+        let mut src = String::from(
+            "fn relevant_symbol() {\n    // body line 1\n    // body line 2\n    println!(\"hi\");\n}\n\n",
+        );
+        for i in 0..4 {
+            src.push_str(&format!(
+                "fn noise_{i}() {{\n    // bulk body {i}\n    let x = {i};\n    let y = x + {i};\n    println!(\"{{x}} {{y}}\");\n}}\n\n",
+                i = i
+            ));
+        }
+        std::fs::write(&path, &src).expect("write demo");
+
+        // Build a minimal graph containing just this file.
+        let mut g = CodeGraph::new();
+        g.add_node(file_node(&format!("file:{file_name}"), file_name));
+        let communities = vec![];
+        let config = RerankConfig::default();
+        let seen = HashSet::new();
+        // Query targets the relevant function by name.
+        let result = retrieve_files(&g, &communities, "relevant_symbol", &config, &seen);
+        // Force presence of the file in result regardless of ranker output,
+        // so we always exercise the compression helper.
+        let forced_result = FileRetrievalResult {
+            primary_files: vec![RankedFile {
+                path: file_name.to_string(),
+                score: 1.0,
+                signals: Vec::new(),
+            }],
+            ..result
+        };
+
+        let (blocks, savings) = build_context_blocks_with_compression(
+            &forced_result,
+            &g,
+            10_000,
+            Some(tmp.path()),
+            "relevant_symbol",
+        );
+
+        assert_eq!(blocks.len(), 1, "one block for the single file");
+        // The relevant function's body must survive compression.
+        assert!(
+            blocks[0].content.contains("relevant_symbol"),
+            "compressed content must mention relevant_symbol: {}",
+            &blocks[0].content
+        );
+        // Savings are non-zero when compression actually ran.
+        assert!(savings > 0, "expected compression savings > 0, got {savings}");
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // Phase 3 integration — inline_builder wired into
+    // retrieve_files_with_inline + build_context_blocks_with_compression
+    // (PLAN_CONTEXT_WIRING Phase 3)
+    // ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn retrieve_files_with_inline_no_match_yields_no_slices() {
+        // Query that doesn't hit any symbol in the graph — inline slices
+        // must remain empty; primary_files behaves like retrieve_files.
+        let graph = build_test_graph();
+        let communities = vec![];
+        let config = RerankConfig::default();
+        let seen = HashSet::new();
+        let tmp = tempfile::tempdir().expect("tmpdir");
+
+        let result = retrieve_files_with_inline(
+            &graph,
+            &communities,
+            "no_such_symbol_xyz_999",
+            &config,
+            &seen,
+            tmp.path(),
+        );
+
+        assert!(
+            result.inline_slices.is_empty(),
+            "no symbol match → inline_slices must be empty"
+        );
+    }
+
+    #[test]
+    fn retrieve_files_with_inline_returns_identical_result_on_empty_graph() {
+        // Isolates the inline path: identical to retrieve_files when the
+        // graph has no symbols to slice.
+        let graph = CodeGraph::new();
+        let communities = vec![];
+        let config = RerankConfig::default();
+        let seen = HashSet::new();
+        let tmp = tempfile::tempdir().expect("tmpdir");
+
+        let a = retrieve_files(&graph, &communities, "anything", &config, &seen);
+        let b = retrieve_files_with_inline(
+            &graph,
+            &communities,
+            "anything",
+            &config,
+            &seen,
+            tmp.path(),
+        );
+
+        assert_eq!(a.primary_files.len(), b.primary_files.len());
+        assert_eq!(a.harm_removals, b.harm_removals);
+        assert!(b.inline_slices.is_empty());
+    }
+
+    #[test]
+    fn build_context_blocks_prepends_inline_slices_with_highest_score() {
+        // Forge a result with one inline slice to exercise the block-build
+        // prepend path without needing the full inline_builder to resolve.
+        let graph = build_test_graph();
+        let slice = crate::inline_builder::InlineSlice {
+            focal_symbol_id: "sym:verify_token".into(),
+            focal_file: "src/auth.rs".into(),
+            content: "// inline snippet\nfn verify_token() { /* ... */ }".into(),
+            token_count: 30,
+            inlined_symbols: vec!["sym:decode_jwt".into()],
+            unresolved_callees: vec![],
+        };
+        let forced = FileRetrievalResult {
+            primary_files: vec![RankedFile {
+                path: "src/db.rs".into(),
+                score: 0.5,
+                signals: Vec::new(),
+            }],
+            inline_slices: vec![slice],
+            ..FileRetrievalResult::default()
+        };
+
+        let (blocks, _) =
+            build_context_blocks_with_compression(&forced, &graph, 10_000, None, "verify_token");
+
+        // First block is the inline slice.
+        assert!(!blocks.is_empty());
+        assert!(
+            blocks[0].block_id.starts_with("blk-inline-"),
+            "inline slice must be the first block, got: {}",
+            blocks[0].block_id
+        );
+        assert_eq!(blocks[0].score, 1.0, "inline slice must score 1.0");
+    }
+
+    #[test]
+    fn inline_slice_for_primary_file_skips_that_file_in_loop() {
+        // Mutual-exclusion test: when an inline slice covers src/auth.rs,
+        // the primary-files loop must not emit an additional block for
+        // the same path (avoids reverse-boost double count).
+        let graph = build_test_graph();
+        let slice = crate::inline_builder::InlineSlice {
+            focal_symbol_id: "sym:verify_token".into(),
+            focal_file: "src/auth.rs".into(),
+            content: "// inline".into(),
+            token_count: 10,
+            inlined_symbols: vec![],
+            unresolved_callees: vec![],
+        };
+        let forced = FileRetrievalResult {
+            primary_files: vec![
+                RankedFile {
+                    path: "src/auth.rs".into(),
+                    score: 0.9,
+                    signals: Vec::new(),
+                },
+                RankedFile {
+                    path: "src/db.rs".into(),
+                    score: 0.5,
+                    signals: Vec::new(),
+                },
+            ],
+            inline_slices: vec![slice],
+            ..FileRetrievalResult::default()
+        };
+
+        let (blocks, _) =
+            build_context_blocks_with_compression(&forced, &graph, 10_000, None, "verify_token");
+
+        // Expected: 1 inline + 1 primary (db only; auth skipped due to inline).
+        let auth_primary_count = blocks
+            .iter()
+            .filter(|b| b.block_id == "blk-file-src-auth.rs")
+            .count();
+        let db_primary_count = blocks
+            .iter()
+            .filter(|b| b.block_id == "blk-file-src-db.rs")
+            .count();
+        assert_eq!(
+            auth_primary_count, 0,
+            "src/auth.rs primary block must be suppressed by inline slice"
+        );
+        assert_eq!(db_primary_count, 1, "src/db.rs primary block still emitted");
     }
 }

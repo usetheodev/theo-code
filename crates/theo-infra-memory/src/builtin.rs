@@ -10,7 +10,7 @@
 
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use async_trait::async_trait;
 use theo_domain::memory::{MemoryError, MemoryProvider};
@@ -25,9 +25,23 @@ struct BuiltinState {
     seen_keys: HashSet<[u8; 32]>,
 }
 
+/// Built-in memory provider backed by a single markdown file.
+///
+/// Phase 1 T1.2 — **frozen snapshot for prefix-cache stability**. The
+/// first call to `prefetch()` in a session captures the current state
+/// into `snapshot: OnceLock<String>`; every subsequent `prefetch()` in
+/// the same provider instance returns that frozen string without
+/// reading `state` again. This keeps the LLM's system-prompt prefix
+/// deterministic across iterations of the same session (prompt caches
+/// hit), at the cost of not seeing intra-session writes until the next
+/// session (same tradeoff Hermes makes).
+///
+/// Writes (`sync_turn`) continue to persist to disk and to update the
+/// in-memory state — they are visible in the NEXT session's snapshot.
 pub struct BuiltinMemoryProvider {
     path: PathBuf,
     state: Arc<RwLock<BuiltinState>>,
+    snapshot: OnceLock<String>,
 }
 
 impl BuiltinMemoryProvider {
@@ -37,6 +51,7 @@ impl BuiltinMemoryProvider {
         Self {
             path: path.into(),
             state: Arc::new(RwLock::new(BuiltinState::default())),
+            snapshot: OnceLock::new(),
         }
     }
 
@@ -83,10 +98,23 @@ impl MemoryProvider for BuiltinMemoryProvider {
     }
 
     async fn prefetch(&self, _query: &str) -> String {
-        // Return every persisted entry; heavier retrieval-backed
-        // ranking lives in RM2's RetrievalBackedMemory.
+        // Phase 1 T1.2: frozen snapshot. First call captures the state,
+        // subsequent calls skip the RwLock entirely. `OnceLock::get`
+        // avoids acquiring the lock when the snapshot is already set,
+        // keeping the hot path zero-cost on every iteration after the
+        // first of a given session. `sync_turn` continues to persist
+        // new writes — they just aren't visible until the next session
+        // (deliberate tradeoff, matches prompt-cache semantics).
+        if let Some(cached) = self.snapshot.get() {
+            return cached.clone();
+        }
         let guard = self.state.read().await;
-        guard.entries.join("\n")
+        let snapshot = guard.entries.join("\n");
+        // `set` races are harmless: OnceLock guarantees only one winner,
+        // and the value is derived from a read-lock so all candidates
+        // see the same state (or the latest write — acceptable).
+        let _ = self.snapshot.set(snapshot.clone());
+        snapshot
     }
 
     async fn sync_turn(&self, user: &str, assistant: &str) {
@@ -136,10 +164,10 @@ mod tests {
             "theo-builtin-{}-{suffix}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                .expect("t")
                 .as_nanos()
         ));
-        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::create_dir_all(&dir).expect("t");
         dir.join("memory.md")
     }
 
@@ -203,7 +231,7 @@ mod tests {
             }));
         }
         for h in handles {
-            h.await.unwrap();
+            h.await.expect("t");
         }
         let out = bp.prefetch("q").await;
         for i in 0..10 {
@@ -220,11 +248,11 @@ mod tests {
         let path = tempfile_path("ac7");
         let bp = BuiltinMemoryProvider::new(&path);
         bp.sync_turn("test", "ack").await;
-        let disk = tokio::fs::read_to_string(&path).await.unwrap();
+        let disk = tokio::fs::read_to_string(&path).await.expect("t");
         assert!(disk.contains("test"));
         let tmp = path.with_file_name(format!(
             "{}.tmp",
-            path.file_name().unwrap().to_string_lossy()
+            path.file_name().expect("t").to_string_lossy()
         ));
         assert!(!tmp.exists(), "temp sibling cleaned after success");
     }
@@ -240,6 +268,71 @@ mod tests {
         assert_eq!(a.len(), 16, "16 hex chars stable filename");
     }
 
+    // ── Phase 1 T1.2 — Frozen snapshot ──────────────────────────
+    #[tokio::test]
+    async fn test_t1_2_ac_1_first_prefetch_captures_snapshot() {
+        let bp = BuiltinMemoryProvider::new(tempfile_path("t1-2-ac1"));
+        bp.sync_turn("hello", "world").await;
+        let a = bp.prefetch("q1").await;
+        let b = bp.prefetch("q2").await;
+        assert!(a.contains("hello"));
+        assert_eq!(
+            a, b,
+            "second prefetch must return the same frozen snapshot"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_t1_2_ac_2_second_prefetch_does_not_see_new_writes() {
+        // Deliberate tradeoff: mid-session writes persist to disk/state
+        // but do not appear in `prefetch` of the same session — prefix
+        // cache stability wins.
+        let bp = BuiltinMemoryProvider::new(tempfile_path("t1-2-ac2"));
+        bp.sync_turn("first", "turn").await;
+        let snapshot_1 = bp.prefetch("q").await;
+        assert!(snapshot_1.contains("first"));
+
+        bp.sync_turn("second", "turn").await; // persists but invisible
+        let snapshot_2 = bp.prefetch("q").await;
+        assert!(
+            !snapshot_2.contains("second"),
+            "intra-session write must not leak into frozen snapshot"
+        );
+        assert_eq!(snapshot_1, snapshot_2);
+    }
+
+    #[tokio::test]
+    async fn test_t1_2_ac_3_writes_still_persist_to_disk() {
+        let path = tempfile_path("t1-2-ac3");
+        let bp = BuiltinMemoryProvider::new(&path);
+        bp.sync_turn("alpha", "ack").await;
+        let _ = bp.prefetch("q").await; // freeze snapshot
+        bp.sync_turn("beta", "ack").await; // persists even after freeze
+        let disk = tokio::fs::read_to_string(&path).await.expect("t");
+        assert!(disk.contains("alpha"), "pre-freeze write on disk");
+        assert!(disk.contains("beta"), "post-freeze write on disk");
+    }
+
+    #[tokio::test]
+    async fn test_t1_2_ac_4_new_session_new_snapshot() {
+        let path = tempfile_path("t1-2-ac4");
+        let bp = BuiltinMemoryProvider::new(&path);
+        bp.sync_turn("s1-msg", "ok").await;
+        let s1 = bp.prefetch("q").await;
+
+        // New provider instance = new session. OnceLock starts empty,
+        // state starts empty (RM3a deferred on-disk reload — see
+        // `test_rm3a_ac_9_persists_across_provider_instances`). The
+        // important invariant here is: a fresh provider gets a fresh
+        // OnceLock, never reuses the first session's snapshot.
+        let bp2 = BuiltinMemoryProvider::new(&path);
+        let s2 = bp2.prefetch("q").await;
+        assert_ne!(
+            s1, s2,
+            "new provider must not inherit the prior session's snapshot"
+        );
+    }
+
     // ── RM3a-AC-9 ───────────────────────────────────────────────
     #[tokio::test]
     async fn test_rm3a_ac_9_persists_across_provider_instances() {
@@ -252,7 +345,7 @@ mod tests {
         // in-memory state only; on-disk content is a side effect. The
         // file existence + content proves atomic persistence for RM3a;
         // full reload-on-open lives as an RM3b enhancement.
-        let disk = tokio::fs::read_to_string(&path).await.unwrap();
+        let disk = tokio::fs::read_to_string(&path).await.expect("t");
         assert!(disk.contains("first"));
     }
 }

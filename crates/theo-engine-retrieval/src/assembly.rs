@@ -1015,6 +1015,23 @@ pub fn assemble_files_direct(
     communities: &[Community],
     budget_tokens: usize,
 ) -> ContextPayload {
+    assemble_files_direct_with_inline_skip(file_scores, graph, communities, budget_tokens, &[])
+}
+
+/// PLAN_CONTEXT_WIRING Task 3.3 — same as `assemble_files_direct` but
+/// suppresses the reverse-dependency boost for files that already
+/// appear as the focal of an inline slice. Avoids double counting
+/// (the inline slice already brings caller context inline).
+///
+/// `inline_focal_files` is the list of `InlineSlice.focal_file` paths
+/// from the current `FileRetrievalResult.inline_slices`.
+pub fn assemble_files_direct_with_inline_skip(
+    file_scores: &std::collections::HashMap<String, f64>,
+    graph: &CodeGraph,
+    communities: &[Community],
+    budget_tokens: usize,
+    inline_focal_files: &[String],
+) -> ContextPayload {
     if file_scores.is_empty() || budget_tokens == 0 {
         return ContextPayload {
             items: vec![],
@@ -1023,6 +1040,7 @@ pub fn assemble_files_direct(
             exploration_hints: String::new(),
         };
     }
+    let inline_skip: HashSet<&str> = inline_focal_files.iter().map(|s| s.as_str()).collect();
 
     // Build file → community lookup
     let mut file_to_community: std::collections::HashMap<&str, &str> =
@@ -1097,6 +1115,13 @@ pub fn assemble_files_direct(
     let mut reverse_boost: std::collections::HashMap<&str, f64> = std::collections::HashMap::new();
 
     for (seed_path, _seed_score) in seeds_for_reverse.iter().take(3) {
+        // Phase 3 mutual exclusion: when this seed already appears as
+        // an inline slice's focal file, the slice will inject caller
+        // context as a high-priority block elsewhere — skipping the
+        // reverse boost here prevents double counting.
+        if inline_skip.contains(seed_path) {
+            continue;
+        }
         let file_id = format!("file:{}", seed_path);
 
         // For each symbol DEFINED in this seed file

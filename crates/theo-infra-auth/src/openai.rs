@@ -51,11 +51,18 @@ impl OpenAITokens {
 }
 
 /// Device code response from OpenAI.
+///
+/// ChatGPT's device flow is two-phase: first we exchange `device_auth_id`
+/// + `user_code` for an `authorization_code`, then that code is traded
+/// for OAuth tokens at `/oauth/token`. The `device_auth_id` is what the
+/// server calls `device_code` in RFC 8628 terms.
 #[derive(Debug, Clone)]
 pub struct DeviceCode {
     pub user_code: String,
+    /// Public URL the user opens in a browser.
     pub verification_uri: String,
-    pub device_code: String,
+    /// Server-assigned id used by the polling endpoint.
+    pub device_auth_id: String,
     pub interval: u64,
     pub expires_in: u64,
 }
@@ -76,22 +83,14 @@ struct TokenResponse {
     token_type: Option<String>,
 }
 
+/// First-phase poll response: trades `(device_auth_id, user_code)` for
+/// an `authorization_code` that we then exchange for OAuth tokens at
+/// `/oauth/token`. Format mirrored from
+/// `referencias/opencode/packages/opencode/src/plugin/codex.ts:534`.
 #[derive(Deserialize)]
-struct DeviceCodeResponse {
-    user_code: String,
-    verification_uri: String,
-    device_code: String,
-    interval: Option<u64>,
-    expires_in: Option<u64>,
-}
-
-#[derive(Deserialize)]
-struct DeviceTokenResponse {
-    access_token: Option<String>,
-    refresh_token: Option<String>,
-    expires_in: Option<u64>,
-    id_token: Option<String>,
-    error: Option<String>,
+struct AuthorizationCodeResponse {
+    authorization_code: String,
+    code_verifier: String,
 }
 
 impl OpenAIAuth {
@@ -313,15 +312,28 @@ impl OpenAIAuth {
         }
     }
 
-    // ─── Device flow (RFC 8628) ───
+    // ─── Device flow (ChatGPT two-phase) ───
+    // Reference impl: `referencias/opencode/packages/opencode/src/plugin/codex.ts:508-572`.
+    //
+    // Phase 1: POST /api/accounts/deviceauth/usercode {client_id} (JSON)
+    //   → {device_auth_id, user_code, interval}
+    // Phase 2 (polling): POST /api/accounts/deviceauth/token
+    //   {device_auth_id, user_code} (JSON)
+    //   → 200 {authorization_code, code_verifier}  when user authorized
+    //   → 4xx                                       while pending
+    // Phase 3: POST /oauth/token (form-urlencoded)
+    //   grant_type=authorization_code, code, redirect_uri=/deviceauth/callback,
+    //   client_id, code_verifier
+    //   → TokenResponse {access_token, refresh_token, id_token, expires_in}
 
-    /// Start the device authorization flow.
-    /// Returns a DeviceCode with user_code and verification_uri to show to the user.
+    /// Start the ChatGPT device-authorization flow.
     pub async fn start_device_flow(&self) -> Result<DeviceCode, AuthError> {
         let resp = self
             .http
             .post(DEVICE_CODE_URL)
-            .form(&[("client_id", CLIENT_ID), ("scope", SCOPES)])
+            .header("Content-Type", "application/json")
+            .header("User-Agent", concat!("theo/", env!("CARGO_PKG_VERSION")))
+            .json(&serde_json::json!({ "client_id": CLIENT_ID }))
             .send()
             .await?;
 
@@ -333,22 +345,45 @@ impl OpenAIAuth {
             )));
         }
 
-        let dc: DeviceCodeResponse = resp
+        // ChatGPT returns `interval` as a string in JSON; parse defensively.
+        let raw: serde_json::Value = resp
             .json()
             .await
             .map_err(|e| AuthError::OAuth(format!("parse device code: {e}")))?;
+        let device_auth_id = raw
+            .get("device_auth_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| AuthError::OAuth("device code: missing device_auth_id".into()))?
+            .to_string();
+        let user_code = raw
+            .get("user_code")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| AuthError::OAuth("device code: missing user_code".into()))?
+            .to_string();
+        let interval = raw
+            .get("interval")
+            .and_then(|v| v.as_str().and_then(|s| s.parse::<u64>().ok()).or_else(|| v.as_u64()))
+            .unwrap_or(5)
+            .max(1);
+        // ChatGPT typically gives 900s (15 min). We extend the local
+        // ceiling to 20 min so a slow authorize-from-phone flow still
+        // fits.
+        let expires_in = raw
+            .get("expires_in")
+            .and_then(|v| v.as_u64().or_else(|| v.as_str().and_then(|s| s.parse().ok())))
+            .unwrap_or(1_200);
 
         Ok(DeviceCode {
-            user_code: dc.user_code,
-            verification_uri: dc.verification_uri,
-            device_code: dc.device_code,
-            interval: dc.interval.unwrap_or(5),
-            expires_in: dc.expires_in.unwrap_or(600),
+            user_code,
+            verification_uri: format!("{ISSUER}/codex/device"),
+            device_auth_id,
+            interval,
+            expires_in,
         })
     }
 
-    /// Poll for device flow completion.
-    /// Blocks until the user authorizes, token expires, or an error occurs.
+    /// Poll until the user authorizes, then exchange the authorization
+    /// code for OAuth tokens.
     pub async fn poll_device_flow(
         &self,
         device_code: &DeviceCode,
@@ -357,68 +392,107 @@ impl OpenAIAuth {
         let deadline =
             std::time::Instant::now() + std::time::Duration::from_secs(device_code.expires_in);
 
-        loop {
+        // Phase 2: poll until the user authorizes.
+        let mut attempt: u32 = 0;
+        let auth_code = loop {
+            attempt += 1;
             if std::time::Instant::now() >= deadline {
                 return Err(AuthError::DeviceExpired);
             }
-
             tokio::time::sleep(interval).await;
 
             let resp = self
                 .http
                 .post(DEVICE_TOKEN_URL)
-                .form(&[
-                    ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
-                    ("device_code", &device_code.device_code),
-                    ("client_id", CLIENT_ID),
-                ])
+                .header("Content-Type", "application/json")
+                .header("User-Agent", concat!("theo/", env!("CARGO_PKG_VERSION")))
+                .json(&serde_json::json!({
+                    "device_auth_id": device_code.device_auth_id,
+                    "user_code": device_code.user_code,
+                }))
                 .send()
                 .await?;
 
-            let dt: DeviceTokenResponse = resp
-                .json()
-                .await
-                .map_err(|e| AuthError::OAuth(format!("parse device token: {e}")))?;
-
-            if let Some(error) = &dt.error {
-                match error.as_str() {
-                    "authorization_pending" => continue,
-                    "slow_down" => {
-                        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                        continue;
-                    }
-                    "expired_token" => return Err(AuthError::DeviceExpired),
-                    _ => return Err(AuthError::OAuth(format!("device flow error: {error}"))),
-                }
+            let status = resp.status();
+            if status.is_success() {
+                let parsed: AuthorizationCodeResponse = resp.json().await.map_err(|e| {
+                    AuthError::OAuth(format!("parse authorization_code: {e}"))
+                })?;
+                eprintln!("[auth] Authorization received after {attempt} polls.");
+                break parsed;
             }
+            // 429 → back off with a longer sleep.
+            if status.as_u16() == 429 {
+                tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+            }
+            // Any non-pending response (not 403/404) surfaces immediately
+            // with body — the user shouldn't wait 15 min on a malformed
+            // request.
+            if status.as_u16() != 403 && status.as_u16() != 404 {
+                let body = resp.text().await.unwrap_or_default();
+                return Err(AuthError::OAuth(format!(
+                    "poll failed ({status}): {body}"
+                )));
+            }
+            // Heartbeat every 30 polls (~2.5 min) so the operator sees
+            // the flow is alive and knows to go authorize in the browser.
+            if attempt.is_multiple_of(30) {
+                eprintln!(
+                    "[auth] still waiting for authorization in browser… (poll #{attempt}, {status})"
+                );
+            }
+        };
 
-            let access_token = dt
-                .access_token
-                .ok_or_else(|| AuthError::OAuth("device flow: missing access_token".to_string()))?;
+        // Phase 3: exchange authorization_code for tokens.
+        let token_resp = self
+            .http
+            .post(TOKEN_URL)
+            .form(&[
+                ("grant_type", "authorization_code"),
+                ("code", auth_code.authorization_code.as_str()),
+                ("redirect_uri", &format!("{ISSUER}/deviceauth/callback")),
+                ("client_id", CLIENT_ID),
+                ("code_verifier", auth_code.code_verifier.as_str()),
+            ])
+            .send()
+            .await?;
 
-            let account_id = dt.id_token.as_deref().and_then(extract_account_id_from_jwt);
-            let expires_at = dt.expires_in.map(|secs| now_secs() + secs);
-
-            let tokens = OpenAITokens {
-                access_token: access_token.clone(),
-                refresh_token: dt.refresh_token.clone(),
-                expires_at,
-                account_id: account_id.clone(),
-            };
-
-            self.store.set(
-                PROVIDER_ID,
-                AuthEntry::OAuth {
-                    access_token,
-                    refresh_token: dt.refresh_token,
-                    expires_at,
-                    account_id,
-                    scopes: Some(SCOPES.to_string()),
-                },
-            )?;
-
-            return Ok(tokens);
+        let status = token_resp.status();
+        if !status.is_success() {
+            let body = token_resp.text().await.unwrap_or_default();
+            return Err(AuthError::OAuth(format!(
+                "token exchange failed ({status}): {body}"
+            )));
         }
+
+        let token: TokenResponse = token_resp
+            .json()
+            .await
+            .map_err(|e| AuthError::OAuth(format!("parse token response: {e}")))?;
+
+        let access_token = token.access_token;
+        let account_id = token.id_token.as_deref().and_then(extract_account_id_from_jwt);
+        let expires_at = token.expires_in.map(|secs| now_secs() + secs);
+
+        let tokens = OpenAITokens {
+            access_token: access_token.clone(),
+            refresh_token: token.refresh_token.clone(),
+            expires_at,
+            account_id: account_id.clone(),
+        };
+
+        self.store.set(
+            PROVIDER_ID,
+            AuthEntry::OAuth {
+                access_token,
+                refresh_token: token.refresh_token,
+                expires_at,
+                account_id,
+                scopes: Some(SCOPES.to_string()),
+            },
+        )?;
+
+        Ok(tokens)
     }
 
     // ─── Constants accessors ───

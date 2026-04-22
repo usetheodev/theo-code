@@ -37,6 +37,10 @@ pub enum EventType {
     // Context management
     /// Context overflow detected; emergency compaction triggered.
     ContextOverflowRecovery,
+    /// Retrieval pipeline emitted context blocks. Payload carries the
+    /// PLAN_CONTEXT_WIRING Phase 4 telemetry: `primary_files`,
+    /// `harm_removals`, `compression_savings_tokens`, `inline_slices_count`.
+    RetrievalExecuted,
 
     // Cognitive events — agent reasoning state
     /// Agent formed a hypothesis. Payload MUST contain "hypothesis" and "rationale".
@@ -186,6 +190,7 @@ impl std::fmt::Display for EventType {
             EventType::ReasoningDelta => write!(f, "ReasoningDelta"),
             EventType::ContentDelta => write!(f, "ContentDelta"),
             EventType::ContextOverflowRecovery => write!(f, "ContextOverflowRecovery"),
+            EventType::RetrievalExecuted => write!(f, "RetrievalExecuted"),
             EventType::TodoUpdated => write!(f, "TodoUpdated"),
             EventType::HypothesisFormed => write!(f, "HypothesisFormed"),
             EventType::HypothesisInvalidated => write!(f, "HypothesisInvalidated"),
@@ -197,7 +202,7 @@ impl std::fmt::Display for EventType {
 }
 
 /// All EventType variants for iteration in tests.
-pub const ALL_EVENT_TYPES: [EventType; 21] = [
+pub const ALL_EVENT_TYPES: [EventType; 22] = [
     EventType::TaskCreated,
     EventType::TaskStateChanged,
     EventType::ToolCallQueued,
@@ -213,6 +218,7 @@ pub const ALL_EVENT_TYPES: [EventType; 21] = [
     EventType::ReasoningDelta,
     EventType::ContentDelta,
     EventType::ContextOverflowRecovery,
+    EventType::RetrievalExecuted,
     EventType::TodoUpdated,
     EventType::HypothesisFormed,
     EventType::HypothesisInvalidated,
@@ -290,6 +296,53 @@ mod tests {
             let back: EventType = serde_json::from_str(&json).unwrap();
             assert_eq!(*et, back, "serde roundtrip failed for {:?}", et);
         }
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // Phase 4 — RetrievalExecuted event reachable and serialized
+    // (PLAN_CONTEXT_WIRING Phase 4)
+    // ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn retrieval_executed_event_type_round_trips() {
+        let et = EventType::RetrievalExecuted;
+        let json = serde_json::to_string(&et).expect("serde");
+        let back: EventType = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(et, back);
+    }
+
+    #[test]
+    fn retrieval_executed_in_all_event_types() {
+        assert!(
+            ALL_EVENT_TYPES.contains(&EventType::RetrievalExecuted),
+            "ALL_EVENT_TYPES must list the telemetry variant"
+        );
+    }
+
+    #[test]
+    fn retrieval_executed_display_name_is_stable() {
+        assert_eq!(
+            format!("{}", EventType::RetrievalExecuted),
+            "RetrievalExecuted"
+        );
+    }
+
+    #[test]
+    fn retrieval_executed_domain_event_carries_metrics_payload() {
+        // The caller in graph_context_service emits a trace line today;
+        // this smoke test documents the payload shape we expect once the
+        // EventBus is plumbed into the read-only context service.
+        let payload = serde_json::json!({
+            "primary_files": 8,
+            "harm_removals": 2,
+            "compression_savings_tokens": 1420,
+            "inline_slices_count": 1,
+        });
+        let event = DomainEvent::new(EventType::RetrievalExecuted, "run-xyz", payload.clone());
+        assert_eq!(event.event_type, EventType::RetrievalExecuted);
+        assert_eq!(event.payload, payload);
+        assert!(!event.event_id.as_str().is_empty());
+        assert!(event.timestamp > 0);
     }
 
     #[test]
@@ -502,7 +555,8 @@ mod tests {
         assert!(ALL_EVENT_TYPES.contains(&EventType::HypothesisInvalidated));
         assert!(ALL_EVENT_TYPES.contains(&EventType::DecisionMade));
         assert!(ALL_EVENT_TYPES.contains(&EventType::ConstraintLearned));
-        assert_eq!(ALL_EVENT_TYPES.len(), 21);
+        // 22 since PLAN_CONTEXT_WIRING Phase 4 added RetrievalExecuted.
+        assert_eq!(ALL_EVENT_TYPES.len(), 22);
     }
 
     // --- P-1 BF2: Contextual validation tests ---
