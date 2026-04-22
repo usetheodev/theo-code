@@ -66,6 +66,22 @@ pub struct AgentRunEngine {
     message_queues: MessageQueues,
     /// Phase 1 T1.1: accumulated token usage across LLM calls.
     session_token_usage: theo_domain::budget::TokenUsage,
+    /// PLAN_AUTO_EVOLUTION_SOTA Phase 1: turns since the last memory
+    /// reviewer spawn. `AtomicUsize` lets the counter survive fork
+    /// boundaries (eliminates Hermes Issue #8506).
+    memory_nudge_counter: Arc<crate::memory_lifecycle::MemoryNudgeCounter>,
+    /// PLAN_AUTO_EVOLUTION_SOTA Phase 3: tool iterations since the
+    /// last skill reviewer spawn. Persists across task boundaries so
+    /// short tasks don't reset accumulation mid-stream.
+    skill_nudge_counter: Arc<crate::skill_reviewer::SkillNudgeCounter>,
+    /// PLAN_AUTO_EVOLUTION_SOTA Phase 3: flipped to `true` whenever
+    /// `skill_manage.create` / `edit` / `patch` succeeds in the
+    /// current task, suppressing the reviewer for that task.
+    skill_created_this_task: std::sync::atomic::AtomicBool,
+    /// PLAN_AUTO_EVOLUTION_SOTA Phase 2: flipped once autodream has
+    /// been attempted for this session so we don't retry on every
+    /// message in long-running sessions.
+    autodream_attempted: std::sync::atomic::AtomicBool,
 }
 
 impl AgentRunEngine {
@@ -142,6 +158,10 @@ impl AgentRunEngine {
             context_metrics: ContextMetrics::new(),
             message_queues: MessageQueues::default(),
             session_token_usage: theo_domain::budget::TokenUsage::default(),
+            memory_nudge_counter: Arc::new(crate::memory_lifecycle::MemoryNudgeCounter::new()),
+            skill_nudge_counter: Arc::new(crate::skill_reviewer::SkillNudgeCounter::new()),
+            skill_created_this_task: std::sync::atomic::AtomicBool::new(false),
+            autodream_attempted: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -252,6 +272,16 @@ impl AgentRunEngine {
         // Phase 0 T0.1 AC-0.1.4: memory-provider session-end hook (every exit path).
         crate::memory_lifecycle::MemoryLifecycle::on_session_end(&self.config).await;
 
+        // PLAN_AUTO_EVOLUTION_SOTA Phase 4 — index session transcript
+        // via the pluggable TranscriptIndexer trait (concrete impl
+        // lives in theo-application).
+        crate::memory_lifecycle::maybe_index_transcript(
+            &self.config,
+            &self.project_dir,
+            self.run.run_id.as_str(),
+            events.clone(),
+        );
+
         // Record session end for cross-session progress tracking
         if !self.config.is_subagent {
             let tasks = if result.success {
@@ -304,13 +334,26 @@ impl AgentRunEngine {
             auto_init_project_context(&self.project_dir);
         }
 
-        // System prompt: .theo/system-prompt.md replaces default, or use config default
-        let system_prompt = if !self.config.is_subagent {
+        // PLAN_AUTO_EVOLUTION_SOTA Phase 2 — autodream at session start.
+        if !self.config.is_subagent {
+            crate::memory_lifecycle::maybe_spawn_autodream(
+                &self.config,
+                &self.autodream_attempted,
+                &self.project_dir,
+                self.run.run_id.as_str(),
+            );
+        }
+
+        // System prompt: .theo/system-prompt.md replaces default, or use config default.
+        // Phase 5 bootstrap prompt prepended when USER.md is missing/empty.
+        let base_prompt = if !self.config.is_subagent {
             crate::project_config::load_system_prompt(&self.project_dir)
                 .unwrap_or_else(|| self.config.system_prompt.clone())
         } else {
             self.config.system_prompt.clone()
         };
+        let system_prompt =
+            crate::memory_lifecycle::maybe_prepend_bootstrap(&self.config, &self.project_dir, base_prompt);
 
         let mut messages: Vec<Message> = vec![Message::system(&system_prompt)];
 
@@ -936,6 +979,22 @@ impl AgentRunEngine {
                     &content,
                 )
                 .await;
+
+                // PLAN_AUTO_EVOLUTION_SOTA Phase 1 + Phase 3 — reviewers nudge.
+                let tool_calls_this_task = self.metrics.snapshot().total_tool_calls as usize;
+                let skill_created = self
+                    .skill_created_this_task
+                    .load(std::sync::atomic::Ordering::Relaxed);
+                crate::memory_lifecycle::maybe_spawn_reviewers(
+                    &self.config,
+                    &self.memory_nudge_counter,
+                    &self.skill_nudge_counter,
+                    &messages,
+                    tool_calls_this_task,
+                    skill_created,
+                );
+                self.skill_created_this_task
+                    .store(false, std::sync::atomic::Ordering::Relaxed);
 
                 self.transition_run(RunState::Converged);
                 let _ = self
@@ -2118,59 +2177,7 @@ fn detect_project_name_simple(project_dir: &std::path::Path) -> Option<String> {
 // Doom Loop Detection
 // ---------------------------------------------------------------------------
 
-/// Tracks recent tool calls to detect doom loops (identical calls repeated).
-/// Uses a ring buffer of (tool_name, args_hash) tuples.
-struct DoomLoopTracker {
-    recent: std::collections::VecDeque<(String, u64)>,
-    threshold: usize,
-    /// How many times the doom loop was detected consecutively.
-    /// First detection = warning. Second detection (threshold*2) = hard abort.
-    hit_count: usize,
-}
-
-impl DoomLoopTracker {
-    fn new(threshold: usize) -> Self {
-        Self {
-            recent: std::collections::VecDeque::with_capacity(threshold + 1),
-            threshold,
-            hit_count: 0,
-        }
-    }
-
-    /// Returns true if a hard abort should happen (2x threshold consecutive identical calls).
-    fn should_abort(&self) -> bool {
-        self.hit_count >= 2
-    }
-
-    /// Record a tool call. Returns true if a doom loop is detected.
-    fn record(&mut self, tool_name: &str, args: &serde_json::Value) -> bool {
-        use std::hash::{Hash, Hasher};
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        tool_name.hash(&mut hasher);
-        args.to_string().hash(&mut hasher);
-        let hash = hasher.finish();
-
-        self.recent.push_back((tool_name.to_string(), hash));
-        if self.recent.len() > self.threshold {
-            self.recent.pop_front();
-        }
-
-        // Detect: all entries in the buffer are identical
-        if self.recent.len() == self.threshold {
-            let first = &self.recent[0];
-            let is_loop = self.recent.iter().all(|entry| entry.1 == first.1);
-            if is_loop {
-                self.hit_count += 1;
-            } else {
-                self.hit_count = 0;
-            }
-            is_loop
-        } else {
-            self.hit_count = 0;
-            false
-        }
-    }
-}
+use crate::doom_loop::DoomLoopTracker;
 
 fn now_millis() -> u64 {
     std::time::SystemTime::now()
@@ -2429,54 +2436,9 @@ mod tests {
         );
     }
 
-    // -----------------------------------------------------------------------
-    // Doom loop detection
-    // -----------------------------------------------------------------------
-
     #[test]
-    fn doom_loop_detected_after_threshold_identical_calls() {
-        let mut tracker = DoomLoopTracker::new(3);
-        let args = serde_json::json!({"filePath": "/tmp/test"});
-        assert!(!tracker.record("read", &args));
-        assert!(!tracker.record("read", &args));
-        assert!(
-            tracker.record("read", &args),
-            "3rd identical call should trigger doom loop"
-        );
-    }
-
-    #[test]
-    fn doom_loop_no_false_positive_same_tool_different_inputs() {
-        let mut tracker = DoomLoopTracker::new(3);
-        assert!(!tracker.record("read", &serde_json::json!({"filePath": "a.rs"})));
-        assert!(!tracker.record("read", &serde_json::json!({"filePath": "b.rs"})));
-        assert!(!tracker.record("read", &serde_json::json!({"filePath": "c.rs"})));
-        // Different inputs → no doom loop
-    }
-
-    #[test]
-    fn doom_loop_counter_resets_on_different_tool() {
-        let mut tracker = DoomLoopTracker::new(3);
-        let args = serde_json::json!({"filePath": "/tmp/test"});
-        assert!(!tracker.record("read", &args));
-        assert!(!tracker.record("read", &args));
-        assert!(!tracker.record("bash", &serde_json::json!({"command": "ls"}))); // different tool
-        assert!(!tracker.record("read", &args)); // counter reset by interleaving
-    }
-
-    #[test]
-    fn doom_loop_threshold_configurable() {
+    fn doom_loop_threshold_config_exposes_default() {
         let config = AgentConfig::default();
         assert_eq!(config.doom_loop_threshold, Some(3));
-
-        let mut tracker = DoomLoopTracker::new(5);
-        let args = serde_json::json!({});
-        for _ in 0..4 {
-            assert!(!tracker.record("bash", &args));
-        }
-        assert!(
-            tracker.record("bash", &args),
-            "5th call should trigger with threshold=5"
-        );
     }
 }

@@ -377,6 +377,11 @@ pub struct AgentConfig {
     /// skill nudge counter fires. `None` disables the feature even
     /// with a positive interval.
     pub skill_reviewer: Option<crate::skill_reviewer::SkillReviewerHandle>,
+    /// Phase 4 of PLAN_AUTO_EVOLUTION_SOTA: optional transcript
+    /// indexer. `None` disables cross-session BM25 recall; the
+    /// concrete Tantivy-backed impl lives in `theo-application` to
+    /// keep bounded contexts intact.
+    pub transcript_indexer: Option<crate::transcript_indexer::TranscriptIndexerHandle>,
 }
 
 /// Debug-friendly wrapper around `Arc<dyn MemoryProvider>` so `AgentConfig`
@@ -456,6 +461,7 @@ impl Default for AgentConfig {
             autodream: None,
             skill_review_nudge_interval: 10,
             skill_reviewer: None,
+            transcript_indexer: None,
         }
     }
 }

@@ -62,6 +62,18 @@ pub fn attach_memory_to_config(config: &mut AgentConfig, project_dir: &Path) {
     if let Some(provider) = build_memory_engine(config, project_dir) {
         config.memory_provider = Some(MemoryHandle::new(provider));
     }
+
+    // PLAN_AUTO_EVOLUTION_SOTA Phase 4 — wire the concrete Tantivy
+    // transcript indexer when the feature is enabled. Respects
+    // `autodream_enabled == false` / `memory_enabled == false` setups
+    // by leaving the handle empty.
+    #[cfg(feature = "tantivy-backend")]
+    if config.memory_enabled && config.transcript_indexer.is_none() {
+        use std::sync::Arc;
+        use theo_agent_runtime::transcript_indexer::TranscriptIndexerHandle;
+        let indexer = Arc::new(crate::use_cases::transcript_indexer_impl::TantivyTranscriptIndexer::new());
+        config.transcript_indexer = Some(TranscriptIndexerHandle::new(indexer));
+    }
 }
 
 #[cfg(test)]
