@@ -208,6 +208,40 @@ pub fn retrieve_files(
     }
 }
 
+/// PLAN_CONTEXT_WIRING Phase 3 — wrapper around `retrieve_files` that
+/// also tries to produce inline slices (focal symbol + callers/callees)
+/// when the query has an exact hit in the graph's `name_index`.
+///
+/// The inline path is purely additive: on no match the result is
+/// identical to `retrieve_files`. When slices ARE produced, the caller
+/// can render them as high-priority context blocks and MUST skip the
+/// reverse-dependency boost for files whose focal symbol already
+/// appears in `inline_slices` (avoid double counting).
+pub fn retrieve_files_with_inline(
+    graph: &CodeGraph,
+    communities: &[Community],
+    query: &str,
+    config: &RerankConfig,
+    previously_seen: &HashSet<String>,
+    workspace_root: &std::path::Path,
+) -> FileRetrievalResult {
+    let mut result = retrieve_files(graph, communities, query, config, previously_seen);
+
+    // Stage 4.5b: Inline expansion. Trigger only when the query resolves
+    // to a symbol in the graph (exact hit in name_index) — otherwise the
+    // inline builder is a cheap no-op.
+    let source_provider = crate::fs_source_provider::FsSourceProvider::new(workspace_root);
+    let policy = crate::inline_builder::InliningPolicy::default();
+    let inline = crate::inline_builder::build_inline_slices(
+        query,
+        graph,
+        &source_provider,
+        &policy,
+    );
+    result.inline_slices = inline.slices;
+    result
+}
+
 /// Apply the harm filter to an already-ranked list, mutating it in place.
 /// Returns the number of candidates removed — caller stores in
 /// `FileRetrievalResult.harm_removals` for telemetry.
@@ -478,9 +512,40 @@ pub fn build_context_blocks_with_compression(
     let mut compression_savings = 0usize;
     let query_tokens: HashSet<String> = tokenise(query).into_iter().collect();
 
+    // PLAN_CONTEXT_WIRING Phase 3 — inline slices first.
+    // A slice bundles a focal symbol with its callees/callers already
+    // resolved, so it deserves the highest score (1.0). When a slice
+    // exists for a primary file, the primary loop below skips that file
+    // to avoid double counting (mutual exclusion with reverse boost).
+    let inline_focal_files: HashSet<String> = result
+        .inline_slices
+        .iter()
+        .map(|s| s.focal_file.clone())
+        .collect();
+
+    for slice in &result.inline_slices {
+        if tokens_used + slice.token_count > budget_tokens {
+            break;
+        }
+        blocks.push(theo_domain::graph_context::ContextBlock {
+            block_id: format!("blk-inline-{}", slice.focal_symbol_id),
+            source_id: slice.focal_file.clone(),
+            content: slice.content.clone(),
+            token_count: slice.token_count,
+            score: 1.0,
+        });
+        tokens_used += slice.token_count;
+    }
+
     // Primary files: full signature content (or compressed source when
     // workspace_root is available and parsing succeeds).
     for ranked in &result.primary_files {
+        // Skip primary files that already appear in an inline slice —
+        // avoids the reverse-dependency-boost double counting flagged
+        // by the original plan (PLAN_CONTEXT_WIRING line 249-257).
+        if inline_focal_files.contains(&ranked.path) {
+            continue;
+        }
         let file_id = format!("file:{}", ranked.path);
         let (content, token_count, saved) = match workspace_root {
             Some(root) => compress_primary_or_fallback(
@@ -1186,5 +1251,147 @@ mod tests {
         );
         // Savings are non-zero when compression actually ran.
         assert!(savings > 0, "expected compression savings > 0, got {savings}");
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // Phase 3 integration — inline_builder wired into
+    // retrieve_files_with_inline + build_context_blocks_with_compression
+    // (PLAN_CONTEXT_WIRING Phase 3)
+    // ────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn retrieve_files_with_inline_no_match_yields_no_slices() {
+        // Query that doesn't hit any symbol in the graph — inline slices
+        // must remain empty; primary_files behaves like retrieve_files.
+        let graph = build_test_graph();
+        let communities = vec![];
+        let config = RerankConfig::default();
+        let seen = HashSet::new();
+        let tmp = tempfile::tempdir().expect("tmpdir");
+
+        let result = retrieve_files_with_inline(
+            &graph,
+            &communities,
+            "no_such_symbol_xyz_999",
+            &config,
+            &seen,
+            tmp.path(),
+        );
+
+        assert!(
+            result.inline_slices.is_empty(),
+            "no symbol match → inline_slices must be empty"
+        );
+    }
+
+    #[test]
+    fn retrieve_files_with_inline_returns_identical_result_on_empty_graph() {
+        // Isolates the inline path: identical to retrieve_files when the
+        // graph has no symbols to slice.
+        let graph = CodeGraph::new();
+        let communities = vec![];
+        let config = RerankConfig::default();
+        let seen = HashSet::new();
+        let tmp = tempfile::tempdir().expect("tmpdir");
+
+        let a = retrieve_files(&graph, &communities, "anything", &config, &seen);
+        let b = retrieve_files_with_inline(
+            &graph,
+            &communities,
+            "anything",
+            &config,
+            &seen,
+            tmp.path(),
+        );
+
+        assert_eq!(a.primary_files.len(), b.primary_files.len());
+        assert_eq!(a.harm_removals, b.harm_removals);
+        assert!(b.inline_slices.is_empty());
+    }
+
+    #[test]
+    fn build_context_blocks_prepends_inline_slices_with_highest_score() {
+        // Forge a result with one inline slice to exercise the block-build
+        // prepend path without needing the full inline_builder to resolve.
+        let graph = build_test_graph();
+        let slice = crate::inline_builder::InlineSlice {
+            focal_symbol_id: "sym:verify_token".into(),
+            focal_file: "src/auth.rs".into(),
+            content: "// inline snippet\nfn verify_token() { /* ... */ }".into(),
+            token_count: 30,
+            inlined_symbols: vec!["sym:decode_jwt".into()],
+            unresolved_callees: vec![],
+        };
+        let forced = FileRetrievalResult {
+            primary_files: vec![RankedFile {
+                path: "src/db.rs".into(),
+                score: 0.5,
+                signals: Vec::new(),
+            }],
+            inline_slices: vec![slice],
+            ..FileRetrievalResult::default()
+        };
+
+        let (blocks, _) =
+            build_context_blocks_with_compression(&forced, &graph, 10_000, None, "verify_token");
+
+        // First block is the inline slice.
+        assert!(!blocks.is_empty());
+        assert!(
+            blocks[0].block_id.starts_with("blk-inline-"),
+            "inline slice must be the first block, got: {}",
+            blocks[0].block_id
+        );
+        assert_eq!(blocks[0].score, 1.0, "inline slice must score 1.0");
+    }
+
+    #[test]
+    fn inline_slice_for_primary_file_skips_that_file_in_loop() {
+        // Mutual-exclusion test: when an inline slice covers src/auth.rs,
+        // the primary-files loop must not emit an additional block for
+        // the same path (avoids reverse-boost double count).
+        let graph = build_test_graph();
+        let slice = crate::inline_builder::InlineSlice {
+            focal_symbol_id: "sym:verify_token".into(),
+            focal_file: "src/auth.rs".into(),
+            content: "// inline".into(),
+            token_count: 10,
+            inlined_symbols: vec![],
+            unresolved_callees: vec![],
+        };
+        let forced = FileRetrievalResult {
+            primary_files: vec![
+                RankedFile {
+                    path: "src/auth.rs".into(),
+                    score: 0.9,
+                    signals: Vec::new(),
+                },
+                RankedFile {
+                    path: "src/db.rs".into(),
+                    score: 0.5,
+                    signals: Vec::new(),
+                },
+            ],
+            inline_slices: vec![slice],
+            ..FileRetrievalResult::default()
+        };
+
+        let (blocks, _) =
+            build_context_blocks_with_compression(&forced, &graph, 10_000, None, "verify_token");
+
+        // Expected: 1 inline + 1 primary (db only; auth skipped due to inline).
+        let auth_primary_count = blocks
+            .iter()
+            .filter(|b| b.block_id == "blk-file-src-auth.rs")
+            .count();
+        let db_primary_count = blocks
+            .iter()
+            .filter(|b| b.block_id == "blk-file-src-db.rs")
+            .count();
+        assert_eq!(
+            auth_primary_count, 0,
+            "src/auth.rs primary block must be suppressed by inline slice"
+        );
+        assert_eq!(db_primary_count, 1, "src/db.rs primary block still emitted");
     }
 }

@@ -433,13 +433,18 @@ impl GraphContextProvider for GraphContextService {
         let blocks: Vec<ContextBlock> = {
             let config = theo_engine_retrieval::file_retriever::RerankConfig::default();
             let seen = std::collections::HashSet::new();
-            let retrieval_result = theo_engine_retrieval::file_retriever::retrieve_files(
-                &graph_state.graph,
-                &graph_state.communities,
-                query,
-                &config,
-                &seen,
-            );
+            // PLAN_CONTEXT_WIRING Phase 3: use the _with_inline variant so
+            // queries that match a symbol name get inline slices (focal +
+            // callees/callers) as high-priority context blocks.
+            let retrieval_result =
+                theo_engine_retrieval::file_retriever::retrieve_files_with_inline(
+                    &graph_state.graph,
+                    &graph_state.communities,
+                    query,
+                    &config,
+                    &seen,
+                    &graph_state.project_dir,
+                );
 
             if !retrieval_result.primary_files.is_empty() {
                 // File-first path with Phase 2 compression: primary files get
