@@ -641,10 +641,11 @@ impl AgentRunEngine {
                     .cloned()
                     .collect(),
             };
-            crate::compaction::compact_if_needed_with_context(
+            crate::compaction_stages::compact_staged_with_policy(
                 &mut messages,
                 self.config.context_window_tokens,
                 Some(&compaction_ctx),
+                &self.config.compaction_policy,
             );
 
             // Record context size for metrics (estimated tokens = chars/4)

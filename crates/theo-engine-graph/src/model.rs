@@ -261,6 +261,39 @@ impl CodeGraph {
         Vec::new()
     }
 
+    /// Return all targets of Calls edges from `source_id`.
+    ///
+    /// O(E) scan over edges — acceptable for depth-limited traversals (max depth 3).
+    /// If performance becomes an issue, add a calls_children_index analogous to
+    /// contains_children_index.
+    pub fn calls_children(&self, source_id: &str) -> Vec<&str> {
+        self.edges
+            .iter()
+            .filter(|e| e.source == source_id && e.edge_type == EdgeType::Calls)
+            .map(|e| e.target.as_str())
+            .collect()
+    }
+
+    /// Return callers of a symbol — nodes with a Calls edge targeting `target_id`.
+    pub fn calls_parents(&self, target_id: &str) -> Vec<&str> {
+        self.edges
+            .iter()
+            .filter(|e| e.target == target_id && e.edge_type == EdgeType::Calls)
+            .map(|e| e.source.as_str())
+            .collect()
+    }
+
+    /// Return source location for a symbol node: (file_path, line_start, line_end).
+    ///
+    /// Returns `None` if the node doesn't exist or lacks location info.
+    pub fn symbol_source_range(&self, node_id: &str) -> Option<(&str, usize, usize)> {
+        let node = self.nodes.get(node_id)?;
+        let file_path = node.file_path.as_deref()?;
+        let start = node.line_start?;
+        let end = node.line_end?;
+        Some((file_path, start, end))
+    }
+
     /// Get the max edge weight between two nodes. O(E) scan — prefer using
     /// `outgoing_edges_from` with pre-built index for bulk operations.
     pub fn max_edge_weight(&self, source: &str, target: &str) -> f64 {
@@ -559,5 +592,122 @@ impl CodeGraph {
             }
         }
         tests
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_symbol_node(id: &str, name: &str, file: &str, line_start: usize, line_end: usize) -> Node {
+        Node {
+            id: id.to_string(),
+            node_type: NodeType::Symbol,
+            name: name.to_string(),
+            file_path: Some(file.to_string()),
+            signature: Some(format!("fn {name}()")),
+            kind: Some(SymbolKind::Function),
+            line_start: Some(line_start),
+            line_end: Some(line_end),
+            last_modified: 0.0,
+            doc: None,
+        }
+    }
+
+    fn make_file_node(path: &str) -> Node {
+        Node {
+            id: format!("file:{path}"),
+            node_type: NodeType::File,
+            name: path.to_string(),
+            file_path: Some(path.to_string()),
+            signature: None,
+            kind: None,
+            line_start: None,
+            line_end: None,
+            last_modified: 0.0,
+            doc: None,
+        }
+    }
+
+    #[test]
+    fn calls_children_returns_only_calls_targets() {
+        let mut g = CodeGraph::new();
+        g.add_node(make_symbol_node("fn:foo", "foo", "a.rs", 1, 10));
+        g.add_node(make_symbol_node("fn:bar", "bar", "a.rs", 12, 20));
+        g.add_node(make_symbol_node("fn:baz", "baz", "b.rs", 1, 10));
+
+        // foo calls bar (Calls edge).
+        g.add_edge(Edge {
+            source: "fn:foo".into(),
+            target: "fn:bar".into(),
+            edge_type: EdgeType::Calls,
+            weight: 1.0,
+        });
+        // foo imports baz (Imports edge — should NOT appear in calls_children).
+        g.add_edge(Edge {
+            source: "fn:foo".into(),
+            target: "fn:baz".into(),
+            edge_type: EdgeType::Imports,
+            weight: 1.0,
+        });
+
+        let callees = g.calls_children("fn:foo");
+        assert_eq!(callees, vec!["fn:bar"]);
+    }
+
+    #[test]
+    fn calls_children_returns_empty_for_leaf() {
+        let mut g = CodeGraph::new();
+        g.add_node(make_symbol_node("fn:leaf", "leaf", "a.rs", 1, 5));
+        let callees = g.calls_children("fn:leaf");
+        assert!(callees.is_empty());
+    }
+
+    #[test]
+    fn calls_parents_returns_callers() {
+        let mut g = CodeGraph::new();
+        g.add_node(make_symbol_node("fn:a", "a", "a.rs", 1, 5));
+        g.add_node(make_symbol_node("fn:b", "b", "b.rs", 1, 5));
+        g.add_node(make_symbol_node("fn:target", "target", "c.rs", 1, 10));
+
+        g.add_edge(Edge {
+            source: "fn:a".into(),
+            target: "fn:target".into(),
+            edge_type: EdgeType::Calls,
+            weight: 1.0,
+        });
+        g.add_edge(Edge {
+            source: "fn:b".into(),
+            target: "fn:target".into(),
+            edge_type: EdgeType::Calls,
+            weight: 1.0,
+        });
+
+        let mut callers = g.calls_parents("fn:target");
+        callers.sort();
+        assert_eq!(callers, vec!["fn:a", "fn:b"]);
+    }
+
+    #[test]
+    fn symbol_source_range_returns_file_and_lines() {
+        let mut g = CodeGraph::new();
+        g.add_node(make_symbol_node("fn:foo", "foo", "src/lib.rs", 10, 25));
+
+        let range = g.symbol_source_range("fn:foo");
+        assert_eq!(range, Some(("src/lib.rs", 10, 25)));
+    }
+
+    #[test]
+    fn symbol_source_range_none_for_missing_node() {
+        let g = CodeGraph::new();
+        assert_eq!(g.symbol_source_range("nonexistent"), None);
+    }
+
+    #[test]
+    fn symbol_source_range_none_for_file_node() {
+        let mut g = CodeGraph::new();
+        g.add_node(make_file_node("src/lib.rs"));
+        // File nodes have no line_start/line_end.
+        assert_eq!(g.symbol_source_range("file:src/lib.rs"), None);
     }
 }
