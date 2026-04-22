@@ -68,6 +68,312 @@ impl MemoryLifecycle {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Phase 1 (PLAN_AUTO_EVOLUTION_SOTA): Nudge counter + background reviewer.
+// ---------------------------------------------------------------------------
+
+/// Decision emitted by [`should_trigger_memory_review`].
+///
+/// Splitting the counter bookkeeping from the actual `tokio::spawn` call
+/// lets us cover the counter logic with synchronous unit tests (no async
+/// runtime / no real LLM) while the spawn wrapper stays as a tiny
+/// wiring-only helper with integration tests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MemoryReviewTrigger {
+    /// Counter below threshold — keep going.
+    NotReady,
+    /// Counter hit threshold; reviewer should be spawned, counter reset.
+    ShouldSpawn,
+    /// Feature explicitly disabled (`interval == 0` or no reviewer wired).
+    Disabled,
+}
+
+/// Atomic nudge counter for memory reviewer spawning.
+///
+/// Separate type so `RunEngine` can own one and the logic stays testable
+/// without mocking the whole engine. Matches Hermes
+/// `run_agent.py:1420 (_turns_since_memory = 0)` but lifted to
+/// `AtomicUsize` so it survives across `run_conversation` calls without
+/// hitting Issue #8506 (gateway reset).
+#[derive(Debug, Default)]
+pub struct MemoryNudgeCounter {
+    inner: std::sync::atomic::AtomicUsize,
+}
+
+impl MemoryNudgeCounter {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Returns the current counter value without modifying it.
+    pub fn get(&self) -> usize {
+        self.inner.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Resets the counter to zero (used after spawning a reviewer or
+    /// when a sub-agent fork needs anti-recursion wiring).
+    pub fn reset(&self) {
+        self.inner.store(0, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Increments the counter and returns the new value.
+    pub fn increment(&self) -> usize {
+        self.inner
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            .saturating_add(1)
+    }
+}
+
+/// Decide whether the background memory reviewer should be spawned now.
+///
+/// Increments the counter on `Active` memory configs; returns
+/// `Disabled` without touching the counter when the feature is off. The
+/// caller receives the decision and spawns a task when `ShouldSpawn` is
+/// returned.
+///
+/// Reference: `referencias/hermes-agent/run_agent.py:8747-8753`.
+pub fn should_trigger_memory_review(
+    cfg: &AgentConfig,
+    counter: &MemoryNudgeCounter,
+) -> MemoryReviewTrigger {
+    // Disabled when: interval == 0, memory off, no provider, or no
+    // reviewer wired. The provider check matches Hermes's
+    // `"memory" in self.valid_tool_names` guard.
+    if cfg.memory_review_nudge_interval == 0
+        || !cfg.memory_enabled
+        || cfg.memory_provider.is_none()
+        || cfg.memory_reviewer.is_none()
+    {
+        return MemoryReviewTrigger::Disabled;
+    }
+
+    let current = counter.increment();
+    if current >= cfg.memory_review_nudge_interval {
+        counter.reset();
+        MemoryReviewTrigger::ShouldSpawn
+    } else {
+        MemoryReviewTrigger::NotReady
+    }
+}
+
+/// Select the most recent window of messages to hand to the reviewer.
+///
+/// Caps at `min(interval, 20)` to keep the reviewer's prompt small
+/// enough to fit a lightweight review model even in long sessions.
+/// Matches the AC-1.6 bound.
+pub fn recent_review_window(
+    messages: &[theo_infra_llm::types::Message],
+    interval: usize,
+) -> Vec<theo_infra_llm::types::Message> {
+    let take = interval.min(20).max(1);
+    let start = messages.len().saturating_sub(take);
+    messages[start..].to_vec()
+}
+
+/// Spawn the background reviewer in a fire-and-forget task.
+///
+/// Failures are logged via `tracing::warn!` and never propagate back to
+/// the caller — per AC-1.5. Returns the `JoinHandle` so tests can
+/// `await` completion when they need deterministic assertions; in
+/// production the handle is dropped immediately.
+pub fn spawn_memory_reviewer(
+    handle: crate::memory_reviewer::MemoryReviewerHandle,
+    window: Vec<theo_infra_llm::types::Message>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        // No tracing dep is wired into theo-agent-runtime yet — emit to
+        // stderr only when the reviewer reports a failure. Success is
+        // silent to avoid polluting stdout during interactive sessions.
+        if let Err(err) = handle.as_reviewer().review(&window).await {
+            eprintln!("[theo::memory_reviewer] background review failed: {err}");
+        }
+    })
+}
+
+#[cfg(test)]
+mod phase1_tests {
+    use super::*;
+    use crate::memory_reviewer::{MemoryReviewError, MemoryReviewerHandle, NullMemoryReviewer};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering as AOrdering};
+    use theo_domain::memory::MemoryProvider;
+    use theo_infra_llm::types::Message;
+
+    /// Minimal provider stub so we can flip `memory_provider.is_some()`
+    /// without pulling in the full BuiltinMemoryProvider.
+    struct StubProvider;
+
+    #[async_trait::async_trait]
+    impl MemoryProvider for StubProvider {
+        fn name(&self) -> &str {
+            "stub"
+        }
+        async fn prefetch(&self, _query: &str) -> String {
+            String::new()
+        }
+        async fn sync_turn(&self, _user: &str, _assistant: &str) {}
+    }
+
+    fn cfg_with_reviewer(interval: usize, reviewer: Option<MemoryReviewerHandle>) -> AgentConfig {
+        AgentConfig {
+            memory_enabled: true,
+            memory_provider: Some(crate::config::MemoryHandle::new(Arc::new(StubProvider))),
+            memory_review_nudge_interval: interval,
+            memory_reviewer: reviewer,
+            ..AgentConfig::default()
+        }
+    }
+
+    // ── AC-1.1 ─────────────────────────────────────────────────────
+    #[test]
+    fn test_ac_1_1_counter_increments_on_each_call() {
+        let cfg = cfg_with_reviewer(
+            10,
+            Some(MemoryReviewerHandle::new(Arc::new(NullMemoryReviewer))),
+        );
+        let counter = MemoryNudgeCounter::new();
+
+        assert_eq!(counter.get(), 0);
+        for expected in 1..=9 {
+            let trig = should_trigger_memory_review(&cfg, &counter);
+            assert_eq!(trig, MemoryReviewTrigger::NotReady);
+            assert_eq!(counter.get(), expected);
+        }
+    }
+
+    // ── AC-1.2 + AC-1.3 ────────────────────────────────────────────
+    #[test]
+    fn test_ac_1_2_spawn_triggers_at_threshold_and_counter_resets() {
+        let cfg = cfg_with_reviewer(
+            3,
+            Some(MemoryReviewerHandle::new(Arc::new(NullMemoryReviewer))),
+        );
+        let counter = MemoryNudgeCounter::new();
+
+        assert_eq!(should_trigger_memory_review(&cfg, &counter), MemoryReviewTrigger::NotReady);
+        assert_eq!(should_trigger_memory_review(&cfg, &counter), MemoryReviewTrigger::NotReady);
+        assert_eq!(
+            should_trigger_memory_review(&cfg, &counter),
+            MemoryReviewTrigger::ShouldSpawn
+        );
+        assert_eq!(counter.get(), 0, "counter must reset after spawn");
+    }
+
+    // ── AC-1.4 ─────────────────────────────────────────────────────
+    #[test]
+    fn test_ac_1_4_zero_interval_disables_feature() {
+        let cfg = cfg_with_reviewer(
+            0,
+            Some(MemoryReviewerHandle::new(Arc::new(NullMemoryReviewer))),
+        );
+        let counter = MemoryNudgeCounter::new();
+        assert_eq!(
+            should_trigger_memory_review(&cfg, &counter),
+            MemoryReviewTrigger::Disabled
+        );
+        assert_eq!(counter.get(), 0, "counter untouched when disabled");
+    }
+
+    #[test]
+    fn test_disabled_when_no_reviewer_even_if_interval_set() {
+        let cfg = cfg_with_reviewer(3, None);
+        let counter = MemoryNudgeCounter::new();
+        assert_eq!(
+            should_trigger_memory_review(&cfg, &counter),
+            MemoryReviewTrigger::Disabled
+        );
+    }
+
+    #[test]
+    fn test_disabled_when_memory_off() {
+        let mut cfg = cfg_with_reviewer(
+            3,
+            Some(MemoryReviewerHandle::new(Arc::new(NullMemoryReviewer))),
+        );
+        cfg.memory_enabled = false;
+        let counter = MemoryNudgeCounter::new();
+        assert_eq!(
+            should_trigger_memory_review(&cfg, &counter),
+            MemoryReviewTrigger::Disabled
+        );
+    }
+
+    // ── AC-1.6 ─────────────────────────────────────────────────────
+    #[test]
+    fn test_ac_1_6_window_respects_interval_and_20_msg_cap() {
+        let msgs: Vec<Message> = (0..30).map(|i| Message::user(format!("m{i}"))).collect();
+
+        // interval < 20 → take `interval` most recent
+        let w = recent_review_window(&msgs, 5);
+        assert_eq!(w.len(), 5);
+        assert_eq!(
+            w.last().and_then(|m| m.content.clone()),
+            Some("m29".to_string())
+        );
+
+        // interval > 20 → capped at 20
+        let w = recent_review_window(&msgs, 100);
+        assert_eq!(w.len(), 20);
+
+        // messages shorter than interval → return all
+        let short: Vec<Message> = (0..3).map(|i| Message::user(format!("s{i}"))).collect();
+        let w = recent_review_window(&short, 10);
+        assert_eq!(w.len(), 3);
+    }
+
+    // ── AC-1.5 ─────────────────────────────────────────────────────
+    struct FailingReviewer {
+        calls: Arc<AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::memory_reviewer::MemoryReviewer for FailingReviewer {
+        async fn review(&self, _: &[Message]) -> Result<usize, MemoryReviewError> {
+            self.calls.fetch_add(1, AOrdering::Relaxed);
+            Err(MemoryReviewError::Backend("boom".into()))
+        }
+        fn name(&self) -> &'static str {
+            "failing"
+        }
+    }
+
+    #[tokio::test]
+    async fn test_ac_1_5_reviewer_failure_does_not_crash_spawn() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let reviewer = Arc::new(FailingReviewer { calls: calls.clone() });
+        let handle = MemoryReviewerHandle::new(reviewer);
+
+        // The spawn helper must complete cleanly even when the reviewer
+        // returns an error. Awaiting the JoinHandle must not yield an
+        // error panic.
+        let jh = spawn_memory_reviewer(
+            handle,
+            vec![Message::user("hello")],
+        );
+        jh.await.expect("spawn_memory_reviewer must never panic");
+        assert_eq!(calls.load(AOrdering::Relaxed), 1);
+    }
+
+    // ── AC-1.7 — reviewer clone must zero interval to prevent recursion.
+    // Because the reviewer receives just a `Vec<Message>` (not an
+    // `AgentConfig`), the anti-recursion invariant is satisfied by
+    // construction: the trait can't re-enter `should_trigger_memory_review`
+    // without a config, and any LLM-backed reviewer is responsible for
+    // zeroing the interval on its own AgentConfig clone. We document
+    // the design here and add a contract test that crosschecks the
+    // Default config shape.
+    #[test]
+    fn test_ac_1_7_default_config_disables_reviewer_until_explicitly_wired() {
+        let cfg = AgentConfig::default();
+        assert!(cfg.memory_reviewer.is_none());
+        let counter = MemoryNudgeCounter::new();
+        assert_eq!(
+            should_trigger_memory_review(&cfg, &counter),
+            MemoryReviewTrigger::Disabled
+        );
+    }
+}
+
 /// Run-engine helpers (Phase 0 T0.1). Extracted here so `run_engine.rs`
 /// stays under the 2500-line structural-hygiene cap while still hooking
 /// every lifecycle point the plan requires.

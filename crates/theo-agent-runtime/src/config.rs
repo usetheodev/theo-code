@@ -345,6 +345,16 @@ pub struct AgentConfig {
     /// NullMemoryProvider (runtime behaviour identical to pre-RM0). Plan
     /// ref: `outputs/agent-memory-plan.md` RM0.
     pub memory_provider: Option<MemoryHandle>,
+    /// Phase 1 of PLAN_AUTO_EVOLUTION_SOTA: number of user turns between
+    /// background memory-reviewer spawns. `0` disables the nudge entirely.
+    /// Default: 10 (matches Hermes `run_agent.py:1418` and mitigates
+    /// Issue #8506 by design — `AtomicUsize` on `RunEngine` persists
+    /// across turns).
+    pub memory_review_nudge_interval: usize,
+    /// Phase 1 of PLAN_AUTO_EVOLUTION_SOTA: optional reviewer invoked
+    /// when the nudge counter fires. When `None`, the nudge becomes a
+    /// no-op even if `memory_review_nudge_interval > 0`.
+    pub memory_reviewer: Option<crate::memory_reviewer::MemoryReviewerHandle>,
 }
 
 /// Debug-friendly wrapper around `Arc<dyn MemoryProvider>` so `AgentConfig`
@@ -417,6 +427,8 @@ impl Default for AgentConfig {
             memory_enabled: false,
             memory_provider: None,
             router: None,
+            memory_review_nudge_interval: 10,
+            memory_reviewer: None,
         }
     }
 }

@@ -21,6 +21,7 @@ pub mod jit_instructions;
 pub mod lesson_pipeline;
 pub mod loop_state;
 pub mod memory_lifecycle;
+pub mod memory_reviewer;
 pub mod metrics;
 #[doc(hidden)] // Dead code: exported but never instantiated externally
 pub mod observability;
