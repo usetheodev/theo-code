@@ -31,11 +31,17 @@ fn trajectory_file_is_created_for_run() {
     );
     let run_id = engine.run_id().as_str().to_string();
     drop(engine);
-    std::thread::sleep(std::time::Duration::from_millis(150));
+    // T5.4: replace the fixed `thread::sleep(150ms)` with a bounded poll so
+    // the test never flakes under load. Wait up to 2s in 10ms ticks for
+    // the writer thread to flush.
     let expected = tmp
         .path()
         .join(".theo")
         .join("trajectories")
         .join(format!("{}.jsonl", run_id));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    while !expected.exists() && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
     assert!(expected.exists(), "trajectory JSONL must exist: {:?}", expected);
 }

@@ -8,8 +8,38 @@
 use std::path::Path;
 
 use serde::Deserialize;
+use thiserror::Error;
 
 use crate::config::AgentConfig;
+
+/// Errors produced by [`ProjectConfig::validate`]. Per ADR-014 we keep
+/// validation in a small manual function rather than pulling `garde` +
+/// `garde-derive` for a single DTO.
+#[derive(Debug, Error, PartialEq)]
+pub enum ConfigValidationError {
+    #[error("temperature must be in [0.0, 2.0], got {0}")]
+    TemperatureOutOfRange(f32),
+
+    #[error("max_iterations must be > 0 and <= 10000, got {0}")]
+    MaxIterationsOutOfRange(usize),
+
+    #[error("max_tokens must be > 0 and <= 2_000_000, got {0}")]
+    MaxTokensOutOfRange(u32),
+
+    #[error("doom_loop_threshold must be < max_iterations; got threshold={threshold}, max={max}")]
+    DoomLoopInconsistent { threshold: usize, max: usize },
+
+    #[error(
+        "context_loop_interval must be > 0 and <= max_iterations; got interval={interval}, max={max:?}"
+    )]
+    ContextLoopInterval {
+        interval: usize,
+        max: Option<usize>,
+    },
+
+    #[error("reasoning_effort must be one of 'low'|'medium'|'high', got {0:?}")]
+    UnknownReasoningEffort(String),
+}
 
 // ---------------------------------------------------------------------------
 // ProjectConfig — parsed from .theo/config.toml
@@ -38,8 +68,14 @@ impl ProjectConfig {
         }
 
         match std::fs::read_to_string(&config_path) {
-            Ok(content) => match toml::from_str(&content) {
-                Ok(config) => config,
+            Ok(content) => match toml::from_str::<Self>(&content) {
+                Ok(config) => match config.validate() {
+                    Ok(()) => config,
+                    Err(e) => {
+                        eprintln!("[theo] Warning: .theo/config.toml failed validation: {e}");
+                        Self::default()
+                    }
+                },
                 Err(e) => {
                     eprintln!("[theo] Warning: failed to parse .theo/config.toml: {e}");
                     Self::default()
@@ -50,6 +86,61 @@ impl ProjectConfig {
                 Self::default()
             }
         }
+    }
+
+    /// Validate every optional field against its accepted domain.
+    ///
+    /// Called from [`Self::load`] immediately after the TOML deserialize
+    /// step, so users get a clear warning instead of silently corrupt
+    /// runtime behaviour. Per ADR-014 this is a hand-written function
+    /// rather than a `#[derive(Garde)]`.
+    pub fn validate(&self) -> Result<(), ConfigValidationError> {
+        if let Some(t) = self.temperature
+            && !(0.0..=2.0).contains(&t)
+        {
+            return Err(ConfigValidationError::TemperatureOutOfRange(t));
+        }
+        if let Some(n) = self.max_iterations
+            && (n == 0 || n > 10_000)
+        {
+            return Err(ConfigValidationError::MaxIterationsOutOfRange(n));
+        }
+        if let Some(n) = self.max_tokens
+            && (n == 0 || n > 2_000_000)
+        {
+            return Err(ConfigValidationError::MaxTokensOutOfRange(n));
+        }
+        if let Some(threshold) = self.doom_loop_threshold
+            && let Some(max) = self.max_iterations
+            && threshold >= max
+        {
+            return Err(ConfigValidationError::DoomLoopInconsistent {
+                threshold,
+                max,
+            });
+        }
+        if let Some(interval) = self.context_loop_interval {
+            if interval == 0 {
+                return Err(ConfigValidationError::ContextLoopInterval {
+                    interval,
+                    max: self.max_iterations,
+                });
+            }
+            if let Some(max) = self.max_iterations
+                && interval > max
+            {
+                return Err(ConfigValidationError::ContextLoopInterval {
+                    interval,
+                    max: Some(max),
+                });
+            }
+        }
+        if let Some(ref effort) = self.reasoning_effort
+            && !matches!(effort.as_str(), "low" | "medium" | "high")
+        {
+            return Err(ConfigValidationError::UnknownReasoningEffort(effort.clone()));
+        }
+        Ok(())
     }
 
     /// Merge project config into an AgentConfig.
@@ -233,6 +324,167 @@ fn parse_agent_file(content: &str) -> Option<CustomAgentDef> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── validate() — per-field error coverage ────────────────────
+
+    #[test]
+    fn validate_accepts_all_none_defaults() {
+        let cfg = ProjectConfig::default();
+        assert_eq!(cfg.validate(), Ok(()));
+    }
+
+    #[test]
+    fn validate_rejects_negative_temperature() {
+        let cfg = ProjectConfig {
+            temperature: Some(-0.1),
+            ..ProjectConfig::default()
+        };
+        assert_eq!(
+            cfg.validate(),
+            Err(ConfigValidationError::TemperatureOutOfRange(-0.1))
+        );
+    }
+
+    #[test]
+    fn validate_rejects_temperature_above_two() {
+        let cfg = ProjectConfig {
+            temperature: Some(2.5),
+            ..ProjectConfig::default()
+        };
+        assert_eq!(
+            cfg.validate(),
+            Err(ConfigValidationError::TemperatureOutOfRange(2.5))
+        );
+    }
+
+    #[test]
+    fn validate_accepts_temperature_at_boundary() {
+        for t in [0.0, 1.0, 2.0] {
+            let cfg = ProjectConfig {
+                temperature: Some(t),
+                ..ProjectConfig::default()
+            };
+            assert_eq!(cfg.validate(), Ok(()));
+        }
+    }
+
+    #[test]
+    fn validate_rejects_zero_max_iterations() {
+        let cfg = ProjectConfig {
+            max_iterations: Some(0),
+            ..ProjectConfig::default()
+        };
+        assert_eq!(
+            cfg.validate(),
+            Err(ConfigValidationError::MaxIterationsOutOfRange(0))
+        );
+    }
+
+    #[test]
+    fn validate_rejects_huge_max_iterations() {
+        let cfg = ProjectConfig {
+            max_iterations: Some(1_000_000),
+            ..ProjectConfig::default()
+        };
+        assert!(matches!(
+            cfg.validate(),
+            Err(ConfigValidationError::MaxIterationsOutOfRange(1_000_000))
+        ));
+    }
+
+    #[test]
+    fn validate_rejects_zero_max_tokens() {
+        let cfg = ProjectConfig {
+            max_tokens: Some(0),
+            ..ProjectConfig::default()
+        };
+        assert_eq!(
+            cfg.validate(),
+            Err(ConfigValidationError::MaxTokensOutOfRange(0))
+        );
+    }
+
+    #[test]
+    fn validate_rejects_doom_loop_ge_max_iterations() {
+        let cfg = ProjectConfig {
+            max_iterations: Some(10),
+            doom_loop_threshold: Some(10),
+            ..ProjectConfig::default()
+        };
+        assert_eq!(
+            cfg.validate(),
+            Err(ConfigValidationError::DoomLoopInconsistent {
+                threshold: 10,
+                max: 10,
+            })
+        );
+    }
+
+    #[test]
+    fn validate_rejects_context_loop_zero_interval() {
+        let cfg = ProjectConfig {
+            context_loop_interval: Some(0),
+            ..ProjectConfig::default()
+        };
+        assert!(matches!(
+            cfg.validate(),
+            Err(ConfigValidationError::ContextLoopInterval { interval: 0, .. })
+        ));
+    }
+
+    #[test]
+    fn validate_rejects_context_loop_greater_than_max() {
+        let cfg = ProjectConfig {
+            max_iterations: Some(5),
+            context_loop_interval: Some(6),
+            ..ProjectConfig::default()
+        };
+        assert!(matches!(
+            cfg.validate(),
+            Err(ConfigValidationError::ContextLoopInterval {
+                interval: 6,
+                max: Some(5),
+            })
+        ));
+    }
+
+    #[test]
+    fn validate_rejects_unknown_reasoning_effort() {
+        let cfg = ProjectConfig {
+            reasoning_effort: Some("ultra".into()),
+            ..ProjectConfig::default()
+        };
+        assert_eq!(
+            cfg.validate(),
+            Err(ConfigValidationError::UnknownReasoningEffort("ultra".into()))
+        );
+    }
+
+    #[test]
+    fn validate_accepts_every_valid_reasoning_effort() {
+        for level in ["low", "medium", "high"] {
+            let cfg = ProjectConfig {
+                reasoning_effort: Some(level.into()),
+                ..ProjectConfig::default()
+            };
+            assert_eq!(cfg.validate(), Ok(()));
+        }
+    }
+
+    #[test]
+    fn load_degrades_to_defaults_on_invalid_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let theo_dir = dir.path().join(".theo");
+        std::fs::create_dir_all(&theo_dir).unwrap();
+        std::fs::write(
+            theo_dir.join("config.toml"),
+            "temperature = -1.0\n",
+        )
+        .unwrap();
+        let cfg = ProjectConfig::load(dir.path());
+        // Invalid field → defaults (all None).
+        assert!(cfg.temperature.is_none());
+    }
 
     #[test]
     fn project_config_missing_returns_defaults() {

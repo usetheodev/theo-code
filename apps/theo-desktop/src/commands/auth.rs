@@ -1,5 +1,6 @@
 use tauri::State;
-use theo_infra_auth::OpenAIAuth;
+// T1.3: facade re-export.
+use theo_application::facade::auth::OpenAIAuth;
 
 use crate::state::AppState;
 
@@ -36,7 +37,7 @@ pub async fn auth_poll_device_flow(
     expires_in: u64,
 ) -> Result<serde_json::Value, String> {
     let auth = OpenAIAuth::with_default_store();
-    let dc = theo_infra_auth::openai::DeviceCode {
+    let dc = theo_application::facade::auth::openai::DeviceCode {
         user_code: String::new(),
         verification_uri: String::new(),
         device_code,

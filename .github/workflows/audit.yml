@@ -1,0 +1,114 @@
+# T6.1 / T4.6 / T1.5 CI wiring — runs every audit gate on every PR.
+#
+# Invariant: if any gate fails, the PR is blocked. Gates that depend on
+# external binaries (semgrep, gitleaks, osv-scanner) install them at the
+# start of the job so the pipeline is self-contained.
+
+name: audit
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  # ── Fast structural gates (no heavy build) ──────────────────────────────
+  structural:
+    name: Structural gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: arch-contract (T1.5)
+        run: bash scripts/check-arch-contract.sh
+      - name: size (T4.6)
+        run: bash scripts/check-sizes.sh
+      - name: unwrap/expect (T2.5)
+        run: bash scripts/check-unwrap.sh
+      - name: panic/todo/unimplemented (T2.6)
+        run: bash scripts/check-panic.sh
+      - name: unsafe SAFETY comments (T2.9)
+        run: bash scripts/check-unsafe.sh
+      - name: secret grep fallback (T6.2)
+        run: bash scripts/check-secrets.sh
+      - name: changelog touched (T6.5)
+        run: bash scripts/check-changelog.sh --base=origin/${{ github.base_ref || 'main' }}
+
+  # ── Rust build + tests ──────────────────────────────────────────────────
+  rust:
+    name: Rust build + tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: build
+        run: cargo build --workspace --exclude theo-code-desktop
+      - name: test
+        run: cargo test --workspace --exclude theo-code-desktop --lib --tests
+
+  # ── UI build + tests ────────────────────────────────────────────────────
+  ui:
+    name: UI build + tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/theo-ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: apps/theo-ui/package-lock.json
+      - run: npm ci
+      - name: npm audit (high)
+        run: npm audit --audit-level=high
+      - name: madge (T0.2 — circular imports)
+        run: npm run audit:circ
+      - name: vitest
+        run: npm test -- --run
+      - name: vite build
+        run: npm run build
+
+  # ── SCA gates ───────────────────────────────────────────────────────────
+  sca:
+    name: SCA (cargo-deny, cargo-audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: install cargo-deny
+        run: cargo install --locked cargo-deny
+      - name: install cargo-audit
+        run: cargo install --locked cargo-audit
+      - name: cargo deny (T3.2)
+        run: cargo deny check
+      - name: cargo audit (T3.1)
+        run: cargo audit --deny warnings
+
+  # ── SAST gates (semgrep + gitleaks) ─────────────────────────────────────
+  sast:
+    name: SAST (semgrep + gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # gitleaks needs history to scan past commits (T6.2 DoD).
+          fetch-depth: 0
+      - name: semgrep (T6.1)
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: .semgrep/theo.yaml
+      - name: gitleaks (T6.2)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -2,14 +2,14 @@
 name = "theo"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [dependencies]
+# T1.2: apps depend only on theo-application + theo-api-contracts + theo-domain
+# per the architecture contract (ADR-010). Lower-layer crates reach apps
+# through the `theo_application::facade` module.
 theo-domain.workspace = true
 theo-application.workspace = true
-theo-agent-runtime.workspace = true
-theo-tooling.workspace = true
-theo-infra-auth = { path = "../../crates/theo-infra-auth" }
-theo-infra-llm = { path = "../../crates/theo-infra-llm" }
 tokio.workspace = true
 async-trait.workspace = true
 clap.workspace = true
@@ -42,6 +42,9 @@ insta.workspace = true
 proptest.workspace = true
 tempfile.workspace = true
 criterion.workspace = true
+# T5.5 — CLI smoke tests
+assert_cmd = "2"
+predicates = "3"
 
 [[bench]]
 name = "streaming_markdown"

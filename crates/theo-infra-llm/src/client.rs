@@ -271,8 +271,13 @@ impl LlmClient {
                     let line = buffer[..newline_pos].to_string();
                     buffer = buffer[newline_pos + 1..].to_string();
 
+                    // T2.7: bound each SSE chunk to the default 10 MiB limit
+                    // before serde allocates.
                     if let Some(data) = line.strip_prefix("data: ")
-                        && let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
+                        && let Ok(json) = theo_domain::safe_json::from_str_bounded::<serde_json::Value>(
+                            data,
+                            theo_domain::safe_json::DEFAULT_JSON_LIMIT,
+                        ) {
                             let event_type =
                                 json.get("type").and_then(|v| v.as_str()).unwrap_or("");
 

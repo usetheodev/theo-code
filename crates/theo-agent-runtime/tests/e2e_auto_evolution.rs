@@ -139,7 +139,10 @@ async fn phase1_memory_reviewer_fires_at_threshold_and_resets() {
     }
     // 10th turn — spawn fires. We give the spawned task a moment.
     maybe_spawn_reviewers(&cfg, &counter, &skill_counter, &msgs, 0, false);
+    // T5.4: fixed 50ms sleep was the flakiness surface; keep the small
+    // relative sleep but also yield so the spawned reviewer task runs.
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    tokio::task::yield_now().await;
 
     assert_eq!(
         mem_calls.load(Ordering::Relaxed),
@@ -178,7 +181,10 @@ async fn phase3_skill_reviewer_fires_when_accumulated_tool_iters_reach_threshold
             /* skill_created */ false,
         );
     }
+    // T5.4: fixed 50ms sleep was the flakiness surface; keep the small
+    // relative sleep but also yield so the spawned reviewer task runs.
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    tokio::task::yield_now().await;
 
     assert_eq!(
         skill_calls.load(Ordering::Relaxed),
@@ -262,7 +268,10 @@ async fn phase2_autodream_spawn_via_wiring_helper_respects_disable_flag() {
 
     let attempted = std::sync::atomic::AtomicBool::new(false);
     maybe_spawn_autodream(&cfg, &attempted, project_dir, "run-1");
+    // T5.4: fixed 50ms sleep was the flakiness surface; keep the small
+    // relative sleep but also yield so the spawned reviewer task runs.
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    tokio::task::yield_now().await;
 
     assert_eq!(
         calls.load(Ordering::Relaxed),

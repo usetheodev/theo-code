@@ -1,0 +1,19 @@
+# Allowlist for `unsafe` blocks that the T2.9 gate
+# (`scripts/check-unsafe.sh`) should tolerate WITHOUT a `// SAFETY:`
+# comment. In practice the list should stay empty — prefer writing the
+# SAFETY comment over adding an entry here.
+#
+# Format:  <path[:line]>|<sunset-YYYY-MM-DD>|<reason>
+
+# ── Rust 2024 `std::env` mutation in `#[cfg(test)]` blocks ───────────
+# Rust 2024 made `std::env::set_var` and `std::env::remove_var` `unsafe`
+# because concurrent modification is UB. In our tests these calls are
+# serialised through `cargo test`'s single-thread setup for the specific
+# test module; no concurrent read races occur. Whole-file allowlist so
+# each new env-manipulating test does not need its own SAFETY comment.
+# Sunset aligned with the Phase-5 test-migration window.
+crates/theo-agent-runtime/src/project_config.rs|2026-10-23|Rust 2024 test-only env::set_var/remove_var; tests run serially.
+crates/theo-tooling/src/sandbox/env_sanitizer.rs|2026-10-23|Rust 2024 test-only env::set_var/remove_var; tests run serially.
+crates/theo-application/src/use_cases/memory_ui.rs|2026-10-23|Rust 2024 test-only env manipulation; tests run serially.
+crates/theo-infra-memory/src/wiki/compiler.rs|2026-10-23|Rust 2024 test-only env manipulation; tests run serially.
+apps/theo-cli/src/permission/prompt.rs|2026-10-23|Rust 2024 test-only env manipulation inside cfg(test) tests.

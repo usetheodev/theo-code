@@ -1,0 +1,68 @@
+# Size allowlist for T4.6 gate (`scripts/check-sizes.sh`).
+#
+# Format:  <path>|<line-limit>|<sunset-YYYY-MM-DD>|<reason>
+#
+# Rules:
+#   - `path` is workspace-relative and exact.
+#   - `line-limit` is the *temporary* maximum while the file is still being
+#     refactored — must be ≥ the current file size so the gate trips when
+#     the file grows further (it cannot grow past this ceiling).
+#   - `sunset` is the absolute date after which the gate will fail even
+#     if the file is still in this list. Dates must be realistic and tied
+#     to a specific task in `docs/audit/remediation-plan.md`.
+#   - New entries require PR review.
+#
+# Rough limit primer: crates max 800 LOC, UI max 400 LOC.
+#
+# Initial allowlist captured 2026-04-23 (Fase 4 baseline). Every entry
+# sunsets at T4.5 deadline 2026-07-23 (3 months) — if the file has not
+# been decomposed by then, the gate fails and forces action.
+
+# ── Top-12 god files (>1000 LOC; highest priority T4.5) ────────────────
+crates/theo-agent-runtime/src/run_engine.rs|2600|2026-07-23|T4.1 (execute_with_history extraction)
+crates/theo-engine-retrieval/src/wiki/generator.rs|2100|2026-07-23|T4.5 god file
+crates/theo-engine-parser/src/extractors/language_behavior.rs|1800|2026-07-23|T4.5 god file
+crates/theo-application/src/use_cases/graph_context_service.rs|1800|2026-07-23|T4.5 god file
+crates/theo-engine-parser/src/types.rs|1700|2026-07-23|T4.5 god file
+crates/theo-engine-retrieval/src/assembly.rs|1700|2026-07-23|T4.5 god file
+crates/theo-engine-graph/src/cluster.rs|1650|2026-07-23|T4.5 god file
+crates/theo-engine-retrieval/src/file_retriever.rs|1500|2026-07-23|T4.5 god file
+crates/theo-engine-parser/src/extractors/symbols.rs|1450|2026-07-23|T4.5 god file
+crates/theo-engine-parser/src/symbol_table.rs|1400|2026-07-23|T4.5 god file
+crates/theo-domain/src/episode.rs|1400|2026-07-23|T4.5 god file
+apps/theo-cli/src/tui/app.rs|1300|2026-07-23|T4.3 (TUI update refactor)
+
+# ── Files 800–1500 LOC (broader Phase 4 scope) ─────────────────────────
+crates/theo-engine-retrieval/src/search.rs|1300|2026-07-23|Phase 4 debt
+crates/theo-engine-parser/src/import_resolver.rs|1300|2026-07-23|Phase 4 debt
+crates/theo-agent-runtime/src/pilot.rs|1250|2026-07-23|Phase 4 debt
+crates/theo-engine-parser/src/extractors/data_models.rs|1200|2026-07-23|Phase 4 debt
+crates/theo-engine-parser/src/extractors/csharp.rs|1200|2026-07-23|Phase 4 debt
+crates/theo-engine-retrieval/src/wiki/runtime.rs|1100|2026-07-23|Phase 4 debt
+crates/theo-infra-llm/src/providers/anthropic.rs|1100|2026-07-23|Phase 4 debt
+crates/theo-domain/src/tool.rs|1100|2026-07-23|Phase 4 debt
+crates/theo-agent-runtime/src/tool_bridge.rs|1100|2026-07-23|Phase 4 debt
+crates/theo-agent-runtime/src/memory_lifecycle.rs|1050|2026-07-23|Phase 4 debt
+apps/theo-cli/src/main.rs|1050|2026-07-23|Phase 4 debt + T1.2 decouple
+crates/theo-application/src/use_cases/pipeline.rs|1000|2026-07-23|Phase 4 debt
+crates/theo-engine-parser/src/extractors/python.rs|1000|2026-07-23|Phase 4 debt
+crates/theo-infra-llm/src/providers/openai.rs|1000|2026-07-23|Phase 4 debt
+crates/theo-engine-parser/src/extractors/php.rs|1000|2026-07-23|Phase 4 debt
+crates/theo-application/src/use_cases/context_assembler.rs|950|2026-07-23|Phase 4 debt
+crates/theo-engine-retrieval/src/tantivy_search.rs|950|2026-07-23|Phase 4 debt
+crates/theo-tooling/src/read/mod.rs|970|2026-07-23|Phase 4 debt (T2.3 adoption raised ceiling by 20 LOC for canonicalize hardening)
+crates/theo-engine-parser/src/extractors/typescript.rs|950|2026-07-23|Phase 4 debt
+crates/theo-agent-runtime/src/session_tree.rs|950|2026-07-23|Phase 4 debt
+crates/theo-engine-graph/src/bridge.rs|900|2026-07-23|Phase 4 debt
+crates/theo-engine-parser/src/tree_sitter.rs|900|2026-07-23|Phase 4 debt
+crates/theo-engine-graph/src/git.rs|900|2026-07-23|Phase 4 debt
+crates/theo-engine-retrieval/src/wiki/model.rs|900|2026-07-23|Phase 4 debt
+crates/theo-tooling/src/apply_patch/mod.rs|920|2026-07-23|Phase 4 debt (T2.3 adoption raised ceiling by ~20 LOC for canonicalize + permission hardening)
+crates/theo-agent-runtime/src/observability/report.rs|900|2026-07-23|Phase 4 debt
+crates/theo-infra-memory/src/security.rs|850|2026-07-23|Phase 4 debt
+
+# ── UI (>400 LOC) ──────────────────────────────────────────────────────
+apps/theo-ui/src/components/ui/sidebar.tsx|800|2026-07-23|T4.4 follow-up (third-party UI derived)
+# apps/theo-ui/src/features/settings/pages/SettingsPage.tsx — decomposed
+# in T4.4 into useSettings hook + 7 section sub-components; page is now
+# 83 LOC, well under the 400-LOC UI limit. Entry removed 2026-04-23.

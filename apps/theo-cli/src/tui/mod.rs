@@ -29,12 +29,13 @@ use futures::FutureExt;
 use ratatui::prelude::*;
 use tokio::sync::mpsc;
 
-use theo_agent_runtime::config::{AgentConfig, AgentMode, system_prompt_for_mode};
-use theo_agent_runtime::event_bus::EventBus;
+// T1.2: route runtime types through the theo-application facade.
+use theo_application::facade::agent::config::{AgentConfig, AgentMode, system_prompt_for_mode};
+use theo_application::facade::agent::EventBus;
 #[allow(deprecated)]
-use theo_agent_runtime::AgentLoop;
-use theo_infra_llm::types::Message;
-use theo_tooling::registry::create_default_registry;
+use theo_application::facade::agent::AgentLoop;
+use theo_application::facade::llm::Message;
+use theo_application::facade::tooling::create_default_registry;
 
 use app::{Msg, TuiState};
 
@@ -223,7 +224,7 @@ pub async fn run(
                                     // Login must run inline (not via app::update)
                                     // because it needs async IO + force draw
                                     app::update(&mut state, cmd_msg); // shows "Starting..."
-                                    let auth = theo_infra_auth::OpenAIAuth::with_default_store();
+                                    let auth = theo_application::facade::auth::OpenAIAuth::with_default_store();
 
                                     if let Ok(Some(tokens)) = auth.get_tokens()
                                         && !tokens.is_expired() {
@@ -288,12 +289,12 @@ pub async fn run(
                                     let server_url = if let Msg::LoginServer(ref u) = cmd_msg { u.clone() } else { unreachable!() };
                                     app::update(&mut state, cmd_msg);
                                     let http = reqwest::Client::new();
-                                    let config = theo_infra_auth::device_flow::DeviceFlowConfig::new(&server_url);
+                                    let config = theo_application::facade::auth::device_flow::DeviceFlowConfig::new(&server_url);
 
                                     app::update(&mut state, Msg::Notify("Requesting device code...".into()));
                                     terminal.draw(|frame| view::draw(frame, &state))?;
 
-                                    match theo_infra_auth::device_flow::start_device_flow(&http, &config).await {
+                                    match theo_application::facade::auth::device_flow::start_device_flow(&http, &config).await {
                                         Ok(code) => {
                                             app::update(&mut state, Msg::Notify("─────────────────────────────────────".into()));
                                             app::update(&mut state, Msg::Notify(format!("1. Open: {}", code.verification_url)));
@@ -316,9 +317,12 @@ pub async fn run(
                                             let poll_code = code.clone();
                                             tokio::spawn(async move {
                                                 let http = reqwest::Client::new();
-                                                match theo_infra_auth::device_flow::poll_device_flow(&http, &poll_config, &poll_code).await {
+                                                match theo_application::facade::auth::device_flow::poll_device_flow(&http, &poll_config, &poll_code).await {
                                                     Ok(tokens) => {
-                                                        // Set the access token as env var for the agent
+                                                        // Set the access token as env var for the agent.
+                                                        // SAFETY: the TUI runtime owns the process-wide env table
+                                                        // and this call happens on the single render-loop task;
+                                                        // no other thread reads/writes env vars concurrently.
                                                         unsafe { std::env::set_var("OPENAI_API_KEY", &tokens.access_token); }
                                                         let _ = poll_tx.send(Msg::LoginComplete("✓ Authenticated! Provider ready.".into())).await;
                                                     }
@@ -355,7 +359,7 @@ pub async fn run(
                     let arg = arg.clone();
                     tokio::spawn(async move {
                         let memory_root = dirs_path().join("memory");
-                        let store = theo_tooling::memory::FileMemoryStore::for_project(&memory_root, &project_dir);
+                        let store = theo_application::facade::tooling::memory::FileMemoryStore::for_project(&memory_root, &project_dir);
                         let result = if arg.is_empty() || arg == "list" {
                             match store.list().await {
                                 Ok(memories) if memories.is_empty() => "No memories for this project.".to_string(),
@@ -392,7 +396,7 @@ pub async fn run(
                 }
                 Msg::SkillsCommand => {
                     let project_dir = project_dir.clone();
-                    let mut registry = theo_agent_runtime::skill::SkillRegistry::new();
+                    let mut registry = theo_application::facade::agent::skill::SkillRegistry::new();
                     registry.load_bundled();
                     let skills_dir = project_dir.join(".theo").join("skills");
                     if skills_dir.exists() {
@@ -511,6 +515,8 @@ pub async fn run(
         // Toggle mouse capture for copy mode
         // When copy_mode is on, disable mouse capture so terminal handles selection
         static mut LAST_COPY_MODE: bool = false;
+        // SAFETY: `LAST_COPY_MODE` is read and written from exactly one task —
+        // the single render-loop future. No concurrent access possible.
         unsafe {
             if state.copy_mode != LAST_COPY_MODE {
                 if state.copy_mode {

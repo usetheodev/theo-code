@@ -421,7 +421,10 @@ pub fn from_chunk(chunk: &str) -> Result<CommonChunk, String> {
         .strip_prefix("data: ")
         .ok_or_else(|| chunk.to_string())?;
 
-    let json: Value = serde_json::from_str(data).map_err(|_| chunk.to_string())?;
+    // T2.7: bound the SSE chunk to 10 MiB.
+    let json: Value =
+        theo_domain::safe_json::from_str_bounded(data, theo_domain::safe_json::DEFAULT_JSON_LIMIT)
+            .map_err(|_| chunk.to_string())?;
 
     let choices = json.get("choices").and_then(|c| c.as_array());
     if choices.is_none() || choices.unwrap().is_empty() {

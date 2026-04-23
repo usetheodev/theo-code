@@ -1,0 +1,1003 @@
+Crate:     protobuf
+Version:   3.7.1
+Title:     Crash due to uncontrolled recursion in protobuf crate
+Date:      2024-12-12
+ID:        RUSTSEC-2024-0437
+URL:       https://rustsec.org/advisories/RUSTSEC-2024-0437
+Solution:  Upgrade to >=3.7.2
+Dependency tree:
+protobuf 3.7.1
+├── theo-engine-graph 0.1.0
+│   ├── theo-engine-retrieval 0.1.0
+│   │   ├── theo-infra-memory 0.1.0
+│   │   │   └── theo-application 0.1.0
+│   │   │       ├── theo-engine-retrieval 0.1.0
+│   │   │       ├── theo-code-desktop 0.1.0
+│   │   │       └── theo 0.1.0
+│   │   └── theo-application 0.1.0
+│   └── theo-application 0.1.0
+└── scip 0.5.2
+    └── theo-engine-graph 0.1.0
+
+Crate:     rustls-webpki
+Version:   0.103.12
+Title:     Reachable panic in certificate revocation list parsing
+Date:      2026-04-22
+ID:        RUSTSEC-2026-0104
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0104
+Solution:  Upgrade to >=0.103.13, <0.104.0-alpha.1 OR >=0.104.0-alpha.7
+Dependency tree:
+rustls-webpki 0.103.12
+└── rustls 0.23.38
+    ├── ureq 2.12.1
+    │   ├── ort-sys 2.0.0-rc.9
+    │   │   ├── ort 2.0.0-rc.9
+    │   │   │   └── fastembed 4.9.1
+    │   │   │       └── theo-engine-retrieval 0.1.0
+    │   │   │           ├── theo-infra-memory 0.1.0
+    │   │   │           │   └── theo-application 0.1.0
+    │   │   │           │       ├── theo-engine-retrieval 0.1.0
+    │   │   │           │       ├── theo-code-desktop 0.1.0
+    │   │   │           │       └── theo 0.1.0
+    │   │   │           └── theo-application 0.1.0
+    │   │   └── fastembed 4.9.1
+    │   └── hf-hub 0.4.3
+    │       └── fastembed 4.9.1
+    ├── tokio-rustls 0.26.4
+    │   ├── reqwest 0.12.28
+    │   │   ├── theo-tooling 0.1.0
+    │   │   │   ├── theo-code-desktop 0.1.0
+    │   │   │   ├── theo-application 0.1.0
+    │   │   │   ├── theo-agent-runtime 0.1.0
+    │   │   │   │   ├── theo-code-desktop 0.1.0
+    │   │   │   │   ├── theo-application 0.1.0
+    │   │   │   │   └── theo 0.1.0
+    │   │   │   └── theo 0.1.0
+    │   │   ├── theo-infra-llm 0.1.0
+    │   │   │   ├── theo-code-desktop 0.1.0
+    │   │   │   ├── theo-application 0.1.0
+    │   │   │   ├── theo-agent-runtime 0.1.0
+    │   │   │   └── theo 0.1.0
+    │   │   ├── theo-infra-auth 0.1.0
+    │   │   │   ├── theo-code-desktop 0.1.0
+    │   │   │   ├── theo-application 0.1.0
+    │   │   │   ├── theo-agent-runtime 0.1.0
+    │   │   │   └── theo 0.1.0
+    │   │   ├── theo 0.1.0
+    │   │   └── hf-hub 0.4.3
+    │   └── hyper-rustls 0.27.9
+    │       └── reqwest 0.12.28
+    ├── reqwest 0.12.28
+    ├── quinn-proto 0.11.14
+    │   └── quinn 0.11.9
+    │       └── reqwest 0.12.28
+    ├── quinn 0.11.9
+    └── hyper-rustls 0.27.9
+
+Crate:     atk
+Version:   0.18.2
+Warning:   unmaintained
+Title:     gtk-rs GTK3 bindings - no longer maintained
+Date:      2024-03-04
+ID:        RUSTSEC-2024-0413
+URL:       https://rustsec.org/advisories/RUSTSEC-2024-0413
+Dependency tree:
+atk 0.18.2
+└── gtk 0.18.2
+    ├── wry 0.54.4
+    │   └── tauri-runtime-wry 2.10.1
+    │       └── tauri 2.10.3
+    │           ├── theo-code-desktop 0.1.0
+    │           ├── tauri-plugin-shell 2.3.5
+    │           │   └── theo-code-desktop 0.1.0
+    │           ├── tauri-plugin-fs 2.5.0
+    │           │   └── tauri-plugin-dialog 2.7.0
+    │           │       └── theo-code-desktop 0.1.0
+    │           └── tauri-plugin-dialog 2.7.0
+    ├── webkit2gtk 2.0.2
+    │   ├── wry 0.54.4
+    │   ├── tauri-runtime-wry 2.10.1
+    │   ├── tauri-runtime 2.10.1
+    │   │   ├── tauri-runtime-wry 2.10.1
+    │   │   └── tauri 2.10.3
+    │   └── tauri 2.10.3
+    ├── tauri-runtime-wry 2.10.1
+    ├── tauri-runtime 2.10.1
+    ├── tauri 2.10.3
+    ├── tao 0.34.8
+    │   └── tauri-runtime-wry 2.10.1
+    ├── muda 0.17.2
+    │   ├── tray-icon 0.21.3
+    │   │   └── tauri 2.10.3
+    │   └── tauri 2.10.3
+    └── libappindicator 0.9.0
+        └── tray-icon 0.21.3
+
+Crate:     atk-sys
+Version:   0.18.2
+Warning:   unmaintained
+Title:     gtk-rs GTK3 bindings - no longer maintained
+Date:      2024-03-04
+ID:        RUSTSEC-2024-0416
+URL:       https://rustsec.org/advisories/RUSTSEC-2024-0416
+Dependency tree:
+atk-sys 0.18.2
+├── gtk-sys 0.18.2
+│   ├── webkit2gtk-sys 2.0.2
+│   │   ├── wry 0.54.4
+│   │   │   └── tauri-runtime-wry 2.10.1
+│   │   │       └── tauri 2.10.3
+│   │   │           ├── theo-code-desktop 0.1.0
+│   │   │           ├── tauri-plugin-shell 2.3.5
+│   │   │           │   └── theo-code-desktop 0.1.0
+│   │   │           ├── tauri-plugin-fs 2.5.0
+│   │   │           │   └── tauri-plugin-dialog 2.7.0
+│   │   │           │       └── theo-code-desktop 0.1.0
+│   │   │           └── tauri-plugin-dialog 2.7.0
+│   │   └── webkit2gtk 2.0.2
+│   │       ├── wry 0.54.4
+│   │       ├── tauri-runtime-wry 2.10.1
+│   │       ├── tauri-runtime 2.10.1
+│   │       │   ├── tauri-runtime-wry 2.10.1
+│   │       │   └── tauri 2.10.3
+│   │       └── tauri 2.10.3
+│   ├── webkit2gtk 2.0.2
+│   ├── rfd 0.16.0
+│   │   └── tauri-plugin-dialog 2.7.0
+│   ├── libappindicator-sys 0.9.0
+│   │   └── libappindicator 0.9.0
+│   │       └── tray-icon 0.21.3
+│   │           └── tauri 2.10.3
+│   ├── libappindicator 0.9.0
+│   └── gtk 0.18.2
+│       ├── wry 0.54.4
+│       ├── webkit2gtk 2.0.2
+│       ├── tauri-runtime-wry 2.10.1
+│       ├── tauri-runtime 2.10.1
+│       ├── tauri 2.10.3
+│       ├── tao 0.34.8
+│       │   └── tauri-runtime-wry 2.10.1
+│       ├── muda 0.17.2
+│       │   ├── tray-icon 0.21.3
+│       │   └── tauri 2.10.3
+│       └── libappindicator 0.9.0
+└── atk 0.18.2
+    └── gtk 0.18.2
+
+Crate:     bincode
+Version:   1.3.3
+Warning:   unmaintained
+Title:     Bincode is unmaintained
+Date:      2025-12-16
+ID:        RUSTSEC-2025-0141
+URL:       https://rustsec.org/advisories/RUSTSEC-2025-0141
+Dependency tree:
+bincode 1.3.3
+├── theo-engine-retrieval 0.1.0
+│   ├── theo-infra-memory 0.1.0
+│   │   └── theo-application 0.1.0
+│   │       ├── theo-engine-retrieval 0.1.0
+│   │       ├── theo-code-desktop 0.1.0
+│   │       └── theo 0.1.0
+│   └── theo-application 0.1.0
+├── theo-engine-graph 0.1.0
+│   ├── theo-engine-retrieval 0.1.0
+│   └── theo-application 0.1.0
+├── theo-application 0.1.0
+└── syntect 5.3.0
+    └── theo 0.1.0
+
+Crate:     fxhash
+Version:   0.2.1
+Warning:   unmaintained
+Title:     fxhash - no longer maintained
+Date:      2025-09-05
+ID:        RUSTSEC-2025-0057
+URL:       https://rustsec.org/advisories/RUSTSEC-2025-0057
+Dependency tree:
+fxhash 0.2.1
+└── selectors 0.24.0
+    └── kuchikiki 0.8.8-speedreader
+        └── tauri-utils 2.8.3
+            ├── tauri-runtime-wry 2.10.1
+            │   └── tauri 2.10.3
+            │       ├── theo-code-desktop 0.1.0
+            │       ├── tauri-plugin-shell 2.3.5
+            │       │   └── theo-code-desktop 0.1.0
+            │       ├── tauri-plugin-fs 2.5.0
+            │       │   └── tauri-plugin-dialog 2.7.0
+            │       │       └── theo-code-desktop 0.1.0
+            │       └── tauri-plugin-dialog 2.7.0
+            ├── tauri-runtime 2.10.1
+            │   ├── tauri-runtime-wry 2.10.1
+            │   └── tauri 2.10.3
+            ├── tauri-plugin-fs 2.5.0
+            ├── tauri-plugin 2.5.4
+            │   ├── tauri-plugin-shell 2.3.5
+            │   ├── tauri-plugin-fs 2.5.0
+            │   └── tauri-plugin-dialog 2.7.0
+            ├── tauri-macros 2.5.5
+            │   └── tauri 2.10.3
+            ├── tauri-codegen 2.5.5
+            │   └── tauri-macros 2.5.5
+            ├── tauri-build 2.5.6
+            │   ├── theo-code-desktop 0.1.0
+            │   └── tauri 2.10.3
+            └── tauri 2.10.3
+
+Crate:     gdk
+Version:   0.18.2
+Warning:   unmaintained
+Title:     gtk-rs GTK3 bindings - no longer maintained
+Date:      2024-03-04
+ID:        RUSTSEC-2024-0412
+URL:       https://rustsec.org/advisories/RUSTSEC-2024-0412
+Dependency tree:
+gdk 0.18.2
+├── webkit2gtk 2.0.2
+│   ├── wry 0.54.4
+│   │   └── tauri-runtime-wry 2.10.1
+│   │       └── tauri 2.10.3
+│   │           ├── theo-code-desktop 0.1.0
+│   │           ├── tauri-plugin-shell 2.3.5
+│   │           │   └── theo-code-desktop 0.1.0
+│   │           ├── tauri-plugin-fs 2.5.0
+│   │           │   └── tauri-plugin-dialog 2.7.0
+│   │           │       └── theo-code-desktop 0.1.0
+│   │           └── tauri-plugin-dialog 2.7.0
+│   ├── tauri-runtime-wry 2.10.1
+│   ├── tauri-runtime 2.10.1
+│   │   ├── tauri-runtime-wry 2.10.1
+│   │   └── tauri 2.10.3
+│   └── tauri 2.10.3
+├── gtk 0.18.2
+│   ├── wry 0.54.4
+│   ├── webkit2gtk 2.0.2
+│   ├── tauri-runtime-wry 2.10.1
+│   ├── tauri-runtime 2.10.1
+│   ├── tauri 2.10.3
+│   ├── tao 0.34.8
+│   │   └── tauri-runtime-wry 2.10.1
+│   ├── muda 0.17.2
+│   │   ├── tray-icon 0.21.3
+│   │   │   └── tauri 2.10.3
+│   │   └── tauri 2.10.3
+│   └── libappindicator 0.9.0
+│       └── tray-icon 0.21.3
+└── gdkx11 0.18.2
+    └── wry 0.54.4
+
+Crate:     gdk-sys
+Version:   0.18.2
+Warning:   unmaintained
+Title:     gtk-rs GTK3 bindings - no longer maintained
+Date:      2024-03-04
+ID:        RUSTSEC-2024-0418
+URL:       https://rustsec.org/advisories/RUSTSEC-2024-0418
+Dependency tree:
+gdk-sys 0.18.2
+├── webkit2gtk-sys 2.0.2
+│   ├── wry 0.54.4
+│   │   └── tauri-runtime-wry 2.10.1
+│   │       └── tauri 2.10.3
+│   │           ├── theo-code-desktop 0.1.0
+│   │           ├── tauri-plugin-shell 2.3.5
+│   │           │   └── theo-code-desktop 0.1.0
+│   │           ├── tauri-plugin-fs 2.5.0
+│   │           │   └── tauri-plugin-dialog 2.7.0
+│   │           │       └── theo-code-desktop 0.1.0
+│   │           └── tauri-plugin-dialog 2.7.0
+│   └── webkit2gtk 2.0.2
+│       ├── wry 0.54.4
+│       ├── tauri-runtime-wry 2.10.1
+│       ├── tauri-runtime 2.10.1
+│       │   ├── tauri-runtime-wry 2.10.1
+│       │   └── tauri 2.10.3
+│       └── tauri 2.10.3
+├── webkit2gtk 2.0.2
+├── gtk-sys 0.18.2
+│   ├── webkit2gtk-sys 2.0.2
+│   ├── webkit2gtk 2.0.2
+│   ├── rfd 0.16.0
+│   │   └── tauri-plugin-dialog 2.7.0
+│   ├── libappindicator-sys 0.9.0
+│   │   └── libappindicator 0.9.0
+│   │       └── tray-icon 0.21.3
+│   │           └── tauri 2.10.3
+│   ├── libappindicator 0.9.0
+│   └── gtk 0.18.2
+│       ├── wry 0.54.4
+│       ├── webkit2gtk 2.0.2
+│       ├── tauri-runtime-wry 2.10.1
+│       ├── tauri-runtime 2.10.1
+│       ├── tauri 2.10.3
+│       ├── tao 0.34.8
+│       │   └── tauri-runtime-wry 2.10.1
+│       ├── muda 0.17.2
+│       │   ├── tray-icon 0.21.3
+│       │   └── tauri 2.10.3
+│       └── libappindicator 0.9.0
+├── gdkx11-sys 0.18.2
+│   ├── tao 0.34.8
+│   └── gdkx11 0.18.2
+│       └── wry 0.54.4
+├── gdkwayland-sys 0.18.2
+│   └── tao 0.34.8
+└── gdk 0.18.2
+    ├── webkit2gtk 2.0.2
+    ├── gtk 0.18.2
+    └── gdkx11 0.18.2
+
+Crate:     gdkwayland-sys
+Version:   0.18.2
+Warning:   unmaintained
+Title:     gtk-rs GTK3 bindings - no longer maintained
+Date:      2024-03-04
+ID:        RUSTSEC-2024-0411
+URL:       https://rustsec.org/advisories/RUSTSEC-2024-0411
+Dependency tree:
+gdkwayland-sys 0.18.2
+└── tao 0.34.8
+    └── tauri-runtime-wry 2.10.1
+        └── tauri 2.10.3
+            ├── theo-code-desktop 0.1.0
+            ├── tauri-plugin-shell 2.3.5
+            │   └── theo-code-desktop 0.1.0
+            ├── tauri-plugin-fs 2.5.0
+            │   └── tauri-plugin-dialog 2.7.0
+            │       └── theo-code-desktop 0.1.0
+            └── tauri-plugin-dialog 2.7.0
+
+Crate:     gdkx11
+Version:   0.18.2
+Warning:   unmaintained
+Title:     gtk-rs GTK3 bindings - no longer maintained
+Date:      2024-03-04
+ID:        RUSTSEC-2024-0417
+URL:       https://rustsec.org/advisories/RUSTSEC-2024-0417
+Dependency tree:
+gdkx11 0.18.2
+└── wry 0.54.4
+    └── tauri-runtime-wry 2.10.1
+        └── tauri 2.10.3
+            ├── theo-code-desktop 0.1.0
+            ├── tauri-plugin-shell 2.3.5
+            │   └── theo-code-desktop 0.1.0
+            ├── tauri-plugin-fs 2.5.0
+            │   └── tauri-plugin-dialog 2.7.0
+            │       └── theo-code-desktop 0.1.0
+            └── tauri-plugin-dialog 2.7.0
+
+Crate:     gdkx11-sys
+Version:   0.18.2
+Warning:   unmaintained
+Title:     gtk-rs GTK3 bindings - no longer maintained
+Date:      2024-03-04
+ID:        RUSTSEC-2024-0414
+URL:       https://rustsec.org/advisories/RUSTSEC-2024-0414
+Dependency tree:
+gdkx11-sys 0.18.2
+├── tao 0.34.8
+│   └── tauri-runtime-wry 2.10.1
+│       └── tauri 2.10.3
+│           ├── theo-code-desktop 0.1.0
+│           ├── tauri-plugin-shell 2.3.5
+│           │   └── theo-code-desktop 0.1.0
+│           ├── tauri-plugin-fs 2.5.0
+│           │   └── tauri-plugin-dialog 2.7.0
+│           │       └── theo-code-desktop 0.1.0
+│           └── tauri-plugin-dialog 2.7.0
+└── gdkx11 0.18.2
+    └── wry 0.54.4
+        └── tauri-runtime-wry 2.10.1
+
+Crate:     gtk
+Version:   0.18.2
+Warning:   unmaintained
+Title:     gtk-rs GTK3 bindings - no longer maintained
+Date:      2024-03-04
+ID:        RUSTSEC-2024-0415
+URL:       https://rustsec.org/advisories/RUSTSEC-2024-0415
+Dependency tree:
+gtk 0.18.2
+├── wry 0.54.4
+│   └── tauri-runtime-wry 2.10.1
+│       └── tauri 2.10.3
+│           ├── theo-code-desktop 0.1.0
+│           ├── tauri-plugin-shell 2.3.5
+│           │   └── theo-code-desktop 0.1.0
+│           ├── tauri-plugin-fs 2.5.0
+│           │   └── tauri-plugin-dialog 2.7.0
+│           │       └── theo-code-desktop 0.1.0
+│           └── tauri-plugin-dialog 2.7.0
+├── webkit2gtk 2.0.2
+│   ├── wry 0.54.4
+│   ├── tauri-runtime-wry 2.10.1
+│   ├── tauri-runtime 2.10.1
+│   │   ├── tauri-runtime-wry 2.10.1
+│   │   └── tauri 2.10.3
+│   └── tauri 2.10.3
+├── tauri-runtime-wry 2.10.1
+├── tauri-runtime 2.10.1
+├── tauri 2.10.3
+├── tao 0.34.8
+│   └── tauri-runtime-wry 2.10.1
+├── muda 0.17.2
+│   ├── tray-icon 0.21.3
+│   │   └── tauri 2.10.3
+│   └── tauri 2.10.3
+└── libappindicator 0.9.0
+    └── tray-icon 0.21.3
+
+Crate:     gtk-sys
+Version:   0.18.2
+Warning:   unmaintained
+Title:     gtk-rs GTK3 bindings - no longer maintained
+Date:      2024-03-04
+ID:        RUSTSEC-2024-0420
+URL:       https://rustsec.org/advisories/RUSTSEC-2024-0420
+Dependency tree:
+gtk-sys 0.18.2
+├── webkit2gtk-sys 2.0.2
+│   ├── wry 0.54.4
+│   │   └── tauri-runtime-wry 2.10.1
+│   │       └── tauri 2.10.3
+│   │           ├── theo-code-desktop 0.1.0
+│   │           ├── tauri-plugin-shell 2.3.5
+│   │           │   └── theo-code-desktop 0.1.0
+│   │           ├── tauri-plugin-fs 2.5.0
+│   │           │   └── tauri-plugin-dialog 2.7.0
+│   │           │       └── theo-code-desktop 0.1.0
+│   │           └── tauri-plugin-dialog 2.7.0
+│   └── webkit2gtk 2.0.2
+│       ├── wry 0.54.4
+│       ├── tauri-runtime-wry 2.10.1
+│       ├── tauri-runtime 2.10.1
+│       │   ├── tauri-runtime-wry 2.10.1
+│       │   └── tauri 2.10.3
+│       └── tauri 2.10.3
+├── webkit2gtk 2.0.2
+├── rfd 0.16.0
+│   └── tauri-plugin-dialog 2.7.0
+├── libappindicator-sys 0.9.0
+│   └── libappindicator 0.9.0
+│       └── tray-icon 0.21.3
+│           └── tauri 2.10.3
+├── libappindicator 0.9.0
+└── gtk 0.18.2
+    ├── wry 0.54.4
+    ├── webkit2gtk 2.0.2
+    ├── tauri-runtime-wry 2.10.1
+    ├── tauri-runtime 2.10.1
+    ├── tauri 2.10.3
+    ├── tao 0.34.8
+    │   └── tauri-runtime-wry 2.10.1
+    ├── muda 0.17.2
+    │   ├── tray-icon 0.21.3
+    │   └── tauri 2.10.3
+    └── libappindicator 0.9.0
+
+Crate:     gtk3-macros
+Version:   0.18.2
+Warning:   unmaintained
+Title:     gtk-rs GTK3 bindings - no longer maintained
+Date:      2024-03-04
+ID:        RUSTSEC-2024-0419
+URL:       https://rustsec.org/advisories/RUSTSEC-2024-0419
+Dependency tree:
+gtk3-macros 0.18.2
+└── gtk 0.18.2
+    ├── wry 0.54.4
+    │   └── tauri-runtime-wry 2.10.1
+    │       └── tauri 2.10.3
+    │           ├── theo-code-desktop 0.1.0
+    │           ├── tauri-plugin-shell 2.3.5
+    │           │   └── theo-code-desktop 0.1.0
+    │           ├── tauri-plugin-fs 2.5.0
+    │           │   └── tauri-plugin-dialog 2.7.0
+    │           │       └── theo-code-desktop 0.1.0
+    │           └── tauri-plugin-dialog 2.7.0
+    ├── webkit2gtk 2.0.2
+    │   ├── wry 0.54.4
+    │   ├── tauri-runtime-wry 2.10.1
+    │   ├── tauri-runtime 2.10.1
+    │   │   ├── tauri-runtime-wry 2.10.1
+    │   │   └── tauri 2.10.3
+    │   └── tauri 2.10.3
+    ├── tauri-runtime-wry 2.10.1
+    ├── tauri-runtime 2.10.1
+    ├── tauri 2.10.3
+    ├── tao 0.34.8
+    │   └── tauri-runtime-wry 2.10.1
+    ├── muda 0.17.2
+    │   ├── tray-icon 0.21.3
+    │   │   └── tauri 2.10.3
+    │   └── tauri 2.10.3
+    └── libappindicator 0.9.0
+        └── tray-icon 0.21.3
+
+Crate:     instant
+Version:   0.1.13
+Warning:   unmaintained
+Title:     `instant` is unmaintained
+Date:      2024-09-01
+ID:        RUSTSEC-2024-0384
+URL:       https://rustsec.org/advisories/RUSTSEC-2024-0384
+Dependency tree:
+instant 0.1.13
+└── measure_time 0.8.3
+    └── tantivy 0.22.1
+        └── theo-engine-retrieval 0.1.0
+            ├── theo-infra-memory 0.1.0
+            │   └── theo-application 0.1.0
+            │       ├── theo-engine-retrieval 0.1.0
+            │       ├── theo-code-desktop 0.1.0
+            │       └── theo 0.1.0
+            └── theo-application 0.1.0
+
+Crate:     number_prefix
+Version:   0.4.0
+Warning:   unmaintained
+Title:     number_prefix crate is unmaintained
+Date:      2025-11-17
+ID:        RUSTSEC-2025-0119
+URL:       https://rustsec.org/advisories/RUSTSEC-2025-0119
+Dependency tree:
+number_prefix 0.4.0
+└── indicatif 0.17.11
+    ├── theo 0.1.0
+    └── hf-hub 0.4.3
+        └── fastembed 4.9.1
+            └── theo-engine-retrieval 0.1.0
+                ├── theo-infra-memory 0.1.0
+                │   └── theo-application 0.1.0
+                │       ├── theo-engine-retrieval 0.1.0
+                │       ├── theo-code-desktop 0.1.0
+                │       └── theo 0.1.0
+                └── theo-application 0.1.0
+
+Crate:     paste
+Version:   1.0.15
+Warning:   unmaintained
+Title:     paste - no longer maintained
+Date:      2024-10-07
+ID:        RUSTSEC-2024-0436
+URL:       https://rustsec.org/advisories/RUSTSEC-2024-0436
+Dependency tree:
+paste 1.0.15
+├── tokenizers 0.21.4
+│   └── fastembed 4.9.1
+│       └── theo-engine-retrieval 0.1.0
+│           ├── theo-infra-memory 0.1.0
+│           │   └── theo-application 0.1.0
+│           │       ├── theo-engine-retrieval 0.1.0
+│           │       ├── theo-code-desktop 0.1.0
+│           │       └── theo 0.1.0
+│           └── theo-application 0.1.0
+├── rav1e 0.8.1
+│   └── ravif 0.13.0
+│       └── image 0.25.10
+│           └── fastembed 4.9.1
+├── ratatui 0.29.0
+│   ├── tui-textarea 0.7.0
+│   │   └── theo 0.1.0
+│   └── theo 0.1.0
+└── macro_rules_attribute 0.2.2
+    └── tokenizers 0.21.4
+
+Crate:     proc-macro-error
+Version:   1.0.4
+Warning:   unmaintained
+Title:     proc-macro-error is unmaintained
+Date:      2024-09-01
+ID:        RUSTSEC-2024-0370
+URL:       https://rustsec.org/advisories/RUSTSEC-2024-0370
+Dependency tree:
+proc-macro-error 1.0.4
+├── gtk3-macros 0.18.2
+│   └── gtk 0.18.2
+│       ├── wry 0.54.4
+│       │   └── tauri-runtime-wry 2.10.1
+│       │       └── tauri 2.10.3
+│       │           ├── theo-code-desktop 0.1.0
+│       │           ├── tauri-plugin-shell 2.3.5
+│       │           │   └── theo-code-desktop 0.1.0
+│       │           ├── tauri-plugin-fs 2.5.0
+│       │           │   └── tauri-plugin-dialog 2.7.0
+│       │           │       └── theo-code-desktop 0.1.0
+│       │           └── tauri-plugin-dialog 2.7.0
+│       ├── webkit2gtk 2.0.2
+│       │   ├── wry 0.54.4
+│       │   ├── tauri-runtime-wry 2.10.1
+│       │   ├── tauri-runtime 2.10.1
+│       │   │   ├── tauri-runtime-wry 2.10.1
+│       │   │   └── tauri 2.10.3
+│       │   └── tauri 2.10.3
+│       ├── tauri-runtime-wry 2.10.1
+│       ├── tauri-runtime 2.10.1
+│       ├── tauri 2.10.3
+│       ├── tao 0.34.8
+│       │   └── tauri-runtime-wry 2.10.1
+│       ├── muda 0.17.2
+│       │   ├── tray-icon 0.21.3
+│       │   │   └── tauri 2.10.3
+│       │   └── tauri 2.10.3
+│       └── libappindicator 0.9.0
+│           └── tray-icon 0.21.3
+└── glib-macros 0.18.5
+    └── glib 0.18.5
+        ├── webkit2gtk 2.0.2
+        ├── soup3 0.5.0
+        │   ├── wry 0.54.4
+        │   └── webkit2gtk 2.0.2
+        ├── pango 0.18.3
+        │   ├── gtk 0.18.2
+        │   └── gdk 0.18.2
+        │       ├── webkit2gtk 2.0.2
+        │       ├── gtk 0.18.2
+        │       └── gdkx11 0.18.2
+        │           └── wry 0.54.4
+        ├── libappindicator 0.9.0
+        ├── javascriptcore-rs 1.1.2
+        │   ├── wry 0.54.4
+        │   └── webkit2gtk 2.0.2
+        ├── gtk 0.18.2
+        ├── gio 0.18.4
+        │   ├── webkit2gtk 2.0.2
+        │   ├── soup3 0.5.0
+        │   ├── pango 0.18.3
+        │   ├── gtk 0.18.2
+        │   ├── gdkx11 0.18.2
+        │   ├── gdk-pixbuf 0.18.5
+        │   │   ├── gtk 0.18.2
+        │   │   └── gdk 0.18.2
+        │   └── gdk 0.18.2
+        ├── gdkx11 0.18.2
+        ├── gdk-pixbuf 0.18.5
+        ├── gdk 0.18.2
+        ├── cairo-rs 0.18.5
+        │   ├── webkit2gtk 2.0.2
+        │   ├── gtk 0.18.2
+        │   └── gdk 0.18.2
+        └── atk 0.18.2
+            └── gtk 0.18.2
+
+Crate:     unic-char-property
+Version:   0.9.0
+Warning:   unmaintained
+Title:     `unic-char-property` is unmaintained
+Date:      2025-10-18
+ID:        RUSTSEC-2025-0081
+URL:       https://rustsec.org/advisories/RUSTSEC-2025-0081
+Dependency tree:
+unic-char-property 0.9.0
+└── unic-ucd-ident 0.9.0
+    └── urlpattern 0.3.0
+        └── tauri-utils 2.8.3
+            ├── tauri-runtime-wry 2.10.1
+            │   └── tauri 2.10.3
+            │       ├── theo-code-desktop 0.1.0
+            │       ├── tauri-plugin-shell 2.3.5
+            │       │   └── theo-code-desktop 0.1.0
+            │       ├── tauri-plugin-fs 2.5.0
+            │       │   └── tauri-plugin-dialog 2.7.0
+            │       │       └── theo-code-desktop 0.1.0
+            │       └── tauri-plugin-dialog 2.7.0
+            ├── tauri-runtime 2.10.1
+            │   ├── tauri-runtime-wry 2.10.1
+            │   └── tauri 2.10.3
+            ├── tauri-plugin-fs 2.5.0
+            ├── tauri-plugin 2.5.4
+            │   ├── tauri-plugin-shell 2.3.5
+            │   ├── tauri-plugin-fs 2.5.0
+            │   └── tauri-plugin-dialog 2.7.0
+            ├── tauri-macros 2.5.5
+            │   └── tauri 2.10.3
+            ├── tauri-codegen 2.5.5
+            │   └── tauri-macros 2.5.5
+            ├── tauri-build 2.5.6
+            │   ├── theo-code-desktop 0.1.0
+            │   └── tauri 2.10.3
+            └── tauri 2.10.3
+
+Crate:     unic-char-range
+Version:   0.9.0
+Warning:   unmaintained
+Title:     `unic-char-range` is unmaintained
+Date:      2025-10-18
+ID:        RUSTSEC-2025-0075
+URL:       https://rustsec.org/advisories/RUSTSEC-2025-0075
+Dependency tree:
+unic-char-range 0.9.0
+├── unic-ucd-ident 0.9.0
+│   └── urlpattern 0.3.0
+│       └── tauri-utils 2.8.3
+│           ├── tauri-runtime-wry 2.10.1
+│           │   └── tauri 2.10.3
+│           │       ├── theo-code-desktop 0.1.0
+│           │       ├── tauri-plugin-shell 2.3.5
+│           │       │   └── theo-code-desktop 0.1.0
+│           │       ├── tauri-plugin-fs 2.5.0
+│           │       │   └── tauri-plugin-dialog 2.7.0
+│           │       │       └── theo-code-desktop 0.1.0
+│           │       └── tauri-plugin-dialog 2.7.0
+│           ├── tauri-runtime 2.10.1
+│           │   ├── tauri-runtime-wry 2.10.1
+│           │   └── tauri 2.10.3
+│           ├── tauri-plugin-fs 2.5.0
+│           ├── tauri-plugin 2.5.4
+│           │   ├── tauri-plugin-shell 2.3.5
+│           │   ├── tauri-plugin-fs 2.5.0
+│           │   └── tauri-plugin-dialog 2.7.0
+│           ├── tauri-macros 2.5.5
+│           │   └── tauri 2.10.3
+│           ├── tauri-codegen 2.5.5
+│           │   └── tauri-macros 2.5.5
+│           ├── tauri-build 2.5.6
+│           │   ├── theo-code-desktop 0.1.0
+│           │   └── tauri 2.10.3
+│           └── tauri 2.10.3
+└── unic-char-property 0.9.0
+    └── unic-ucd-ident 0.9.0
+
+Crate:     unic-common
+Version:   0.9.0
+Warning:   unmaintained
+Title:     `unic-common` is unmaintained
+Date:      2025-10-18
+ID:        RUSTSEC-2025-0080
+URL:       https://rustsec.org/advisories/RUSTSEC-2025-0080
+Dependency tree:
+unic-common 0.9.0
+└── unic-ucd-version 0.9.0
+    └── unic-ucd-ident 0.9.0
+        └── urlpattern 0.3.0
+            └── tauri-utils 2.8.3
+                ├── tauri-runtime-wry 2.10.1
+                │   └── tauri 2.10.3
+                │       ├── theo-code-desktop 0.1.0
+                │       ├── tauri-plugin-shell 2.3.5
+                │       │   └── theo-code-desktop 0.1.0
+                │       ├── tauri-plugin-fs 2.5.0
+                │       │   └── tauri-plugin-dialog 2.7.0
+                │       │       └── theo-code-desktop 0.1.0
+                │       └── tauri-plugin-dialog 2.7.0
+                ├── tauri-runtime 2.10.1
+                │   ├── tauri-runtime-wry 2.10.1
+                │   └── tauri 2.10.3
+                ├── tauri-plugin-fs 2.5.0
+                ├── tauri-plugin 2.5.4
+                │   ├── tauri-plugin-shell 2.3.5
+                │   ├── tauri-plugin-fs 2.5.0
+                │   └── tauri-plugin-dialog 2.7.0
+                ├── tauri-macros 2.5.5
+                │   └── tauri 2.10.3
+                ├── tauri-codegen 2.5.5
+                │   └── tauri-macros 2.5.5
+                ├── tauri-build 2.5.6
+                │   ├── theo-code-desktop 0.1.0
+                │   └── tauri 2.10.3
+                └── tauri 2.10.3
+
+Crate:     unic-ucd-ident
+Version:   0.9.0
+Warning:   unmaintained
+Title:     `unic-ucd-ident` is unmaintained
+Date:      2025-10-18
+ID:        RUSTSEC-2025-0100
+URL:       https://rustsec.org/advisories/RUSTSEC-2025-0100
+Dependency tree:
+unic-ucd-ident 0.9.0
+└── urlpattern 0.3.0
+    └── tauri-utils 2.8.3
+        ├── tauri-runtime-wry 2.10.1
+        │   └── tauri 2.10.3
+        │       ├── theo-code-desktop 0.1.0
+        │       ├── tauri-plugin-shell 2.3.5
+        │       │   └── theo-code-desktop 0.1.0
+        │       ├── tauri-plugin-fs 2.5.0
+        │       │   └── tauri-plugin-dialog 2.7.0
+        │       │       └── theo-code-desktop 0.1.0
+        │       └── tauri-plugin-dialog 2.7.0
+        ├── tauri-runtime 2.10.1
+        │   ├── tauri-runtime-wry 2.10.1
+        │   └── tauri 2.10.3
+        ├── tauri-plugin-fs 2.5.0
+        ├── tauri-plugin 2.5.4
+        │   ├── tauri-plugin-shell 2.3.5
+        │   ├── tauri-plugin-fs 2.5.0
+        │   └── tauri-plugin-dialog 2.7.0
+        ├── tauri-macros 2.5.5
+        │   └── tauri 2.10.3
+        ├── tauri-codegen 2.5.5
+        │   └── tauri-macros 2.5.5
+        ├── tauri-build 2.5.6
+        │   ├── theo-code-desktop 0.1.0
+        │   └── tauri 2.10.3
+        └── tauri 2.10.3
+
+Crate:     unic-ucd-version
+Version:   0.9.0
+Warning:   unmaintained
+Title:     `unic-ucd-version` is unmaintained
+Date:      2025-10-18
+ID:        RUSTSEC-2025-0098
+URL:       https://rustsec.org/advisories/RUSTSEC-2025-0098
+Dependency tree:
+unic-ucd-version 0.9.0
+└── unic-ucd-ident 0.9.0
+    └── urlpattern 0.3.0
+        └── tauri-utils 2.8.3
+            ├── tauri-runtime-wry 2.10.1
+            │   └── tauri 2.10.3
+            │       ├── theo-code-desktop 0.1.0
+            │       ├── tauri-plugin-shell 2.3.5
+            │       │   └── theo-code-desktop 0.1.0
+            │       ├── tauri-plugin-fs 2.5.0
+            │       │   └── tauri-plugin-dialog 2.7.0
+            │       │       └── theo-code-desktop 0.1.0
+            │       └── tauri-plugin-dialog 2.7.0
+            ├── tauri-runtime 2.10.1
+            │   ├── tauri-runtime-wry 2.10.1
+            │   └── tauri 2.10.3
+            ├── tauri-plugin-fs 2.5.0
+            ├── tauri-plugin 2.5.4
+            │   ├── tauri-plugin-shell 2.3.5
+            │   ├── tauri-plugin-fs 2.5.0
+            │   └── tauri-plugin-dialog 2.7.0
+            ├── tauri-macros 2.5.5
+            │   └── tauri 2.10.3
+            ├── tauri-codegen 2.5.5
+            │   └── tauri-macros 2.5.5
+            ├── tauri-build 2.5.6
+            │   ├── theo-code-desktop 0.1.0
+            │   └── tauri 2.10.3
+            └── tauri 2.10.3
+
+Crate:     yaml-rust
+Version:   0.4.5
+Warning:   unmaintained
+Title:     yaml-rust is unmaintained.
+Date:      2024-03-20
+ID:        RUSTSEC-2024-0320
+URL:       https://rustsec.org/advisories/RUSTSEC-2024-0320
+Dependency tree:
+yaml-rust 0.4.5
+└── syntect 5.3.0
+    └── theo 0.1.0
+
+Crate:     glib
+Version:   0.18.5
+Warning:   unsound
+Title:     Unsoundness in `Iterator` and `DoubleEndedIterator` impls for `glib::VariantStrIter`
+Date:      2024-03-30
+ID:        RUSTSEC-2024-0429
+URL:       https://rustsec.org/advisories/RUSTSEC-2024-0429
+Dependency tree:
+glib 0.18.5
+├── webkit2gtk 2.0.2
+│   ├── wry 0.54.4
+│   │   └── tauri-runtime-wry 2.10.1
+│   │       └── tauri 2.10.3
+│   │           ├── theo-code-desktop 0.1.0
+│   │           ├── tauri-plugin-shell 2.3.5
+│   │           │   └── theo-code-desktop 0.1.0
+│   │           ├── tauri-plugin-fs 2.5.0
+│   │           │   └── tauri-plugin-dialog 2.7.0
+│   │           │       └── theo-code-desktop 0.1.0
+│   │           └── tauri-plugin-dialog 2.7.0
+│   ├── tauri-runtime-wry 2.10.1
+│   ├── tauri-runtime 2.10.1
+│   │   ├── tauri-runtime-wry 2.10.1
+│   │   └── tauri 2.10.3
+│   └── tauri 2.10.3
+├── soup3 0.5.0
+│   ├── wry 0.54.4
+│   └── webkit2gtk 2.0.2
+├── pango 0.18.3
+│   ├── gtk 0.18.2
+│   │   ├── wry 0.54.4
+│   │   ├── webkit2gtk 2.0.2
+│   │   ├── tauri-runtime-wry 2.10.1
+│   │   ├── tauri-runtime 2.10.1
+│   │   ├── tauri 2.10.3
+│   │   ├── tao 0.34.8
+│   │   │   └── tauri-runtime-wry 2.10.1
+│   │   ├── muda 0.17.2
+│   │   │   ├── tray-icon 0.21.3
+│   │   │   │   └── tauri 2.10.3
+│   │   │   └── tauri 2.10.3
+│   │   └── libappindicator 0.9.0
+│   │       └── tray-icon 0.21.3
+│   └── gdk 0.18.2
+│       ├── webkit2gtk 2.0.2
+│       ├── gtk 0.18.2
+│       └── gdkx11 0.18.2
+│           └── wry 0.54.4
+├── libappindicator 0.9.0
+├── javascriptcore-rs 1.1.2
+│   ├── wry 0.54.4
+│   └── webkit2gtk 2.0.2
+├── gtk 0.18.2
+├── gio 0.18.4
+│   ├── webkit2gtk 2.0.2
+│   ├── soup3 0.5.0
+│   ├── pango 0.18.3
+│   ├── gtk 0.18.2
+│   ├── gdkx11 0.18.2
+│   ├── gdk-pixbuf 0.18.5
+│   │   ├── gtk 0.18.2
+│   │   └── gdk 0.18.2
+│   └── gdk 0.18.2
+├── gdkx11 0.18.2
+├── gdk-pixbuf 0.18.5
+├── gdk 0.18.2
+├── cairo-rs 0.18.5
+│   ├── webkit2gtk 2.0.2
+│   ├── gtk 0.18.2
+│   └── gdk 0.18.2
+└── atk 0.18.2
+    └── gtk 0.18.2
+
+Crate:     lru
+Version:   0.12.5
+Warning:   unsound
+Title:     `IterMut` violates Stacked Borrows by invalidating internal pointer
+Date:      2026-01-07
+ID:        RUSTSEC-2026-0002
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0002
+Dependency tree:
+lru 0.12.5
+├── tantivy 0.22.1
+│   └── theo-engine-retrieval 0.1.0
+│       ├── theo-infra-memory 0.1.0
+│       │   └── theo-application 0.1.0
+│       │       ├── theo-engine-retrieval 0.1.0
+│       │       ├── theo-code-desktop 0.1.0
+│       │       └── theo 0.1.0
+│       └── theo-application 0.1.0
+└── ratatui 0.29.0
+    ├── tui-textarea 0.7.0
+    │   └── theo 0.1.0
+    └── theo 0.1.0
+
+Crate:     rand
+Version:   0.7.3
+Warning:   unsound
+Title:     Rand is unsound with a custom logger using `rand::rng()`
+Date:      2026-04-09
+ID:        RUSTSEC-2026-0097
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0097
+Dependency tree:
+rand 0.7.3
+└── phf_generator 0.8.0
+    └── phf_codegen 0.8.0
+        └── selectors 0.24.0
+            └── kuchikiki 0.8.8-speedreader
+                └── tauri-utils 2.8.3
+                    ├── tauri-runtime-wry 2.10.1
+                    │   └── tauri 2.10.3
+                    │       ├── theo-code-desktop 0.1.0
+                    │       ├── tauri-plugin-shell 2.3.5
+                    │       │   └── theo-code-desktop 0.1.0
+                    │       ├── tauri-plugin-fs 2.5.0
+                    │       │   └── tauri-plugin-dialog 2.7.0
+                    │       │       └── theo-code-desktop 0.1.0
+                    │       └── tauri-plugin-dialog 2.7.0
+                    ├── tauri-runtime 2.10.1
+                    │   ├── tauri-runtime-wry 2.10.1
+                    │   └── tauri 2.10.3
+                    ├── tauri-plugin-fs 2.5.0
+                    ├── tauri-plugin 2.5.4
+                    │   ├── tauri-plugin-shell 2.3.5
+                    │   ├── tauri-plugin-fs 2.5.0
+                    │   └── tauri-plugin-dialog 2.7.0
+                    ├── tauri-macros 2.5.5
+                    │   └── tauri 2.10.3
+                    ├── tauri-codegen 2.5.5
+                    │   └── tauri-macros 2.5.5
+                    ├── tauri-build 2.5.6
+                    │   ├── theo-code-desktop 0.1.0
+                    │   └── tauri 2.10.3
+                    └── tauri 2.10.3
+

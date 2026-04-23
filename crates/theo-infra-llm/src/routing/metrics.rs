@@ -111,11 +111,32 @@ pub fn load_cases(dir: &Path) -> Result<Vec<RoutingCase>, MetricsError> {
             path: path.clone(),
             source,
         })?;
-        let case: RoutingCase =
-            serde_json::from_str(&raw).map_err(|source| MetricsError::Parse {
+        // Use the T2.7 bounded helper to reject oversized routing cases
+        // up-front. A routing fixture should never legitimately exceed the
+        // default 10 MiB limit — attackers that dump huge payloads into the
+        // fixtures directory now get a typed error instead of OOM.
+        let case: RoutingCase = theo_domain::safe_json::from_str_bounded(
+            &raw,
+            theo_domain::safe_json::DEFAULT_JSON_LIMIT,
+        )
+        .map_err(|source| match source {
+            theo_domain::safe_json::SafeJsonError::Parse(source) => MetricsError::Parse {
                 path: path.clone(),
                 source,
-            })?;
+            },
+            theo_domain::safe_json::SafeJsonError::PayloadTooLarge { actual, limit } => {
+                MetricsError::Parse {
+                    path: path.clone(),
+                    source: serde_json::Error::io(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!(
+                            "payload {actual} bytes exceeds bounded-JSON limit {limit} for {}",
+                            path.display()
+                        ),
+                    )),
+                }
+            }
+        })?;
         cases.push(case);
     }
     if cases.is_empty() {

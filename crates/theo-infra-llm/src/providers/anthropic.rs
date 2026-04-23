@@ -342,8 +342,13 @@ pub fn to_request(body: &CommonRequest) -> Value {
 
                 if let Some(tool_calls) = &msg.tool_calls {
                     for tc in tool_calls {
-                        let input: Value = serde_json::from_str(&tc.function.arguments)
-                            .unwrap_or_else(|_| Value::String(tc.function.arguments.clone()));
+                        // T2.7: bound tool-call arguments so a malicious
+                        // provider cannot force unbounded allocation.
+                        let input: Value = theo_domain::safe_json::from_str_bounded(
+                            &tc.function.arguments,
+                            theo_domain::safe_json::DEFAULT_JSON_LIMIT,
+                        )
+                        .unwrap_or_else(|_| Value::String(tc.function.arguments.clone()));
                         let mut block = serde_json::json!({
                             "type": "tool_use",
                             "id": tc.id,
@@ -637,7 +642,13 @@ pub fn from_chunk(chunk: &str) -> Result<CommonChunk, String> {
         .find(|l| l.starts_with("data: "))
         .ok_or_else(|| chunk.to_string())?;
 
-    let json: Value = serde_json::from_str(&data_line[6..]).map_err(|_| chunk.to_string())?;
+    // T2.7: bound the SSE chunk to 10 MiB so a misbehaving Anthropic endpoint
+    // cannot force unbounded allocation in the parser.
+    let json: Value = theo_domain::safe_json::from_str_bounded(
+        &data_line[6..],
+        theo_domain::safe_json::DEFAULT_JSON_LIMIT,
+    )
+    .map_err(|_| chunk.to_string())?;
 
     let event_type = json
         .get("type")

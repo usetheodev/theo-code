@@ -1,0 +1,19 @@
+# Allowlist for `panic!` / `todo!` / `unimplemented!` in production code
+# (T2.6 gate — `scripts/check-panic.sh`).
+#
+# Format:  <path[:line]>|<sunset-YYYY-MM-DD>|<reason>
+#
+# Same rules as the unwrap allowlist:
+#   - Every entry requires a reason describing why the panic cannot be
+#     converted into a typed error.
+#   - Every entry requires a sunset date.
+#   - Whole-file entries (no `:line`) allowed for test-fixture crates.
+#   - Prefer refactoring to `?` / typed errors over adding an entry here.
+#
+# Baseline 2026-04-23 — first gate run surfaced 2 production panic sites.
+# Both are legitimate start-of-process fail-fast on compile-time invariants
+# that, if ever false, would indicate a code bug that typed errors cannot
+# recover from.
+
+crates/theo-tooling/src/registry/mod.rs:217|2026-10-23|Startup panic if a built-in tool ships an invalid schema. Caught at `ToolRegistry::register_builtins()` during app boot; there is no recoverable path because the tool would then be unusable. Acceptable until schemas are validated at compile time.
+crates/theo-agent-runtime/src/observability/normalizer.rs:26|2026-10-23|Panic guard inside `cached(&OnceLock, &'static pattern)`. Patterns are compile-time literals validated by tests — this branch is unreachable in practice and exists to surface a code bug loudly if someone passes a malformed literal.

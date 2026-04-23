@@ -281,7 +281,7 @@ fn cmd_login(key: Option<String>, server: Option<String>, no_browser: bool) -> i
 
     // Path 1: API key direct persistence.
     if let Some(raw) = key {
-        let store = theo_infra_auth::store::AuthStore::open();
+        let store = theo_application::facade::auth::AuthStore::open();
         match auth::save_api_key(&store, &raw) {
             Ok(_) => {
                 eprintln!("✓ Saved API key: {}", auth::mask_key(raw.trim()));
@@ -311,7 +311,7 @@ fn cmd_login(key: Option<String>, server: Option<String>, no_browser: bool) -> i
 
 /// Run the OpenAI device-flow end-to-end, printing UX prompts to stderr.
 async fn run_oauth_device_flow(no_browser: bool) -> i32 {
-    let auth_client = theo_infra_auth::OpenAIAuth::with_default_store();
+    let auth_client = theo_application::facade::auth::OpenAIAuth::with_default_store();
     eprintln!("Contacting OpenAI authorization server...");
     let code = match auth_client.start_device_flow().await {
         Ok(c) => c,
@@ -363,7 +363,7 @@ fn open_browser(url: &str) -> std::io::Result<()> {
 /// `theo logout` — clear saved OpenAI credentials.
 fn cmd_logout() -> i32 {
     use theo_application::use_cases::auth;
-    let store = theo_infra_auth::store::AuthStore::open();
+    let store = theo_application::facade::auth::AuthStore::open();
     match auth::logout(&store) {
         Ok(true) => {
             eprintln!("✓ Logged out. Saved credentials cleared.");
@@ -503,7 +503,7 @@ fn cmd_headless(
 
         // Apply project config + env var overrides (THEO_TEMPERATURE, THEO_MODEL, etc.)
         // Precedence: CLI flag > env var > .theo/config.toml > default
-        let project_config = theo_agent_runtime::project_config::ProjectConfig::load(&project_dir)
+        let project_config = theo_application::facade::agent::project_config::ProjectConfig::load(&project_dir)
             .with_env_overrides();
         project_config.apply_to(&mut config);
 
@@ -513,10 +513,10 @@ fn cmd_headless(
         }
 
         let mode_str = mode.as_deref().unwrap_or("agent");
-        let agent_mode = theo_agent_runtime::config::AgentMode::from_str(mode_str)
-            .unwrap_or(theo_agent_runtime::config::AgentMode::Agent);
+        let agent_mode = theo_application::facade::agent::AgentMode::from_str(mode_str)
+            .unwrap_or(theo_application::facade::agent::AgentMode::Agent);
         config.mode = agent_mode;
-        config.system_prompt = theo_agent_runtime::config::system_prompt_for_mode(agent_mode);
+        config.system_prompt = theo_application::facade::agent::system_prompt_for_mode(agent_mode);
 
         let model_name = config.model.clone();
         let temperature_actual = config.temperature;
@@ -551,8 +551,8 @@ fn cmd_headless(
             &project_dir,
         );
 
-        let registry = theo_tooling::registry::create_default_registry();
-        let agent = theo_agent_runtime::AgentLoop::new(config, registry);
+        let registry = theo_application::facade::tooling::create_default_registry();
+        let agent = theo_application::facade::agent::AgentLoop::new(config, registry);
 
         let started = Instant::now();
         let mut result = agent
@@ -619,7 +619,7 @@ fn cmd_pilot(
         let (config, _provider_name) =
             resolve_agent_config(provider_id.as_deref(), model.as_deref(), None).await;
 
-        let mut pilot_config = theo_agent_runtime::pilot::PilotConfig::load(&project_dir);
+        let mut pilot_config = theo_application::facade::agent::PilotConfig::load(&project_dir);
         if let Some(calls) = max_calls {
             pilot_config.max_total_calls = calls;
         }
@@ -937,10 +937,11 @@ async fn resolve_agent_config(
     provider_id: Option<&str>,
     model: Option<&str>,
     max_iter: Option<usize>,
-) -> (theo_agent_runtime::AgentConfig, String) {
-    use theo_infra_llm::provider::registry::create_default_registry as create_provider_registry;
+) -> (theo_application::facade::agent::AgentConfig, String) {
+    use theo_application::facade::llm::provider_registry::create_default_registry
+        as create_provider_registry;
 
-    let mut config = theo_agent_runtime::AgentConfig::default();
+    let mut config = theo_application::facade::agent::AgentConfig::default();
     // Opt-in flag for the memory subsystem (G1–G10). Default stays `false`
     // for backward-compat (test_pre5_ac_1_memory_enabled_default_false).
     // Set `THEO_MEMORY=1` (or any non-empty value) to activate every hook.
@@ -954,7 +955,7 @@ async fn resolve_agent_config(
     let mut oauth_applied = false;
 
     if provider_id.is_none() {
-        let auth = theo_infra_auth::OpenAIAuth::with_default_store();
+        let auth = theo_application::facade::auth::OpenAIAuth::with_default_store();
         if let Ok(Some(tokens)) = auth.get_tokens()
             && !tokens.is_expired() {
                 api_key = Some(tokens.access_token.clone());
@@ -984,7 +985,7 @@ async fn resolve_agent_config(
             config.api_key = api_key;
             provider_name = spec.display_name.to_string();
 
-            let auth = theo_infra_auth::OpenAIAuth::with_default_store();
+            let auth = theo_application::facade::auth::OpenAIAuth::with_default_store();
             if let Ok(Some(tokens)) = auth.get_tokens()
                 && let Some(ref account_id) = tokens.account_id {
                     config

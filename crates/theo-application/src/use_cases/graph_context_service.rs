@@ -396,26 +396,27 @@ impl GraphContextProvider for GraphContextService {
         //
         // Fallback cascade: Tier 2 → 1 → 0 (infalível).
         let file_scores: std::collections::HashMap<String, f64> = {
-            // Try Tier 2 first: full RRF 3-ranker (BM25 + Tantivy + Dense)
+            // Try Tier 2 first: full RRF 3-ranker (BM25 + Tantivy + Dense).
+            // T2.5 cleanup: let-chains destructure the Options in place so we
+            // never unwrap after a separate `is_some()` check.
             #[cfg(feature = "dense-retrieval")]
             {
-                let has_tier2 = graph_state.tantivy_index.is_some()
-                    && graph_state.embedder.is_some()
-                    && graph_state.embedding_cache.is_some();
-
-                if has_tier2 {
+                if let Some(idx) = graph_state.tantivy_index.as_ref()
+                    && let Some(embedder) = graph_state.embedder.as_ref()
+                    && let Some(cache) = graph_state.embedding_cache.as_ref()
+                {
                     theo_engine_retrieval::tantivy_search::hybrid_rrf_search(
                         &graph_state.graph,
-                        graph_state.tantivy_index.as_ref().unwrap(),
-                        graph_state.embedder.as_ref().unwrap(),
-                        graph_state.embedding_cache.as_ref().unwrap(),
+                        idx,
+                        embedder,
+                        cache,
                         query,
                         20.0, // RRF k parameter (empirically optimal)
                     )
-                } else if graph_state.tantivy_index.is_some() {
+                } else if let Some(idx) = graph_state.tantivy_index.as_ref() {
                     theo_engine_retrieval::tantivy_search::hybrid_search(
                         &graph_state.graph,
-                        graph_state.tantivy_index.as_ref().unwrap(),
+                        idx,
                         query,
                     )
                 } else {
@@ -1130,11 +1131,19 @@ struct GraphManifest {
 /// - Cold (no cache): reads all files, ~15ms for 500 files, ~500ms for 5000.
 /// - Warm (with cache): only re-hashes changed files, <50ms even for 10K+ repos.
 fn compute_project_hash(project_dir: &Path) -> String {
-    // Load cached hashes (path → (mtime_secs, size_bytes, content_hash))
+    // Load cached hashes (path → (mtime_secs, size_bytes, content_hash)).
+    // T2.7: bounded deserialization — a corrupted or oversized cache file
+    // falls back to an empty map instead of allocating unbounded memory.
     let cache_path = project_dir.join(".theo").join("hash_cache.json");
     let mut cached: BTreeMap<String, (u64, u64, String)> = std::fs::read_to_string(&cache_path)
         .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
+        .and_then(|s| {
+            theo_domain::safe_json::from_str_bounded(
+                &s,
+                theo_domain::safe_json::DEFAULT_JSON_LIMIT,
+            )
+            .ok()
+        })
         .unwrap_or_default();
 
     let mut entries: BTreeMap<String, String> = BTreeMap::new();
@@ -1257,7 +1266,12 @@ fn try_load_cache(cache_path: &Path, project_dir: &Path) -> Option<CodeGraph> {
 
     let manifest_path = cache_path.with_extension("manifest.json");
     let manifest_content = std::fs::read_to_string(&manifest_path).ok()?;
-    let manifest: GraphManifest = serde_json::from_str(&manifest_content).ok()?;
+    // T2.7: bounded deserialization of the graph manifest cache.
+    let manifest: GraphManifest = theo_domain::safe_json::from_str_bounded(
+        &manifest_content,
+        theo_domain::safe_json::DEFAULT_JSON_LIMIT,
+    )
+    .ok()?;
 
     let current_hash = compute_project_hash(project_dir);
     if manifest.content_hash != current_hash {

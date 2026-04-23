@@ -16,6 +16,7 @@ pub mod lsp;
 pub mod memory;
 pub mod multiedit;
 pub mod mutation_queue;
+pub mod path;
 pub mod plan;
 pub mod question;
 pub mod read;

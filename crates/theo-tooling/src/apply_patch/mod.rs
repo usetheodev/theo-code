@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use std::path::{Path, PathBuf};
 use theo_domain::error::ToolError;
 use theo_domain::permission::{PermissionRequest, PermissionType};
 use theo_domain::tool::{
@@ -49,6 +50,41 @@ impl ApplyPatchTool {
         Self
     }
 
+    /// Canonicalize a patch-relative path against `project_dir`.
+    ///
+    /// Mirrors read/write/edit (T2.3): `..`, `.`, and symlinks are resolved
+    /// via `crate::path::absolutize`. The permission gate is separate
+    /// (`record_external_if_escapes`) so each PatchOp can decide its own
+    /// response to an out-of-workspace target.
+    fn resolve_path(file_path: &str, project_dir: &Path) -> PathBuf {
+        match crate::path::absolutize(project_dir, file_path) {
+            Ok(canonical) => canonical,
+            Err(_) => project_dir.join(file_path),
+        }
+    }
+
+    /// Record an `ExternalDirectory` permission request if `resolved`
+    /// escapes `project_dir`. Returns true when the path is inside.
+    fn record_external_if_escapes(
+        resolved: &Path,
+        project_dir: &Path,
+        permissions: &mut PermissionCollector,
+    ) -> bool {
+        let inside = crate::path::is_contained(resolved, project_dir)
+            .unwrap_or_else(|_| resolved.starts_with(project_dir));
+        if !inside {
+            let dir = resolved.parent().unwrap_or(resolved);
+            let pattern = format!("{}/*", dir.display()).replace('\\', "/");
+            permissions.record(PermissionRequest {
+                permission: PermissionType::ExternalDirectory,
+                patterns: vec![pattern.clone()],
+                always: vec![pattern],
+                metadata: serde_json::json!({}),
+            });
+        }
+        inside
+    }
+
     fn strip_heredoc(text: &str) -> &str {
         let trimmed = text.trim();
         // Strip cat <<'EOF' ... EOF wrapper
@@ -97,8 +133,10 @@ impl ApplyPatchTool {
             if line.starts_with("*** End Patch") {
                 break;
             }
-            if line.starts_with("*** Add File: ") {
-                let path = line.strip_prefix("*** Add File: ").unwrap().to_string();
+            // Prefer `strip_prefix`'s Option directly to double-checking via
+            // `starts_with` + `unwrap()` (T2.5 cleanup: removed 4 unwraps).
+            if let Some(path_ref) = line.strip_prefix("*** Add File: ") {
+                let path = path_ref.to_string();
                 i += 1;
                 let mut content_lines = Vec::new();
                 while i < lines.len() && !lines[i].starts_with("***") {
@@ -112,16 +150,19 @@ impl ApplyPatchTool {
                     content.push('\n');
                 }
                 ops.push(PatchOp::Add { path, content });
-            } else if line.starts_with("*** Delete File: ") {
-                let path = line.strip_prefix("*** Delete File: ").unwrap().to_string();
-                ops.push(PatchOp::Delete { path });
+            } else if let Some(path_ref) = line.strip_prefix("*** Delete File: ") {
+                ops.push(PatchOp::Delete {
+                    path: path_ref.to_string(),
+                });
                 i += 1;
-            } else if line.starts_with("*** Update File: ") {
-                let path = line.strip_prefix("*** Update File: ").unwrap().to_string();
+            } else if let Some(path_ref) = line.strip_prefix("*** Update File: ") {
+                let path = path_ref.to_string();
                 i += 1;
                 let mut move_to = None;
-                if i < lines.len() && lines[i].starts_with("*** Move to: ") {
-                    move_to = Some(lines[i].strip_prefix("*** Move to: ").unwrap().to_string());
+                if i < lines.len()
+                    && let Some(dest_ref) = lines[i].strip_prefix("*** Move to: ")
+                {
+                    move_to = Some(dest_ref.to_string());
                     i += 1;
                 }
                 let mut hunks = Vec::new();
@@ -382,11 +423,42 @@ impl Tool for ApplyPatchTool {
 
         let ops = Self::parse(&patch_text)?;
 
+        // Before touching anything, declare ExternalDirectory permissions for
+        // any operation whose resolved path escapes the project directory.
+        // Mirrors the ReadTool / WriteTool / EditTool pattern (T2.3) so
+        // patch-level writes cannot silently drop files outside the workspace.
+        for op in &ops {
+            match op {
+                PatchOp::Add { path, .. }
+                | PatchOp::Delete { path }
+                | PatchOp::Update { path, .. } => {
+                    let resolved = Self::resolve_path(path, &ctx.project_dir);
+                    let _ = Self::record_external_if_escapes(
+                        &resolved,
+                        &ctx.project_dir,
+                        permissions,
+                    );
+                }
+            }
+            if let PatchOp::Update {
+                move_to: Some(dest),
+                ..
+            } = op
+            {
+                let resolved = Self::resolve_path(dest, &ctx.project_dir);
+                let _ = Self::record_external_if_escapes(
+                    &resolved,
+                    &ctx.project_dir,
+                    permissions,
+                );
+            }
+        }
+
         // Verify all operations first (fail-fast)
         for op in &ops {
             match op {
                 PatchOp::Update { path, .. } => {
-                    let full = ctx.project_dir.join(path);
+                    let full = Self::resolve_path(path, &ctx.project_dir);
                     if !full.exists() {
                         return Err(ToolError::Validation(
                             "apply_patch verification failed: Failed to read file to update"
@@ -395,7 +467,7 @@ impl Tool for ApplyPatchTool {
                     }
                 }
                 PatchOp::Delete { path } => {
-                    let full = ctx.project_dir.join(path);
+                    let full = Self::resolve_path(path, &ctx.project_dir);
                     if !full.exists() {
                         return Err(ToolError::Validation(format!(
                             "apply_patch verification failed: File not found for delete: {path}"
@@ -414,7 +486,7 @@ impl Tool for ApplyPatchTool {
         // Verify update hunks match before applying anything
         for op in &ops {
             if let PatchOp::Update { path, hunks, .. } = op {
-                let full = ctx.project_dir.join(path);
+                let full = Self::resolve_path(path, &ctx.project_dir);
                 let content = tokio::fs::read_to_string(&full)
                     .await
                     .map_err(|e| ToolError::Execution(format!("Failed to read file: {e}")))?;
@@ -429,7 +501,7 @@ impl Tool for ApplyPatchTool {
         for op in &ops {
             match op {
                 PatchOp::Add { path, content } => {
-                    let full = ctx.project_dir.join(path);
+                    let full = Self::resolve_path(path, &ctx.project_dir);
                     if let Some(parent) = full.parent() {
                         tokio::fs::create_dir_all(parent)
                             .await
@@ -453,7 +525,7 @@ impl Tool for ApplyPatchTool {
                     }));
                 }
                 PatchOp::Delete { path } => {
-                    let full = ctx.project_dir.join(path);
+                    let full = Self::resolve_path(path, &ctx.project_dir);
                     tokio::fs::remove_file(&full)
                         .await
                         .map_err(|e| ToolError::Execution(format!("{e}")))?;
@@ -469,7 +541,7 @@ impl Tool for ApplyPatchTool {
                     hunks,
                     move_to,
                 } => {
-                    let full = ctx.project_dir.join(path);
+                    let full = Self::resolve_path(path, &ctx.project_dir);
                     let content = tokio::fs::read_to_string(&full)
                         .await
                         .map_err(|e| ToolError::Execution(format!("{e}")))?;
@@ -477,7 +549,7 @@ impl Tool for ApplyPatchTool {
                     let new_content = Self::apply_hunks(&content, hunks)?;
 
                     if let Some(dest) = move_to {
-                        let dest_full = ctx.project_dir.join(dest);
+                        let dest_full = Self::resolve_path(dest, &ctx.project_dir);
                         if let Some(parent) = dest_full.parent() {
                             tokio::fs::create_dir_all(parent)
                                 .await

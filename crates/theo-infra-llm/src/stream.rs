@@ -143,7 +143,12 @@ pub fn parse_sse_line(line: &str) -> Option<StreamDelta> {
         return Some(StreamDelta::Done);
     }
 
-    let json: serde_json::Value = serde_json::from_str(data).ok()?;
+    // T2.7: bound the SSE chunk to the default 10 MiB limit. A legitimate
+    // SSE chunk is < 10 KiB; anything beyond the default limit is either a
+    // misconfigured provider or a targeted DoS attempt.
+    let json: serde_json::Value =
+        theo_domain::safe_json::from_str_bounded(data, theo_domain::safe_json::DEFAULT_JSON_LIMIT)
+            .ok()?;
     let delta = json.get("choices")?.get(0)?.get("delta")?;
 
     // Check for reasoning/thinking (OpenAI extended thinking)

@@ -13,6 +13,7 @@ pub mod permission;
 pub mod priority;
 pub mod retry_policy;
 pub mod routing;
+pub mod safe_json;
 pub mod sandbox;
 pub mod session;
 pub mod session_search;

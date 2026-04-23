@@ -103,19 +103,7 @@ pub fn compute_loop_metrics(
         .iter()
         .filter(|s| s.event_type == "LlmCallStart")
         .count() as u32;
-    let mut dist: HashMap<String, PhaseMetric> = HashMap::new();
-    let phases = ["Explore", "Edit", "Verify", "Done"];
-    for p in phases {
-        dist.insert(
-            p.into(),
-            PhaseMetric {
-                iterations: 0,
-                duration_ms: 0,
-                pct: 0.0,
-            },
-        );
-    }
-
+    let mut dist: HashMap<String, PhaseMetric>;
     let denom = total_iterations.max(1) as f64;
     let explore = steps.iter().filter(|s| s.event_type == "RetrievalExecuted").count() as u32;
     let edit = steps
@@ -128,14 +116,28 @@ pub fn compute_loop_metrics(
     let verify = steps.iter().filter(|s| s.event_type == "SensorExecuted").count() as u32;
     let done = if converged { 1 } else { 0 };
 
-    dist.get_mut("Explore").unwrap().iterations = explore;
-    dist.get_mut("Explore").unwrap().pct = explore as f64 / denom;
-    dist.get_mut("Edit").unwrap().iterations = edit;
-    dist.get_mut("Edit").unwrap().pct = edit as f64 / denom;
-    dist.get_mut("Verify").unwrap().iterations = verify;
-    dist.get_mut("Verify").unwrap().pct = verify as f64 / denom;
-    dist.get_mut("Done").unwrap().iterations = done;
-    dist.get_mut("Done").unwrap().pct = done as f64 / denom;
+    // Rebuild the map directly so we don't rely on get_mut + unwrap for entries we
+    // just inserted. Using an array of tuples makes the population a declarative
+    // list and removes 8 production `.unwrap()` sites (T2.5).
+    let counts = [
+        ("Explore", explore),
+        ("Edit", edit),
+        ("Verify", verify),
+        ("Done", done),
+    ];
+    dist = counts
+        .into_iter()
+        .map(|(name, iterations)| {
+            (
+                name.to_string(),
+                PhaseMetric {
+                    iterations,
+                    duration_ms: 0,
+                    pct: iterations as f64 / denom,
+                },
+            )
+        })
+        .collect();
 
     let convergence_rate = if converged { 1.0 } else { 0.0 };
     let bu = BudgetUtilization {

@@ -240,7 +240,12 @@ pub fn from_codex_stream(stream_body: &str) -> Option<ChatResponse> {
         };
 
         if event.trim() == "response.completed" {
-            let json: serde_json::Value = serde_json::from_str(data).ok()?;
+            // T2.7: bound SSE completed-event payload.
+            let json: serde_json::Value = theo_domain::safe_json::from_str_bounded(
+                data,
+                theo_domain::safe_json::DEFAULT_JSON_LIMIT,
+            )
+            .ok()?;
             // The completed event has a "response" field with the full response
             let response = json.get("response").unwrap_or(&json);
             // Some Codex responses ship an empty `output` array in the completed
@@ -283,7 +288,11 @@ pub fn from_codex_stream(stream_body: &str) -> Option<ChatResponse> {
         };
         let event = event.trim();
 
-        let json: serde_json::Value = match serde_json::from_str(data) {
+        // T2.7: bound each SSE delta chunk.
+        let json: serde_json::Value = match theo_domain::safe_json::from_str_bounded(
+            data,
+            theo_domain::safe_json::DEFAULT_JSON_LIMIT,
+        ) {
             Ok(v) => v,
             Err(_) => continue,
         };
