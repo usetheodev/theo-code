@@ -101,6 +101,19 @@ pub enum EventType {
     ///   "iterations_used": u64,
     /// }
     SubagentCompleted,
+    /// Phase 18 (sota-gaps-plan): emitted by the parent right BEFORE the
+    /// sub-agent spawn happens, after the handoff guardrails have run.
+    /// Provides full audit trail of what was allowed/blocked and by whom.
+    /// Payload: {
+    ///   "source_agent": String,           // parent agent name (or "main")
+    ///   "target_agent": String,           // requested agent name
+    ///   "objective": String,              // the objective string
+    ///   "decision": "allow|block|warn",   // overall outcome
+    ///   "reason": Option<String>,         // present when decision != allow
+    ///   "guardrails_evaluated": Vec<String>,  // ids of guardrails run
+    ///   "blocked_by": Option<String>,     // first blocker id (if any)
+    /// }
+    HandoffEvaluated,
 }
 
 /// Scope of a learned constraint.
@@ -258,6 +271,8 @@ impl EventType {
             // Sub-agent lifecycle (Phase 3)
             EventType::SubagentStarted => EventKind::Lifecycle,
             EventType::SubagentCompleted => EventKind::Lifecycle,
+            // Phase 18 (sota-gaps): handoff guardrail audit trail
+            EventType::HandoffEvaluated => EventKind::Lifecycle,
         }
     }
 }
@@ -289,12 +304,13 @@ impl std::fmt::Display for EventType {
             EventType::SensorExecuted => write!(f, "SensorExecuted"),
             EventType::SubagentStarted => write!(f, "SubagentStarted"),
             EventType::SubagentCompleted => write!(f, "SubagentCompleted"),
+            EventType::HandoffEvaluated => write!(f, "HandoffEvaluated"),
         }
     }
 }
 
 /// All EventType variants for iteration in tests.
-pub const ALL_EVENT_TYPES: [EventType; 24] = [
+pub const ALL_EVENT_TYPES: [EventType; 25] = [
     EventType::TaskCreated,
     EventType::TaskStateChanged,
     EventType::ToolCallQueued,
@@ -319,6 +335,7 @@ pub const ALL_EVENT_TYPES: [EventType; 24] = [
     EventType::SensorExecuted,
     EventType::SubagentStarted,
     EventType::SubagentCompleted,
+    EventType::HandoffEvaluated,
 ];
 
 /// A domain event representing a significant occurrence in the system.
@@ -650,7 +667,9 @@ mod tests {
         assert!(ALL_EVENT_TYPES.contains(&EventType::DecisionMade));
         assert!(ALL_EVENT_TYPES.contains(&EventType::ConstraintLearned));
         // Track A — Phase 3 added SubagentStarted + SubagentCompleted (was 22).
-        assert_eq!(ALL_EVENT_TYPES.len(), 24);
+        // sota-gaps Phase 18 added HandoffEvaluated → 25.
+        assert_eq!(ALL_EVENT_TYPES.len(), 25);
+        assert!(ALL_EVENT_TYPES.contains(&EventType::HandoffEvaluated));
     }
 
     // --- P-1 BF2: Contextual validation tests ---

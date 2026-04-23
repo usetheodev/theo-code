@@ -17,6 +17,7 @@ pub mod evolution;
 pub mod extension;
 pub mod failure_tracker;
 pub mod frontmatter;
+pub mod handoff_guardrail;
 pub mod hooks;
 pub mod lifecycle_hooks;
 pub mod output_format;

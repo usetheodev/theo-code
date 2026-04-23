@@ -13,14 +13,18 @@
 //! - `theo agents approve` — interactive approval of pending project agents
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use clap::Subcommand;
 
 use theo_agent_runtime::checkpoint::CheckpointManager;
+use theo_agent_runtime::config::AgentConfig;
+use theo_agent_runtime::event_bus::EventBus;
 use theo_agent_runtime::subagent::approval::{
     compute_current_manifest, load_approved, persist_approved, ApprovalManifest, ApprovedEntry,
     sha256_hex,
 };
+use theo_agent_runtime::subagent::{Resumer, SubAgentManager, SubAgentRegistry};
 use theo_agent_runtime::subagent_runs::{FileSubagentRunStore, RunStatus};
 
 #[derive(Subcommand)]
@@ -42,6 +46,16 @@ pub enum SubagentCmd {
         /// Maximum age in days (default: 7).
         #[arg(long, default_value_t = 7)]
         days: u32,
+    },
+    /// Resume a non-terminal sub-agent run. Reconstructs history from the
+    /// event log and re-spawns the agent. Idempotent: terminal runs
+    /// (Completed/Failed/Cancelled/Abandoned) are rejected.
+    Resume {
+        /// Run ID.
+        run_id: String,
+        /// Optional new objective (overrides the original).
+        #[arg(long)]
+        objective: Option<String>,
     },
 }
 
@@ -149,8 +163,57 @@ pub fn handle_subagent(cmd: SubagentCmd, project_dir: &std::path::Path) -> anyho
                 .map_err(|e| anyhow::anyhow!("{}", e))?;
             println!("✓ Removed {} terminal run(s) older than {} day(s).", removed, days);
         }
+        SubagentCmd::Resume { run_id, objective } => {
+            return handle_resume(&store, project_dir, &run_id, objective.as_deref());
+        }
     }
     Ok(())
+}
+
+/// Phase 16 — Resume entry point.
+///
+/// Loads the run, validates that it is non-terminal, builds a SubAgentManager
+/// with the default registry, and re-spawns the agent with the reconstructed
+/// history. Idempotent: terminal runs are rejected with a clear error.
+///
+/// LLM configuration uses the project's default chain (env, OAuth, providers
+/// registry). The resume CLI does not currently expose `--provider`/`--model`
+/// flags — the resumed run inherits the spec's `model_override` if any.
+pub fn handle_resume(
+    store: &FileSubagentRunStore,
+    project_dir: &std::path::Path,
+    run_id: &str,
+    objective_override: Option<&str>,
+) -> anyhow::Result<()> {
+    let rt = tokio::runtime::Runtime::new()
+        .map_err(|e| anyhow::anyhow!("failed to create tokio runtime: {}", e))?;
+    rt.block_on(async {
+        let bus = Arc::new(EventBus::new());
+        let manager = SubAgentManager::with_registry(
+            AgentConfig::default(),
+            bus,
+            project_dir.to_path_buf(),
+            Arc::new(SubAgentRegistry::with_builtins()),
+        );
+        let resumer = Resumer::new(store, &manager);
+        match resumer.resume_with_objective(run_id, objective_override).await {
+            Ok(result) => {
+                println!("✓ Resume completed for '{}'.", run_id);
+                println!("  Success: {}", result.success);
+                if !result.summary.is_empty() {
+                    println!("  Summary: {}", truncate(&result.summary, 200));
+                }
+                if result.iterations_used > 0 {
+                    println!("  Iterations used: {}", result.iterations_used);
+                }
+                if result.tokens_used > 0 {
+                    println!("  Tokens used: {}", result.tokens_used);
+                }
+                Ok(())
+            }
+            Err(e) => Err(anyhow::anyhow!("resume failed: {}", e)),
+        }
+    })
 }
 
 pub fn handle_checkpoints(
@@ -361,6 +424,41 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let res = handle_agents(AgentsCmd::Revoke, dir.path());
         assert!(res.is_ok());
+    }
+
+    #[test]
+    fn handle_subagent_resume_unknown_returns_err() {
+        let dir = TempDir::new().unwrap();
+        let res = handle_subagent(
+            SubagentCmd::Resume {
+                run_id: "missing".into(),
+                objective: None,
+            },
+            dir.path(),
+        );
+        assert!(res.is_err(), "resume of missing run should error");
+    }
+
+    #[test]
+    fn handle_subagent_resume_terminal_run_returns_err() {
+        use theo_agent_runtime::subagent_runs::{SubagentRun, RunStatus, FileSubagentRunStore};
+        use theo_domain::agent_spec::AgentSpec;
+        let dir = TempDir::new().unwrap();
+        let store_dir = dir.path().join(".theo").join("subagent");
+        let store = FileSubagentRunStore::new(&store_dir);
+        let spec = AgentSpec::on_demand("x", "y");
+        let mut run = SubagentRun::new_running("r-term", None, &spec, "y", "/tmp", None);
+        run.status = RunStatus::Completed;
+        store.save(&run).unwrap();
+
+        let res = handle_subagent(
+            SubagentCmd::Resume {
+                run_id: "r-term".into(),
+                objective: None,
+            },
+            dir.path(),
+        );
+        assert!(res.is_err(), "terminal run resume must reject");
     }
 
     #[test]

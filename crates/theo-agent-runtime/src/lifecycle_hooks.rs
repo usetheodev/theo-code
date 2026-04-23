@@ -50,10 +50,14 @@ pub enum HookEvent {
     WorktreeCreate,
     WorktreeRemove,
     InstructionsLoaded,
+    /// Phase 18: fired right before a `delegate_task` spawn. Hook may
+    /// `Block` the handoff (returns `HookResponse::Block`) — the
+    /// guardrail chain runs first, the hook is the final gate.
+    PreHandoff,
 }
 
 impl HookEvent {
-    pub const ALL: [HookEvent; 21] = [
+    pub const ALL: [HookEvent; 22] = [
         HookEvent::PreToolUse,
         HookEvent::PostToolUse,
         HookEvent::PostToolUseFailure,
@@ -75,6 +79,7 @@ impl HookEvent {
         HookEvent::WorktreeCreate,
         HookEvent::WorktreeRemove,
         HookEvent::InstructionsLoaded,
+        HookEvent::PreHandoff,
     ];
 
     pub fn as_str(&self) -> &'static str {
@@ -100,6 +105,7 @@ impl HookEvent {
             HookEvent::WorktreeCreate => "WorktreeCreate",
             HookEvent::WorktreeRemove => "WorktreeRemove",
             HookEvent::InstructionsLoaded => "InstructionsLoaded",
+            HookEvent::PreHandoff => "PreHandoff",
         }
     }
 }

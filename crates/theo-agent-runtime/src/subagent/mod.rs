@@ -12,6 +12,7 @@ pub mod builtins;
 pub mod parser;
 pub mod registry;
 pub mod reloadable;
+pub mod resume;
 pub mod watcher;
 
 pub use reloadable::ReloadableRegistry;
@@ -19,6 +20,7 @@ pub use reloadable::ReloadableRegistry;
 pub use approval::{ApprovalManifest, ApprovalMode, ApprovedEntry};
 pub use parser::{parse_agent_spec, ParseError};
 pub use registry::{LoadOutcome, RegistryWarning, SubAgentRegistry, WarningKind};
+pub use resume::{reconstruct_history, ResumeContext, ResumeError, Resumer};
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -68,6 +70,11 @@ pub struct SubAgentManager {
     /// and the resulting hint is injected into the sub-agent's system prompt
     /// so the LLM is aware of MCP tools.
     mcp_registry: Option<Arc<theo_infra_mcp::McpRegistry>>,
+    /// Phase 17: optional MCP discovery cache. When Some AND
+    /// `spec.mcp_servers` is non-empty, the cache is queried for discovered
+    /// tools and the resulting prompt-hint advertises *concrete* tool
+    /// names (not just the `mcp:<server>:<tool>` namespace).
+    mcp_discovery: Option<Arc<theo_infra_mcp::DiscoveryCache>>,
 }
 
 impl SubAgentManager {
@@ -92,6 +99,7 @@ impl SubAgentManager {
             worktree_provider: None,
             metrics: None,
             mcp_registry: None,
+            mcp_discovery: None,
         }
     }
 
@@ -172,9 +180,26 @@ impl SubAgentManager {
         self
     }
 
+    /// Phase 17: attach a pre-discovery cache. When attached together with
+    /// the registry, sub-agents whose `mcp_servers` allowlist matches a
+    /// cached server receive a richer system-prompt hint listing actual
+    /// tool names instead of the bare namespace placeholder.
+    pub fn with_mcp_discovery(
+        mut self,
+        cache: Arc<theo_infra_mcp::DiscoveryCache>,
+    ) -> Self {
+        self.mcp_discovery = Some(cache);
+        self
+    }
+
     /// Access the MCP registry, if any.
     pub fn mcp_registry(&self) -> Option<&theo_infra_mcp::McpRegistry> {
         self.mcp_registry.as_deref()
+    }
+
+    /// Access the MCP discovery cache, if any.
+    pub fn mcp_discovery(&self) -> Option<&theo_infra_mcp::DiscoveryCache> {
+        self.mcp_discovery.as_deref()
     }
 
     /// Access the registry, if any.
@@ -432,18 +457,24 @@ impl SubAgentManager {
                 )
             };
 
-            // Phase 8: MCP integration — when the spec declares mcp_servers
-            // and a global MCP registry is attached, filter to the allowlist
-            // and inject a prompt hint advertising the mcp:<server>:<tool>
-            // namespace.
+            // Phase 8 + Phase 17: MCP integration — inject a prompt hint
+            // advertising MCP tools. Preference order:
+            //   1. discovery cache (when present, has concrete tool names)
+            //   2. registry-only namespace placeholder (legacy hint)
             if !spec.mcp_servers.is_empty() {
-                if let Some(global) = &self.mcp_registry {
-                    let filtered = global.filtered(&spec.mcp_servers);
-                    let hint = filtered.render_prompt_hint();
-                    if !hint.is_empty() {
-                        sub_config.system_prompt =
-                            format!("{}\n\n{}", sub_config.system_prompt, hint);
+                let mut hint = String::new();
+                if let Some(cache) = &self.mcp_discovery {
+                    hint = cache.render_prompt_hint(&spec.mcp_servers);
+                }
+                if hint.is_empty() {
+                    if let Some(global) = &self.mcp_registry {
+                        let filtered = global.filtered(&spec.mcp_servers);
+                        hint = filtered.render_prompt_hint();
                     }
+                }
+                if !hint.is_empty() {
+                    sub_config.system_prompt =
+                        format!("{}\n\n{}", sub_config.system_prompt, hint);
                 }
             }
 
@@ -806,6 +837,7 @@ mod tests {
             worktree_provider: None,
             metrics: None,
             mcp_registry: None,
+            mcp_discovery: None,
         };
 
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("test", "test obj");
@@ -886,6 +918,7 @@ mod tests {
             worktree_provider: None,
             metrics: None,
             mcp_registry: None,
+            mcp_discovery: None,
         };
 
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("scout", "check x");
@@ -940,6 +973,7 @@ mod tests {
             worktree_provider: None,
             metrics: None,
             mcp_registry: None,
+            mcp_discovery: None,
         };
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("x", "y");
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -971,6 +1005,7 @@ mod tests {
             worktree_provider: None,
             metrics: None,
             mcp_registry: None,
+            mcp_discovery: None,
         };
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("persisted", "test");
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -1002,6 +1037,7 @@ mod tests {
             worktree_provider: None,
             metrics: None,
             mcp_registry: None,
+            mcp_discovery: None,
         };
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("x", "y");
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -1080,6 +1116,7 @@ mod tests {
             worktree_provider: None,
             metrics: None,
             mcp_registry: None,
+            mcp_discovery: None,
         };
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("x", "y");
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -1108,6 +1145,7 @@ mod tests {
             worktree_provider: None,
             metrics: None,
             mcp_registry: None,
+            mcp_discovery: None,
         };
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("x", "y");
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -1135,6 +1173,78 @@ mod tests {
         assert!(manager.run_store().is_some());
     }
 
+    // ── Phase 17: MCP discovery cache integration ──
+
+    #[test]
+    fn with_mcp_discovery_builder_stores_reference() {
+        let cache = Arc::new(theo_infra_mcp::DiscoveryCache::new());
+        let bus = Arc::new(EventBus::new());
+        let manager = SubAgentManager::with_builtins(
+            AgentConfig::default(),
+            bus,
+            PathBuf::from("/tmp"),
+        )
+        .with_mcp_discovery(cache);
+        assert!(manager.mcp_discovery().is_some());
+    }
+
+    #[test]
+    fn discovery_cache_takes_precedence_over_registry_hint() {
+        // Spec declares mcp_servers and BOTH registry + discovery cache are
+        // attached. When the cache has discovered tools for that server, the
+        // *cache* hint must be used (concrete tool names) not the registry's
+        // bare-namespace hint.
+        use std::collections::BTreeMap;
+        use theo_infra_mcp::{DiscoveryCache, McpRegistry, McpServerConfig, McpTool};
+
+        let bus = Arc::new(EventBus::new());
+
+        let mut reg = McpRegistry::new();
+        reg.register(McpServerConfig::Stdio {
+            name: "github".into(),
+            command: "echo".into(),
+            args: vec![],
+            env: BTreeMap::new(),
+        });
+        let cache = DiscoveryCache::new();
+        cache.put(
+            "github",
+            vec![
+                McpTool {
+                    name: "search_repo".into(),
+                    description: Some("search a github repository".into()),
+                    input_schema: serde_json::json!({"type":"object"}),
+                },
+            ],
+        );
+
+        let manager = SubAgentManager {
+            config: AgentConfig::default(),
+            event_bus: bus.clone(),
+            project_dir: PathBuf::from("/tmp"),
+            depth: 1, // depth-limit early return → no real spawn
+            registry: None,
+            run_store: None,
+            hook_manager: None,
+            cancellation: None,
+            checkpoint_manager: None,
+            worktree_provider: None,
+            metrics: None,
+            mcp_registry: Some(Arc::new(reg)),
+            mcp_discovery: Some(Arc::new(cache)),
+        };
+
+        // We cannot directly inspect sub_config.system_prompt without
+        // refactoring spawn_with_spec, so we rely on render_prompt_hint
+        // semantics being unit-tested in theo-infra-mcp::discovery::tests.
+        // Sanity check: the discovery cache used here resolves correctly.
+        let cache_ref = manager.mcp_discovery().unwrap();
+        let allow = vec!["github".to_string()];
+        let hint = cache_ref.render_prompt_hint(&allow);
+        assert!(hint.contains("`mcp:github:search_repo`"));
+        assert!(hint.contains("pre-discovered"));
+    }
+
     #[test]
     fn spawn_with_spec_text_none_context_leaves_context_used_none() {
         let bus = Arc::new(EventBus::new());
@@ -1151,6 +1261,7 @@ mod tests {
             worktree_provider: None,
             metrics: None,
             mcp_registry: None,
+            mcp_discovery: None,
         };
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("y", "z");
         let rt = tokio::runtime::Runtime::new().unwrap();

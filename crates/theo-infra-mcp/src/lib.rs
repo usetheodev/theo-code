@@ -25,6 +25,7 @@
 
 pub mod client;
 pub mod config;
+pub mod discovery;
 pub mod dispatch;
 pub mod error;
 pub mod protocol;
@@ -33,6 +34,7 @@ pub mod transport_stdio;
 
 pub use client::{McpClient, McpStdioClient};
 pub use config::McpServerConfig;
+pub use discovery::{shared_cache, DiscoveryCache, DiscoveryReport, DEFAULT_PER_SERVER_TIMEOUT};
 pub use dispatch::{DispatchOutcome, McpDispatcher};
 pub use error::McpError;
 pub use protocol::{McpRequest, McpResponse, McpTool};

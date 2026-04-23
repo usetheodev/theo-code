@@ -95,6 +95,12 @@ pub struct AgentRunEngine {
     subagent_checkpoint: Option<Arc<crate::checkpoint::CheckpointManager>>,
     subagent_worktree: Option<Arc<theo_isolation::WorktreeProvider>>,
     subagent_mcp: Option<Arc<theo_infra_mcp::McpRegistry>>,
+    /// Phase 17: optional MCP discovery cache propagated to spawn_with_spec.
+    subagent_mcp_discovery: Option<Arc<theo_infra_mcp::DiscoveryCache>>,
+    /// Phase 18: optional handoff guardrail chain. When `None`, a default
+    /// chain (built-ins) is used per delegate_task call. Programmatic
+    /// callers can register custom guardrails by injecting a chain.
+    subagent_handoff_guardrails: Option<Arc<crate::handoff_guardrail::GuardrailChain>>,
     /// Phase 8: lazy-built dispatcher used to handle `mcp:server:tool`
     /// calls. Built from `subagent_mcp` on first use.
     subagent_mcp_dispatcher: std::sync::OnceLock<Arc<theo_infra_mcp::McpDispatcher>>,
@@ -205,6 +211,8 @@ impl AgentRunEngine {
             subagent_checkpoint: None,
             subagent_worktree: None,
             subagent_mcp: None,
+            subagent_mcp_discovery: None,
+            subagent_handoff_guardrails: None,
             subagent_mcp_dispatcher: std::sync::OnceLock::new(),
             subagent_reloadable: None,
             checkpoint_taken_this_turn: std::sync::atomic::AtomicBool::new(false),
@@ -344,6 +352,29 @@ impl AgentRunEngine {
     /// `mcp:server:tool` namespace.
     pub fn with_subagent_mcp(mut self, mcp: Arc<theo_infra_mcp::McpRegistry>) -> Self {
         self.subagent_mcp = Some(mcp);
+        self
+    }
+
+    /// Phase 17: inject MCP discovery cache. When attached, sub-agents whose
+    /// `mcp_servers` allowlist matches a cached server receive a richer
+    /// system-prompt hint listing actual tool names instead of just the
+    /// `mcp:<server>:<tool>` namespace placeholder.
+    pub fn with_subagent_mcp_discovery(
+        mut self,
+        cache: Arc<theo_infra_mcp::DiscoveryCache>,
+    ) -> Self {
+        self.subagent_mcp_discovery = Some(cache);
+        self
+    }
+
+    /// Phase 18: inject the handoff guardrail chain. When `None`, a default
+    /// chain (`GuardrailChain::with_default_builtins`) is constructed per
+    /// `delegate_task` call.
+    pub fn with_subagent_handoff_guardrails(
+        mut self,
+        chain: Arc<crate::handoff_guardrail::GuardrailChain>,
+    ) -> Self {
+        self.subagent_handoff_guardrails = Some(chain);
         self
     }
 
@@ -2290,6 +2321,17 @@ impl AgentRunEngine {
         if let Some(mcp) = &self.subagent_mcp {
             manager = manager.with_mcp_registry(mcp.clone());
         }
+        if let Some(cache) = &self.subagent_mcp_discovery {
+            manager = manager.with_mcp_discovery(cache.clone());
+        }
+
+        // Phase 18: resolve handoff guardrail chain (injected or default).
+        let guardrails: Arc<crate::handoff_guardrail::GuardrailChain> = self
+            .subagent_handoff_guardrails
+            .clone()
+            .unwrap_or_else(|| {
+                Arc::new(crate::handoff_guardrail::GuardrailChain::with_default_builtins())
+            });
 
         if has_agent {
             let agent_name = args
@@ -2321,6 +2363,17 @@ impl AgentRunEngine {
                 .unwrap_or_else(|| {
                     theo_domain::agent_spec::AgentSpec::on_demand(&agent_name, &objective)
                 });
+
+            // Phase 18: handoff guardrail evaluation.
+            if let Some(refusal) = self.evaluate_handoff_or_refuse(
+                &guardrails,
+                "main",
+                &agent_name,
+                &spec,
+                &objective,
+            ) {
+                return refusal;
+            }
 
             let result = manager
                 .spawn_with_spec_text(&spec, &objective, context.as_deref())
@@ -2380,6 +2433,23 @@ impl AgentRunEngine {
                         theo_domain::agent_spec::AgentSpec::on_demand(&agent_name, &objective)
                     });
 
+                // Phase 18: per-entry handoff guardrail evaluation.
+                if let Some(refusal) = self.evaluate_handoff_or_refuse(
+                    &guardrails,
+                    "main",
+                    &agent_name,
+                    &spec,
+                    &objective,
+                ) {
+                    combined.push_str(&format!(
+                        "[Sub-agent {}] ❌ {} (handoff refused): {}\n",
+                        i + 1,
+                        spec.name,
+                        refusal,
+                    ));
+                    continue;
+                }
+
                 let result = manager
                     .spawn_with_spec_text(&spec, &objective, context.as_deref())
                     .await;
@@ -2399,6 +2469,115 @@ impl AgentRunEngine {
             }
             combined
         }
+    }
+
+    // ---------------------------------------------------------------------
+    // Phase 18: handoff guardrail evaluation
+    // ---------------------------------------------------------------------
+
+    /// Evaluate the handoff guardrail chain + the PreHandoff lifecycle
+    /// hook. Returns `Some(refusal_message)` to short-circuit the spawn,
+    /// or `None` to allow it.
+    ///
+    /// Side effects:
+    /// - publishes a `EventType::HandoffEvaluated` audit record (always)
+    /// - dispatches `HookEvent::PreHandoff` after the chain (if hooks are
+    ///   attached) — a hook `Block` becomes the final blocker.
+    pub fn evaluate_handoff_or_refuse(
+        &self,
+        chain: &crate::handoff_guardrail::GuardrailChain,
+        source_agent: &str,
+        target_agent: &str,
+        target_spec: &theo_domain::agent_spec::AgentSpec,
+        objective: &str,
+    ) -> Option<String> {
+        use crate::handoff_guardrail::{GuardrailDecision, HandoffContext};
+        let ctx = HandoffContext {
+            source_agent,
+            target_agent,
+            target_spec,
+            objective,
+            source_capabilities: self.config.capability_set.as_ref(),
+        };
+
+        let decisions = chain.evaluate(&ctx);
+        let blocked_by = decisions.iter().find_map(|(id, d)| match d {
+            GuardrailDecision::Block { reason } => Some((id.clone(), reason.clone())),
+            _ => None,
+        });
+        let warnings: Vec<String> = decisions
+            .iter()
+            .filter_map(|(id, d)| match d {
+                GuardrailDecision::Warn { message } => Some(format!("[{}] {}", id, message)),
+                _ => None,
+            })
+            .collect();
+
+        // Phase 18: PreHandoff hook (only if no chain block — chain wins first).
+        let hook_block = if blocked_by.is_none() {
+            self.subagent_hooks.as_ref().and_then(|hooks| {
+                use crate::lifecycle_hooks::{HookContext, HookEvent, HookResponse};
+                let hook_ctx = HookContext {
+                    tool_name: Some(format!("delegate_task:{}", target_agent)),
+                    tool_args: Some(serde_json::json!({
+                        "agent": target_agent,
+                        "objective": objective,
+                    })),
+                    tool_result: None,
+                };
+                match hooks.dispatch(HookEvent::PreHandoff, &hook_ctx) {
+                    HookResponse::Block { reason } => {
+                        Some(("hook.pre_handoff".to_string(), reason))
+                    }
+                    _ => None,
+                }
+            })
+        } else {
+            None
+        };
+
+        let final_block = blocked_by.clone().or(hook_block.clone());
+        let decision_label = if final_block.is_some() {
+            "block"
+        } else if !warnings.is_empty() {
+            "warn"
+        } else {
+            "allow"
+        };
+
+        // Always publish an audit event.
+        self.event_bus.publish(theo_domain::event::DomainEvent::new(
+            theo_domain::event::EventType::HandoffEvaluated,
+            self.run.run_id.as_str(),
+            serde_json::json!({
+                "source_agent": source_agent,
+                "target_agent": target_agent,
+                "target_source": target_spec.source.as_str(),
+                "objective": truncate_handoff_objective(objective),
+                "decision": decision_label,
+                "reason": final_block.as_ref().map(|(_, r)| r.clone()),
+                "blocked_by": final_block.as_ref().map(|(id, _)| id.clone()),
+                "guardrails_evaluated": chain.ids(),
+                "warnings": warnings,
+            }),
+        ));
+
+        final_block.map(|(id, reason)| {
+            format!(
+                "[handoff refused by {}] {}",
+                id, reason
+            )
+        })
+    }
+}
+
+fn truncate_handoff_objective(s: &str) -> String {
+    if s.chars().count() <= 200 {
+        s.to_string()
+    } else {
+        let mut t: String = s.chars().take(199).collect();
+        t.push('…');
+        t
     }
 }
 
@@ -2936,6 +3115,114 @@ mod tests {
         // Run store must have persisted the run
         let runs = store.list().unwrap();
         assert_eq!(runs.len(), 1, "registry-resolved spawn must persist");
+    }
+
+    // ── Phase 18: handoff guardrails integration ──
+
+    #[test]
+    fn engine_with_subagent_handoff_guardrails_stores_reference() {
+        let setup = TestSetup::new();
+        let chain = std::sync::Arc::new(
+            crate::handoff_guardrail::GuardrailChain::with_default_builtins(),
+        );
+        let engine = setup
+            .create_engine("test")
+            .with_subagent_handoff_guardrails(chain);
+        assert!(engine.subagent_handoff_guardrails.is_some());
+    }
+
+    #[test]
+    fn engine_with_subagent_mcp_discovery_stores_reference() {
+        let setup = TestSetup::new();
+        let cache = std::sync::Arc::new(theo_infra_mcp::DiscoveryCache::new());
+        let engine = setup
+            .create_engine("test")
+            .with_subagent_mcp_discovery(cache);
+        assert!(engine.subagent_mcp_discovery.is_some());
+    }
+
+    #[tokio::test]
+    async fn delegate_task_blocked_when_explorer_asked_to_implement() {
+        // Built-in `ReadOnlyAgentMustNotMutate` should refuse: explorer is
+        // read-only, "implement" is a mutation verb.
+        let setup = TestSetup::new();
+        let reg = crate::subagent::SubAgentRegistry::with_builtins();
+        // Make sure explorer is in the registry (with_builtins includes it).
+        let _ = reg.get("explorer").expect("explorer builtin must exist");
+        let engine = setup
+            .create_engine("test")
+            .with_subagent_registry(std::sync::Arc::new(reg));
+
+        let mut engine = engine;
+        let args = serde_json::json!({
+            "agent": "explorer",
+            "objective": "implement caching layer"
+        });
+        let result = engine.handle_delegate_task(args).await;
+        assert!(
+            result.contains("handoff refused"),
+            "expected handoff refusal, got: {}",
+            result
+        );
+        assert!(
+            result.contains("read_only_agent_must_not_mutate"),
+            "expected guardrail id in result, got: {}",
+            result
+        );
+    }
+
+    #[tokio::test]
+    async fn delegate_task_allowed_when_implementer_asked_to_implement() {
+        let setup = TestSetup::new();
+        let mut engine = setup.create_engine("test");
+        let args = serde_json::json!({
+            "agent": "implementer",
+            "objective": "implement caching layer"
+        });
+        let result = engine.handle_delegate_task(args).await;
+        assert!(
+            !result.contains("handoff refused"),
+            "implementer must be allowed; got: {}",
+            result
+        );
+    }
+
+    #[tokio::test]
+    async fn delegate_task_emits_handoff_evaluated_event() {
+        use crate::event_bus::EventListener;
+        use std::sync::Mutex;
+        use theo_domain::event::{DomainEvent, EventType};
+
+        struct Capture(Mutex<Vec<DomainEvent>>);
+        impl EventListener for Capture {
+            fn on_event(&self, e: &DomainEvent) {
+                self.0.lock().unwrap().push(e.clone());
+            }
+        }
+
+        let setup = TestSetup::new();
+        let capture = std::sync::Arc::new(Capture(Mutex::new(Vec::new())));
+        setup.bus.subscribe(capture.clone() as std::sync::Arc<dyn EventListener>);
+        let mut engine = setup.create_engine("test");
+        let args = serde_json::json!({
+            "agent": "explorer",
+            "objective": "implement evil mutation"
+        });
+        let _ = engine.handle_delegate_task(args).await;
+        let events = capture.0.lock().unwrap().clone();
+        assert!(
+            events.iter().any(|e| e.event_type == EventType::HandoffEvaluated),
+            "HandoffEvaluated event must be emitted"
+        );
+        let evt = events
+            .iter()
+            .find(|e| e.event_type == EventType::HandoffEvaluated)
+            .unwrap();
+        assert_eq!(
+            evt.payload.get("decision").and_then(|v| v.as_str()),
+            Some("block")
+        );
+        assert!(evt.payload.get("blocked_by").and_then(|v| v.as_str()).is_some());
     }
 
     #[test]
