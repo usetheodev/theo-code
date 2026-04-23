@@ -94,6 +94,10 @@ pub struct AgentRunEngine {
     subagent_cancellation: Option<Arc<crate::cancellation::CancellationTree>>,
     subagent_checkpoint: Option<Arc<crate::checkpoint::CheckpointManager>>,
     subagent_worktree: Option<Arc<theo_isolation::WorktreeProvider>>,
+    subagent_mcp: Option<Arc<theo_infra_mcp::McpRegistry>>,
+    /// Phase 9: turns since the last checkpoint (one snapshot per turn,
+    /// only when a mutating tool first fires within that turn).
+    checkpoint_taken_this_turn: std::sync::atomic::AtomicBool,
 }
 
 impl AgentRunEngine {
@@ -192,7 +196,39 @@ impl AgentRunEngine {
             subagent_cancellation: None,
             subagent_checkpoint: None,
             subagent_worktree: None,
+            subagent_mcp: None,
+            checkpoint_taken_this_turn: std::sync::atomic::AtomicBool::new(false),
         }
+    }
+
+    /// Phase 9: at the start of a turn, reset the once-per-turn snapshot flag.
+    pub fn reset_turn_checkpoint(&self) {
+        self.checkpoint_taken_this_turn
+            .store(false, std::sync::atomic::Ordering::Release);
+    }
+
+    /// Phase 9: take a snapshot if (a) a checkpoint manager is attached AND
+    /// (b) the tool is mutating AND (c) no snapshot was taken this turn yet.
+    /// Idempotent within a turn. Returns the SHA on a fresh snapshot, None
+    /// otherwise.
+    pub fn maybe_checkpoint_for_tool(&self, tool_name: &str, turn_id: u32) -> Option<String> {
+        if !Self::is_mutating_tool(tool_name) {
+            return None;
+        }
+        // Compare-and-swap: only snapshot if not already taken this turn.
+        if self
+            .checkpoint_taken_this_turn
+            .compare_exchange(
+                false,
+                true,
+                std::sync::atomic::Ordering::AcqRel,
+                std::sync::atomic::Ordering::Acquire,
+            )
+            .is_err()
+        {
+            return None;
+        }
+        self.checkpoint_before_mutation(&format!("turn-{}-pre-{}", turn_id, tool_name))
     }
 
     /// Phase 1-13: inject the SubAgentRegistry. Used by delegate_task to look
@@ -252,6 +288,31 @@ impl AgentRunEngine {
     ) -> Self {
         self.subagent_worktree = Some(provider);
         self
+    }
+
+    /// Phase 8: inject MCP registry. Sub-agents with non-empty
+    /// `spec.mcp_servers` get a system-prompt hint listing the allowed
+    /// `mcp:server:tool` namespace.
+    pub fn with_subagent_mcp(mut self, mcp: Arc<theo_infra_mcp::McpRegistry>) -> Self {
+        self.subagent_mcp = Some(mcp);
+        self
+    }
+
+    /// Phase 9: snapshot the workdir BEFORE a mutating tool fires (edit /
+    /// write / apply_patch / bash). Idempotent within a turn — caller is
+    /// expected to track once-per-turn state.
+    /// Returns the commit SHA on success, None if no checkpoint manager
+    /// is attached or snapshot fails (fail-soft).
+    pub fn checkpoint_before_mutation(&self, label: &str) -> Option<String> {
+        self.subagent_checkpoint
+            .as_ref()
+            .and_then(|cm| cm.snapshot(label).ok())
+    }
+
+    /// Returns true if `tool_name` is a mutating tool that warrants a
+    /// pre-mutation checkpoint snapshot.
+    pub fn is_mutating_tool(tool_name: &str) -> bool {
+        matches!(tool_name, "edit" | "write" | "apply_patch" | "bash")
     }
 
     /// Accumulated token usage (Phase 1 T1.1 AC-1.1.4, CLI display).
@@ -2133,6 +2194,9 @@ impl AgentRunEngine {
         if let Some(wp) = &self.subagent_worktree {
             manager = manager.with_worktree_provider(wp.clone());
         }
+        if let Some(mcp) = &self.subagent_mcp {
+            manager = manager.with_mcp_registry(mcp.clone());
+        }
 
         if has_agent {
             let agent_name = args
@@ -2790,6 +2854,53 @@ mod tests {
                 crate::lifecycle_hooks::HookManager::new(),
             ));
         assert!(engine.subagent_hooks.is_some());
+    }
+
+    #[test]
+    fn is_mutating_tool_recognizes_known_writes() {
+        assert!(AgentRunEngine::is_mutating_tool("edit"));
+        assert!(AgentRunEngine::is_mutating_tool("write"));
+        assert!(AgentRunEngine::is_mutating_tool("apply_patch"));
+        assert!(AgentRunEngine::is_mutating_tool("bash"));
+        assert!(!AgentRunEngine::is_mutating_tool("read"));
+        assert!(!AgentRunEngine::is_mutating_tool("grep"));
+        assert!(!AgentRunEngine::is_mutating_tool("glob"));
+    }
+
+    #[test]
+    fn maybe_checkpoint_returns_none_without_manager() {
+        let setup = TestSetup::new();
+        let engine = setup.create_engine("test");
+        // No subagent_checkpoint attached → snapshot returns None even
+        // for mutating tool
+        assert!(engine.maybe_checkpoint_for_tool("edit", 1).is_none());
+        assert!(engine.checkpoint_before_mutation("any").is_none());
+    }
+
+    #[test]
+    fn maybe_checkpoint_skips_non_mutating_tools() {
+        let setup = TestSetup::new();
+        let engine = setup.create_engine("test");
+        // read is not mutating — even with manager attached this would
+        // return None; with no manager, definitely None.
+        assert!(engine.maybe_checkpoint_for_tool("read", 1).is_none());
+        assert!(engine.maybe_checkpoint_for_tool("grep", 1).is_none());
+    }
+
+    #[test]
+    fn reset_turn_checkpoint_allows_new_snapshot() {
+        let setup = TestSetup::new();
+        let engine = setup.create_engine("test");
+        // Mark snapshot as taken
+        engine
+            .checkpoint_taken_this_turn
+            .store(true, std::sync::atomic::Ordering::Release);
+        engine.reset_turn_checkpoint();
+        assert!(
+            !engine
+                .checkpoint_taken_this_turn
+                .load(std::sync::atomic::Ordering::Acquire)
+        );
     }
 
     #[test]

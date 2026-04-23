@@ -86,6 +86,7 @@ pub struct AgentLoop {
     subagent_cancellation: Option<Arc<crate::cancellation::CancellationTree>>,
     subagent_checkpoint: Option<Arc<crate::checkpoint::CheckpointManager>>,
     subagent_worktree: Option<Arc<theo_isolation::WorktreeProvider>>,
+    subagent_mcp: Option<Arc<theo_infra_mcp::McpRegistry>>,
 }
 
 impl AgentLoop {
@@ -110,6 +111,7 @@ impl AgentLoop {
             subagent_cancellation: None,
             subagent_checkpoint: None,
             subagent_worktree: None,
+            subagent_mcp: None,
         }
     }
 
@@ -169,6 +171,11 @@ impl AgentLoop {
         self
     }
 
+    pub fn with_subagent_mcp(mut self, m: Arc<theo_infra_mcp::McpRegistry>) -> Self {
+        self.subagent_mcp = Some(m);
+        self
+    }
+
     /// Forward all subagent integrations to a freshly-built AgentRunEngine.
     fn forward_subagent_integrations(&self, mut engine: AgentRunEngine) -> AgentRunEngine {
         if let Some(r) = &self.subagent_registry {
@@ -188,6 +195,9 @@ impl AgentLoop {
         }
         if let Some(w) = &self.subagent_worktree {
             engine = engine.with_subagent_worktree(w.clone());
+        }
+        if let Some(m) = &self.subagent_mcp {
+            engine = engine.with_subagent_mcp(m.clone());
         }
         engine
     }

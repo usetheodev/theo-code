@@ -11,7 +11,10 @@ pub mod approval;
 pub mod builtins;
 pub mod parser;
 pub mod registry;
+pub mod reloadable;
 pub mod watcher;
+
+pub use reloadable::ReloadableRegistry;
 
 pub use approval::{ApprovalManifest, ApprovalMode, ApprovedEntry};
 pub use parser::{parse_agent_spec, ParseError};
@@ -61,6 +64,10 @@ pub struct SubAgentManager {
     /// Phase 12: optional metrics collector. When Some, spawn_with_spec records
     /// per-agent metrics via MetricsCollector::record_subagent_run.
     metrics: Option<Arc<crate::observability::metrics::MetricsCollector>>,
+    /// Phase 8: optional MCP registry. Filtered by spec.mcp_servers (allowlist)
+    /// and the resulting hint is injected into the sub-agent's system prompt
+    /// so the LLM is aware of MCP tools.
+    mcp_registry: Option<Arc<theo_infra_mcp::McpRegistry>>,
 }
 
 impl SubAgentManager {
@@ -84,6 +91,7 @@ impl SubAgentManager {
             checkpoint_manager: None,
             worktree_provider: None,
             metrics: None,
+            mcp_registry: None,
         }
     }
 
@@ -153,6 +161,20 @@ impl SubAgentManager {
     ) -> Self {
         self.metrics = Some(metrics);
         self
+    }
+
+    /// Phase 8: attach an MCP registry. When spec.mcp_servers is non-empty,
+    /// the registry is filtered by the allowlist and a hint section is
+    /// injected into the sub-agent's system prompt advertising the available
+    /// `mcp:server:tool` namespace.
+    pub fn with_mcp_registry(mut self, reg: Arc<theo_infra_mcp::McpRegistry>) -> Self {
+        self.mcp_registry = Some(reg);
+        self
+    }
+
+    /// Access the MCP registry, if any.
+    pub fn mcp_registry(&self) -> Option<&theo_infra_mcp::McpRegistry> {
+        self.mcp_registry.as_deref()
     }
 
     /// Access the registry, if any.
@@ -399,6 +421,21 @@ impl SubAgentManager {
                     agent_cwd.display(),
                 )
             };
+
+            // Phase 8: MCP integration — when the spec declares mcp_servers
+            // and a global MCP registry is attached, filter to the allowlist
+            // and inject a prompt hint advertising the mcp:<server>:<tool>
+            // namespace.
+            if !spec.mcp_servers.is_empty() {
+                if let Some(global) = &self.mcp_registry {
+                    let filtered = global.filtered(&spec.mcp_servers);
+                    let hint = filtered.render_prompt_hint();
+                    if !hint.is_empty() {
+                        sub_config.system_prompt =
+                            format!("{}\n\n{}", sub_config.system_prompt, hint);
+                    }
+                }
+            }
 
             let registry = theo_tooling::registry::create_default_registry();
             let agent = AgentLoop::new(sub_config, registry);
@@ -725,6 +762,7 @@ mod tests {
             checkpoint_manager: None,
             worktree_provider: None,
             metrics: None,
+            mcp_registry: None,
         };
 
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("test", "test obj");
@@ -804,6 +842,7 @@ mod tests {
             checkpoint_manager: None,
             worktree_provider: None,
             metrics: None,
+            mcp_registry: None,
         };
 
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("scout", "check x");
@@ -857,6 +896,7 @@ mod tests {
             checkpoint_manager: None,
             worktree_provider: None,
             metrics: None,
+            mcp_registry: None,
         };
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("x", "y");
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -887,6 +927,7 @@ mod tests {
             checkpoint_manager: None,
             worktree_provider: None,
             metrics: None,
+            mcp_registry: None,
         };
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("persisted", "test");
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -917,6 +958,7 @@ mod tests {
             checkpoint_manager: None,
             worktree_provider: None,
             metrics: None,
+            mcp_registry: None,
         };
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("x", "y");
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -994,6 +1036,7 @@ mod tests {
             checkpoint_manager: None,
             worktree_provider: None,
             metrics: None,
+            mcp_registry: None,
         };
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("x", "y");
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -1021,6 +1064,7 @@ mod tests {
             checkpoint_manager: None,
             worktree_provider: None,
             metrics: None,
+            mcp_registry: None,
         };
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("x", "y");
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -1063,6 +1107,7 @@ mod tests {
             checkpoint_manager: None,
             worktree_provider: None,
             metrics: None,
+            mcp_registry: None,
         };
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("y", "z");
         let rt = tokio::runtime::Runtime::new().unwrap();

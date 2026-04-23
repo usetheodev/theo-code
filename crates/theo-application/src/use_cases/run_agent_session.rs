@@ -29,6 +29,7 @@ pub struct SubagentInjections {
     pub cancellation: Option<Arc<theo_agent_runtime::cancellation::CancellationTree>>,
     pub checkpoint: Option<Arc<theo_agent_runtime::checkpoint::CheckpointManager>>,
     pub worktree: Option<Arc<theo_isolation::WorktreeProvider>>,
+    pub mcp: Option<Arc<theo_infra_mcp::McpRegistry>>,
 }
 
 impl SubagentInjections {
@@ -51,6 +52,9 @@ impl SubagentInjections {
         }
         if let Some(w) = &self.worktree {
             loop_ = loop_.with_subagent_worktree(w.clone());
+        }
+        if let Some(m) = &self.mcp {
+            loop_ = loop_.with_subagent_mcp(m.clone());
         }
         loop_
     }

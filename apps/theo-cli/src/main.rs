@@ -351,6 +351,9 @@ fn main() {
 
 /// Translate CLI runtime features into `SubagentInjections`. Always
 /// includes a builtin registry. Adds checkpoint when --enable-checkpoints.
+/// When `--watch-agents` is active, uses the live snapshot from
+/// `RuntimeFeatures.reloadable` so reloads from the watcher are picked up
+/// each time `delegate_task` resolves a sub-agent name.
 fn build_injections(
     features: &runtime_features::RuntimeFeatures,
     project_dir: &PathBuf,
@@ -358,14 +361,21 @@ fn build_injections(
     use std::sync::Arc;
     let mut inj = theo_application::use_cases::run_agent_session::SubagentInjections::default();
 
-    // Always inject a registry with builtins + project agents (TrustAll for CLI).
-    let mut reg = theo_agent_runtime::subagent::SubAgentRegistry::with_builtins();
-    let _ = reg.load_all(
-        Some(project_dir),
-        None,
-        theo_agent_runtime::subagent::ApprovalMode::TrustAll,
-    );
-    inj.registry = Some(Arc::new(reg));
+    // Registry: prefer the watcher-backed reloadable snapshot if active,
+    // otherwise build a fresh builtins+project registry once.
+    let registry = match &features.reloadable {
+        Some(rel) => Arc::new(rel.snapshot()),
+        None => {
+            let mut reg = theo_agent_runtime::subagent::SubAgentRegistry::with_builtins();
+            let _ = reg.load_all(
+                Some(project_dir),
+                None,
+                theo_agent_runtime::subagent::ApprovalMode::TrustAll,
+            );
+            Arc::new(reg)
+        }
+    };
+    inj.registry = Some(registry);
 
     // Persistent run store under <project>/.theo/subagent/
     let store = theo_agent_runtime::subagent_runs::FileSubagentRunStore::new(

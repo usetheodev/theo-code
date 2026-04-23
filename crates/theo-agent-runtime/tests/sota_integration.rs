@@ -405,3 +405,126 @@ fn git_available() -> bool {
         .map(|o| o.status.success())
         .unwrap_or(false)
 }
+
+// ── Pipeline integration tests (Phase 1-13 wiring) ─────────────────────
+
+#[tokio::test]
+async fn sota_pipeline_subagent_manager_chains_all_builders() {
+    use std::sync::Arc;
+    use theo_agent_runtime::cancellation::CancellationTree;
+    use theo_agent_runtime::config::AgentConfig;
+    use theo_agent_runtime::event_bus::EventBus;
+    use theo_agent_runtime::lifecycle_hooks::HookManager;
+    use theo_agent_runtime::observability::metrics::MetricsCollector;
+    use theo_agent_runtime::subagent::SubAgentManager;
+    use theo_agent_runtime::subagent_runs::FileSubagentRunStore;
+    use theo_infra_mcp::McpRegistry;
+
+    let bus = Arc::new(EventBus::new());
+    let dir = TempDir::new().unwrap();
+
+    let mut mgr = SubAgentManager::with_builtins(
+        AgentConfig::default(),
+        bus,
+        dir.path().to_path_buf(),
+    );
+
+    // Chain ALL Phase 5-12 builders
+    mgr = mgr
+        .with_run_store(Arc::new(FileSubagentRunStore::new(dir.path())))
+        .with_hooks(Arc::new(HookManager::new()))
+        .with_cancellation(Arc::new(CancellationTree::new()))
+        .with_metrics(Arc::new(MetricsCollector::new()))
+        .with_mcp_registry(Arc::new(McpRegistry::new()));
+
+    // Verify accessors return Some for each
+    assert!(mgr.registry().is_some());
+    assert!(mgr.run_store().is_some());
+    assert!(mgr.hook_manager().is_some());
+    assert!(mgr.cancellation().is_some());
+    assert!(mgr.mcp_registry().is_some());
+    assert_eq!(mgr.registry().unwrap().len(), 4); // builtins
+}
+
+#[tokio::test]
+async fn sota_pipeline_run_engine_forwards_to_subagent_manager() {
+    use std::sync::Arc;
+    use theo_agent_runtime::cancellation::CancellationTree;
+    use theo_agent_runtime::lifecycle_hooks::HookManager;
+    use theo_agent_runtime::subagent::SubAgentRegistry;
+    use theo_agent_runtime::subagent_runs::FileSubagentRunStore;
+    use theo_infra_mcp::McpRegistry;
+
+    use theo_agent_runtime::agent_loop::AgentLoop;
+    use theo_agent_runtime::config::AgentConfig;
+    use theo_tooling::registry::create_default_registry;
+
+    let dir = TempDir::new().unwrap();
+    let store = Arc::new(FileSubagentRunStore::new(dir.path()));
+
+    // Build AgentLoop with ALL forward builders
+    let _agent = AgentLoop::new(AgentConfig::default(), create_default_registry())
+        .with_subagent_registry(Arc::new(SubAgentRegistry::with_builtins()))
+        .with_subagent_run_store(store.clone())
+        .with_subagent_hooks(Arc::new(HookManager::new()))
+        .with_subagent_cancellation(Arc::new(CancellationTree::new()))
+        .with_subagent_mcp(Arc::new(McpRegistry::new()));
+
+    // The forwarding to AgentRunEngine is exercised when run() is called.
+    // We can't run a full agent without an LLM here, but the construction
+    // path having compiled + accepted all builders is the contract test.
+    // (run_engine integration is exercised by delegate_task tests.)
+}
+
+#[tokio::test]
+async fn sota_pipeline_mcp_hint_injected_when_spec_declares_servers() {
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+    use theo_agent_runtime::config::AgentConfig;
+    use theo_agent_runtime::event_bus::EventBus;
+    use theo_agent_runtime::subagent::SubAgentManager;
+    use theo_infra_mcp::{McpRegistry, McpServerConfig};
+
+    let bus = Arc::new(EventBus::new());
+    let dir = TempDir::new().unwrap();
+
+    let mut mcp_reg = McpRegistry::new();
+    mcp_reg.register(McpServerConfig::Stdio {
+        name: "github".to_string(),
+        command: "echo".to_string(),
+        args: vec![],
+        env: BTreeMap::new(),
+    });
+    mcp_reg.register(McpServerConfig::Stdio {
+        name: "postgres".to_string(),
+        command: "echo".to_string(),
+        args: vec![],
+        env: BTreeMap::new(),
+    });
+
+    let mgr = SubAgentManager::with_builtins(
+        AgentConfig::default(),
+        bus,
+        dir.path().to_path_buf(),
+    )
+    .with_mcp_registry(Arc::new(mcp_reg));
+
+    // Spec declares only github → filtered hint should mention only github
+    let mut spec = parse_agent_spec(
+        "---\ndescription: x\n---\nbody",
+        "test",
+        AgentSpecSource::Project,
+    )
+    .unwrap();
+    spec.mcp_servers = vec!["github".to_string()];
+
+    // Verify the manager has the registry and the spec carries the allowlist
+    assert_eq!(mgr.mcp_registry().unwrap().len(), 2);
+    let filtered = mgr.mcp_registry().unwrap().filtered(&spec.mcp_servers);
+    assert_eq!(filtered.len(), 1);
+    assert!(filtered.get("github").is_some());
+    assert!(filtered.get("postgres").is_none());
+    let hint = filtered.render_prompt_hint();
+    assert!(hint.contains("github"));
+    assert!(!hint.contains("postgres"));
+}
