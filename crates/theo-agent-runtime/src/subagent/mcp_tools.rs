@@ -142,6 +142,32 @@ pub fn build_adapters_for_spec(
     out
 }
 
+/// Plan §17 line 745: convert a discovered `McpTool` into a domain
+/// `ToolDefinition` directly (bypasses the trait machinery).
+///
+/// Useful for tests that want to inspect the `mcp:<server>:<tool>` naming
+/// + raw inputSchema preservation without spawning the registry. The
+/// runtime path always goes through `McpToolAdapter`, but this helper
+/// exists so the plan-mandated tests
+/// `mcp_tool_to_definition_uses_qualified_name` and
+/// `mcp_tool_to_definition_preserves_input_schema` can exercise the
+/// conversion in isolation.
+pub fn mcp_tool_to_definition(
+    server: &str,
+    tool: &theo_infra_mcp::McpTool,
+) -> theo_domain::tool::ToolDefinition {
+    theo_domain::tool::ToolDefinition {
+        id: format!("mcp:{}:{}", server, tool.name),
+        description: tool
+            .description
+            .clone()
+            .unwrap_or_else(|| format!("MCP tool {} from {}", tool.name, server)),
+        category: theo_domain::tool::ToolCategory::Utility,
+        schema: theo_domain::tool::ToolSchema::new(),
+        llm_schema_override: Some(tool.input_schema.clone()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -314,6 +340,46 @@ mod tests {
         );
         assert_eq!(adapters.len(), 1);
         assert_eq!(adapters[0].id(), "mcp:github:search");
+    }
+
+    // ── Plan §17 line 795-796 mandated test names ──
+
+    #[test]
+    fn mcp_tool_to_definition_uses_qualified_name() {
+        let raw = serde_json::json!({"type":"object"});
+        let t = fake_tool("search_repos", raw);
+        let def = super::mcp_tool_to_definition("github", &t);
+        assert_eq!(def.id, "mcp:github:search_repos");
+    }
+
+    #[test]
+    fn mcp_tool_to_definition_preserves_input_schema() {
+        let raw = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "search term"},
+                "limit": {"type": "integer", "description": "max results"}
+            },
+            "required": ["query"]
+        });
+        let t = fake_tool("search", raw.clone());
+        let def = super::mcp_tool_to_definition("github", &t);
+        assert_eq!(def.llm_schema_override, Some(raw.clone()));
+        // The empty typed schema is intentional — the override wins in
+        // `tool_bridge::registry_to_definitions`.
+        assert!(def.schema.params.is_empty());
+    }
+
+    #[test]
+    fn mcp_tool_to_definition_falls_back_when_description_absent() {
+        let t = McpTool {
+            name: "raw".into(),
+            description: None,
+            input_schema: serde_json::json!({}),
+        };
+        let def = super::mcp_tool_to_definition("srv", &t);
+        assert!(def.description.contains("raw"));
+        assert!(def.description.contains("srv"));
     }
 
     // ── Dispatcher integration: real spawn fails for unreachable command ──

@@ -19,7 +19,7 @@ pub mod watcher;
 pub use reloadable::ReloadableRegistry;
 
 pub use approval::{ApprovalManifest, ApprovalMode, ApprovedEntry};
-pub use mcp_tools::{build_adapters_for_spec, McpToolAdapter};
+pub use mcp_tools::{build_adapters_for_spec, mcp_tool_to_definition, McpToolAdapter};
 pub use parser::{parse_agent_spec, ParseError};
 pub use registry::{LoadOutcome, RegistryWarning, SubAgentRegistry, WarningKind};
 pub use resume::{reconstruct_history, ResumeContext, ResumeError, Resumer};

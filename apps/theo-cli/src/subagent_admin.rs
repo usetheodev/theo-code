@@ -211,6 +211,28 @@ pub fn handle_resume(
                 }
                 Ok(())
             }
+            // Plan §16 line 596: NotResumable is a normal user condition, not
+            // an error — print guidance instead of bubbling up exit-code 1.
+            Err(theo_agent_runtime::subagent::ResumeError::NotResumable {
+                status, ..
+            }) => {
+                println!(
+                    "Run '{}' is in terminal status '{}'. \
+                     Use `theo subagent abandon {}` to mark it as abandoned, \
+                     then re-spawn fresh.",
+                    run_id, status, run_id
+                );
+                Ok(())
+            }
+            Err(theo_agent_runtime::subagent::ResumeError::NotFound(_)) => {
+                println!(
+                    "Run '{}' not found in {}. \
+                     Use `theo subagent list` to see available runs.",
+                    run_id,
+                    project_dir.display()
+                );
+                Ok(())
+            }
             Err(e) => Err(anyhow::anyhow!("resume failed: {}", e)),
         }
     })
@@ -460,8 +482,10 @@ pub mod resume {
     use super::{handle_subagent, SubagentCmd};
     use tempfile::TempDir;
 
+    /// Plan §16 line 596: NotFound is a normal user condition (typo'd run id),
+    /// not a CLI error — guidance is printed and exit code 0 is returned.
     #[test]
-    fn handle_subagent_resume_unknown_returns_err() {
+    fn handle_subagent_resume_unknown_returns_ok_with_guidance() {
         let dir = TempDir::new().unwrap();
         let res = handle_subagent(
             SubagentCmd::Resume {
@@ -470,11 +494,17 @@ pub mod resume {
             },
             dir.path(),
         );
-        assert!(res.is_err(), "resume of missing run should error");
+        assert!(
+            res.is_ok(),
+            "missing run id is friendly UX (Ok with println), not Err: {:?}",
+            res
+        );
     }
 
+    /// Plan §16 line 596: terminal status prints a tip (use `abandon`), not
+    /// an error. Exit code 0.
     #[test]
-    fn handle_subagent_resume_terminal_run_returns_err() {
+    fn handle_subagent_resume_terminal_run_returns_ok_with_guidance() {
         use theo_agent_runtime::subagent_runs::{
             FileSubagentRunStore, RunStatus, SubagentRun,
         };
@@ -496,6 +526,40 @@ pub mod resume {
             },
             dir.path(),
         );
-        assert!(res.is_err(), "terminal run resume must reject");
+        assert!(
+            res.is_ok(),
+            "terminal run resume is friendly UX (Ok with abandon hint): {:?}",
+            res
+        );
+    }
+
+    /// Idempotency: invoking resume on the same terminal run twice produces
+    /// identical UX both times.
+    #[test]
+    fn handle_subagent_resume_terminal_run_is_idempotent() {
+        use theo_agent_runtime::subagent_runs::{
+            FileSubagentRunStore, RunStatus, SubagentRun,
+        };
+        use theo_domain::agent_spec::AgentSpec;
+        let dir = TempDir::new().unwrap();
+        let store_dir = dir.path().join(".theo").join("subagent");
+        let store = FileSubagentRunStore::new(&store_dir);
+        let spec = AgentSpec::on_demand("x", "y");
+        let mut run = SubagentRun::new_running(
+            "r-done", None, &spec, "y", "/tmp", None,
+        );
+        run.status = RunStatus::Completed;
+        store.save(&run).unwrap();
+
+        for _ in 0..3 {
+            let res = handle_subagent(
+                SubagentCmd::Resume {
+                    run_id: "r-done".into(),
+                    objective: None,
+                },
+                dir.path(),
+            );
+            assert!(res.is_ok(), "every call must be Ok (idempotent)");
+        }
     }
 }
