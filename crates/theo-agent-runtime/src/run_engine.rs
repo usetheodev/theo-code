@@ -86,6 +86,14 @@ pub struct AgentRunEngine {
     episodes_injected: u32, episodes_created: u32,
     initial_context_files: std::collections::HashSet<String>,
     pre_compaction_hot_files: std::collections::HashSet<String>,
+    /// Phase 1-13 integrations: when present, propagated to spawn_with_spec.
+    /// Optional so backward-compat is preserved (legacy callers don't need to inject).
+    subagent_registry: Option<Arc<crate::subagent::SubAgentRegistry>>,
+    subagent_run_store: Option<Arc<crate::subagent_runs::FileSubagentRunStore>>,
+    subagent_hooks: Option<Arc<crate::lifecycle_hooks::HookManager>>,
+    subagent_cancellation: Option<Arc<crate::cancellation::CancellationTree>>,
+    subagent_checkpoint: Option<Arc<crate::checkpoint::CheckpointManager>>,
+    subagent_worktree: Option<Arc<theo_isolation::WorktreeProvider>>,
 }
 
 impl AgentRunEngine {
@@ -178,7 +186,72 @@ impl AgentRunEngine {
             autodream_attempted: std::sync::atomic::AtomicBool::new(false),
             observability, episodes_injected: 0, episodes_created: 0,
             initial_context_files: Default::default(), pre_compaction_hot_files: Default::default(),
+            subagent_registry: None,
+            subagent_run_store: None,
+            subagent_hooks: None,
+            subagent_cancellation: None,
+            subagent_checkpoint: None,
+            subagent_worktree: None,
         }
+    }
+
+    /// Phase 1-13: inject the SubAgentRegistry. Used by delegate_task to look
+    /// up named agents (built-in / project / global). When `None`, a default
+    /// registry with builtins is constructed on each delegate_task call.
+    pub fn with_subagent_registry(
+        mut self,
+        registry: Arc<crate::subagent::SubAgentRegistry>,
+    ) -> Self {
+        self.subagent_registry = Some(registry);
+        self
+    }
+
+    /// Phase 10: inject session persistence store. When set, sub-agent runs
+    /// are persisted in `<base>/runs/{run_id}.json`.
+    pub fn with_subagent_run_store(
+        mut self,
+        store: Arc<crate::subagent_runs::FileSubagentRunStore>,
+    ) -> Self {
+        self.subagent_run_store = Some(store);
+        self
+    }
+
+    /// Phase 5: inject global hooks (per-agent hooks merged via spec.hooks).
+    pub fn with_subagent_hooks(
+        mut self,
+        hooks: Arc<crate::lifecycle_hooks::HookManager>,
+    ) -> Self {
+        self.subagent_hooks = Some(hooks);
+        self
+    }
+
+    /// Phase 6: inject cancellation tree. Sub-agents register children;
+    /// root cancellation propagates.
+    pub fn with_subagent_cancellation(
+        mut self,
+        tree: Arc<crate::cancellation::CancellationTree>,
+    ) -> Self {
+        self.subagent_cancellation = Some(tree);
+        self
+    }
+
+    /// Phase 9: inject checkpoint manager. Sub-agents auto-snapshot pre-run.
+    pub fn with_subagent_checkpoint(
+        mut self,
+        manager: Arc<crate::checkpoint::CheckpointManager>,
+    ) -> Self {
+        self.subagent_checkpoint = Some(manager);
+        self
+    }
+
+    /// Phase 11: inject worktree provider. Sub-agents with isolation=worktree
+    /// get an isolated git worktree.
+    pub fn with_subagent_worktree(
+        mut self,
+        provider: Arc<theo_isolation::WorktreeProvider>,
+    ) -> Self {
+        self.subagent_worktree = Some(provider);
+        self
     }
 
     /// Accumulated token usage (Phase 1 T1.1 AC-1.1.4, CLI display).
@@ -2138,26 +2211,45 @@ impl AgentRunEngine {
                 .to_string();
         }
 
-        // Build the registry on demand. Phase 4 — Future iteration may inject
-        // an Arc<SubAgentRegistry> at AgentRunEngine construction time (A3).
-        let mut registry =
-            crate::subagent::SubAgentRegistry::with_builtins();
-        // Best-effort load of project + global agents (TrustAll for now —
-        // the proper S3 prompt UI is owned by apps/* and orchestrated by
-        // theo-application; runtime falls back to TrustAll here so the
-        // tool dispatch always works even from non-interactive contexts.
-        let _ = registry.load_all(
-            Some(&self.project_dir),
-            None,
-            crate::subagent::ApprovalMode::TrustAll,
-        );
+        // Use injected registry when available; otherwise build a default one
+        // with builtins + load_all (TrustAll fallback for non-interactive paths).
+        let registry: Arc<crate::subagent::SubAgentRegistry> = match &self.subagent_registry {
+            Some(r) => r.clone(),
+            None => {
+                let mut reg = crate::subagent::SubAgentRegistry::with_builtins();
+                let _ = reg.load_all(
+                    Some(&self.project_dir),
+                    None,
+                    crate::subagent::ApprovalMode::TrustAll,
+                );
+                Arc::new(reg)
+            }
+        };
 
-        let manager = crate::subagent::SubAgentManager::with_registry(
+        // Build the manager and chain ALL Phase 5-12 integrations.
+        let mut manager = crate::subagent::SubAgentManager::with_registry(
             self.config.clone(),
             self.event_bus.clone(),
             self.project_dir.clone(),
-            std::sync::Arc::new(registry),
-        );
+            registry,
+        )
+        .with_metrics(self.metrics.clone());
+
+        if let Some(store) = &self.subagent_run_store {
+            manager = manager.with_run_store(store.clone());
+        }
+        if let Some(hooks) = &self.subagent_hooks {
+            manager = manager.with_hooks(hooks.clone());
+        }
+        if let Some(tree) = &self.subagent_cancellation {
+            manager = manager.with_cancellation(tree.clone());
+        }
+        if let Some(cm) = &self.subagent_checkpoint {
+            manager = manager.with_checkpoint(cm.clone());
+        }
+        if let Some(wp) = &self.subagent_worktree {
+            manager = manager.with_worktree_provider(wp.clone());
+        }
 
         if has_agent {
             let agent_name = args
@@ -2777,6 +2869,55 @@ mod tests {
             names.contains(&"delegate_task"),
             "delegate_task must be in tool definitions"
         );
+    }
+
+    #[tokio::test]
+    async fn delegate_task_uses_injected_registry_and_run_store() {
+        use crate::subagent_runs::FileSubagentRunStore;
+        let setup = TestSetup::new();
+        let mut engine = setup.create_engine("test");
+
+        // Inject a custom registry with a known agent + a run store
+        let mut reg = crate::subagent::SubAgentRegistry::with_builtins();
+        reg.register(theo_domain::agent_spec::AgentSpec::on_demand(
+            "scout",
+            "test purpose",
+        ));
+        let tempdir = tempfile::TempDir::new().unwrap();
+        let store = std::sync::Arc::new(FileSubagentRunStore::new(tempdir.path()));
+
+        engine = engine
+            .with_subagent_registry(std::sync::Arc::new(reg))
+            .with_subagent_run_store(store.clone());
+
+        let args = serde_json::json!({"agent": "scout", "objective": "look around"});
+        let _result = engine.handle_delegate_task(args).await;
+
+        // Run store must have persisted the run
+        let runs = store.list().unwrap();
+        assert_eq!(runs.len(), 1, "registry-resolved spawn must persist");
+    }
+
+    #[test]
+    fn engine_with_subagent_hooks_stores_reference() {
+        let setup = TestSetup::new();
+        let engine = setup
+            .create_engine("test")
+            .with_subagent_hooks(std::sync::Arc::new(
+                crate::lifecycle_hooks::HookManager::new(),
+            ));
+        assert!(engine.subagent_hooks.is_some());
+    }
+
+    #[test]
+    fn engine_with_subagent_cancellation_stores_reference() {
+        let setup = TestSetup::new();
+        let engine = setup
+            .create_engine("test")
+            .with_subagent_cancellation(std::sync::Arc::new(
+                crate::cancellation::CancellationTree::new(),
+            ));
+        assert!(engine.subagent_cancellation.is_some());
     }
 
     #[test]

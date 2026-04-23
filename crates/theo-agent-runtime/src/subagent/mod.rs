@@ -30,7 +30,16 @@ use theo_domain::event::{DomainEvent, EventType};
 use theo_infra_llm::types::Message;
 
 // ---------------------------------------------------------------------------
-// SubAgentRole — specialized roles with restricted capabilities
+// SubAgentRole — LEGACY (Phase 1-4 migration): use AgentSpec + delegate_task.
+//
+// Kept for backward-compat with 530+ existing tests and the legacy
+// `subagent`/`subagent_parallel` tool dispatchers. Will be removed when the
+// tool_bridge migration is complete (currently coexists with `delegate_task`).
+//
+// New code MUST use: `SubAgentManager::with_builtins()` +
+// `spawn_with_spec()` OR the `delegate_task` tool.
+//
+// Ref: agents-plan.md v3.0 "TRACK A — FASE 4 CLEANUP" (deferred).
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

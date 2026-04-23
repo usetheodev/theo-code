@@ -8,6 +8,7 @@ mod permission;
 mod pilot;
 mod render;
 mod renderer;
+mod runtime_features;
 mod status_line;
 mod subagent_admin;
 mod tui;
@@ -313,6 +314,17 @@ fn main() {
             }
         }
         None => {
+            // Phase 9 + 13: activate runtime features per CLI flags.
+            // Held in scope so watcher / checkpoint live for the session.
+            let features = runtime_features::RuntimeFeatures::from_flags(
+                cli.watch_agents,
+                cli.enable_checkpoints,
+                &cli.repo,
+            );
+            features.print_status();
+            // Keep features alive for the session by binding to a local var.
+            let _runtime_features = features;
+
             if cli.headless {
                 cmd_headless(cli.prompt, cli.repo, cli.provider, cli.model, cli.max_iter, cli.mode, cli.temperature, cli.seed);
                 return;
