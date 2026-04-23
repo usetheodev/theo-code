@@ -19,7 +19,10 @@
 #   6. Assert subagent_admin shows ≥ 1 run, dashboard endpoint serves
 #      the agent's stats, trajectory contains HandoffEvaluated.
 
-set -euo pipefail
+set -uo pipefail
+# Note: deliberately NOT using `set -e` — the agent run can exit non-zero
+# (e.g. BudgetExceeded is reported as success=false but is a normal
+# outcome in this smoke test). We assert the persistence layer instead.
 
 if [ "${OAUTH_E2E:-0}" != "1" ]; then
   echo "[sota12-oauth-smoke] skipped (set OAUTH_E2E=1 to run)"
@@ -97,30 +100,30 @@ echo "[sota12-oauth-smoke] result line:"
 echo "$RESULT_JSON" | head -c 400
 echo
 
-# ── 6. Assertions ─────────────────────────────────────────────────────
-SUCCESS=$(echo "$RESULT_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin).get('success', False))" 2>/dev/null || echo "False")
-if [ "$SUCCESS" != "True" ]; then
-  echo "[sota12-oauth-smoke] WARN: agent did not report success. JSON:"
-  echo "$RESULT_JSON"
-fi
+# ── 6. Assertions (don't gate on agent success — sub-agent budget
+#       exhaustion produces success=false but the spawn DID happen,
+#       which is what we're validating).
+PASS=true
 
 # Sub-agent run persisted?
-RUN_COUNT=$("$CLI" subagent list --repo "$WORK" 2>/dev/null | grep -c "sota12-validator\|RUN_ID" || echo "0")
-if [ "$RUN_COUNT" -lt 2 ]; then  # 1 header + ≥1 run
-  echo "[sota12-oauth-smoke] FAIL: expected ≥1 sub-agent run; got: $RUN_COUNT"
+RUN_COUNT=$("$CLI" subagent list --repo "$WORK" 2>/dev/null | grep -c "sota12-validator" || echo "0")
+if [ "$RUN_COUNT" -lt 1 ]; then
+  echo "[sota12-oauth-smoke] ✗ no sub-agent runs persisted"
   "$CLI" subagent list --repo "$WORK" || true
-  exit 1
+  PASS=false
+else
+  echo "[sota12-oauth-smoke] ✓ Sub-agent runs persisted ($RUN_COUNT)"
 fi
-echo "[sota12-oauth-smoke] ✓ Sub-agent run persisted"
 
 # HandoffEvaluated event in trajectory?
 HANDOFF_COUNT=$(grep -h "HandoffEvaluated" "$WORK"/.theo/trajectories/*.jsonl 2>/dev/null | wc -l || echo "0")
 if [ "$HANDOFF_COUNT" -lt 1 ]; then
-  echo "[sota12-oauth-smoke] FAIL: HandoffEvaluated event missing from trajectories"
-  ls "$WORK"/.theo/trajectories/ || true
-  exit 1
+  echo "[sota12-oauth-smoke] ✗ HandoffEvaluated event missing from trajectories"
+  ls "$WORK"/.theo/trajectories/ 2>/dev/null || true
+  PASS=false
+else
+  echo "[sota12-oauth-smoke] ✓ HandoffEvaluated event captured ($HANDOFF_COUNT)"
 fi
-echo "[sota12-oauth-smoke] ✓ HandoffEvaluated event captured ($HANDOFF_COUNT occurrences)"
 
 # Dashboard endpoint responds?
 PORT=5180
@@ -129,15 +132,23 @@ DASH_PID=$!
 trap "kill $DASH_PID 2>/dev/null; rm -rf '$WORK'" EXIT
 sleep 2
 AGENTS_JSON=$(curl -s "http://127.0.0.1:$PORT/api/agents" 2>/dev/null || echo "[]")
-if ! echo "$AGENTS_JSON" | grep -q "sota12-validator"; then
-  echo "[sota12-oauth-smoke] FAIL: dashboard /api/agents missing sota12-validator. Body: $AGENTS_JSON"
-  exit 1
+if echo "$AGENTS_JSON" | grep -q "sota12-validator"; then
+  echo "[sota12-oauth-smoke] ✓ Dashboard exposes sota12-validator"
+else
+  echo "[sota12-oauth-smoke] ✗ dashboard /api/agents missing sota12-validator"
+  echo "  body: $AGENTS_JSON"
+  PASS=false
 fi
-echo "[sota12-oauth-smoke] ✓ Dashboard exposes sota12-validator"
 
 echo ""
-echo "[sota12-oauth-smoke] ✓✓✓ ALL ASSERTIONS PASSED"
-echo "  - OAuth token valid"
-echo "  - Sub-agent run persisted"
-echo "  - HandoffEvaluated event emitted ($HANDOFF_COUNT)"
-echo "  - Dashboard /api/agents serves the agent"
+if [ "$PASS" = "true" ]; then
+  echo "[sota12-oauth-smoke] ✓✓✓ ALL ASSERTIONS PASSED"
+  echo "  - OAuth token valid"
+  echo "  - Sub-agent runs persisted ($RUN_COUNT)"
+  echo "  - HandoffEvaluated events emitted ($HANDOFF_COUNT)"
+  echo "  - Dashboard /api/agents serves the agent"
+  exit 0
+else
+  echo "[sota12-oauth-smoke] ✗ some assertions failed"
+  exit 1
+fi
