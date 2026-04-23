@@ -907,6 +907,20 @@ impl AgentRunEngine {
                     self.session_token_usage.accumulate(&theo_domain::budget::TokenUsage {
                         input_tokens: input_tok, output_tokens: output_tok, ..Default::default()
                     });
+                    // Emit LlmCallEnd with full accounting so observability can
+                    // plot context growth, token-per-iteration, and cache hit rate.
+                    self.event_bus.publish(DomainEvent::new(
+                        EventType::LlmCallEnd,
+                        self.run.run_id.as_str(),
+                        serde_json::json!({
+                            "iteration": iteration,
+                            "duration_ms": llm_duration,
+                            "input_tokens": input_tok,
+                            "output_tokens": output_tok,
+                            "total_tokens": total_tok,
+                            "context_tokens": estimated_context_tokens,
+                        }),
+                    ));
                     resp
                 }
                 Err(e) if e.is_context_overflow() => {

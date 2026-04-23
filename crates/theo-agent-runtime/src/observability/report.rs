@@ -343,6 +343,112 @@ pub fn compute_memory_metrics(
     }
 }
 
+// ----- Sub-agent metrics -----
+
+/// Metrics about sub-agent spawning and completion during the run.
+///
+/// A sub-agent is a nested `AgentRunEngine` spawned via the `subagent` tool —
+/// its own events do not show up in the parent trajectory (the parent engine
+/// doesn't subscribe to the child bus), but the parent records the tool call
+/// which is what we count here.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct SubagentMetrics {
+    pub spawned: u32,
+    pub succeeded: u32,
+    pub failed: u32,
+    pub avg_duration_ms: f64,
+    pub max_duration_ms: u64,
+    pub success_rate: f64,
+}
+
+pub fn compute_subagent_metrics(steps: &[ProjectedStep]) -> SubagentMetrics {
+    let is_subagent =
+        |s: &&ProjectedStep| matches!(s.tool_name.as_deref(), Some("subagent" | "subagent_parallel"));
+    let mut spawned = 0u32;
+    let mut succeeded = 0u32;
+    let mut failed = 0u32;
+    let mut durations: Vec<u64> = Vec::new();
+    for s in steps.iter().filter(|s| s.event_type == "ToolCallCompleted") {
+        if !is_subagent(&s) {
+            continue;
+        }
+        spawned += 1;
+        match s.outcome {
+            Some(StepOutcome::Success) => succeeded += 1,
+            _ => failed += 1,
+        }
+        if let Some(d) = s.duration_ms {
+            durations.push(d);
+        }
+    }
+    let (avg_duration_ms, max_duration_ms) = if durations.is_empty() {
+        (0.0, 0)
+    } else {
+        (
+            durations.iter().sum::<u64>() as f64 / durations.len() as f64,
+            *durations.iter().max().unwrap_or(&0),
+        )
+    };
+    SubagentMetrics {
+        spawned,
+        succeeded,
+        failed,
+        avg_duration_ms,
+        max_duration_ms,
+        success_rate: safe_div(succeeded as f64, spawned as f64),
+    }
+}
+
+// ----- Error taxonomy -----
+
+/// Classification of `Error` events by root cause category.
+///
+/// Helps answer "where is our error budget going?" — network vs provider vs
+/// tool sandbox vs business-logic failures.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct ErrorTaxonomy {
+    pub total_errors: u32,
+    pub network_errors: u32,
+    pub llm_errors: u32,
+    pub tool_errors: u32,
+    pub sandbox_errors: u32,
+    pub budget_errors: u32,
+    pub validation_errors: u32,
+    pub failure_mode_errors: u32,
+    pub other_errors: u32,
+}
+
+pub fn compute_error_taxonomy(steps: &[ProjectedStep]) -> ErrorTaxonomy {
+    let mut tax = ErrorTaxonomy::default();
+    for s in steps {
+        if s.event_type != "Error" && s.event_type != "BudgetExceeded" {
+            continue;
+        }
+        tax.total_errors += 1;
+        if s.event_type == "BudgetExceeded" {
+            tax.budget_errors += 1;
+            continue;
+        }
+        let lower = s.payload_summary.to_lowercase();
+        if lower.contains("failure_mode") {
+            tax.failure_mode_errors += 1;
+        } else if lower.contains("network") || lower.contains("timeout") || lower.contains("connection") {
+            tax.network_errors += 1;
+        } else if lower.contains("sandbox") || lower.contains("seccomp") || lower.contains("landlock") {
+            tax.sandbox_errors += 1;
+        } else if lower.contains("invalid") || lower.contains("validation") || lower.contains("schema") {
+            tax.validation_errors += 1;
+        } else if lower.contains("tool") {
+            tax.tool_errors += 1;
+        } else if lower.contains("llm") || lower.contains("api") || lower.contains("rate") {
+            tax.llm_errors += 1;
+        } else {
+            tax.other_errors += 1;
+        }
+    }
+    tax
+}
+
 // ----- T3.13 RunReport -----
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -353,6 +459,10 @@ pub struct RunReport {
     pub tool_breakdown: Vec<ToolBreakdown>,
     pub context_health: ContextHealthMetrics,
     pub memory_metrics: MemoryMetrics,
+    #[serde(default)]
+    pub subagent_metrics: SubagentMetrics,
+    #[serde(default)]
+    pub error_taxonomy: ErrorTaxonomy,
     pub integrity: IntegrityReport,
 }
 
@@ -643,6 +753,78 @@ mod tests {
         let _ = r.tool_breakdown;
         let _ = r.context_health;
         let _ = r.memory_metrics;
+        let _ = r.subagent_metrics;
+        let _ = r.error_taxonomy;
         let _ = r.integrity;
+    }
+
+    // --- SubagentMetrics ---
+
+    #[test]
+    fn test_subagent_metrics_empty_when_no_subagent_calls() {
+        let s = vec![step(0, 0, "ToolCallCompleted", Some("bash"), Some(StepOutcome::Success), None)];
+        let m = compute_subagent_metrics(&s);
+        assert_eq!(m.spawned, 0);
+        assert_eq!(m.success_rate, 0.0);
+    }
+
+    #[test]
+    fn test_subagent_metrics_counts_subagent_tool() {
+        let s = vec![
+            step(0, 0, "ToolCallCompleted", Some("subagent"), Some(StepOutcome::Success), Some(5000)),
+            step(1, 1, "ToolCallCompleted", Some("subagent"), Some(StepOutcome::Failure { retryable: false }), Some(3000)),
+            step(2, 2, "ToolCallCompleted", Some("subagent_parallel"), Some(StepOutcome::Success), Some(8000)),
+        ];
+        let m = compute_subagent_metrics(&s);
+        assert_eq!(m.spawned, 3);
+        assert_eq!(m.succeeded, 2);
+        assert_eq!(m.failed, 1);
+        assert!((m.success_rate - 2.0 / 3.0).abs() < 1e-9);
+        assert_eq!(m.max_duration_ms, 8000);
+    }
+
+    // --- ErrorTaxonomy ---
+
+    #[test]
+    fn test_error_taxonomy_empty_when_no_errors() {
+        let tax = compute_error_taxonomy(&[]);
+        assert_eq!(tax.total_errors, 0);
+    }
+
+    #[test]
+    fn test_error_taxonomy_classifies_network() {
+        let s = vec![step(0, 0, "Error", None, None, None)];
+        let s = vec![ProjectedStep {
+            payload_summary: "network timeout connecting to api.openai.com".into(),
+            ..s[0].clone()
+        }];
+        let tax = compute_error_taxonomy(&s);
+        assert_eq!(tax.network_errors, 1);
+        assert_eq!(tax.total_errors, 1);
+    }
+
+    #[test]
+    fn test_error_taxonomy_classifies_budget() {
+        let s = vec![step(0, 0, "BudgetExceeded", None, None, None)];
+        let tax = compute_error_taxonomy(&s);
+        assert_eq!(tax.budget_errors, 1);
+        assert_eq!(tax.total_errors, 1);
+    }
+
+    #[test]
+    fn test_error_taxonomy_classifies_failure_mode() {
+        let s = vec![ProjectedStep {
+            sequence: 0,
+            event_type: "Error".into(),
+            event_kind: Some(EventKind::Failure),
+            timestamp: 0,
+            entity_id: "e".into(),
+            payload_summary: "{\"failure_mode\":\"WeakVerification\"}".into(),
+            duration_ms: None,
+            tool_name: None,
+            outcome: None,
+        }];
+        let tax = compute_error_taxonomy(&s);
+        assert_eq!(tax.failure_mode_errors, 1);
     }
 }

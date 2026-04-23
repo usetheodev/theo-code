@@ -1,4 +1,5 @@
 mod config;
+mod dashboard;
 mod init;
 mod input;
 mod json_output;
@@ -161,6 +162,22 @@ enum Commands {
 
     /// Remove saved credentials (OpenAI provider).
     Logout,
+
+    /// Start the observability dashboard HTTP server.
+    ///
+    /// Serves the built Theo UI bundle and exposes the observability API
+    /// (`/api/list_runs`, `/api/run/:id/trajectory`, ...) so remote operators
+    /// can view trajectories via `ssh -L <port>:localhost:<port>`.
+    Dashboard {
+        /// TCP port (default: 5173).
+        #[arg(long, default_value_t = 5173)]
+        port: u16,
+
+        /// Override path to the built UI bundle. Defaults to an autodetect
+        /// that looks for `apps/theo-ui/dist` or `<exe>/dashboard-dist`.
+        #[arg(long)]
+        static_dir: Option<PathBuf>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -219,6 +236,9 @@ fn main() {
         }
         Some(Commands::Logout) => {
             std::process::exit(cmd_logout());
+        }
+        Some(Commands::Dashboard { port, static_dir }) => {
+            cmd_dashboard(cli.repo, port, static_dir);
         }
         Some(Commands::Memory { action }) => match action {
             MemoryAction::Lint { format } => {
@@ -357,6 +377,16 @@ fn cmd_logout() -> i32 {
             eprintln!("✗ logout failed: {e}");
             1
         }
+    }
+}
+
+fn cmd_dashboard(repo: PathBuf, port: u16, static_dir: Option<PathBuf>) {
+    let project_dir = resolve_dir(repo);
+    let static_dir = static_dir.or_else(dashboard::find_default_static_dir);
+    let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
+    if let Err(e) = rt.block_on(dashboard::serve(project_dir, port, static_dir)) {
+        eprintln!("✗ dashboard failed: {e}");
+        std::process::exit(1);
     }
 }
 

@@ -77,3 +77,5 @@ scip = "0.5"
 protobuf = "3"
 tantivy = "0.22"
 blake3 = "1"
+axum = "0.7"
+tower-http = { version = "0.5", features = ["fs", "cors"] }

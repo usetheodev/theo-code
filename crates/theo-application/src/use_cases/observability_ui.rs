@@ -8,8 +8,9 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+pub use theo_agent_runtime::observability::RunReport;
 use theo_agent_runtime::observability::{
-    project, read_trajectory, DerivedMetrics, RunReport, TrajectoryProjection,
+    project, read_trajectory, DerivedMetrics, TrajectoryProjection,
 };
 
 const TRAJECTORY_SUBDIR: &str = ".theo/trajectories";
@@ -122,6 +123,170 @@ pub fn compare_runs(project_dir: &Path, run_ids: &[String]) -> Vec<DerivedMetric
         .iter()
         .map(|id| get_run_metrics(project_dir, id).unwrap_or_default())
         .collect()
+}
+
+/// Full RunReport for a single run (all metric sections).
+pub fn get_run_report(project_dir: &Path, run_id: &str) -> Result<RunReport, String> {
+    let path = trajectories_base(project_dir).join(format!("{}.jsonl", run_id));
+    let (envelopes, _) = read_trajectory(&path).map_err(|e| e.to_string())?;
+    for env in envelopes.iter().rev() {
+        if matches!(
+            env.kind,
+            theo_agent_runtime::observability::envelope::EnvelopeKind::Summary
+        ) && let Ok(r) = serde_json::from_value::<RunReport>(env.payload.clone())
+        {
+            return Ok(r);
+        }
+    }
+    Err(format!("no summary line in trajectory for run {}", run_id))
+}
+
+/// Aggregated system-wide stats across all runs.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+pub struct SystemStats {
+    pub total_runs: usize,
+    pub successful_runs: usize,
+    pub failed_runs: usize,
+    pub total_input_tokens: u64,
+    pub total_output_tokens: u64,
+    pub total_cache_read_tokens: u64,
+    pub total_tool_calls: u64,
+    pub total_tool_failures: u64,
+    pub total_duration_ms: u64,
+    pub total_subagent_spawned: u64,
+    pub total_subagent_succeeded: u64,
+    pub total_errors: u64,
+    pub errors_by_category: std::collections::HashMap<String, u64>,
+    pub tools_by_usage: Vec<(String, u64)>,
+    pub tools_by_failure_rate: Vec<(String, f64)>,
+    pub avg_llm_efficiency: f64,
+    pub avg_cache_hit_rate: f64,
+    pub avg_iterations_per_run: f64,
+    pub total_episodes_injected: u64,
+    pub total_hypotheses_formed: u64,
+    pub total_hypotheses_invalidated: u64,
+    pub total_constraints_learned: u64,
+    pub total_fingerprints_new: u64,
+    pub total_fingerprints_recurrent: u64,
+}
+
+/// Aggregate all runs for a system-wide view.
+pub fn get_system_stats(project_dir: &Path) -> SystemStats {
+    let base = trajectories_base(project_dir);
+    let entries = match std::fs::read_dir(&base) {
+        Ok(e) => e,
+        Err(_) => return SystemStats::default(),
+    };
+    let mut stats = SystemStats::default();
+    let mut tool_calls_map: std::collections::HashMap<String, u64> =
+        std::collections::HashMap::new();
+    let mut tool_failures_map: std::collections::HashMap<String, (u64, u64)> =
+        std::collections::HashMap::new();
+    let mut llm_eff_sum = 0.0;
+    let mut llm_eff_count = 0;
+    let mut cache_sum = 0.0;
+    let mut cache_count = 0;
+    let mut iter_sum = 0u64;
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) != Some("jsonl") {
+            continue;
+        }
+        let run_id = match path.file_stem().and_then(|s| s.to_str()) {
+            Some(n) => n.to_string(),
+            None => continue,
+        };
+        let report = match get_run_report(project_dir, &run_id) {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+        stats.total_runs += 1;
+        if report.loop_metrics.convergence_rate > 0.0 {
+            stats.successful_runs += 1;
+        } else {
+            stats.failed_runs += 1;
+        }
+        stats.total_input_tokens += report.token_metrics.input_tokens;
+        stats.total_output_tokens += report.token_metrics.output_tokens;
+        stats.total_cache_read_tokens += report.token_metrics.cache_read_tokens;
+        stats.total_subagent_spawned += report.subagent_metrics.spawned as u64;
+        stats.total_subagent_succeeded += report.subagent_metrics.succeeded as u64;
+        stats.total_errors += report.error_taxonomy.total_errors as u64;
+        iter_sum += report.loop_metrics.total_iterations as u64;
+
+        for (k, v) in [
+            ("network", report.error_taxonomy.network_errors),
+            ("llm", report.error_taxonomy.llm_errors),
+            ("tool", report.error_taxonomy.tool_errors),
+            ("sandbox", report.error_taxonomy.sandbox_errors),
+            ("budget", report.error_taxonomy.budget_errors),
+            ("validation", report.error_taxonomy.validation_errors),
+            ("failure_mode", report.error_taxonomy.failure_mode_errors),
+            ("other", report.error_taxonomy.other_errors),
+        ] {
+            if v > 0 {
+                *stats.errors_by_category.entry(k.into()).or_insert(0) += v as u64;
+            }
+        }
+
+        for t in &report.tool_breakdown {
+            stats.total_tool_calls += t.call_count as u64;
+            stats.total_tool_failures += t.failure_count as u64;
+            *tool_calls_map.entry(t.tool_name.clone()).or_insert(0) += t.call_count as u64;
+            let entry = tool_failures_map.entry(t.tool_name.clone()).or_insert((0, 0));
+            entry.0 += t.call_count as u64;
+            entry.1 += t.failure_count as u64;
+        }
+
+        if report.surrogate_metrics.llm_efficiency.confidence > 0.0 {
+            llm_eff_sum += report.surrogate_metrics.llm_efficiency.value;
+            llm_eff_count += 1;
+        }
+        if report.token_metrics.cache_hit_rate > 0.0 {
+            cache_sum += report.token_metrics.cache_hit_rate;
+            cache_count += 1;
+        }
+
+        stats.total_episodes_injected += report.memory_metrics.episodes_injected as u64;
+        stats.total_hypotheses_formed += report.memory_metrics.hypotheses_formed as u64;
+        stats.total_hypotheses_invalidated += report.memory_metrics.hypotheses_invalidated as u64;
+        stats.total_constraints_learned += report.memory_metrics.constraints_learned as u64;
+        stats.total_fingerprints_new += report.memory_metrics.failure_fingerprints_new as u64;
+        stats.total_fingerprints_recurrent +=
+            report.memory_metrics.failure_fingerprints_recurrent as u64;
+    }
+
+    let mut tools_by_usage: Vec<(String, u64)> = tool_calls_map.into_iter().collect();
+    tools_by_usage.sort_by(|a, b| b.1.cmp(&a.1));
+    stats.tools_by_usage = tools_by_usage;
+
+    let mut tools_by_failure_rate: Vec<(String, f64)> = tool_failures_map
+        .into_iter()
+        .filter(|(_, (c, _))| *c > 0)
+        .map(|(k, (c, f))| (k, f as f64 / c as f64))
+        .collect();
+    tools_by_failure_rate.sort_by(|a, b| {
+        b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    stats.tools_by_failure_rate = tools_by_failure_rate;
+
+    stats.avg_llm_efficiency = if llm_eff_count > 0 {
+        llm_eff_sum / llm_eff_count as f64
+    } else {
+        0.0
+    };
+    stats.avg_cache_hit_rate = if cache_count > 0 {
+        cache_sum / cache_count as f64
+    } else {
+        0.0
+    };
+    stats.avg_iterations_per_run = if stats.total_runs > 0 {
+        iter_sum as f64 / stats.total_runs as f64
+    } else {
+        0.0
+    };
+    stats
 }
 
 fn time_bounds(proj: &TrajectoryProjection) -> (u64, u64) {

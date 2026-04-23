@@ -80,6 +80,107 @@ export interface RunSummary {
   metrics: DerivedMetrics;
 }
 
+// --- Full RunReport: everything the backend computes for a single run ---
+
+export interface TokenMetrics {
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  reasoning_tokens: number;
+  total_cost_usd: number;
+  cache_hit_rate: number;
+  tokens_per_successful_edit: number;
+}
+
+export interface PhaseMetric {
+  iterations: number;
+  duration_ms: number;
+  pct: number;
+}
+
+export interface BudgetUtilization {
+  iterations_pct: number;
+  tokens_pct: number;
+  time_pct: number;
+}
+
+export interface LoopMetrics {
+  phase_distribution: Record<string, PhaseMetric>;
+  total_iterations: number;
+  done_blocked_count: number;
+  convergence_rate: number;
+  budget_utilization: BudgetUtilization;
+  evolution_attempts: number;
+  evolution_success: boolean;
+}
+
+export interface ToolBreakdown {
+  tool_name: string;
+  call_count: number;
+  success_count: number;
+  failure_count: number;
+  avg_latency_ms: number;
+  max_latency_ms: number;
+  retry_count: number;
+  success_rate: number;
+}
+
+export interface ContextHealthMetrics {
+  avg_context_size_tokens: number;
+  max_context_size_tokens: number;
+  context_growth_rate: number;
+  compaction_count: number;
+  compaction_savings_ratio: number;
+  refetch_rate: number;
+  action_repetition_rate: number;
+  usefulness_avg: number;
+}
+
+export interface MemoryMetrics {
+  episodes_injected: number;
+  episodes_created: number;
+  hypotheses_formed: number;
+  hypotheses_invalidated: number;
+  hypotheses_active: number;
+  constraints_learned: number;
+  failure_fingerprints_new: number;
+  failure_fingerprints_recurrent: number;
+}
+
+export interface SubagentMetrics {
+  spawned: number;
+  succeeded: number;
+  failed: number;
+  avg_duration_ms: number;
+  max_duration_ms: number;
+  success_rate: number;
+}
+
+export interface ErrorTaxonomy {
+  total_errors: number;
+  network_errors: number;
+  llm_errors: number;
+  tool_errors: number;
+  sandbox_errors: number;
+  budget_errors: number;
+  validation_errors: number;
+  failure_mode_errors: number;
+  other_errors: number;
+}
+
+export interface RunReport {
+  surrogate_metrics: DerivedMetrics;
+  token_metrics: TokenMetrics;
+  loop_metrics: LoopMetrics;
+  tool_breakdown: ToolBreakdown[];
+  context_health: ContextHealthMetrics;
+  memory_metrics: MemoryMetrics;
+  subagent_metrics: SubagentMetrics;
+  error_taxonomy: ErrorTaxonomy;
+  integrity: IntegrityReport;
+}
+
 /** Default empty SurrogateMetric used when data is missing. */
 export const emptyMetric: SurrogateMetric = {
   value: 0,
