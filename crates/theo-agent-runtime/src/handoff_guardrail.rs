@@ -284,6 +284,8 @@ impl HandoffGuardrail for ObjectiveMustNotBeEmpty {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/// Char-aware truncation used by built-in guardrail messages.
+#[allow(dead_code)]
 fn truncate(s: &str, n: usize) -> String {
     if s.chars().count() <= n {
         s.to_string()
@@ -539,6 +541,108 @@ mod tests {
         let target = explorer_spec();
         let r = c.first_block(&ctx(&target, "")).unwrap();
         assert_eq!(r.0, "builtin.objective_must_not_be_empty");
+    }
+
+    // ── Plan-named chain semantic tests (sota-gaps-plan.md §18 RED list) ──
+
+    #[test]
+    fn guardrail_chain_empty_returns_allow() {
+        let c = GuardrailChain::new();
+        let target = implementer_spec();
+        // Empty chain → first_decision returns None (= allow) and
+        // first_block returns None.
+        assert!(c.first_decision(&ctx(&target, "do anything")).is_none());
+        assert!(c.first_block(&ctx(&target, "do anything")).is_none());
+    }
+
+    #[test]
+    fn guardrail_chain_first_block_wins() {
+        // First Block decision wins; subsequent guardrails are not consulted.
+        #[derive(Debug)]
+        struct BlockA;
+        impl HandoffGuardrail for BlockA {
+            fn id(&self) -> &str { "first.blocker" }
+            fn evaluate(&self, _: &HandoffContext<'_>) -> GuardrailDecision {
+                GuardrailDecision::Block { reason: "first".into() }
+            }
+        }
+        #[derive(Debug)]
+        struct BlockB;
+        impl HandoffGuardrail for BlockB {
+            fn id(&self) -> &str { "second.blocker" }
+            fn evaluate(&self, _: &HandoffContext<'_>) -> GuardrailDecision {
+                GuardrailDecision::Block { reason: "second".into() }
+            }
+        }
+        let mut c = GuardrailChain::new();
+        c.add(Arc::new(BlockA));
+        c.add(Arc::new(BlockB));
+        let target = implementer_spec();
+        let (id, reason) = c.first_block(&ctx(&target, "x")).unwrap();
+        assert_eq!(id, "first.blocker");
+        assert_eq!(reason, "first");
+    }
+
+    #[test]
+    fn guardrail_chain_first_redirect_wins() {
+        #[derive(Debug)]
+        struct RedirectA;
+        impl HandoffGuardrail for RedirectA {
+            fn id(&self) -> &str { "first.redirect" }
+            fn evaluate(&self, _: &HandoffContext<'_>) -> GuardrailDecision {
+                GuardrailDecision::Redirect {
+                    new_agent_name: "alpha".into(),
+                }
+            }
+        }
+        #[derive(Debug)]
+        struct RedirectB;
+        impl HandoffGuardrail for RedirectB {
+            fn id(&self) -> &str { "second.redirect" }
+            fn evaluate(&self, _: &HandoffContext<'_>) -> GuardrailDecision {
+                GuardrailDecision::Redirect {
+                    new_agent_name: "beta".into(),
+                }
+            }
+        }
+        let mut c = GuardrailChain::new();
+        c.add(Arc::new(RedirectA));
+        c.add(Arc::new(RedirectB));
+        let target = implementer_spec();
+        let (id, decision) = c.first_decision(&ctx(&target, "x")).unwrap();
+        assert_eq!(id, "first.redirect");
+        if let GuardrailDecision::Redirect { new_agent_name } = decision {
+            assert_eq!(new_agent_name, "alpha");
+        } else {
+            panic!("expected Redirect");
+        }
+    }
+
+    #[test]
+    fn guardrail_chain_skips_allow_continues_to_next() {
+        // First guardrail allows, second blocks: chain reports the second.
+        #[derive(Debug)]
+        struct AllowFirst;
+        impl HandoffGuardrail for AllowFirst {
+            fn id(&self) -> &str { "first.allow" }
+            fn evaluate(&self, _: &HandoffContext<'_>) -> GuardrailDecision {
+                GuardrailDecision::Allow
+            }
+        }
+        #[derive(Debug)]
+        struct BlockSecond;
+        impl HandoffGuardrail for BlockSecond {
+            fn id(&self) -> &str { "second.blocker" }
+            fn evaluate(&self, _: &HandoffContext<'_>) -> GuardrailDecision {
+                GuardrailDecision::Block { reason: "deny".into() }
+            }
+        }
+        let mut c = GuardrailChain::new();
+        c.add(Arc::new(AllowFirst));
+        c.add(Arc::new(BlockSecond));
+        let target = implementer_spec();
+        let (id, _) = c.first_block(&ctx(&target, "x")).unwrap();
+        assert_eq!(id, "second.blocker");
     }
 
     // ── Custom guardrail (project tier) ──

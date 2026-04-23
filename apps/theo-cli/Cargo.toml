@@ -54,6 +54,9 @@ criterion.workspace = true
 # T5.5 — CLI smoke tests
 assert_cmd = "2"
 predicates = "3"
+# sota-gaps Phase 15: axum endpoint tests use tower::ServiceExt::oneshot
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
 
 [[bench]]
 name = "streaming_markdown"
