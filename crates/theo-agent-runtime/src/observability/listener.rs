@@ -87,10 +87,7 @@ impl EventListener for ObservabilityListener {
             };
             match guard.as_ref() {
                 Some(tx) => tx.try_send(bytes),
-                None => {
-                    // Sender was closed by `close()` — silently drop.
-                    return;
-                }
+                None => return,
             }
         };
         if send_result.is_err() {
