@@ -64,6 +64,19 @@ struct RawFrontmatter {
     /// Phase 7: optional structured-output JSON Schema.
     #[serde(default)]
     output_format: Option<RawOutputFormat>,
+    /// Phase 8: MCP servers allowlist for this agent.
+    #[serde(default)]
+    mcp_servers: Option<Vec<String>>,
+    /// Phase 11: isolation mode ("shared" default, "worktree" opt-in).
+    #[serde(default)]
+    isolation: Option<RawIsolation>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawIsolation {
+    mode: String,
+    #[serde(default)]
+    base_branch: Option<String>,
 }
 
 /// Frontmatter representation of OutputFormat config.
@@ -138,6 +151,12 @@ pub fn parse_agent_spec(
         }
     };
 
+    let mcp_servers = raw.mcp_servers.unwrap_or_default();
+    let (isolation, isolation_base_branch) = match raw.isolation {
+        None => (None, None),
+        Some(iso) => (Some(iso.mode), iso.base_branch),
+    };
+
     Ok(AgentSpec {
         name,
         description,
@@ -149,6 +168,9 @@ pub fn parse_agent_spec(
         source,
         output_format,
         output_format_strict,
+        mcp_servers,
+        isolation,
+        isolation_base_branch,
     })
 }
 

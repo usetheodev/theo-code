@@ -191,6 +191,9 @@ pub struct SubAgentManager {
     /// Phase 9: optional checkpoint manager. When Some, snapshot the workdir
     /// once at the start of every spawn_with_spec (pre-mutation safety).
     checkpoint_manager: Option<Arc<crate::checkpoint::CheckpointManager>>,
+    /// Phase 11: optional worktree provider. When Some AND spec.isolation=="worktree",
+    /// spawn_with_spec creates an isolated worktree, runs there, and cleans up.
+    worktree_provider: Option<Arc<theo_isolation::WorktreeProvider>>,
 }
 
 impl SubAgentManager {
@@ -206,6 +209,7 @@ impl SubAgentManager {
             hook_manager: None,
             cancellation: None,
             checkpoint_manager: None,
+            worktree_provider: None,
         }
     }
 
@@ -227,6 +231,7 @@ impl SubAgentManager {
             hook_manager: None,
             cancellation: None,
             checkpoint_manager: None,
+            worktree_provider: None,
         }
     }
 
@@ -275,6 +280,17 @@ impl SubAgentManager {
         manager: Arc<crate::checkpoint::CheckpointManager>,
     ) -> Self {
         self.checkpoint_manager = Some(manager);
+        self
+    }
+
+    /// Phase 11: attach a worktree provider. When spec.isolation == "worktree",
+    /// spawn_with_spec creates an isolated git worktree, runs the sub-agent
+    /// there, and removes the worktree on completion (per CleanupPolicy).
+    pub fn with_worktree_provider(
+        mut self,
+        provider: Arc<theo_isolation::WorktreeProvider>,
+    ) -> Self {
+        self.worktree_provider = Some(provider);
         self
     }
 
@@ -457,6 +473,29 @@ impl SubAgentManager {
         });
 
         Box::pin(async move {
+            // Phase 11: optionally create an isolated worktree
+            let worktree_handle = match (&self.worktree_provider, spec.isolation.as_deref()) {
+                (Some(provider), Some("worktree")) => {
+                    let base = spec
+                        .isolation_base_branch
+                        .clone()
+                        .unwrap_or_else(|| "main".to_string());
+                    match provider.create(&spec.name, &base) {
+                        Ok(h) => Some(h),
+                        Err(_) => {
+                            // Try "master" fallback (legacy git default)
+                            provider.create(&spec.name, "master").ok()
+                        }
+                    }
+                }
+                _ => None,
+            };
+            // The CWD the sub-agent will use: worktree path if isolated, else parent's project_dir
+            let agent_cwd: PathBuf = worktree_handle
+                .as_ref()
+                .map(|h| h.path.clone())
+                .unwrap_or_else(|| self.project_dir.clone());
+
             // Phase 9: auto-snapshot the workdir BEFORE the run (pre-mutation safety)
             let checkpoint_before: Option<String> = self
                 .checkpoint_manager
@@ -593,13 +632,25 @@ impl SubAgentManager {
             sub_bus.subscribe(prefixed);
 
             // Prefix role name + project dir restriction (same format as legacy spawn)
-            sub_config.system_prompt = format!(
-                "[{}] {}\n\nIMPORTANT: You MUST only operate within the project directory: {}. \
-             Do NOT search, read, or access files outside this directory.",
-                spec.name,
-                sub_config.system_prompt,
-                self.project_dir.display()
-            );
+            // If isolated, use the worktree path AND inject Pi-Mono safety rules.
+            sub_config.system_prompt = if worktree_handle.is_some() {
+                format!(
+                    "[{}] {}\n\nIMPORTANT: You MUST only operate within the worktree directory: {}. \
+                     Do NOT search, read, or access files outside this directory.\n\n{}",
+                    spec.name,
+                    sub_config.system_prompt,
+                    agent_cwd.display(),
+                    theo_isolation::safety_rules(),
+                )
+            } else {
+                format!(
+                    "[{}] {}\n\nIMPORTANT: You MUST only operate within the project directory: {}. \
+                     Do NOT search, read, or access files outside this directory.",
+                    spec.name,
+                    sub_config.system_prompt,
+                    agent_cwd.display(),
+                )
+            };
 
             let registry = theo_tooling::registry::create_default_registry();
             let agent = AgentLoop::new(sub_config, registry);
@@ -608,7 +659,8 @@ impl SubAgentManager {
             let timeout = std::time::Duration::from_secs(spec.timeout_secs);
 
             // Phase 6: race the agent against (timeout || cancellation)
-            let agent_run = agent.run_with_history(&objective, &self.project_dir, history, Some(sub_bus));
+            // Phase 11: agent uses worktree path when isolated
+            let agent_run = agent.run_with_history(&objective, &agent_cwd, history, Some(sub_bus));
             let mut result = if let Some(tok) = cancellation_token {
                 tokio::select! {
                     res = tokio::time::timeout(timeout, agent_run) => match res {
@@ -716,6 +768,14 @@ impl SubAgentManager {
             // Phase 6: forget the cancellation token (cleanup tree)
             if let Some(tree) = &self.cancellation {
                 tree.forget(&run_id);
+            }
+
+            // Phase 11: cleanup worktree on success (default policy: OnSuccess).
+            // Failures preserve the worktree for inspection.
+            if let (Some(handle), Some(provider)) = (&worktree_handle, &self.worktree_provider) {
+                if result.success {
+                    let _ = provider.remove(handle, false);
+                }
             }
 
             self.publish_completed(&spec, &result);
@@ -917,6 +977,7 @@ mod tests {
             hook_manager: None,
             cancellation: None,
             checkpoint_manager: None,
+            worktree_provider: None,
         };
 
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -994,6 +1055,7 @@ mod tests {
             hook_manager: None,
             cancellation: None,
             checkpoint_manager: None,
+            worktree_provider: None,
         };
 
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("scout", "check x");
@@ -1045,6 +1107,7 @@ mod tests {
             hook_manager: None,
             cancellation: None,
             checkpoint_manager: None,
+            worktree_provider: None,
         };
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("x", "y");
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -1073,6 +1136,7 @@ mod tests {
             hook_manager: None,
             cancellation: None,
             checkpoint_manager: None,
+            worktree_provider: None,
         };
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("persisted", "test");
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -1101,6 +1165,7 @@ mod tests {
             hook_manager: None,
             cancellation: None,
             checkpoint_manager: None,
+            worktree_provider: None,
         };
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("x", "y");
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -1119,6 +1184,23 @@ mod tests {
         )
         .with_hooks(Arc::new(HookManager::new()));
         assert!(manager.hook_manager().is_some());
+    }
+
+    #[test]
+    fn with_worktree_provider_builder_stores_reference() {
+        use std::path::PathBuf;
+        let provider = Arc::new(theo_isolation::WorktreeProvider::new(
+            PathBuf::from("/repo"),
+            PathBuf::from("/wt"),
+        ));
+        let bus = Arc::new(EventBus::new());
+        let manager = SubAgentManager::with_builtins(
+            AgentConfig::default(),
+            bus,
+            PathBuf::from("/tmp"),
+        )
+        .with_worktree_provider(provider);
+        assert!(manager.worktree_provider.is_some());
     }
 
     #[test]
@@ -1159,6 +1241,7 @@ mod tests {
             hook_manager: Some(Arc::new(hooks)),
             cancellation: None,
             checkpoint_manager: None,
+            worktree_provider: None,
         };
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("x", "y");
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -1184,6 +1267,7 @@ mod tests {
             hook_manager: None,
             cancellation: Some(tree),
             checkpoint_manager: None,
+            worktree_provider: None,
         };
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("x", "y");
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -1224,6 +1308,7 @@ mod tests {
             hook_manager: None,
             cancellation: None,
             checkpoint_manager: None,
+            worktree_provider: None,
         };
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("y", "z");
         let rt = tokio::runtime::Runtime::new().unwrap();

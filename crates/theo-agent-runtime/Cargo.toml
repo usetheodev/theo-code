@@ -24,6 +24,8 @@ tokio-util.workspace = true
 dashmap.workspace = true
 notify.workspace = true
 notify-debouncer-mini.workspace = true
+theo-isolation.workspace = true
+theo-infra-mcp.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }

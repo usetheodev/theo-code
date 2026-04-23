@@ -239,6 +239,9 @@ mod tests {
             source: AgentSpecSource::Builtin,
             output_format: None,
             output_format_strict: None,
+            mcp_servers: Vec::new(),
+            isolation: None,
+            isolation_base_branch: None,
         };
         let span = AgentRunSpan::from_spec(&spec, "run-abc");
         assert_eq!(span.attributes[ATTR_AGENT_ID], "run-abc");

@@ -49,6 +49,9 @@ pub fn explorer() -> AgentSpec {
         source: AgentSpecSource::Builtin,
         output_format: None,
         output_format_strict: None,
+        mcp_servers: Vec::new(),
+        isolation: None,
+        isolation_base_branch: None,
     }
 }
 
@@ -80,6 +83,9 @@ pub fn implementer() -> AgentSpec {
         source: AgentSpecSource::Builtin,
         output_format: None,
         output_format_strict: None,
+        mcp_servers: Vec::new(),
+        isolation: None,
+        isolation_base_branch: None,
     }
 }
 
@@ -123,6 +129,9 @@ pub fn verifier() -> AgentSpec {
         source: AgentSpecSource::Builtin,
         output_format: None,
         output_format_strict: None,
+        mcp_servers: Vec::new(),
+        isolation: None,
+        isolation_base_branch: None,
     }
 }
 
@@ -154,6 +163,9 @@ pub fn reviewer() -> AgentSpec {
         source: AgentSpecSource::Builtin,
         output_format: None,
         output_format_strict: None,
+        mcp_servers: Vec::new(),
+        isolation: None,
+        isolation_base_branch: None,
     }
 }
 

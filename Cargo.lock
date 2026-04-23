@@ -6620,6 +6620,8 @@ dependencies = [
  "theo-domain",
  "theo-infra-auth",
  "theo-infra-llm",
+ "theo-infra-mcp",
+ "theo-isolation",
  "theo-tooling",
  "thiserror 2.0.18",
  "tokio",

@@ -95,6 +95,17 @@ pub struct AgentSpec {
     /// "best_effort" (default) keeps free-text on failure; "strict" fails the run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_format_strict: Option<bool>,
+    /// Phase 8: MCP servers this agent is allowed to use (allowlist).
+    /// Empty = no MCP access. Names match `McpServerConfig.name()`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mcp_servers: Vec<String>,
+    /// Phase 11: isolation mode. `None` (default) = shared CWD;
+    /// `Some("worktree")` = isolated git worktree.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub isolation: Option<String>,
+    /// Phase 11: base branch for worktree creation (default "main").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub isolation_base_branch: Option<String>,
 }
 
 impl AgentSpec {
@@ -130,6 +141,9 @@ impl AgentSpec {
             source: AgentSpecSource::OnDemand,
             output_format: None,
             output_format_strict: None,
+            mcp_servers: Vec::new(),
+            isolation: None,
+            isolation_base_branch: None,
         }
     }
 }
@@ -152,6 +166,9 @@ mod tests {
             source,
             output_format: None,
             output_format_strict: None,
+            mcp_servers: Vec::new(),
+            isolation: None,
+            isolation_base_branch: None,
         }
     }
 
