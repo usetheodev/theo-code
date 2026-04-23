@@ -1,0 +1,13 @@
+{
+  "updated_at": "1776884974Z",
+  "session_id": "0019db697be7d_55db58aebf6f70bb",
+  "tasks_completed": [
+    {
+      "name": "LLM error: network error: error sending request for url (http://localhost:8000/v1/chat/completions)",
+      "status": "failed",
+      "files_changed": []
+    }
+  ],
+  "next_steps": [],
+  "last_error": "LLM error: network error: error sending request for url (http://localhost:8000/v1/chat/completions)"
+}

@@ -8,10 +8,14 @@
 //! The legacy `SubAgentRole` enum is kept for backward compat; the new
 //! `builtins` module is the source of truth and is consumed by the registry.
 
+pub mod approval;
 pub mod builtins;
+pub mod parser;
 pub mod registry;
 
-pub use registry::{RegistryWarning, SubAgentRegistry, WarningKind};
+pub use approval::{ApprovalManifest, ApprovalMode, ApprovedEntry};
+pub use parser::{parse_agent_spec, ParseError};
+pub use registry::{LoadOutcome, RegistryWarning, SubAgentRegistry, WarningKind};
 
 use std::path::PathBuf;
 use std::sync::Arc;

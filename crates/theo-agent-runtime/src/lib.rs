@@ -14,6 +14,7 @@ pub mod event_bus;
 pub mod evolution;
 pub mod extension;
 pub mod failure_tracker;
+pub mod frontmatter;
 pub mod hooks;
 pub mod hypothesis_pipeline;
 pub mod jit_instructions;
