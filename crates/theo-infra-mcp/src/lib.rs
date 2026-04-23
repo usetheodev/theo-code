@@ -25,6 +25,7 @@
 
 pub mod client;
 pub mod config;
+pub mod dispatch;
 pub mod error;
 pub mod protocol;
 pub mod registry;
@@ -32,6 +33,7 @@ pub mod transport_stdio;
 
 pub use client::{McpClient, McpStdioClient};
 pub use config::McpServerConfig;
+pub use dispatch::{DispatchOutcome, McpDispatcher};
 pub use error::McpError;
 pub use protocol::{McpRequest, McpResponse, McpTool};
 pub use registry::McpRegistry;

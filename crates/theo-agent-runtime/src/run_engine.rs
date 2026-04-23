@@ -95,6 +95,9 @@ pub struct AgentRunEngine {
     subagent_checkpoint: Option<Arc<crate::checkpoint::CheckpointManager>>,
     subagent_worktree: Option<Arc<theo_isolation::WorktreeProvider>>,
     subagent_mcp: Option<Arc<theo_infra_mcp::McpRegistry>>,
+    /// Phase 8: lazy-built dispatcher used to handle `mcp:server:tool`
+    /// calls. Built from `subagent_mcp` on first use.
+    subagent_mcp_dispatcher: std::sync::OnceLock<Arc<theo_infra_mcp::McpDispatcher>>,
     /// Phase 13: optional ReloadableRegistry. When Some, takes precedence
     /// over `subagent_registry`: each delegate_task call reads
     /// `reloadable.snapshot()` so changes from the watcher take effect
@@ -202,9 +205,49 @@ impl AgentRunEngine {
             subagent_checkpoint: None,
             subagent_worktree: None,
             subagent_mcp: None,
+            subagent_mcp_dispatcher: std::sync::OnceLock::new(),
             subagent_reloadable: None,
             checkpoint_taken_this_turn: std::sync::atomic::AtomicBool::new(false),
         }
+    }
+
+    /// Lazy: build the McpDispatcher from `subagent_mcp` registry on first call.
+    /// Returns `None` if no MCP registry is attached.
+    pub fn mcp_dispatcher(&self) -> Option<Arc<theo_infra_mcp::McpDispatcher>> {
+        let reg = self.subagent_mcp.as_ref()?;
+        Some(
+            self.subagent_mcp_dispatcher
+                .get_or_init(|| Arc::new(theo_infra_mcp::McpDispatcher::new(reg.clone())))
+                .clone(),
+        )
+    }
+
+    /// Phase 8: dispatch a tool call to MCP if its name is in the
+    /// `mcp:<server>:<tool>` namespace. Returns `Some(message)` on
+    /// dispatch (success or RPC failure → error message). Returns `None`
+    /// when the tool is not MCP — the caller falls back to normal dispatch.
+    pub async fn try_dispatch_mcp_tool(&self, call: &theo_infra_llm::types::ToolCall) -> Option<theo_infra_llm::types::Message> {
+        let name = &call.function.name;
+        if !theo_infra_mcp::McpDispatcher::handles(name) {
+            return None;
+        }
+        let dispatcher = self.mcp_dispatcher()?;
+        let args = call.parse_arguments().unwrap_or_default();
+        let result_text = match dispatcher.dispatch(name, args).await {
+            Ok(out) => {
+                if out.is_error {
+                    format!("[mcp error] {}", out.text)
+                } else {
+                    out.text
+                }
+            }
+            Err(err) => format!("[mcp dispatch failed] {}", err),
+        };
+        Some(theo_infra_llm::types::Message::tool_result(
+            &call.id,
+            name,
+            &result_text,
+        ))
     }
 
     /// Phase 9: at the start of a turn, reset the once-per-turn snapshot flag.
@@ -1854,6 +1897,15 @@ impl AgentRunEngine {
                     ));
                 }
 
+                // ── PHASE 8: MCP DISPATCH ──
+                // If the tool name is in the `mcp:<server>:<tool>`
+                // namespace, route to McpDispatcher (transient stdio
+                // client). Otherwise fall through to the normal dispatch.
+                if let Some(mcp_msg) = self.try_dispatch_mcp_tool(call).await {
+                    messages.push(mcp_msg);
+                    continue;
+                }
+
                 // Execute regular tool via ToolCallManager (Invariants 2, 3, 5)
                 let tool_args = match call.parse_arguments() {
                     Ok(args) => args,
@@ -2942,6 +2994,56 @@ mod tests {
                 .checkpoint_taken_this_turn
                 .load(std::sync::atomic::Ordering::Acquire)
         );
+    }
+
+    #[tokio::test]
+    async fn try_dispatch_mcp_tool_returns_none_for_non_mcp_name() {
+        let setup = TestSetup::new();
+        let engine = setup.create_engine("test");
+        let call = theo_infra_llm::types::ToolCall {
+            id: "1".into(),
+            call_type: "function".into(),
+            function: theo_infra_llm::types::FunctionCall {
+                name: "read".into(),
+                arguments: "{}".into(),
+            },
+        };
+        assert!(engine.try_dispatch_mcp_tool(&call).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn try_dispatch_mcp_tool_no_registry_returns_none() {
+        let setup = TestSetup::new();
+        let engine = setup.create_engine("test");
+        let call = theo_infra_llm::types::ToolCall {
+            id: "1".into(),
+            call_type: "function".into(),
+            function: theo_infra_llm::types::FunctionCall {
+                name: "mcp:github:search".into(),
+                arguments: "{}".into(),
+            },
+        };
+        // No subagent_mcp attached → no dispatcher → None
+        assert!(engine.try_dispatch_mcp_tool(&call).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn try_dispatch_mcp_tool_unknown_server_returns_error_message() {
+        let setup = TestSetup::new();
+        let engine = setup
+            .create_engine("test")
+            .with_subagent_mcp(std::sync::Arc::new(theo_infra_mcp::McpRegistry::new()));
+        let call = theo_infra_llm::types::ToolCall {
+            id: "1".into(),
+            call_type: "function".into(),
+            function: theo_infra_llm::types::FunctionCall {
+                name: "mcp:nonexistent:foo".into(),
+                arguments: "{}".into(),
+            },
+        };
+        let msg = engine.try_dispatch_mcp_tool(&call).await.unwrap();
+        let content = msg.content.unwrap_or_default();
+        assert!(content.contains("mcp dispatch failed"));
     }
 
     #[test]

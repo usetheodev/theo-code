@@ -476,6 +476,195 @@ async fn sota_pipeline_run_engine_forwards_to_subagent_manager() {
     // (run_engine integration is exercised by delegate_task tests.)
 }
 
+#[test]
+fn sota_pipeline_reloadable_picks_up_filesystem_changes() {
+    use std::sync::Arc;
+    use theo_agent_runtime::subagent::{ApprovalMode, ReloadableRegistry, SubAgentRegistry};
+
+    let dir = TempDir::new().unwrap();
+    let agents = dir.path().join(".theo").join("agents");
+    std::fs::create_dir_all(&agents).unwrap();
+
+    // Initial state: no project agents
+    let rel = ReloadableRegistry::new(
+        SubAgentRegistry::with_builtins(),
+        Some(dir.path().to_path_buf()),
+        None,
+        ApprovalMode::TrustAll,
+    );
+    let snap_initial = rel.snapshot();
+    assert_eq!(snap_initial.len(), 4); // 4 builtins
+
+    // Simulate filesystem change: add a new project spec
+    std::fs::write(
+        agents.join("hot-reload-target.md"),
+        "---\ndescription: hot reloaded\n---\nbody",
+    )
+    .unwrap();
+
+    // BEFORE reload(): snapshot still doesn't see the new agent
+    let snap_before = rel.snapshot();
+    assert_eq!(snap_before.len(), 4);
+    assert!(!snap_before.contains("hot-reload-target"));
+
+    // Trigger reload (simulates what the watcher thread does)
+    rel.reload();
+
+    // AFTER reload(): snapshot picks up the new agent
+    let snap_after = rel.snapshot();
+    assert_eq!(snap_after.len(), 5);
+    assert!(snap_after.contains("hot-reload-target"));
+
+    // Multiple .clone()s share state
+    let rel2 = rel.clone();
+    let snap_via_clone = rel2.snapshot();
+    assert!(snap_via_clone.contains("hot-reload-target"));
+    let _ = Arc::new(()); // ensure Arc is in scope
+}
+
+#[tokio::test]
+async fn sota_pipeline_otel_attrs_in_subagent_started_event() {
+    use std::sync::{Arc, Mutex};
+    use theo_agent_runtime::cancellation::CancellationTree;
+    use theo_agent_runtime::config::AgentConfig;
+    use theo_agent_runtime::event_bus::{EventBus, EventListener};
+    use theo_agent_runtime::subagent::SubAgentRegistry;
+    use theo_domain::event::{DomainEvent, EventType};
+
+    struct Capture(Mutex<Vec<DomainEvent>>);
+    impl EventListener for Capture {
+        fn on_event(&self, e: &DomainEvent) {
+            self.0.lock().unwrap().push(e.clone());
+        }
+    }
+
+    let bus = Arc::new(EventBus::new());
+    let cap = Arc::new(Capture(Mutex::new(Vec::new())));
+    bus.subscribe(cap.clone() as Arc<dyn EventListener>);
+
+    // Pre-cancel so spawn_with_spec returns immediately via cancellation
+    // path AFTER emitting SubagentStarted + SubagentCompleted.
+    let tree = Arc::new(CancellationTree::new());
+    tree.cancel_all();
+
+    let manager = theo_agent_runtime::subagent::SubAgentManager::with_registry(
+        AgentConfig::default(),
+        bus.clone(),
+        std::path::PathBuf::from("/tmp"),
+        Arc::new(SubAgentRegistry::with_builtins()),
+    )
+    .with_cancellation(tree);
+
+    let spec = theo_domain::agent_spec::AgentSpec::on_demand("otel-probe", "test obj");
+    let _ = manager.spawn_with_spec(&spec, "test obj", None).await;
+
+    // Find SubagentStarted event
+    let events = cap.0.lock().unwrap();
+    let started = events
+        .iter()
+        .find(|e| e.event_type == EventType::SubagentStarted)
+        .expect("SubagentStarted should be emitted");
+    let otel = started
+        .payload
+        .get("otel")
+        .expect("payload must include 'otel' field");
+    let otel_obj = otel.as_object().expect("otel is an object");
+
+    // Required OTel GenAI attrs (Phase 12)
+    assert_eq!(
+        otel_obj
+            .get("gen_ai.agent.name")
+            .and_then(|v| v.as_str()),
+        Some("otel-probe")
+    );
+    assert!(otel_obj.contains_key("gen_ai.agent.id"));
+    assert_eq!(
+        otel_obj
+            .get("theo.agent.source")
+            .and_then(|v| v.as_str()),
+        Some("on_demand")
+    );
+    assert_eq!(
+        otel_obj
+            .get("theo.agent.builtin")
+            .and_then(|v| v.as_bool()),
+        Some(false)
+    );
+    assert_eq!(
+        otel_obj
+            .get("gen_ai.operation.name")
+            .and_then(|v| v.as_str()),
+        Some("subagent.spawn")
+    );
+    assert_eq!(
+        otel_obj
+            .get("theo.subagent.objective")
+            .and_then(|v| v.as_str()),
+        Some("test obj")
+    );
+}
+
+#[tokio::test]
+async fn sota_pipeline_otel_attrs_in_subagent_completed_event() {
+    use std::sync::{Arc, Mutex};
+    use theo_agent_runtime::cancellation::CancellationTree;
+    use theo_agent_runtime::config::AgentConfig;
+    use theo_agent_runtime::event_bus::{EventBus, EventListener};
+    use theo_agent_runtime::subagent::SubAgentRegistry;
+    use theo_domain::event::{DomainEvent, EventType};
+
+    struct Capture(Mutex<Vec<DomainEvent>>);
+    impl EventListener for Capture {
+        fn on_event(&self, e: &DomainEvent) {
+            self.0.lock().unwrap().push(e.clone());
+        }
+    }
+
+    let bus = Arc::new(EventBus::new());
+    let cap = Arc::new(Capture(Mutex::new(Vec::new())));
+    bus.subscribe(cap.clone() as Arc<dyn EventListener>);
+
+    let tree = Arc::new(CancellationTree::new());
+    tree.cancel_all();
+
+    let manager = theo_agent_runtime::subagent::SubAgentManager::with_registry(
+        AgentConfig::default(),
+        bus.clone(),
+        std::path::PathBuf::from("/tmp"),
+        Arc::new(SubAgentRegistry::with_builtins()),
+    )
+    .with_cancellation(tree);
+
+    let spec = theo_domain::agent_spec::AgentSpec::on_demand("otel-completed", "obj");
+    let _ = manager.spawn_with_spec(&spec, "obj", None).await;
+
+    let events = cap.0.lock().unwrap();
+    let completed = events
+        .iter()
+        .find(|e| e.event_type == EventType::SubagentCompleted)
+        .expect("SubagentCompleted should be emitted");
+    let otel = completed
+        .payload
+        .get("otel")
+        .expect("payload must include 'otel' field");
+    let otel_obj = otel.as_object().expect("otel is an object");
+
+    // Required OTel GenAI usage + theo run attrs (Phase 12)
+    assert_eq!(
+        otel_obj
+            .get("gen_ai.agent.name")
+            .and_then(|v| v.as_str()),
+        Some("otel-completed")
+    );
+    assert!(otel_obj.contains_key("gen_ai.usage.input_tokens"));
+    assert!(otel_obj.contains_key("gen_ai.usage.output_tokens"));
+    assert!(otel_obj.contains_key("gen_ai.usage.total_tokens"));
+    assert!(otel_obj.contains_key("theo.run.duration_ms"));
+    assert!(otel_obj.contains_key("theo.run.iterations_used"));
+    assert!(otel_obj.contains_key("theo.run.llm_calls"));
+    assert!(otel_obj.contains_key("theo.run.success"));
+}
+
 #[tokio::test]
 async fn sota_pipeline_mcp_hint_injected_when_spec_declares_servers() {
     use std::collections::BTreeMap;
