@@ -136,6 +136,50 @@ pub fn registry_to_definitions(registry: &ToolRegistry) -> Vec<ToolDefinition> {
         }),
     ));
 
+    // Add the `delegate_task` meta-tool — Phase 4 unified API.
+    // Coexists with legacy `subagent`/`subagent_parallel` until Phase 4 cleanup.
+    // Schema accepts EITHER a single delegation OR a `parallel` array.
+    defs.push(ToolDefinition::new(
+        "delegate_task",
+        concat!(
+            "Delegate work to a specialized sub-agent. Single-mode: pass `agent` + `objective`. ",
+            "Parallel-mode: pass `parallel: [{agent, objective, context}, ...]`. ",
+            "Built-in agents: explorer, implementer, verifier, reviewer. ",
+            "Custom agents loadable from .theo/agents/*.md. ",
+            "Unknown names create on-demand READ-ONLY agents (max 10 iterations, 120s timeout)."
+        ),
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "agent": {
+                    "type": "string",
+                    "description": "Name of a registered agent OR an arbitrary name (creates on-demand read-only agent). Mutually exclusive with `parallel`."
+                },
+                "objective": {
+                    "type": "string",
+                    "description": "What the agent should accomplish. Required when `agent` is set."
+                },
+                "context": {
+                    "type": "string",
+                    "description": "Optional background info, file paths, or constraints for the sub-agent."
+                },
+                "parallel": {
+                    "type": "array",
+                    "description": "Multiple agents to spawn concurrently. Mutually exclusive with `agent`/`objective`.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "agent": { "type": "string" },
+                            "objective": { "type": "string" },
+                            "context": { "type": "string" }
+                        },
+                        "required": ["agent", "objective"]
+                    }
+                }
+            }
+        }),
+    ));
+
     // Add the `subagent_parallel` meta-tool for concurrent delegation
     defs.push(ToolDefinition::new(
         "subagent_parallel",
@@ -284,6 +328,7 @@ pub async fn execute_tool_call(
             "done",
             "subagent",
             "subagent_parallel",
+            "delegate_task",
             "skill",
         ];
         let Some(calls) = args.get("calls").and_then(|v| v.as_array()) else {
@@ -448,10 +493,10 @@ mod tests {
         let defs = registry_to_definitions(&registry);
 
         // Meta-tools injected by registry_to_definitions: tool_search,
-        // batch_execute, done, subagent, subagent_parallel, skill, batch
-        // (+7). Deferred tools in the default registry are filtered out;
-        // none are currently deferred.
-        assert_eq!(defs.len(), registry.len() + 7);
+        // batch_execute, done, subagent, delegate_task, skill,
+        // subagent_parallel, batch (+8). Deferred tools in the default
+        // registry are filtered out; none are currently deferred.
+        assert_eq!(defs.len(), registry.len() + 8);
 
         let names: Vec<&str> = defs.iter().map(|d| d.function.name.as_str()).collect();
         assert!(names.contains(&"read"));
@@ -474,6 +519,10 @@ mod tests {
         assert!(
             !names.contains(&"subagent_parallel"),
             "sub-agents must not see 'subagent_parallel' tool"
+        );
+        assert!(
+            !names.contains(&"delegate_task"),
+            "sub-agents must not see 'delegate_task' tool"
         );
         assert!(
             !names.contains(&"skill"),
