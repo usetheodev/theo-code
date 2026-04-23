@@ -1411,141 +1411,6 @@ impl AgentRunEngine {
                     break;
                 }
 
-                // Handle `subagent` meta-tool — delegate to sub-agent
-                if name == "subagent" {
-                    let args = call.parse_arguments().unwrap_or_default();
-                    let role_str = args
-                        .get("role")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("explorer");
-                    let objective = args
-                        .get("objective")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("No objective provided");
-
-                    let role = crate::subagent::SubAgentRole::from_str(role_str)
-                        .unwrap_or(crate::subagent::SubAgentRole::Explorer);
-
-                    // Publish spawn event
-                    self.event_bus.publish(DomainEvent::new(
-                        EventType::RunStateChanged,
-                        self.run.run_id.as_str(),
-                        serde_json::json!({
-                            "from": "Executing",
-                            "to": format!("SubAgent:{}", role.display_name()),
-                        }),
-                    ));
-
-                    let manager = crate::subagent::SubAgentManager::new(
-                        self.config.clone(),
-                        self.event_bus.clone(),
-                        self.project_dir.clone(),
-                    );
-
-                    let sub_result = manager.spawn(role, objective, None).await;
-
-                    let result_msg = if sub_result.success {
-                        format!(
-                            "[{} sub-agent completed] {}",
-                            role.display_name(),
-                            sub_result.summary
-                        )
-                    } else {
-                        format!(
-                            "[{} sub-agent failed] {}",
-                            role.display_name(),
-                            sub_result.summary
-                        )
-                    };
-
-                    // Record sub-agent files as parent's edits
-                    for file in &sub_result.files_edited {
-                        if !file.is_empty() {
-                            self.context_loop_state
-                                .record_edit_attempt(file, true, None);
-                        }
-                    }
-
-                    // Aggregate sub-agent tokens into parent budget + metrics
-                    self.budget_enforcer.record_tokens(sub_result.tokens_used);
-                    self.metrics.record_delegated_tokens(sub_result.tokens_used);
-
-                    messages.push(Message::tool_result(&call.id, "subagent", &result_msg));
-                    continue;
-                }
-
-                // Handle `subagent_parallel` — run multiple sub-agents concurrently
-                if name == "subagent_parallel" {
-                    let args = call.parse_arguments().unwrap_or_default();
-                    let agents_array = args.get("agents").and_then(|v| v.as_array());
-
-                    if let Some(agents) = agents_array {
-                        let tasks: Vec<(crate::subagent::SubAgentRole, String)> = agents
-                            .iter()
-                            .filter_map(|a| {
-                                let role_str = a.get("role").and_then(|v| v.as_str())?;
-                                let objective = a.get("objective").and_then(|v| v.as_str())?;
-                                let role = crate::subagent::SubAgentRole::from_str(role_str)?;
-                                Some((role, objective.to_string()))
-                            })
-                            .collect();
-
-                        let count = tasks.len();
-
-                        // Publish parallel spawn event
-                        self.event_bus.publish(DomainEvent::new(
-                            EventType::RunStateChanged,
-                            self.run.run_id.as_str(),
-                            serde_json::json!({
-                                "from": "Executing",
-                                "to": format!("SubAgentParallel:{}", count),
-                            }),
-                        ));
-
-                        let manager = crate::subagent::SubAgentManager::new(
-                            self.config.clone(),
-                            self.event_bus.clone(),
-                            self.project_dir.clone(),
-                        );
-
-                        let results = manager.spawn_parallel(tasks).await;
-
-                        // Combine results
-                        let mut combined = String::new();
-                        for (i, result) in results.iter().enumerate() {
-                            combined.push_str(&format!(
-                                "[Sub-agent {}] {}: {}\n",
-                                i + 1,
-                                if result.success { "✅" } else { "❌" },
-                                result.summary,
-                            ));
-                            for file in &result.files_edited {
-                                if !file.is_empty() {
-                                    self.context_loop_state
-                                        .record_edit_attempt(file, true, None);
-                                }
-                            }
-                            // Aggregate parallel sub-agent tokens into parent budget + metrics
-                            self.budget_enforcer.record_tokens(result.tokens_used);
-                            self.metrics.record_delegated_tokens(result.tokens_used);
-                        }
-
-                        messages.push(Message::tool_result(
-                            &call.id,
-                            "subagent_parallel",
-                            &combined,
-                        ));
-                        continue;
-                    } else {
-                        messages.push(Message::tool_result(
-                            &call.id,
-                            "subagent_parallel",
-                            "Error: 'agents' array is required",
-                        ));
-                        continue;
-                    }
-                }
-
                 // Handle `delegate_task` meta-tool — Phase 4 unified API.
                 // Validates schema and routes to single or parallel mode.
                 if name == "delegate_task" {
@@ -1582,25 +1447,44 @@ impl AgentRunEngine {
                                     ),
                                 ));
                             }
-                            crate::skill::SkillMode::SubAgent { role } => {
-                                // Spawn sub-agent with skill instructions as prompt
+                            crate::skill::SkillMode::SubAgent { agent_name } => {
+                                // Spawn sub-agent with skill instructions as prompt.
+                                // Resolve agent_name via the registry (or build a default).
                                 self.event_bus.publish(DomainEvent::new(
                                     EventType::RunStateChanged,
                                     self.run.run_id.as_str(),
                                     serde_json::json!({
                                         "from": "Executing",
-                                        "to": format!("Skill:{}:{}", skill_name, role.display_name()),
+                                        "to": format!("Skill:{}:{}", skill_name, agent_name),
                                     }),
                                 ));
 
-                                let manager = crate::subagent::SubAgentManager::new(
+                                let registry: Arc<crate::subagent::SubAgentRegistry> = match &self.subagent_registry {
+                                    Some(r) => r.clone(),
+                                    None => Arc::new(crate::subagent::SubAgentRegistry::with_builtins()),
+                                };
+
+                                let spec = registry
+                                    .get(agent_name)
+                                    .cloned()
+                                    .unwrap_or_else(|| {
+                                        theo_domain::agent_spec::AgentSpec::on_demand(
+                                            agent_name,
+                                            &skill.instructions,
+                                        )
+                                    });
+
+                                let manager = crate::subagent::SubAgentManager::with_registry(
                                     self.config.clone(),
                                     self.event_bus.clone(),
                                     self.project_dir.clone(),
-                                );
+                                    registry,
+                                )
+                                .with_metrics(self.metrics.clone());
 
-                                let sub_result =
-                                    manager.spawn(*role, &skill.instructions, None).await;
+                                let sub_result = manager
+                                    .spawn_with_spec_text(&spec, &skill.instructions, None)
+                                    .await;
 
                                 let result_msg = if sub_result.success {
                                     format!(
@@ -1621,7 +1505,6 @@ impl AgentRunEngine {
                                     }
                                 }
 
-                                // Aggregate skill sub-agent tokens into parent budget + metrics
                                 self.budget_enforcer.record_tokens(sub_result.tokens_used);
                                 self.metrics.record_delegated_tokens(sub_result.tokens_used);
 

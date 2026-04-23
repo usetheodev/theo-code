@@ -237,7 +237,17 @@ fn main() {
                 cmd_headless(prompt, cli.repo, cli.provider, cli.model, cli.max_iter, cli.mode, cli.temperature, cli.seed);
                 return;
             }
-            cmd_agent(prompt, cli.repo, cli.provider, cli.model, cli.max_iter);
+            // Build injections from CLI flags so subagent integrations are
+            // active even on the explicit `theo agent` subcommand.
+            let features = runtime_features::RuntimeFeatures::from_flags(
+                cli.watch_agents,
+                cli.enable_checkpoints,
+                &cli.repo,
+            );
+            features.print_status();
+            let injections = build_injections(&features, &cli.repo);
+            let _runtime_features = features;
+            cmd_agent(prompt, cli.repo, cli.provider, cli.model, cli.max_iter, injections);
         }
         Some(Commands::Pilot {
             calls,
@@ -322,7 +332,11 @@ fn main() {
                 &cli.repo,
             );
             features.print_status();
-            // Keep features alive for the session by binding to a local var.
+
+            // Build SubagentInjections from active features so the runtime
+            // (AgentLoop → AgentRunEngine → SubAgentManager) sees them.
+            let injections = build_injections(&features, &cli.repo);
+            // Keep watcher alive for the session.
             let _runtime_features = features;
 
             if cli.headless {
@@ -330,9 +344,46 @@ fn main() {
                 return;
             }
             // Default: TUI (interactive or one-shot with trailing prompt).
-            cmd_agent(cli.prompt, cli.repo, cli.provider, cli.model, cli.max_iter);
+            cmd_agent(cli.prompt, cli.repo, cli.provider, cli.model, cli.max_iter, injections);
         }
     }
+}
+
+/// Translate CLI runtime features into `SubagentInjections`. Always
+/// includes a builtin registry. Adds checkpoint when --enable-checkpoints.
+fn build_injections(
+    features: &runtime_features::RuntimeFeatures,
+    project_dir: &PathBuf,
+) -> theo_application::use_cases::run_agent_session::SubagentInjections {
+    use std::sync::Arc;
+    let mut inj = theo_application::use_cases::run_agent_session::SubagentInjections::default();
+
+    // Always inject a registry with builtins + project agents (TrustAll for CLI).
+    let mut reg = theo_agent_runtime::subagent::SubAgentRegistry::with_builtins();
+    let _ = reg.load_all(
+        Some(project_dir),
+        None,
+        theo_agent_runtime::subagent::ApprovalMode::TrustAll,
+    );
+    inj.registry = Some(Arc::new(reg));
+
+    // Persistent run store under <project>/.theo/subagent/
+    let store = theo_agent_runtime::subagent_runs::FileSubagentRunStore::new(
+        project_dir.join(".theo").join("subagent"),
+    );
+    inj.run_store = Some(Arc::new(store));
+
+    // Cancellation tree (always — Ctrl+C propagation).
+    inj.cancellation = Some(Arc::new(
+        theo_agent_runtime::cancellation::CancellationTree::new(),
+    ));
+
+    // Phase 9: checkpoint manager (only when --enable-checkpoints).
+    if let Some(cp) = &features.checkpoint {
+        inj.checkpoint = Some(cp.clone());
+    }
+
+    inj
 }
 
 // ---------------------------------------------------------------------------
@@ -485,6 +536,7 @@ fn cmd_agent(
     provider_id: Option<String>,
     model: Option<String>,
     max_iter: Option<usize>,
+    injections: theo_application::use_cases::run_agent_session::SubagentInjections,
 ) {
     let project_dir = resolve_dir(repo);
 
@@ -499,7 +551,7 @@ fn cmd_agent(
         let (config, provider_name) =
             resolve_agent_config(provider_id.as_deref(), model.as_deref(), max_iter).await;
 
-        if let Err(e) = tui::run(config, project_dir, provider_name, inline_prompt).await {
+        if let Err(e) = tui::run(config, project_dir, provider_name, inline_prompt, injections).await {
             eprintln!("TUI error: {e}");
             std::process::exit(1);
         }

@@ -79,6 +79,13 @@ pub struct AgentLoop {
     config: AgentConfig,
     listeners: Vec<Arc<dyn EventListener>>,
     graph_context: Option<Arc<dyn theo_domain::graph_context::GraphContextProvider>>,
+    // Phase 1-13 sub-agent integrations forwarded to AgentRunEngine.
+    subagent_registry: Option<Arc<crate::subagent::SubAgentRegistry>>,
+    subagent_run_store: Option<Arc<crate::subagent_runs::FileSubagentRunStore>>,
+    subagent_hooks: Option<Arc<crate::lifecycle_hooks::HookManager>>,
+    subagent_cancellation: Option<Arc<crate::cancellation::CancellationTree>>,
+    subagent_checkpoint: Option<Arc<crate::checkpoint::CheckpointManager>>,
+    subagent_worktree: Option<Arc<theo_isolation::WorktreeProvider>>,
 }
 
 impl AgentLoop {
@@ -97,6 +104,12 @@ impl AgentLoop {
             config,
             listeners: Vec::new(),
             graph_context: None,
+            subagent_registry: None,
+            subagent_run_store: None,
+            subagent_hooks: None,
+            subagent_cancellation: None,
+            subagent_checkpoint: None,
+            subagent_worktree: None,
         }
     }
 
@@ -114,6 +127,69 @@ impl AgentLoop {
     ) -> Self {
         self.graph_context = Some(provider);
         self
+    }
+
+    /// Inject a SubAgentRegistry into AgentLoop → forwarded to AgentRunEngine.
+    pub fn with_subagent_registry(mut self, r: Arc<crate::subagent::SubAgentRegistry>) -> Self {
+        self.subagent_registry = Some(r);
+        self
+    }
+
+    pub fn with_subagent_run_store(
+        mut self,
+        s: Arc<crate::subagent_runs::FileSubagentRunStore>,
+    ) -> Self {
+        self.subagent_run_store = Some(s);
+        self
+    }
+
+    pub fn with_subagent_hooks(mut self, h: Arc<crate::lifecycle_hooks::HookManager>) -> Self {
+        self.subagent_hooks = Some(h);
+        self
+    }
+
+    pub fn with_subagent_cancellation(
+        mut self,
+        c: Arc<crate::cancellation::CancellationTree>,
+    ) -> Self {
+        self.subagent_cancellation = Some(c);
+        self
+    }
+
+    pub fn with_subagent_checkpoint(
+        mut self,
+        m: Arc<crate::checkpoint::CheckpointManager>,
+    ) -> Self {
+        self.subagent_checkpoint = Some(m);
+        self
+    }
+
+    pub fn with_subagent_worktree(mut self, w: Arc<theo_isolation::WorktreeProvider>) -> Self {
+        self.subagent_worktree = Some(w);
+        self
+    }
+
+    /// Forward all subagent integrations to a freshly-built AgentRunEngine.
+    fn forward_subagent_integrations(&self, mut engine: AgentRunEngine) -> AgentRunEngine {
+        if let Some(r) = &self.subagent_registry {
+            engine = engine.with_subagent_registry(r.clone());
+        }
+        if let Some(s) = &self.subagent_run_store {
+            engine = engine.with_subagent_run_store(s.clone());
+        }
+        if let Some(h) = &self.subagent_hooks {
+            engine = engine.with_subagent_hooks(h.clone());
+        }
+        if let Some(c) = &self.subagent_cancellation {
+            engine = engine.with_subagent_cancellation(c.clone());
+        }
+        if let Some(cm) = &self.subagent_checkpoint {
+            engine = engine.with_subagent_checkpoint(cm.clone());
+        }
+        if let Some(w) = &self.subagent_worktree {
+            engine = engine.with_subagent_worktree(w.clone());
+        }
+        engine
     }
 
     /// Run the agent loop on a task.
@@ -168,6 +244,7 @@ impl AgentLoop {
         if let Some(ref gc) = self.graph_context {
             engine = engine.with_graph_context(gc.clone());
         }
+        engine = self.forward_subagent_integrations(engine);
 
         engine.execute().await
     }
@@ -227,6 +304,7 @@ impl AgentLoop {
         if let Some(ref gc) = self.graph_context {
             engine = engine.with_graph_context(gc.clone());
         }
+        engine = self.forward_subagent_integrations(engine);
 
         // Wrap execute_with_history + record_session_exit so headless
         // callers (`theo -p "task"`, `AgentLoop::run_with_history`) hit

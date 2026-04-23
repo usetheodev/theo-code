@@ -1,7 +1,12 @@
 //! Bundled skills — compiled into the binary.
 
 use super::{SkillDefinition, SkillMode};
-use crate::subagent::SubAgentRole;
+
+fn subagent(name: &str) -> SkillMode {
+    SkillMode::SubAgent {
+        agent_name: name.to_string(),
+    }
+}
 
 pub fn bundled_skills() -> Vec<SkillDefinition> {
     vec![
@@ -27,7 +32,7 @@ pub fn bundled_skills() -> Vec<SkillDefinition> {
         SkillDefinition {
             name: "test".into(),
             trigger: "when the user asks to run tests, check tests, verify tests, or cargo test".into(),
-            mode: SkillMode::SubAgent { role: SubAgentRole::Verifier },
+            mode: subagent("verifier"),
             instructions: r#"## Test Skill
 
 Run the project's test suite directly. Do NOT create tasks for this — just execute.
@@ -41,7 +46,7 @@ Be direct. Skip task management overhead for this workflow."#.into(),
         SkillDefinition {
             name: "review".into(),
             trigger: "when the user asks for code review, review changes, or check code quality".into(),
-            mode: SkillMode::SubAgent { role: SubAgentRole::Reviewer },
+            mode: subagent("reviewer"),
             instructions: r#"## Code Review Skill
 
 1. Identify what files changed (git diff or recent edits).
@@ -59,7 +64,7 @@ Be direct. Skip task management overhead for this workflow."#.into(),
         SkillDefinition {
             name: "build".into(),
             trigger: "when the user asks to build, compile, check build, cargo build, or cargo check".into(),
-            mode: SkillMode::SubAgent { role: SubAgentRole::Verifier },
+            mode: subagent("verifier"),
             instructions: r#"## Build Skill
 
 1. Detect the build tool (cargo, npm, make, etc.).
@@ -78,85 +83,74 @@ Be direct. Skip task management overhead for this workflow."#.into(),
             instructions: r#"## Explain Skill
 
 1. Identify what the user wants explained (file, function, module, architecture).
-2. Read the relevant code thoroughly.
-3. Explain in clear language:
-   - What it does (purpose)
-   - How it works (mechanism)
-   - Why it's designed this way (rationale)
-   - How it connects to other parts (dependencies)
-4. Use examples if helpful.
-5. Keep the explanation concise but complete."#.into(),
+2. Read the relevant code carefully.
+3. Explain in this structure:
+   - **Purpose**: what problem this solves
+   - **How it works**: the flow / algorithm
+   - **Inputs/Outputs**: what goes in, what comes out
+   - **Notable details**: edge cases, design choices
+
+## Rules
+- Be concise. Don't repeat the code verbatim.
+- Show example usage if non-obvious.
+- If the code has bugs or smells, mention them."#.into(),
         },
         SkillDefinition {
             name: "fix".into(),
-            trigger: "when the user asks to fix a bug, debug an error, resolve an issue, or repair broken code".into(),
+            trigger: "when the user asks to fix a bug, debug an error, or troubleshoot".into(),
             mode: SkillMode::InContext,
             instructions: r#"## Fix Skill
 
-1. Understand the bug: read the error message, stack trace, or user description carefully.
-2. Locate the source: use `grep`, `read`, and `glob` to find the relevant code.
-3. Diagnose: use `think` to reason about the root cause before making changes.
-4. Fix: make the minimal change that resolves the issue.
-5. Verify: run tests or the failing command to confirm the fix works.
-6. Report: explain what was wrong and what you changed.
-
-## Rules
-- Fix the root cause, not the symptom.
-- Make the smallest possible change.
-- If unsure about the cause, ask the user before editing."#.into(),
+1. Reproduce the bug if possible.
+2. Read the error message carefully — what does it actually say?
+3. Trace through the code to find the root cause.
+4. Make a minimal fix — change only what's necessary.
+5. Add a regression test BEFORE fixing (TDD: red → green → refactor).
+6. Verify the fix doesn't break other tests."#.into(),
         },
         SkillDefinition {
             name: "refactor".into(),
-            trigger: "when the user asks to refactor, clean up, reorganize, simplify, or improve code structure".into(),
+            trigger: "when the user asks to refactor, clean up, improve code, or simplify".into(),
             mode: SkillMode::InContext,
             instructions: r#"## Refactor Skill
 
-1. Read the code to refactor thoroughly. Understand what it does before changing it.
-2. Plan: use `think` to outline the refactoring steps.
-3. Refactor incrementally — one change at a time, verify after each.
-4. Preserve behavior: the refactored code must do exactly the same thing.
-5. Run tests after refactoring to confirm nothing broke.
+1. Identify the code to refactor and its current responsibilities.
+2. Define the goal: extract function, simplify logic, remove duplication, improve naming.
+3. Make small, atomic changes — one refactor at a time.
+4. Run tests after EACH change to catch regressions early.
+5. Keep behavior identical — refactoring changes structure, NOT behavior.
 
 ## Rules
-- NEVER change behavior during a refactor. If the user wants new features, that's a separate task.
-- Prefer small, focused changes over large rewrites.
-- If tests don't exist for the code being refactored, mention this risk."#.into(),
+- Don't refactor and add features in the same change.
+- If tests don't exist, write them BEFORE refactoring.
+- If a refactor requires multiple commits, do small reviewable steps."#.into(),
         },
         SkillDefinition {
-            name: "pr".into(),
-            trigger: "when the user asks to create a pull request, open a PR, push changes, or submit for review".into(),
+            name: "init".into(),
+            trigger: "when the user asks to initialize, set up, or scaffold a new project/feature".into(),
             mode: SkillMode::InContext,
-            instructions: r#"## Pull Request Skill
+            instructions: r#"## Init Skill
 
-1. Run `git status` and `git diff --stat` to understand what will be in the PR.
-2. If on main/master, create a feature branch: `git checkout -b feat/description`.
-3. Stage and commit changes (follow Conventional Commits).
-4. Push: `git push -u origin <branch>`.
-5. Create PR: `gh pr create --title "..." --body "..."` with:
-   - Clear title (under 70 chars)
-   - Summary of changes
-   - Test plan
-
-## Rules
-- NEVER push directly to main/master.
-- NEVER force push.
-- If `gh` is not installed, tell the user to install it or create the PR manually.
-- Include a test plan in the PR body."#.into(),
+1. Ask what kind of project/feature (CLI, library, web service, etc.).
+2. Generate a minimal scaffold:
+   - Directory structure
+   - Build manifest (Cargo.toml, package.json, etc.)
+   - Entry point with hello-world
+   - Test file with one passing test
+3. Add minimal docs: README with how to build/run/test.
+4. Verify the scaffold builds and tests pass before declaring done."#.into(),
         },
         SkillDefinition {
             name: "doc".into(),
-            trigger: "when the user asks to document, write docs, generate documentation, add comments, or update README".into(),
+            trigger: "when the user asks to document, write docs, add comments, or write README".into(),
             mode: SkillMode::InContext,
-            instructions: r#"## Documentation Skill
+            instructions: r#"## Doc Skill
 
-1. Identify what needs documentation (module, function, API, architecture).
-2. Read the code thoroughly to understand it.
-3. Write clear documentation:
-   - For code: add doc comments (/// in Rust, /** */ in JS/TS, docstrings in Python).
-   - For README: explain purpose, setup, usage, architecture.
-   - For API: document endpoints, request/response formats, error codes.
-4. Keep docs close to the code they describe.
-5. Use examples where helpful.
+1. Identify what needs documentation (function, module, project, API).
+2. For functions: write doc comments that explain WHY (purpose, invariants, examples).
+3. For modules: explain the role of the module in the larger system.
+4. For projects: README with what/why/how (install, build, test, use).
+5. Use code examples where helpful.
 
 ## Rules
 - Write for the reader, not the writer.
@@ -166,7 +160,7 @@ Be direct. Skip task management overhead for this workflow."#.into(),
         SkillDefinition {
             name: "deps".into(),
             trigger: "when the user asks to check dependencies, audit packages, find vulnerabilities, or review Cargo.toml/package.json".into(),
-            mode: SkillMode::SubAgent { role: SubAgentRole::Explorer },
+            mode: subagent("explorer"),
             instructions: r#"## Dependencies Skill
 
 Analyze project dependencies. Do NOT create tasks — just execute directly.
@@ -209,30 +203,26 @@ mod tests {
     fn commit_is_in_context() {
         let skills = bundled_skills();
         let commit = skills.iter().find(|s| s.name == "commit").unwrap();
-        assert!(matches!(commit.mode, SkillMode::InContext));
+        assert_eq!(commit.mode, SkillMode::InContext);
     }
 
     #[test]
     fn test_is_subagent_verifier() {
         let skills = bundled_skills();
         let test = skills.iter().find(|s| s.name == "test").unwrap();
-        assert!(matches!(
-            test.mode,
-            SkillMode::SubAgent {
-                role: SubAgentRole::Verifier
-            }
-        ));
+        match &test.mode {
+            SkillMode::SubAgent { agent_name } => assert_eq!(agent_name, "verifier"),
+            _ => panic!("expected SubAgent verifier"),
+        }
     }
 
     #[test]
     fn review_is_subagent_reviewer() {
         let skills = bundled_skills();
         let review = skills.iter().find(|s| s.name == "review").unwrap();
-        assert!(matches!(
-            review.mode,
-            SkillMode::SubAgent {
-                role: SubAgentRole::Reviewer
-            }
-        ));
+        match &review.mode {
+            SkillMode::SubAgent { agent_name } => assert_eq!(agent_name, "reviewer"),
+            _ => panic!("expected SubAgent reviewer"),
+        }
     }
 }

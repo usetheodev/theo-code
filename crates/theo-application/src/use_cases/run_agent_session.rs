@@ -17,6 +17,45 @@ pub enum RunSessionError {
     InvalidProjectDir(String),
 }
 
+/// Optional runtime injections that surfaces (CLI/Desktop) can build from
+/// flags and pass into the agent session. Each field is forwarded to
+/// `AgentLoop` and propagated to the underlying `AgentRunEngine`, which
+/// activates the corresponding sub-agent feature in `delegate_task`.
+#[derive(Default, Clone)]
+pub struct SubagentInjections {
+    pub registry: Option<Arc<theo_agent_runtime::subagent::SubAgentRegistry>>,
+    pub run_store: Option<Arc<theo_agent_runtime::subagent_runs::FileSubagentRunStore>>,
+    pub hooks: Option<Arc<theo_agent_runtime::lifecycle_hooks::HookManager>>,
+    pub cancellation: Option<Arc<theo_agent_runtime::cancellation::CancellationTree>>,
+    pub checkpoint: Option<Arc<theo_agent_runtime::checkpoint::CheckpointManager>>,
+    pub worktree: Option<Arc<theo_isolation::WorktreeProvider>>,
+}
+
+impl SubagentInjections {
+    /// Apply all present injections to the AgentLoop.
+    pub fn apply_to(&self, mut loop_: AgentLoop) -> AgentLoop {
+        if let Some(r) = &self.registry {
+            loop_ = loop_.with_subagent_registry(r.clone());
+        }
+        if let Some(s) = &self.run_store {
+            loop_ = loop_.with_subagent_run_store(s.clone());
+        }
+        if let Some(h) = &self.hooks {
+            loop_ = loop_.with_subagent_hooks(h.clone());
+        }
+        if let Some(c) = &self.cancellation {
+            loop_ = loop_.with_subagent_cancellation(c.clone());
+        }
+        if let Some(cm) = &self.checkpoint {
+            loop_ = loop_.with_subagent_checkpoint(cm.clone());
+        }
+        if let Some(w) = &self.worktree {
+            loop_ = loop_.with_subagent_worktree(w.clone());
+        }
+        loop_
+    }
+}
+
 /// Run a complete agent session: validate config, create registry, execute loop.
 ///
 /// This is the primary entry point for any surface (CLI, desktop, API)
@@ -25,10 +64,30 @@ pub enum RunSessionError {
 /// Initializes GRAPHCTX (code intelligence) before running the agent.
 /// If graph build fails, the agent runs without code context (graceful degradation).
 pub async fn run_agent_session(
+    config: AgentConfig,
+    task: &str,
+    project_dir: &Path,
+    event_listener: Arc<dyn EventListener>,
+) -> Result<AgentResult, RunSessionError> {
+    run_agent_session_with_injections(
+        config,
+        task,
+        project_dir,
+        event_listener,
+        SubagentInjections::default(),
+    )
+    .await
+}
+
+/// Same as `run_agent_session`, but accepts optional sub-agent runtime
+/// injections (registry, run_store, hooks, cancellation, checkpoint,
+/// worktree) that the surface layer (CLI/Desktop) builds from flags.
+pub async fn run_agent_session_with_injections(
     mut config: AgentConfig,
     task: &str,
     project_dir: &Path,
     event_listener: Arc<dyn EventListener>,
+    injections: SubagentInjections,
 ) -> Result<AgentResult, RunSessionError> {
     if config.api_key.is_none() {
         return Err(RunSessionError::MissingApiKey);
@@ -72,6 +131,8 @@ pub async fn run_agent_session(
     if let Some(gc) = graph_context {
         agent = agent.with_graph_context(gc);
     }
+    // Apply sub-agent injections from CLI flags (Phase 1-13 features).
+    agent = injections.apply_to(agent);
     let result = agent.run(task, project_dir).await;
 
     Ok(result)

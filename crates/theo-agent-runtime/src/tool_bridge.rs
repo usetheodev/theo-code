@@ -100,26 +100,6 @@ pub fn registry_to_definitions(registry: &ToolRegistry) -> Vec<ToolDefinition> {
         }),
     ));
 
-    // Add the `subagent` meta-tool for delegation
-    defs.push(ToolDefinition::new(
-        "subagent",
-        "Delegate work to a specialized sub-agent. Use for independent sub-problems. Roles: explorer (read-only research), implementer (make code changes), verifier (run tests/checks), reviewer (code review).",
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "role": {
-                    "type": "string",
-                    "description": "Sub-agent role: 'explorer', 'implementer', 'verifier', or 'reviewer'"
-                },
-                "objective": {
-                    "type": "string",
-                    "description": "What the sub-agent should accomplish"
-                }
-            },
-            "required": ["role", "objective"]
-        }),
-    ));
-
     // Add the `skill` meta-tool for invoking packaged capabilities
     defs.push(ToolDefinition::new(
         "skill",
@@ -136,8 +116,7 @@ pub fn registry_to_definitions(registry: &ToolRegistry) -> Vec<ToolDefinition> {
         }),
     ));
 
-    // Add the `delegate_task` meta-tool — Phase 4 unified API.
-    // Coexists with legacy `subagent`/`subagent_parallel` until Phase 4 cleanup.
+    // The `delegate_task` meta-tool — unified delegation API (Phase 1-13).
     // Schema accepts EITHER a single delegation OR a `parallel` array.
     defs.push(ToolDefinition::new(
         "delegate_task",
@@ -180,40 +159,10 @@ pub fn registry_to_definitions(registry: &ToolRegistry) -> Vec<ToolDefinition> {
         }),
     ));
 
-    // Add the `subagent_parallel` meta-tool for concurrent delegation
-    defs.push(ToolDefinition::new(
-        "subagent_parallel",
-        "Run multiple sub-agents in parallel. All execute concurrently and results are combined. Use when tasks are independent.",
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "agents": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "role": {
-                                "type": "string",
-                                "description": "Sub-agent role: 'explorer', 'implementer', 'verifier', or 'reviewer'"
-                            },
-                            "objective": {
-                                "type": "string",
-                                "description": "What this sub-agent should accomplish"
-                            }
-                        },
-                        "required": ["role", "objective"]
-                    },
-                    "description": "Array of sub-agents to run in parallel"
-                }
-            },
-            "required": ["agents"]
-        }),
-    ));
-
     // Add the `batch` meta-tool for parallel execution (CodeAct-inspired)
     defs.push(ToolDefinition::new(
         "batch",
-        "Execute multiple tool calls in a single turn. Use for independent operations like reading multiple files. Max 25 calls. Cannot include batch/done/subagent/skill inside.",
+        "Execute multiple tool calls in a single turn. Use for independent operations like reading multiple files. Max 25 calls. Cannot include batch/done/delegate_task/skill inside.",
         serde_json::json!({
             "type": "object",
             "properties": {
@@ -245,10 +194,10 @@ pub fn registry_to_definitions(registry: &ToolRegistry) -> Vec<ToolDefinition> {
 
 /// Generate tool definitions for sub-agents.
 ///
-/// Sub-agents receive ONLY registry tools + `done`. They do NOT receive
-/// delegation meta-tools (`subagent`, `subagent_parallel`, `skill`).
-/// This prevents recursive spawning — the gold standard pattern used by
-/// Claude Code, OpenCode, and OpenDev (arxiv 2603.05344).
+/// Sub-agents receive ONLY registry tools + `done` + `batch`. They do NOT
+/// receive delegation meta-tools (`delegate_task`, `skill`). This prevents
+/// recursive spawning — the gold standard pattern used by Claude Code,
+/// OpenCode, and OpenDev (arxiv 2603.05344).
 pub fn registry_to_definitions_for_subagent(registry: &ToolRegistry) -> Vec<ToolDefinition> {
     let mut defs: Vec<ToolDefinition> = registry
         .definitions()
@@ -326,8 +275,6 @@ pub async fn execute_tool_call(
             "batch",
             "tool_search",
             "done",
-            "subagent",
-            "subagent_parallel",
             "delegate_task",
             "skill",
         ];
@@ -493,16 +440,21 @@ mod tests {
         let defs = registry_to_definitions(&registry);
 
         // Meta-tools injected by registry_to_definitions: tool_search,
-        // batch_execute, done, subagent, delegate_task, skill,
-        // subagent_parallel, batch (+8). Deferred tools in the default
-        // registry are filtered out; none are currently deferred.
-        assert_eq!(defs.len(), registry.len() + 8);
+        // batch_execute, done, skill, delegate_task, batch (+6).
+        // Deferred tools in the default registry are filtered out.
+        assert_eq!(defs.len(), registry.len() + 6);
 
         let names: Vec<&str> = defs.iter().map(|d| d.function.name.as_str()).collect();
         assert!(names.contains(&"read"));
         assert!(names.contains(&"bash"));
         assert!(names.contains(&"edit"));
         assert!(names.contains(&"done")); // meta-tool
+        assert!(names.contains(&"delegate_task"));
+        assert!(!names.contains(&"subagent"), "legacy 'subagent' removed");
+        assert!(
+            !names.contains(&"subagent_parallel"),
+            "legacy 'subagent_parallel' removed"
+        );
     }
 
     #[test]
@@ -512,14 +464,6 @@ mod tests {
         let names: Vec<&str> = defs.iter().map(|d| d.function.name.as_str()).collect();
 
         // Must NOT contain delegation meta-tools
-        assert!(
-            !names.contains(&"subagent"),
-            "sub-agents must not see 'subagent' tool"
-        );
-        assert!(
-            !names.contains(&"subagent_parallel"),
-            "sub-agents must not see 'subagent_parallel' tool"
-        );
         assert!(
             !names.contains(&"delegate_task"),
             "sub-agents must not see 'delegate_task' tool"

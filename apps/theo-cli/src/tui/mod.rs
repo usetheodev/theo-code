@@ -63,6 +63,7 @@ pub async fn run(
     project_dir: PathBuf,
     provider_name: String,
     initial_prompt: Option<String>,
+    injections: theo_application::use_cases::run_agent_session::SubagentInjections,
 ) -> anyhow::Result<()> {
     // Ensure log directory exists
     let _ = std::fs::create_dir_all(dirs_path());
@@ -472,6 +473,7 @@ pub async fn run(
                 let task_messages = session_messages.clone();
                 let task_prompt = prompt.clone();
                 let task_msg_tx = msg_tx.clone();
+                let injections_for_task = injections.clone();
 
                 // Record in session
                 session_messages.push(Message::user(&prompt));
@@ -483,8 +485,7 @@ pub async fn run(
                     cfg.mode = AgentMode::Agent;
 
                     let registry = create_default_registry();
-                    #[allow(deprecated)]
-                    let agent = AgentLoop::new(cfg.clone(), registry);
+                    let agent = injections_for_task.apply_to(AgentLoop::new(cfg.clone(), registry));
 
                     tui_log("AgentLoop created, calling run_with_history...");
                     tui_log(&format!("  api_key len: {}", cfg.api_key.as_ref().map(|k| k.len()).unwrap_or(0)));

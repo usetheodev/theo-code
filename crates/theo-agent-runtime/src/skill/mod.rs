@@ -7,18 +7,24 @@ pub mod bundled;
 
 use std::path::Path;
 
-use crate::subagent::SubAgentRole;
-
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone)]
+/// Errors from skill execution.
+#[derive(Debug, thiserror::Error)]
+pub enum SkillError {
+    #[error("agent '{agent}' referenced by skill '{skill}' not found in registry")]
+    AgentNotFound { skill: String, agent: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SkillMode {
     /// Instructions injected into the main agent's context.
     InContext,
     /// Spawns a sub-agent with the skill instructions as system prompt.
-    SubAgent { role: SubAgentRole },
+    /// `agent_name` is resolved against the SubAgentRegistry at dispatch time.
+    SubAgent { agent_name: String },
 }
 
 #[derive(Debug, Clone)]
@@ -88,8 +94,8 @@ impl SkillRegistry {
             .iter()
             .map(|s| {
                 let mode_str = match &s.mode {
-                    SkillMode::InContext => "in-context",
-                    SkillMode::SubAgent { role } => &format!("sub-agent:{}", role.display_name()),
+                    SkillMode::InContext => "in-context".to_string(),
+                    SkillMode::SubAgent { agent_name } => format!("sub-agent:{}", agent_name),
                 };
                 format!("- **{}** ({}): {}", s.name, mode_str, s.trigger)
             })
@@ -158,8 +164,13 @@ fn parse_skill_file(content: &str) -> Option<SkillDefinition> {
 
     let mode = match mode_str.as_str() {
         "subagent" | "sub_agent" => {
-            let role = SubAgentRole::from_str(&subagent_role_str).unwrap_or(SubAgentRole::Explorer);
-            SkillMode::SubAgent { role }
+            // Default to "explorer" if subagent_role not specified
+            let agent_name = if subagent_role_str.is_empty() {
+                "explorer".to_string()
+            } else {
+                subagent_role_str
+            };
+            SkillMode::SubAgent { agent_name }
         }
         _ => SkillMode::InContext,
     };
@@ -211,7 +222,26 @@ Run cargo test.
 "#;
         let skill = parse_skill_file(content).unwrap();
         assert_eq!(skill.name, "test");
-        assert!(matches!(skill.mode, SkillMode::SubAgent { .. }));
+        match skill.mode {
+            SkillMode::SubAgent { agent_name } => assert_eq!(agent_name, "verifier"),
+            _ => panic!("expected SubAgent"),
+        }
+    }
+
+    #[test]
+    fn parse_skill_file_subagent_default_to_explorer_when_role_missing() {
+        let content = r#"---
+name: test
+trigger: run
+mode: subagent
+---
+body
+"#;
+        let skill = parse_skill_file(content).unwrap();
+        match skill.mode {
+            SkillMode::SubAgent { agent_name } => assert_eq!(agent_name, "explorer"),
+            _ => panic!("expected SubAgent"),
+        }
     }
 
     #[test]

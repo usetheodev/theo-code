@@ -12,6 +12,7 @@ theo-api-contracts.workspace = true
 theo-engine-graph.workspace = true
 theo-engine-parser.workspace = true
 theo-engine-retrieval.workspace = true
+theo-isolation.workspace = true
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true
