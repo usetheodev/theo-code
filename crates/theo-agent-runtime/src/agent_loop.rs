@@ -53,6 +53,15 @@ pub struct AgentResult {
     /// best_effort mode, or output is plain text.
     #[doc(hidden)]
     pub structured: Option<serde_json::Value>,
+    /// Phase 6: true when the run terminated via cooperative cancellation
+    /// (parent cancelled, root token, or per-agent token). Distinct from
+    /// `success: false` which covers errors / timeouts.
+    #[doc(hidden)]
+    pub cancelled: bool,
+    /// Phase 11: path of the isolated worktree when isolation=worktree.
+    /// `None` when the sub-agent ran in shared CWD.
+    #[doc(hidden)]
+    pub worktree_path: Option<std::path::PathBuf>,
 }
 
 /// The main agent loop that orchestrates LLM ↔ tool execution.

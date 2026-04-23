@@ -57,13 +57,38 @@ impl RuntimeMetrics {
 /// Uses RwLock to allow concurrent reads (snapshot) and exclusive writes (record).
 pub struct MetricsCollector {
     metrics: Arc<RwLock<RuntimeMetrics>>,
+    /// Phase 12: per-agent metrics breakdown for the dashboard (A4 gap).
+    by_agent: Arc<RwLock<crate::observability::otel::MetricsByAgent>>,
 }
 
 impl MetricsCollector {
     pub fn new() -> Self {
         Self {
             metrics: Arc::new(RwLock::new(RuntimeMetrics::default())),
+            by_agent: Arc::new(RwLock::new(
+                crate::observability::otel::MetricsByAgent::new(),
+            )),
         }
+    }
+
+    /// Phase 12: record per-agent run completion (called from spawn_with_spec
+    /// after final result is known).
+    pub fn record_subagent_run(
+        &self,
+        agent_name: &str,
+        success: bool,
+        payload: crate::observability::otel::SubagentRunMetrics,
+    ) {
+        let mut m = self.by_agent.write().expect("by_agent write lock poisoned");
+        m.record(agent_name, success, payload);
+    }
+
+    /// Snapshot per-agent metrics breakdown.
+    pub fn by_agent_snapshot(&self) -> crate::observability::otel::MetricsByAgent {
+        self.by_agent
+            .read()
+            .expect("by_agent read lock poisoned")
+            .clone()
     }
 
     pub fn record_llm_call(&self, duration_ms: u64, tokens: u64) {
@@ -284,6 +309,59 @@ mod tests {
         let collector = MetricsCollector::new();
         let m = collector.snapshot();
         assert_eq!(m.total_cost_usd, 0.0);
+    }
+
+    #[test]
+    fn record_subagent_run_aggregates_per_agent_metrics() {
+        use crate::observability::otel::SubagentRunMetrics;
+        let collector = MetricsCollector::new();
+        collector.record_subagent_run(
+            "explorer",
+            true,
+            SubagentRunMetrics {
+                tokens_used: 1000,
+                input_tokens: 700,
+                output_tokens: 300,
+                llm_calls: 2,
+                iterations_used: 5,
+                duration_ms: 200,
+            },
+        );
+        collector.record_subagent_run(
+            "explorer",
+            false,
+            SubagentRunMetrics {
+                tokens_used: 500,
+                ..Default::default()
+            },
+        );
+        collector.record_subagent_run(
+            "implementer",
+            true,
+            SubagentRunMetrics {
+                tokens_used: 3000,
+                ..Default::default()
+            },
+        );
+
+        let by_agent = collector.by_agent_snapshot();
+        let exp = by_agent.get("explorer").expect("explorer recorded");
+        assert_eq!(exp.runs, 2);
+        assert_eq!(exp.success, 1);
+        assert_eq!(exp.failure, 1);
+        assert_eq!(exp.total_tokens, 1500);
+        assert_eq!(exp.success_rate(), 0.5);
+
+        let imp = by_agent.get("implementer").expect("implementer recorded");
+        assert_eq!(imp.runs, 1);
+        assert_eq!(imp.total_tokens, 3000);
+    }
+
+    #[test]
+    fn by_agent_snapshot_empty_for_new_collector() {
+        let collector = MetricsCollector::new();
+        let by_agent = collector.by_agent_snapshot();
+        assert!(by_agent.by_agent.is_empty());
     }
 
     #[test]

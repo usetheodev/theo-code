@@ -70,6 +70,9 @@ struct RawFrontmatter {
     /// Phase 11: isolation mode ("shared" default, "worktree" opt-in).
     #[serde(default)]
     isolation: Option<RawIsolation>,
+    /// Phase 5: per-agent hooks (HookManager-compatible JSON).
+    #[serde(default)]
+    hooks: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -173,6 +176,7 @@ pub fn parse_agent_spec(
         mcp_servers,
         isolation,
         isolation_base_branch,
+        hooks: raw.hooks,
     })
 }
 

@@ -106,6 +106,11 @@ pub struct AgentSpec {
     /// Phase 11: base branch for worktree creation (default "main").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub isolation_base_branch: Option<String>,
+    /// Phase 5: per-agent hooks. Pure JSON (HookManager-compatible) so
+    /// theo-domain stays dependency-free. Runtime parses via
+    /// `theo_agent_runtime::lifecycle_hooks::HookManager::deserialize`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hooks: Option<serde_json::Value>,
 }
 
 impl AgentSpec {
@@ -144,6 +149,7 @@ impl AgentSpec {
             mcp_servers: Vec::new(),
             isolation: None,
             isolation_base_branch: None,
+            hooks: None,
         }
     }
 }
@@ -169,6 +175,7 @@ mod tests {
             mcp_servers: Vec::new(),
             isolation: None,
             isolation_base_branch: None,
+            hooks: None,
         }
     }
 

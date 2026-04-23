@@ -52,6 +52,7 @@ pub fn explorer() -> AgentSpec {
         mcp_servers: Vec::new(),
         isolation: None,
         isolation_base_branch: None,
+        hooks: None,
     }
 }
 
@@ -86,6 +87,7 @@ pub fn implementer() -> AgentSpec {
         mcp_servers: Vec::new(),
         isolation: None,
         isolation_base_branch: None,
+        hooks: None,
     }
 }
 
@@ -132,6 +134,7 @@ pub fn verifier() -> AgentSpec {
         mcp_servers: Vec::new(),
         isolation: None,
         isolation_base_branch: None,
+        hooks: None,
     }
 }
 
@@ -166,6 +169,7 @@ pub fn reviewer() -> AgentSpec {
         mcp_servers: Vec::new(),
         isolation: None,
         isolation_base_branch: None,
+        hooks: None,
     }
 }
 

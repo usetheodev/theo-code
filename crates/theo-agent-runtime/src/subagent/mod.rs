@@ -194,6 +194,9 @@ pub struct SubAgentManager {
     /// Phase 11: optional worktree provider. When Some AND spec.isolation=="worktree",
     /// spawn_with_spec creates an isolated worktree, runs there, and cleans up.
     worktree_provider: Option<Arc<theo_isolation::WorktreeProvider>>,
+    /// Phase 12: optional metrics collector. When Some, spawn_with_spec records
+    /// per-agent metrics via MetricsCollector::record_subagent_run.
+    metrics: Option<Arc<crate::observability::metrics::MetricsCollector>>,
 }
 
 impl SubAgentManager {
@@ -210,6 +213,7 @@ impl SubAgentManager {
             cancellation: None,
             checkpoint_manager: None,
             worktree_provider: None,
+            metrics: None,
         }
     }
 
@@ -232,6 +236,7 @@ impl SubAgentManager {
             cancellation: None,
             checkpoint_manager: None,
             worktree_provider: None,
+            metrics: None,
         }
     }
 
@@ -291,6 +296,15 @@ impl SubAgentManager {
         provider: Arc<theo_isolation::WorktreeProvider>,
     ) -> Self {
         self.worktree_provider = Some(provider);
+        self
+    }
+
+    /// Phase 12: attach a metrics collector for per-agent breakdown (A4 gap).
+    pub fn with_metrics(
+        mut self,
+        metrics: Arc<crate::observability::metrics::MetricsCollector>,
+    ) -> Self {
+        self.metrics = Some(metrics);
         self
     }
 
@@ -480,13 +494,22 @@ impl SubAgentManager {
                         .isolation_base_branch
                         .clone()
                         .unwrap_or_else(|| "main".to_string());
-                    match provider.create(&spec.name, &base) {
-                        Ok(h) => Some(h),
-                        Err(_) => {
-                            // Try "master" fallback (legacy git default)
-                            provider.create(&spec.name, "master").ok()
-                        }
+                    let result = provider.create(&spec.name, &base).or_else(|_| {
+                        // Try "master" fallback (legacy git default)
+                        provider.create(&spec.name, "master")
+                    });
+                    // Phase 5: dispatch WorktreeCreate hook (informational)
+                    if let (Ok(handle), Some(hooks)) = (&result, &self.hook_manager) {
+                        use crate::lifecycle_hooks::{HookContext, HookEvent};
+                        let _ = hooks.dispatch(
+                            HookEvent::WorktreeCreate,
+                            &HookContext {
+                                tool_name: Some(handle.path.to_string_lossy().to_string()),
+                                ..Default::default()
+                            },
+                        );
                     }
+                    result.ok()
                 }
                 _ => None,
             };
@@ -525,8 +548,11 @@ impl SubAgentManager {
                 let _ = store.save(&run);
             }
 
+            // Phase 5: build effective HookManager — per-agent overrides global
+            let effective_hooks = build_effective_hooks(&spec, self.hook_manager.as_deref());
+
             // Phase 5: dispatch SubagentStart hook
-            if let Some(hooks) = &self.hook_manager {
+            if let Some(hooks) = &effective_hooks {
                 use crate::lifecycle_hooks::{HookContext, HookEvent, HookResponse};
                 let resp = hooks.dispatch(HookEvent::SubagentStart, &HookContext::default());
                 if let HookResponse::Block { reason } = resp {
@@ -570,6 +596,8 @@ impl SubAgentManager {
                         agent_name: spec.name.clone(),
                         context_used: context_text.clone(),
                         duration_ms: start.elapsed().as_millis() as u64,
+                        cancelled: true,
+                        worktree_path: worktree_handle.as_ref().map(|h| h.path.clone()),
                         ..Default::default()
                     };
                     if let Some(store) = &self.run_store {
@@ -680,6 +708,7 @@ impl SubAgentManager {
                             "Sub-agent ({}) cancelled mid-run by parent",
                             spec.name
                         ),
+                        cancelled: true,
                         ..Default::default()
                     },
                 }
@@ -701,11 +730,14 @@ impl SubAgentManager {
             result.agent_name = spec.name.clone();
             result.context_used = context_text;
             result.duration_ms = start.elapsed().as_millis() as u64;
+            result.worktree_path = worktree_handle.as_ref().map(|h| h.path.clone());
 
             // Phase 10: update persisted run with final status + metrics
             if let Some(store) = &self.run_store {
                 if let Ok(mut run) = store.load(&run_id) {
-                    run.status = if result.success {
+                    run.status = if result.cancelled {
+                        crate::subagent_runs::RunStatus::Cancelled
+                    } else if result.success {
                         crate::subagent_runs::RunStatus::Completed
                     } else {
                         crate::subagent_runs::RunStatus::Failed
@@ -754,7 +786,7 @@ impl SubAgentManager {
             // Phase 5: dispatch SubagentStop hook (informational; can't cancel
             // — the run already finished). Block here is treated as marking
             // the result with a warning suffix.
-            if let Some(hooks) = &self.hook_manager {
+            if let Some(hooks) = &effective_hooks {
                 use crate::lifecycle_hooks::{HookContext, HookEvent, HookResponse};
                 let resp = hooks.dispatch(HookEvent::SubagentStop, &HookContext::default());
                 if let HookResponse::Block { reason } = resp {
@@ -774,7 +806,20 @@ impl SubAgentManager {
             // Failures preserve the worktree for inspection.
             if let (Some(handle), Some(provider)) = (&worktree_handle, &self.worktree_provider) {
                 if result.success {
-                    let _ = provider.remove(handle, false);
+                    let removed = provider.remove(handle, false).is_ok();
+                    // Phase 5: WorktreeRemove hook (informational)
+                    if removed {
+                        if let Some(hooks) = &self.hook_manager {
+                            use crate::lifecycle_hooks::{HookContext, HookEvent};
+                            let _ = hooks.dispatch(
+                                HookEvent::WorktreeRemove,
+                                &HookContext {
+                                    tool_name: Some(handle.path.to_string_lossy().to_string()),
+                                    ..Default::default()
+                                },
+                            );
+                        }
+                    }
                 }
             }
 
@@ -809,8 +854,52 @@ impl SubAgentManager {
                 "output_tokens": result.output_tokens,
                 "llm_calls": result.llm_calls,
                 "iterations_used": result.iterations_used,
+                "cancelled": result.cancelled,
+                "worktree_path": result.worktree_path.as_ref().map(|p| p.to_string_lossy().to_string()),
             }),
         ));
+        // Phase 12: per-agent metrics aggregation
+        if let Some(metrics) = &self.metrics {
+            metrics.record_subagent_run(
+                &spec.name,
+                result.success,
+                crate::observability::otel::SubagentRunMetrics {
+                    tokens_used: result.tokens_used,
+                    input_tokens: result.input_tokens,
+                    output_tokens: result.output_tokens,
+                    llm_calls: result.llm_calls,
+                    iterations_used: result.iterations_used,
+                    duration_ms: result.duration_ms,
+                },
+            );
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// build_effective_hooks — Phase 5: per-agent hooks override globals
+// ---------------------------------------------------------------------------
+
+/// Merge per-agent hooks (from `spec.hooks`) with global `manager`.
+/// Per-agent fires first (higher priority) thanks to `merge_with_priority`.
+/// Returns `None` if neither source has hooks.
+fn build_effective_hooks(
+    spec: &AgentSpec,
+    global: Option<&crate::lifecycle_hooks::HookManager>,
+) -> Option<crate::lifecycle_hooks::HookManager> {
+    let per_agent: Option<crate::lifecycle_hooks::HookManager> = spec
+        .hooks
+        .as_ref()
+        .and_then(|v| serde_json::from_value(v.clone()).ok());
+    match (per_agent, global) {
+        (None, None) => None,
+        (Some(pa), None) => Some(pa),
+        (None, Some(g)) => Some(g.clone()),
+        (Some(pa), Some(g)) => {
+            let mut merged = g.clone();
+            merged.merge_with_priority(pa);
+            Some(merged)
+        }
     }
 }
 
@@ -978,6 +1067,7 @@ mod tests {
             cancellation: None,
             checkpoint_manager: None,
             worktree_provider: None,
+            metrics: None,
         };
 
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -1056,6 +1146,7 @@ mod tests {
             cancellation: None,
             checkpoint_manager: None,
             worktree_provider: None,
+            metrics: None,
         };
 
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("scout", "check x");
@@ -1108,6 +1199,7 @@ mod tests {
             cancellation: None,
             checkpoint_manager: None,
             worktree_provider: None,
+            metrics: None,
         };
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("x", "y");
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -1137,6 +1229,7 @@ mod tests {
             cancellation: None,
             checkpoint_manager: None,
             worktree_provider: None,
+            metrics: None,
         };
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("persisted", "test");
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -1166,6 +1259,7 @@ mod tests {
             cancellation: None,
             checkpoint_manager: None,
             worktree_provider: None,
+            metrics: None,
         };
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("x", "y");
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -1242,6 +1336,7 @@ mod tests {
             cancellation: None,
             checkpoint_manager: None,
             worktree_provider: None,
+            metrics: None,
         };
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("x", "y");
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -1268,6 +1363,7 @@ mod tests {
             cancellation: Some(tree),
             checkpoint_manager: None,
             worktree_provider: None,
+            metrics: None,
         };
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("x", "y");
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -1309,6 +1405,7 @@ mod tests {
             cancellation: None,
             checkpoint_manager: None,
             worktree_provider: None,
+            metrics: None,
         };
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("y", "z");
         let rt = tokio::runtime::Runtime::new().unwrap();

@@ -73,6 +73,19 @@ struct Cli {
     #[arg(long, global = true)]
     seed: Option<u64>,
 
+    /// Phase 13: enable hot-reload of `.theo/agents/` and `~/.theo/agents/`.
+    /// When set, modifications to project agent specs are detected via
+    /// filesystem watcher (debounce 500ms) and trigger registry re-load.
+    /// Modified specs require re-approval via S3 manifest.
+    #[arg(long, global = true)]
+    watch_agents: bool,
+
+    /// Phase 9: enable automatic checkpoint snapshots before file mutations
+    /// (write/edit/apply_patch/bash). Shadow git repo at
+    /// ~/.theo/checkpoints/{sha16}/. Use `theo checkpoints restore` to revert.
+    #[arg(long, global = true)]
+    enable_checkpoints: bool,
+
     #[command(subcommand)]
     command: Option<Commands>,
 
