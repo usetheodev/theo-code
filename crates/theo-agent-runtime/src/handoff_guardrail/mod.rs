@@ -27,6 +27,12 @@ use theo_domain::agent_spec::AgentSpec;
 use theo_domain::capability::CapabilitySet;
 use theo_domain::tool::ToolCategory;
 
+pub mod declarative;
+pub use declarative::{
+    parse_guardrails_toml, DeclarativeDecision, DeclarativeGuardrail,
+    DeclarativeGuardrailSpec, DeclarativeGuardrailsFile, DeclarativeMatcher,
+};
+
 // ---------------------------------------------------------------------------
 // HandoffContext — what every guardrail sees
 // ---------------------------------------------------------------------------

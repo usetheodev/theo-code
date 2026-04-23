@@ -2593,8 +2593,10 @@ impl AgentRunEngine {
             _ => None,
         });
 
-        // Phase 18: PreHandoff hook only fires when no chain block — chain
-        // wins first. Hooks may also Block, becoming the final blocker.
+        // Phase 18 + 24: PreHandoff hook only fires when no chain block —
+        // chain wins first. Hooks may also Block, becoming the final blocker.
+        // Phase 24 (sota-gaps-followup): populates HookContext.target_agent
+        // + target_objective so YAML matchers can regex-match against them.
         let hook_block = if blocked_by.is_none() {
             self.subagent_hooks.as_ref().and_then(|hooks| {
                 use crate::lifecycle_hooks::{HookContext, HookEvent, HookResponse};
@@ -2605,6 +2607,8 @@ impl AgentRunEngine {
                         "objective": objective,
                     })),
                     tool_result: None,
+                    target_agent: Some(target_agent.to_string()),
+                    target_objective: Some(objective.to_string()),
                 };
                 match hooks.dispatch(HookEvent::PreHandoff, &hook_ctx) {
                     HookResponse::Block { reason } => {

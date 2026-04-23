@@ -54,6 +54,24 @@ pub mod tooling {
     pub use theo_tooling::memory;
 }
 
+/// MCP types that apps need for the discovery cache + admin CLI.
+/// Phase 21 (sota-gaps-followup): exposes the minimal surface that
+/// `apps/theo-cli/src/mcp_admin.rs` consumes (DiscoveryCache, registry,
+/// timeout constant, server config).
+pub mod mcp {
+    pub use theo_infra_mcp::{
+        DEFAULT_PER_SERVER_TIMEOUT, DiscoveryCache, DiscoveryReport,
+        McpRegistry, McpServerConfig, McpTool,
+    };
+}
+
+/// Handoff guardrail types for the apps layer (Phase 18 + 23).
+pub mod handoff_guardrail {
+    pub use theo_agent_runtime::handoff_guardrail::{
+        GuardrailChain, GuardrailDecision, HandoffContext, HandoffGuardrail,
+    };
+}
+
 /// Types that apps pulled in from `theo-infra-auth` before T1.2.
 ///
 /// Kept narrow — expose only what theo-cli + theo-desktop currently wire

@@ -124,6 +124,10 @@ pub struct HookContext {
     pub tool_args: Option<serde_json::Value>,
     /// For PostToolUse: tool result.
     pub tool_result: Option<serde_json::Value>,
+    /// For PreHandoff: target sub-agent name. Phase 24 (sota-gaps-followup).
+    pub target_agent: Option<String>,
+    /// For PreHandoff: objective string the parent passed to delegate_task.
+    pub target_objective: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -173,6 +177,11 @@ fn default_timeout_secs() -> u32 {
 impl HookMatcher {
     /// Test whether this matcher fires for a given context.
     /// Returns `Err` if the regex is invalid.
+    ///
+    /// Match target precedence (first non-None wins):
+    /// 1. `tool_name` — PreToolUse / PostToolUse
+    /// 2. `target_agent` — PreHandoff (Phase 24 sota-gaps-followup)
+    /// 3. `target_objective` — PreHandoff fallback if target_agent absent
     pub fn matches(&self, ctx: &HookContext) -> Result<bool, regex::Error> {
         match &self.matcher {
             None => Ok(true), // No matcher = always fires
@@ -180,6 +189,10 @@ impl HookMatcher {
                 let re = Regex::new(pattern)?;
                 if let Some(name) = &ctx.tool_name {
                     Ok(re.is_match(name))
+                } else if let Some(agent) = &ctx.target_agent {
+                    Ok(re.is_match(agent))
+                } else if let Some(obj) = &ctx.target_objective {
+                    Ok(re.is_match(obj))
                 } else {
                     Ok(false)
                 }
@@ -526,5 +539,112 @@ mod tests {
         let json = serde_json::to_string(&mgr).unwrap();
         let back: HookManager = serde_json::from_str(&json).unwrap();
         assert_eq!(back.event_count(), mgr.event_count());
+    }
+
+    // ── Phase 24 (sota-gaps-followup): PreHandoff matcher ──
+
+    pub mod pre_handoff {
+        use super::*;
+
+        #[test]
+        fn hook_context_carries_pre_handoff_fields() {
+            let ctx = HookContext {
+                tool_name: None,
+                tool_args: None,
+                tool_result: None,
+                target_agent: Some("verifier".into()),
+                target_objective: Some("audit security".into()),
+            };
+            assert_eq!(ctx.target_agent.as_deref(), Some("verifier"));
+            assert_eq!(ctx.target_objective.as_deref(), Some("audit security"));
+        }
+
+        #[test]
+        fn pre_handoff_matcher_blocks_by_target_agent_regex() {
+            let matcher = HookMatcher {
+                matcher: Some("^impl.*$".into()),
+                response: HookResponse::Block { reason: "no impl".into() },
+                timeout_secs: 60,
+            };
+            let ctx = HookContext {
+                tool_name: None,
+                tool_args: None,
+                tool_result: None,
+                target_agent: Some("implementer".into()),
+                target_objective: Some("anything".into()),
+            };
+            assert!(matcher.matches(&ctx).unwrap());
+        }
+
+        #[test]
+        fn pre_handoff_matcher_blocks_by_objective_regex_when_no_target_agent() {
+            let matcher = HookMatcher {
+                matcher: Some("prod|production".into()),
+                response: HookResponse::Block { reason: "no prod".into() },
+                timeout_secs: 60,
+            };
+            let ctx = HookContext {
+                tool_name: None,
+                tool_args: None,
+                tool_result: None,
+                target_agent: None,
+                target_objective: Some("deploy to production".into()),
+            };
+            assert!(matcher.matches(&ctx).unwrap());
+        }
+
+        #[test]
+        fn pre_handoff_matcher_allows_when_no_match() {
+            let matcher = HookMatcher {
+                matcher: Some("^verifier$".into()),
+                response: HookResponse::Block { reason: "x".into() },
+                timeout_secs: 60,
+            };
+            let ctx = HookContext {
+                tool_name: None,
+                tool_args: None,
+                tool_result: None,
+                target_agent: Some("explorer".into()),
+                target_objective: Some("read foo".into()),
+            };
+            // target_agent doesn't match, no tool_name, no objective match either
+            assert!(!matcher.matches(&ctx).unwrap());
+        }
+
+        #[test]
+        fn pre_handoff_matcher_tool_name_takes_precedence_over_target_agent() {
+            // Backward compat: existing PreToolUse matchers still work even
+            // when both tool_name AND target_agent are populated.
+            let matcher = HookMatcher {
+                matcher: Some("^delegate_task".into()),
+                response: HookResponse::Block { reason: "x".into() },
+                timeout_secs: 60,
+            };
+            let ctx = HookContext {
+                tool_name: Some("delegate_task:verifier".into()),
+                tool_args: None,
+                tool_result: None,
+                target_agent: Some("verifier".into()),
+                target_objective: Some("review".into()),
+            };
+            assert!(matcher.matches(&ctx).unwrap());
+        }
+
+        #[test]
+        fn pre_handoff_no_matcher_always_fires() {
+            let matcher = HookMatcher {
+                matcher: None,
+                response: HookResponse::Block { reason: "universal".into() },
+                timeout_secs: 60,
+            };
+            let ctx = HookContext {
+                tool_name: None,
+                tool_args: None,
+                tool_result: None,
+                target_agent: Some("any".into()),
+                target_objective: Some("any".into()),
+            };
+            assert!(matcher.matches(&ctx).unwrap());
+        }
     }
 }

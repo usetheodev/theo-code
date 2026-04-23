@@ -2,6 +2,7 @@ mod config;
 mod dashboard;
 mod dashboard_agents;
 mod init;
+mod mcp_admin;
 mod input;
 mod json_output;
 mod memory_lint;
@@ -212,6 +213,12 @@ enum Commands {
         #[command(subcommand)]
         action: subagent_admin::AgentsCmd,
     },
+
+    /// Manage MCP discovery cache (Phase 21 / sota-gaps-followup).
+    Mcp {
+        #[command(subcommand)]
+        action: mcp_admin::McpCmd,
+    },
 }
 
 #[derive(Subcommand)]
@@ -324,6 +331,28 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        Some(Commands::Mcp { action }) => {
+            let project = cli.repo.clone();
+            // Process-local cache: every CLI invocation starts fresh.
+            // Operator workflow: run `theo mcp discover` once before the
+            // first `theo agent` to warm the cache for that session.
+            let cache = std::sync::Arc::new(
+                theo_application::facade::mcp::DiscoveryCache::new(),
+            );
+            let rt = match tokio::runtime::Runtime::new() {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("Error: failed to create tokio runtime: {}", e);
+                    std::process::exit(1);
+                }
+            };
+            if let Err(e) =
+                rt.block_on(mcp_admin::handle_mcp(action, &project, cache))
+            {
+                eprintln!("Error: {}", e);
+                std::process::exit(1);
+            }
+        }
         None => {
             // Phase 9 + 13: activate runtime features per CLI flags.
             // Held in scope so watcher / checkpoint live for the session.
@@ -397,12 +426,16 @@ fn build_injections(
 
     // Phase 17 (sota-gaps): MCP discovery cache. Always-on; the cache stays
     // empty when no MCP registry is configured, so the cost is zero.
-    inj.mcp_discovery = Some(Arc::new(theo_infra_mcp::DiscoveryCache::new()));
+    inj.mcp_discovery = Some(Arc::new(
+        theo_application::facade::mcp::DiscoveryCache::new(),
+    ));
 
-    // Phase 18 (sota-gaps): handoff guardrail chain with built-in defaults.
-    // Project-specific guardrails can be appended later via a config loader.
+    // Phase 18 + 23 (sota-gaps): handoff guardrail chain with built-in
+    // defaults + any declarative entries from .theo/handoff_guardrails.toml.
     inj.handoff_guardrails = Some(Arc::new(
-        theo_agent_runtime::handoff_guardrail::GuardrailChain::with_default_builtins(),
+        theo_application::use_cases::guardrail_loader::load_project_guardrails(
+            project_dir,
+        ),
     ));
 
     inj
