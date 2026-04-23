@@ -183,6 +183,14 @@ pub struct SubAgentManager {
     /// creates a SubagentRun record (started → completed/failed/cancelled)
     /// and appends iteration events. None = no persistence (legacy).
     run_store: Option<Arc<crate::subagent_runs::FileSubagentRunStore>>,
+    /// Phase 5: optional global hooks dispatched at SubagentStart/SubagentStop.
+    hook_manager: Option<Arc<crate::lifecycle_hooks::HookManager>>,
+    /// Phase 6: optional cancellation tree. When Some, spawn_with_spec creates
+    /// a child token and bails out early if cancelled before the LLM call.
+    cancellation: Option<Arc<crate::cancellation::CancellationTree>>,
+    /// Phase 9: optional checkpoint manager. When Some, snapshot the workdir
+    /// once at the start of every spawn_with_spec (pre-mutation safety).
+    checkpoint_manager: Option<Arc<crate::checkpoint::CheckpointManager>>,
 }
 
 impl SubAgentManager {
@@ -195,6 +203,9 @@ impl SubAgentManager {
             depth: 0,
             registry: None,
             run_store: None,
+            hook_manager: None,
+            cancellation: None,
+            checkpoint_manager: None,
         }
     }
 
@@ -213,6 +224,9 @@ impl SubAgentManager {
             depth: 0,
             registry: Some(registry),
             run_store: None,
+            hook_manager: None,
+            cancellation: None,
+            checkpoint_manager: None,
         }
     }
 
@@ -238,6 +252,32 @@ impl SubAgentManager {
         self
     }
 
+    /// Phase 5: attach a global HookManager. Hooks fire at SubagentStart/Stop.
+    pub fn with_hooks(mut self, hooks: Arc<crate::lifecycle_hooks::HookManager>) -> Self {
+        self.hook_manager = Some(hooks);
+        self
+    }
+
+    /// Phase 6: attach a cancellation tree. spawn_with_spec checks the token
+    /// at start (after Started event) and aborts cleanly if cancelled.
+    pub fn with_cancellation(
+        mut self,
+        tree: Arc<crate::cancellation::CancellationTree>,
+    ) -> Self {
+        self.cancellation = Some(tree);
+        self
+    }
+
+    /// Phase 9: attach a checkpoint manager. spawn_with_spec auto-snapshots
+    /// the workdir BEFORE the agent loop runs (pre-mutation safety).
+    pub fn with_checkpoint(
+        mut self,
+        manager: Arc<crate::checkpoint::CheckpointManager>,
+    ) -> Self {
+        self.checkpoint_manager = Some(manager);
+        self
+    }
+
     /// Access the registry, if any.
     pub fn registry(&self) -> Option<&SubAgentRegistry> {
         self.registry.as_deref()
@@ -246,6 +286,21 @@ impl SubAgentManager {
     /// Access the persistence store, if any.
     pub fn run_store(&self) -> Option<&crate::subagent_runs::FileSubagentRunStore> {
         self.run_store.as_deref()
+    }
+
+    /// Access the global hook manager, if any.
+    pub fn hook_manager(&self) -> Option<&crate::lifecycle_hooks::HookManager> {
+        self.hook_manager.as_deref()
+    }
+
+    /// Access the cancellation tree, if any.
+    pub fn cancellation(&self) -> Option<&crate::cancellation::CancellationTree> {
+        self.cancellation.as_deref()
+    }
+
+    /// Access the checkpoint manager, if any.
+    pub fn checkpoint_manager(&self) -> Option<&crate::checkpoint::CheckpointManager> {
+        self.checkpoint_manager.as_deref()
     }
 
     /// Spawn a sub-agent with a specific role and objective.
@@ -402,6 +457,14 @@ impl SubAgentManager {
         });
 
         Box::pin(async move {
+            // Phase 9: auto-snapshot the workdir BEFORE the run (pre-mutation safety)
+            let checkpoint_before: Option<String> = self
+                .checkpoint_manager
+                .as_ref()
+                .and_then(|cm| {
+                    cm.snapshot(&format!("pre-run:{}", spec.name)).ok()
+                });
+
             // Phase 10: persist run start
             let run_id = format!(
                 "subagent-{}-{}",
@@ -418,9 +481,26 @@ impl SubAgentManager {
                     &spec,
                     &objective,
                     self.project_dir.to_string_lossy(),
-                    None,
+                    checkpoint_before.clone(),
                 );
                 let _ = store.save(&run);
+            }
+
+            // Phase 5: dispatch SubagentStart hook
+            if let Some(hooks) = &self.hook_manager {
+                use crate::lifecycle_hooks::{HookContext, HookEvent, HookResponse};
+                let resp = hooks.dispatch(HookEvent::SubagentStart, &HookContext::default());
+                if let HookResponse::Block { reason } = resp {
+                    let r = AgentResult {
+                        success: false,
+                        summary: format!("Sub-agent blocked by SubagentStart hook: {}", reason),
+                        agent_name: spec.name.clone(),
+                        context_used: context_text.clone(),
+                        ..Default::default()
+                    };
+                    self.publish_completed(&spec, &r);
+                    return r;
+                }
             }
 
             // Emit SubagentStarted
@@ -432,10 +512,38 @@ impl SubAgentManager {
                     "agent_source": spec.source.as_str(),
                     "objective": objective,
                     "run_id": run_id,
+                    "checkpoint_before": checkpoint_before,
                 }),
             ));
 
             let start = std::time::Instant::now();
+
+            // Phase 6: register child cancellation token (early-bail if root already cancelled)
+            let cancellation_token = self
+                .cancellation
+                .as_ref()
+                .map(|tree| tree.child(&run_id));
+            if let Some(tok) = &cancellation_token {
+                if tok.is_cancelled() {
+                    let r = AgentResult {
+                        success: false,
+                        summary: "Sub-agent cancelled before start (parent cancelled)".to_string(),
+                        agent_name: spec.name.clone(),
+                        context_used: context_text.clone(),
+                        duration_ms: start.elapsed().as_millis() as u64,
+                        ..Default::default()
+                    };
+                    if let Some(store) = &self.run_store {
+                        if let Ok(mut run) = store.load(&run_id) {
+                            run.status = crate::subagent_runs::RunStatus::Cancelled;
+                            run.summary = Some(r.summary.clone());
+                            let _ = store.save(&run);
+                        }
+                    }
+                    self.publish_completed(&spec, &r);
+                    return r;
+                }
+            }
 
             // Enforce max_depth
             if self.depth >= MAX_DEPTH {
@@ -499,21 +607,42 @@ impl SubAgentManager {
             let history = context.unwrap_or_default();
             let timeout = std::time::Duration::from_secs(spec.timeout_secs);
 
-            let mut result = match tokio::time::timeout(
-                timeout,
-                agent.run_with_history(&objective, &self.project_dir, history, Some(sub_bus)),
-            )
-            .await
-            {
-                Ok(result) => result,
-                Err(_) => AgentResult {
-                    success: false,
-                    summary: format!(
-                        "Sub-agent ({}) timed out after {}s. Objective: {}",
-                        spec.name, spec.timeout_secs, objective
-                    ),
-                    ..Default::default()
-                },
+            // Phase 6: race the agent against (timeout || cancellation)
+            let agent_run = agent.run_with_history(&objective, &self.project_dir, history, Some(sub_bus));
+            let mut result = if let Some(tok) = cancellation_token {
+                tokio::select! {
+                    res = tokio::time::timeout(timeout, agent_run) => match res {
+                        Ok(r) => r,
+                        Err(_) => AgentResult {
+                            success: false,
+                            summary: format!(
+                                "Sub-agent ({}) timed out after {}s. Objective: {}",
+                                spec.name, spec.timeout_secs, objective
+                            ),
+                            ..Default::default()
+                        },
+                    },
+                    _ = tok.cancelled() => AgentResult {
+                        success: false,
+                        summary: format!(
+                            "Sub-agent ({}) cancelled mid-run by parent",
+                            spec.name
+                        ),
+                        ..Default::default()
+                    },
+                }
+            } else {
+                match tokio::time::timeout(timeout, agent_run).await {
+                    Ok(r) => r,
+                    Err(_) => AgentResult {
+                        success: false,
+                        summary: format!(
+                            "Sub-agent ({}) timed out after {}s. Objective: {}",
+                            spec.name, spec.timeout_secs, objective
+                        ),
+                        ..Default::default()
+                    },
+                }
             };
 
             // Annotate result with spec metadata
@@ -568,6 +697,25 @@ impl SubAgentManager {
                         // best_effort (default): keep free-text, structured=None
                     }
                 }
+            }
+
+            // Phase 5: dispatch SubagentStop hook (informational; can't cancel
+            // — the run already finished). Block here is treated as marking
+            // the result with a warning suffix.
+            if let Some(hooks) = &self.hook_manager {
+                use crate::lifecycle_hooks::{HookContext, HookEvent, HookResponse};
+                let resp = hooks.dispatch(HookEvent::SubagentStop, &HookContext::default());
+                if let HookResponse::Block { reason } = resp {
+                    result.summary = format!(
+                        "{}\n\n[SubagentStop hook flagged] {}",
+                        result.summary, reason
+                    );
+                }
+            }
+
+            // Phase 6: forget the cancellation token (cleanup tree)
+            if let Some(tree) = &self.cancellation {
+                tree.forget(&run_id);
             }
 
             self.publish_completed(&spec, &result);
@@ -766,6 +914,9 @@ mod tests {
             depth: 1, // Already at max
             registry: None,
             run_store: None,
+            hook_manager: None,
+            cancellation: None,
+            checkpoint_manager: None,
         };
 
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -840,6 +991,9 @@ mod tests {
             depth: 1,
             registry: Some(Arc::new(SubAgentRegistry::with_builtins())),
             run_store: None,
+            hook_manager: None,
+            cancellation: None,
+            checkpoint_manager: None,
         };
 
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("scout", "check x");
@@ -888,6 +1042,9 @@ mod tests {
             depth: 1, // trigger depth-limit early return (no real LLM)
             registry: Some(Arc::new(SubAgentRegistry::with_builtins())),
             run_store: None,
+            hook_manager: None,
+            cancellation: None,
+            checkpoint_manager: None,
         };
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("x", "y");
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -913,6 +1070,9 @@ mod tests {
             depth: 1, // depth-limit early return (no real LLM)
             registry: None,
             run_store: Some(store.clone()),
+            hook_manager: None,
+            cancellation: None,
+            checkpoint_manager: None,
         };
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("persisted", "test");
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -938,11 +1098,102 @@ mod tests {
             depth: 1,
             registry: None,
             run_store: None,
+            hook_manager: None,
+            cancellation: None,
+            checkpoint_manager: None,
         };
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("x", "y");
         let rt = tokio::runtime::Runtime::new().unwrap();
         // Should not panic / not require store
         let _ = rt.block_on(async { manager.spawn_with_spec(&spec, "y", None).await });
+    }
+
+    #[test]
+    fn with_hooks_builder_stores_reference() {
+        use crate::lifecycle_hooks::HookManager;
+        let bus = Arc::new(EventBus::new());
+        let manager = SubAgentManager::with_builtins(
+            AgentConfig::default(),
+            bus,
+            PathBuf::from("/tmp"),
+        )
+        .with_hooks(Arc::new(HookManager::new()));
+        assert!(manager.hook_manager().is_some());
+    }
+
+    #[test]
+    fn with_cancellation_builder_stores_reference() {
+        use crate::cancellation::CancellationTree;
+        let bus = Arc::new(EventBus::new());
+        let manager = SubAgentManager::with_builtins(
+            AgentConfig::default(),
+            bus,
+            PathBuf::from("/tmp"),
+        )
+        .with_cancellation(Arc::new(CancellationTree::new()));
+        assert!(manager.cancellation().is_some());
+    }
+
+    #[test]
+    fn spawn_with_spec_blocked_by_subagent_start_hook() {
+        use crate::lifecycle_hooks::{HookEvent, HookManager, HookMatcher, HookResponse};
+        let bus = Arc::new(EventBus::new());
+        let mut hooks = HookManager::new();
+        hooks.add(
+            HookEvent::SubagentStart,
+            HookMatcher {
+                matcher: None,
+                response: HookResponse::Block {
+                    reason: "test block".into(),
+                },
+                timeout_secs: 60,
+            },
+        );
+        let manager = SubAgentManager {
+            config: AgentConfig::default(),
+            event_bus: bus,
+            project_dir: PathBuf::from("/tmp"),
+            depth: 0,
+            registry: None,
+            run_store: None,
+            hook_manager: Some(Arc::new(hooks)),
+            cancellation: None,
+            checkpoint_manager: None,
+        };
+        let spec = theo_domain::agent_spec::AgentSpec::on_demand("x", "y");
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let result = rt.block_on(async { manager.spawn_with_spec(&spec, "y", None).await });
+        assert!(!result.success);
+        assert!(result.summary.contains("test block"));
+    }
+
+    #[test]
+    fn spawn_with_spec_early_cancelled_by_pre_run_cancel() {
+        use crate::cancellation::CancellationTree;
+        let bus = Arc::new(EventBus::new());
+        let tree = Arc::new(CancellationTree::new());
+        tree.cancel_all(); // root already cancelled
+
+        let manager = SubAgentManager {
+            config: AgentConfig::default(),
+            event_bus: bus,
+            project_dir: PathBuf::from("/tmp"),
+            depth: 0,
+            registry: None,
+            run_store: None,
+            hook_manager: None,
+            cancellation: Some(tree),
+            checkpoint_manager: None,
+        };
+        let spec = theo_domain::agent_spec::AgentSpec::on_demand("x", "y");
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let result = rt.block_on(async { manager.spawn_with_spec(&spec, "y", None).await });
+        assert!(!result.success);
+        assert!(
+            result.summary.contains("cancelled before start"),
+            "got: {}",
+            result.summary
+        );
     }
 
     #[test]
@@ -970,6 +1221,9 @@ mod tests {
             depth: 1,
             registry: None,
             run_store: None,
+            hook_manager: None,
+            cancellation: None,
+            checkpoint_manager: None,
         };
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("y", "z");
         let rt = tokio::runtime::Runtime::new().unwrap();
