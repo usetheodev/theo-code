@@ -1,6 +1,7 @@
 pub mod agent_loop;
 pub mod agent_message;
 pub mod budget_enforcer;
+pub mod cancellation;
 pub mod capability_gate;
 pub mod compaction;
 pub mod compaction_stages;
@@ -16,6 +17,8 @@ pub mod extension;
 pub mod failure_tracker;
 pub mod frontmatter;
 pub mod hooks;
+pub mod lifecycle_hooks;
+pub mod output_format;
 pub mod hypothesis_pipeline;
 pub mod jit_instructions;
 pub mod lesson_pipeline;

@@ -20,6 +20,8 @@ regex = { workspace = true }
 indexmap.workspace = true
 serde_yaml.workspace = true
 sha2.workspace = true
+tokio-util.workspace = true
+dashmap.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
