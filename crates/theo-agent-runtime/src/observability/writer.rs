@@ -25,7 +25,20 @@ use theo_domain::event::DomainEvent;
 
 use crate::observability::envelope::{EnvelopeKind, TrajectoryEnvelope, ENVELOPE_SCHEMA_VERSION};
 
-const FLUSH_EVERY: usize = 100;
+/// Maximum events written before forcing a `BufWriter::flush()`.
+///
+/// Kept small so that crash-tolerance dominates throughput. The BufWriter
+/// default capacity is 8KB (about 30-50 envelopes); flushing every 5
+/// envelopes keeps < 5 events in-flight at any moment without becoming
+/// fsync-heavy (flush → write(2), not sync_data(2)).
+const FLUSH_EVERY: usize = 5;
+
+/// Wall-clock interval between forced flushes on an idle writer.
+///
+/// Prevents arbitrary data loss on long LLM waits where no event arrives
+/// for many seconds. Unit is milliseconds.
+const FORCE_FLUSH_MS: u64 = 500;
+
 const RETRY_QUEUE_CAP: usize = 100;
 
 /// Payload the caller may hand the writer when the run is ending so that it
@@ -153,7 +166,20 @@ fn run_writer_loop(
         (drained, None)
     };
 
-    for bytes in receiver.iter() {
+    // Periodic flush loop: use `recv_timeout` so we can flush on idle too.
+    let flush_interval = std::time::Duration::from_millis(FORCE_FLUSH_MS);
+    loop {
+        let bytes = match receiver.recv_timeout(flush_interval) {
+            Ok(b) => b,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                if since_flush > 0 {
+                    let _ = writer.flush();
+                    since_flush = 0;
+                }
+                continue;
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+        };
         // If the retry queue has pending bytes, try to drain them first.
         if !retry_queue.is_empty() {
             let (drained, err) = drain_retry_queue(&mut writer, &mut retry_queue, &write_errors);
@@ -458,6 +484,32 @@ mod tests {
         h.join.join().unwrap();
         // With open failure, events fall back to dropped counter.
         assert!(dropped.load(Ordering::Relaxed) >= 5);
+    }
+
+    // --- Bug-fix regression: periodic idle flush before shutdown ---
+    //
+    // If a sender dies before enough events (<5) are received, the writer
+    // must still flush what it has so that `ls -la .theo/trajectories/` shows
+    // a populated file instead of a 0-byte placeholder.
+    #[test]
+    fn test_idle_flush_before_shutdown_yields_populated_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let (tx, rx) = sync_channel::<Vec<u8>>(8);
+        let d = Arc::new(AtomicU64::new(0));
+        let s = Arc::new(AtomicU64::new(0));
+        let h = spawn_writer_thread(rx, "idle".into(), tmp.path().into(), d, s);
+        // Send a single event, then idle longer than FORCE_FLUSH_MS.
+        tx.send(make_event(EventType::RunInitialized, "x")).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(700));
+        // File MUST be populated even though we haven't dropped the sender
+        // or hit FLUSH_EVERY — idle flush runs on recv_timeout.
+        let contents = std::fs::read_to_string(tmp.path().join("idle.jsonl")).unwrap();
+        assert!(
+            !contents.is_empty(),
+            "idle flush must persist events before shutdown"
+        );
+        drop(tx);
+        h.join.join().unwrap();
     }
 
     // --- T1.4: write_errors counter is accessible on the handle (INV-4) ---
