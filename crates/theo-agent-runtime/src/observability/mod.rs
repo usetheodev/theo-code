@@ -17,6 +17,7 @@ pub mod derived_metrics;
 pub mod normalizer;
 pub mod loop_detector;
 pub mod failure_sensors;
+pub mod otel;
 pub mod report;
 
 pub use envelope::{TrajectoryEnvelope, ENVELOPE_SCHEMA_VERSION};

@@ -1,0 +1,16 @@
+[package]
+name = "theo-infra-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+theo-domain.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["process", "io-util", "time", "macros"] }
+async-trait.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

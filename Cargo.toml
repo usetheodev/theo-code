@@ -6,6 +6,7 @@ members = [
     "crates/theo-governance",
     "crates/theo-engine-parser",
     "crates/theo-isolation",
+    "crates/theo-infra-mcp",
     "crates/theo-tooling",
     "crates/theo-infra-llm",
     "crates/theo-agent-runtime",
@@ -32,6 +33,7 @@ theo-engine-retrieval = { path = "crates/theo-engine-retrieval" }
 theo-governance = { path = "crates/theo-governance" }
 theo-engine-parser = { path = "crates/theo-engine-parser" }
 theo-isolation = { path = "crates/theo-isolation" }
+theo-infra-mcp = { path = "crates/theo-infra-mcp" }
 theo-tooling = { path = "crates/theo-tooling" }
 theo-infra-llm = { path = "crates/theo-infra-llm" }
 theo-agent-runtime = { path = "crates/theo-agent-runtime" }
