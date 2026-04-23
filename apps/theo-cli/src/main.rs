@@ -438,6 +438,26 @@ fn build_injections(
         ),
     ));
 
+    // Phase 27 follow-up (sota-gaps-followup gap #4): wire the
+    // AutomaticModelRouter from .theo/config.toml so routing decisions
+    // are recorded. Recorder writes to stderr when THEO_DEBUG_ROUTING=1
+    // — full MetricsCollector integration is a future improvement.
+    let recorder: Option<theo_application::facade::llm::routing::RoutingMetricsRecorder> =
+        if std::env::var("THEO_DEBUG_ROUTING").is_ok() {
+            Some(Arc::new(|task_type, tier, model_id| {
+                eprintln!(
+                    "[theo:router] task_type={} tier={} model={}",
+                    task_type, tier, model_id
+                );
+            }))
+        } else {
+            None
+        };
+    inj.router = theo_application::use_cases::router_loader::load_router(
+        project_dir,
+        recorder,
+    );
+
     inj
 }
 
@@ -724,7 +744,6 @@ fn cmd_headless(
         );
 
         let registry = theo_application::facade::tooling::create_default_registry();
-        let mut agent = theo_application::facade::agent::AgentLoop::new(config, registry);
 
         // Phase 29 follow-up (sota-gaps-followup) — closes gap #7.
         // Headless previously bypassed `build_injections`, so MCP discovery,
@@ -737,6 +756,16 @@ fn cmd_headless(
             &project_dir,
         );
         let injections = build_injections(&features, &project_dir);
+
+        // Phase 27 follow-up: seed the router from .theo/config.toml
+        // BEFORE constructing the AgentLoop so the inner AgentRunEngine
+        // sees `config.router.is_some()` instead of falling back to
+        // "no_router".
+        if let Some(router) = injections.router_clone() {
+            config.router = Some(theo_application::facade::agent::config::RouterHandle::new(router));
+        }
+
+        let mut agent = theo_application::facade::agent::AgentLoop::new(config, registry);
         agent = injections.apply_to(agent);
 
         let started = Instant::now();
@@ -1189,6 +1218,21 @@ async fn resolve_agent_config(
     if let Some(m) = model {
         config.model = m.to_string();
     } else if oauth_applied && config.model == "default" {
+        // Empirically validated default for the agentic flow:
+        // gpt-5.3-codex is the ONLY Codex catalog model that reliably
+        // honors THEO_FORCE_TOOL_CHOICE=function:NAME for delegate_task.
+        // Tested with sota12-full-stress.sh against the OAuth Codex
+        // endpoint (chatgpt.com/backend-api/codex/responses):
+        //
+        //   model           tool_choice forced   delegate_task called?
+        //   ──────────────────────────────────────────────────────────
+        //   gpt-5.3-codex   yes                  ✓ 5/5 turns
+        //   gpt-5.2-codex   yes                  ✗ 0/5 turns (text only)
+        //   gpt-5.4         yes                  ✗ 0/5 turns (text only)
+        //
+        // The "frontier" / "current" labels describe coding depth, not
+        // tool-call compliance under forcing. Operator can override
+        // via --model.
         config.model = "gpt-5.3-codex".to_string();
     }
 

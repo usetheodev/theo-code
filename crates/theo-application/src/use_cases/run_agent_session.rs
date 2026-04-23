@@ -38,10 +38,20 @@ pub struct SubagentInjections {
     /// default chain (built-ins) is constructed per `delegate_task` call.
     pub handoff_guardrails:
         Option<Arc<theo_agent_runtime::handoff_guardrail::GuardrailChain>>,
+    /// Phase 27 follow-up (sota-gaps-followup gap #4): the production
+    /// `AutomaticModelRouter` resolved from `.theo/config.toml`. Mounted
+    /// onto `AgentConfig.router` by `apply_to`.
+    pub router: Option<Arc<dyn theo_domain::routing::ModelRouter>>,
     pub reloadable: Option<theo_agent_runtime::subagent::ReloadableRegistry>,
 }
 
 impl SubagentInjections {
+    /// Returns a clone of the router handle, if injected. Used by the
+    /// CLI to seed `AgentConfig.router` before spawning the loop.
+    pub fn router_clone(&self) -> Option<Arc<dyn theo_domain::routing::ModelRouter>> {
+        self.router.clone()
+    }
+
     /// Apply all present injections to the AgentLoop.
     pub fn apply_to(&self, mut loop_: AgentLoop) -> AgentLoop {
         if let Some(r) = &self.registry {
