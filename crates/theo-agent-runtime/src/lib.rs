@@ -6,7 +6,6 @@ pub mod compaction;
 pub mod compaction_stages;
 pub mod compaction_summary;
 pub mod config;
-pub mod context_metrics;
 pub mod convergence;
 #[doc(hidden)] // Dead code: exported but never instantiated externally
 pub mod correction;
@@ -25,9 +24,12 @@ mod doom_loop;
 pub mod memory_lifecycle;
 pub mod memory_reviewer;
 pub mod onboarding;
-pub mod metrics;
-#[doc(hidden)] // Dead code: exported but never instantiated externally
 pub mod observability;
+
+// Re-exports preserving the legacy module paths. Consumers can keep using
+// `theo_agent_runtime::metrics::*` and `theo_agent_runtime::context_metrics::*`.
+pub use observability::context_metrics;
+pub use observability::metrics;
 pub mod persistence;
 pub mod pilot;
 pub mod plugin;

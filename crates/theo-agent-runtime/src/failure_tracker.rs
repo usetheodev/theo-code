@@ -105,6 +105,29 @@ impl FailurePatternTracker {
     pub fn save(&self) {
         save_patterns(&self.project_dir, &self.data);
     }
+
+    /// Number of patterns that have been observed for the first time.
+    ///
+    /// A pattern is "new" the first time it is recorded in this session —
+    /// approximated by `count == 1`. Since the counts are persisted across
+    /// runs, a pattern already in the JSON file with `count > 1` is considered
+    /// recurrent.
+    pub fn new_fingerprint_count(&self) -> u32 {
+        self.data
+            .patterns
+            .values()
+            .filter(|e| e.count == 1)
+            .count() as u32
+    }
+
+    /// Number of patterns observed more than once (recurring across sessions).
+    pub fn recurrent_fingerprint_count(&self) -> u32 {
+        self.data
+            .patterns
+            .values()
+            .filter(|e| e.count > 1)
+            .count() as u32
+    }
 }
 
 fn unix_now() -> u64 {
@@ -235,5 +258,36 @@ mod tests {
             let mut tracker = FailurePatternTracker::new(dir.path());
             assert!(tracker.check_suggestion("error_x").is_none());
         }
+    }
+
+    #[test]
+    fn test_new_fingerprint_counts_only_once_seen() {
+        let dir = temp_project();
+        let mut tracker = FailurePatternTracker::new(dir.path());
+        tracker.record("a");
+        tracker.record("b");
+        tracker.record("c");
+        tracker.record("c");
+        assert_eq!(tracker.new_fingerprint_count(), 2);
+    }
+
+    #[test]
+    fn test_recurrent_fingerprint_counts_only_repeated() {
+        let dir = temp_project();
+        let mut tracker = FailurePatternTracker::new(dir.path());
+        tracker.record("a");
+        tracker.record("b");
+        tracker.record("b");
+        tracker.record("c");
+        tracker.record("c");
+        assert_eq!(tracker.recurrent_fingerprint_count(), 2);
+    }
+
+    #[test]
+    fn test_empty_tracker_reports_zero_fingerprints() {
+        let dir = temp_project();
+        let tracker = FailurePatternTracker::new(dir.path());
+        assert_eq!(tracker.new_fingerprint_count(), 0);
+        assert_eq!(tracker.recurrent_fingerprint_count(), 0);
     }
 }

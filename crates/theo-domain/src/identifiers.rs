@@ -62,6 +62,10 @@ define_identifier!(
 define_identifier!(CallId, "Unique identifier for a tool call.");
 define_identifier!(RunId, "Unique identifier for an agent run.");
 define_identifier!(EventId, "Unique identifier for a domain event.");
+define_identifier!(
+    TrajectoryId,
+    "Unique identifier for an observability trajectory (derived projection of a run)."
+);
 
 /// Simple random u64 using system entropy without external crates.
 fn random_u64() -> u64 {
@@ -155,6 +159,38 @@ mod tests {
             ids.insert(EventId::generate().as_str().to_string());
         }
         assert_eq!(ids.len(), 1000);
+    }
+
+    // --- T0.1: TrajectoryId tests ---
+
+    #[test]
+    fn test_trajectory_id_generate_is_unique() {
+        let a = TrajectoryId::generate();
+        let b = TrajectoryId::generate();
+        assert_ne!(a, b, "two generated TrajectoryIds must differ");
+    }
+
+    #[test]
+    #[should_panic(expected = "must not be empty")]
+    fn test_trajectory_id_new_rejects_empty() {
+        TrajectoryId::new("");
+    }
+
+    #[test]
+    fn trajectory_id_generate_produces_unique_ids() {
+        let mut ids = HashSet::new();
+        for _ in 0..1000 {
+            ids.insert(TrajectoryId::generate().as_str().to_string());
+        }
+        assert_eq!(ids.len(), 1000);
+    }
+
+    #[test]
+    fn serde_roundtrip_trajectory_id() {
+        let id = TrajectoryId::new("traj-42");
+        let json = serde_json::to_string(&id).unwrap();
+        let back: TrajectoryId = serde_json::from_str(&json).unwrap();
+        assert_eq!(id, back);
     }
 
     #[test]

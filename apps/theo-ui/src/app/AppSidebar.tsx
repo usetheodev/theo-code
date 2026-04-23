@@ -32,7 +32,7 @@ const MAIN_ITEMS = [
 ];
 
 const WORKSPACE_ITEMS = [
-  { id: "logs", label: "Logs", icon: ScrollText },
+  { id: "observability", label: "Observability", icon: ScrollText },
   { id: "deploys", label: "Deploys", icon: Rocket },
   { id: "monitoring", label: "Monitoring", icon: Activity },
   { id: "database", label: "Database", icon: Database },
