@@ -424,7 +424,7 @@ Após este plano: **0 gaps reais**. Sistema SOTA não só no design (já era), m
 | #4 tier_chosen telemetria | ✓ Fase 27 |
 | #5 SSE EventBus push | ✓ Fase 28 |
 | #6 MCP server real test | ✓ Fase 22 |
-| #7 OAuth Codex E2E | ✓ Fase 29 |
+| #7 OAuth Codex E2E | ⚠ Fase 29 PARCIAL — script + token + skip funcionam, mas Codex não invoca delegate_task espontaneamente (precisa tool_choice forçado, épico separado) |
 | #8 `theo mcp discover` CLI | ✓ Fase 21 |
 | #9 Cache invalidação no reload | ✓ Fase 21 |
 | #10 Resume worktree restore | ✓ Fase 26 |
