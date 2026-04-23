@@ -588,8 +588,8 @@ impl SubAgentManager {
                 .cancellation
                 .as_ref()
                 .map(|tree| tree.child(&run_id));
-            if let Some(tok) = &cancellation_token {
-                if tok.is_cancelled() {
+            if let Some(tok) = &cancellation_token
+                && tok.is_cancelled() {
                     let r = AgentResult {
                         success: false,
                         summary: "Sub-agent cancelled before start (parent cancelled)".to_string(),
@@ -600,17 +600,15 @@ impl SubAgentManager {
                         worktree_path: worktree_handle.as_ref().map(|h| h.path.clone()),
                         ..Default::default()
                     };
-                    if let Some(store) = &self.run_store {
-                        if let Ok(mut run) = store.load(&run_id) {
+                    if let Some(store) = &self.run_store
+                        && let Ok(mut run) = store.load(&run_id) {
                             run.status = crate::subagent_runs::RunStatus::Cancelled;
                             run.summary = Some(r.summary.clone());
                             let _ = store.save(&run);
                         }
-                    }
                     self.publish_completed(&spec, &r);
                     return r;
                 }
-            }
 
             // Enforce max_depth
             if self.depth >= MAX_DEPTH {
@@ -624,8 +622,8 @@ impl SubAgentManager {
                     ..Default::default()
                 };
                 // Persist final state for early return path (Phase 10)
-                if let Some(store) = &self.run_store {
-                    if let Ok(mut run) = store.load(&run_id) {
+                if let Some(store) = &self.run_store
+                    && let Ok(mut run) = store.load(&run_id) {
                         run.status = crate::subagent_runs::RunStatus::Failed;
                         run.finished_at = Some(
                             std::time::SystemTime::now()
@@ -636,7 +634,6 @@ impl SubAgentManager {
                         run.summary = Some(r.summary.clone());
                         let _ = store.save(&run);
                     }
-                }
                 self.publish_completed(&spec, &r);
                 return r;
             }
@@ -733,8 +730,8 @@ impl SubAgentManager {
             result.worktree_path = worktree_handle.as_ref().map(|h| h.path.clone());
 
             // Phase 10: update persisted run with final status + metrics
-            if let Some(store) = &self.run_store {
-                if let Ok(mut run) = store.load(&run_id) {
+            if let Some(store) = &self.run_store
+                && let Ok(mut run) = store.load(&run_id) {
                     run.status = if result.cancelled {
                         crate::subagent_runs::RunStatus::Cancelled
                     } else if result.success {
@@ -753,7 +750,6 @@ impl SubAgentManager {
                     run.summary = Some(result.summary.clone());
                     let _ = store.save(&run);
                 }
-            }
 
             // Phase 7: try output format parsing
             if let Some(schema) = &spec.output_format {
@@ -762,12 +758,11 @@ impl SubAgentManager {
                     Ok(value) => {
                         result.structured = Some(value.clone());
                         // Phase 10: also persist structured_output if store attached
-                        if let Some(store) = &self.run_store {
-                            if let Ok(mut run) = store.load(&run_id) {
+                        if let Some(store) = &self.run_store
+                            && let Ok(mut run) = store.load(&run_id) {
                                 run.structured_output = Some(value);
                                 let _ = store.save(&run);
                             }
-                        }
                     }
                     Err(err) => {
                         if strict {
@@ -804,12 +799,12 @@ impl SubAgentManager {
 
             // Phase 11: cleanup worktree on success (default policy: OnSuccess).
             // Failures preserve the worktree for inspection.
-            if let (Some(handle), Some(provider)) = (&worktree_handle, &self.worktree_provider) {
-                if result.success {
+            if let (Some(handle), Some(provider)) = (&worktree_handle, &self.worktree_provider)
+                && result.success {
                     let removed = provider.remove(handle, false).is_ok();
                     // Phase 5: WorktreeRemove hook (informational)
-                    if removed {
-                        if let Some(hooks) = &self.hook_manager {
+                    if removed
+                        && let Some(hooks) = &self.hook_manager {
                             use crate::lifecycle_hooks::{HookContext, HookEvent};
                             let _ = hooks.dispatch(
                                 HookEvent::WorktreeRemove,
@@ -819,9 +814,7 @@ impl SubAgentManager {
                                 },
                             );
                         }
-                    }
                 }
-            }
 
             self.publish_completed(&spec, &result);
             result

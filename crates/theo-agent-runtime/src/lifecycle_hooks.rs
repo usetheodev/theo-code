@@ -132,18 +132,15 @@ pub struct HookContext {
 /// - `InjectContext { content }` — prepend to message stream (Rippletide pattern).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[derive(Default)]
 pub enum HookResponse {
+    #[default]
     Allow,
     Block { reason: String },
     Replace { value: serde_json::Value },
     InjectContext { content: String },
 }
 
-impl Default for HookResponse {
-    fn default() -> Self {
-        HookResponse::Allow
-    }
-}
 
 // ---------------------------------------------------------------------------
 // HookMatcher — single rule (matcher + response + timeout)

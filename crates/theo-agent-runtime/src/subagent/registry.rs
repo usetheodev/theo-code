@@ -18,7 +18,7 @@ use theo_domain::agent_spec::{AgentSpec, AgentSpecSource};
 use super::approval::{
     compute_current_manifest, diff_unapproved, load_approved, ApprovalMode, ApprovedEntry,
 };
-use super::parser::{parse_agent_spec, ParseError};
+use super::parser::parse_agent_spec;
 
 /// Warning emitted when a custom agent overrides a builtin or fails to load.
 #[derive(Debug, Clone, PartialEq, Eq)]

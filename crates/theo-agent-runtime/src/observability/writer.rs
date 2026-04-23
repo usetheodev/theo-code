@@ -141,9 +141,8 @@ fn run_writer_loop(
         write_errors: &Arc<AtomicU64>,
         bytes: &[u8],
     ) -> Result<(), std::io::Error> {
-        writer.write_all(bytes).and_then(|_| writer.write_all(b"\n")).map_err(|e| {
+        writer.write_all(bytes).and_then(|_| writer.write_all(b"\n")).inspect_err(|e| {
             write_errors.fetch_add(1, Ordering::Relaxed);
-            e
         })
     }
 

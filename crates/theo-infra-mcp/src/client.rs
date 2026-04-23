@@ -39,7 +39,7 @@ impl McpStdioClient {
                 name, command, args, env,
             } => {
                 let transport =
-                    StdioTransport::spawn(command, args, env.clone().into_iter()).await?;
+                    StdioTransport::spawn(command, args, env.clone()).await?;
                 Ok(Self {
                     name: name.clone(),
                     transport,

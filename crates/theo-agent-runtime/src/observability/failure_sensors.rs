@@ -114,14 +114,12 @@ pub fn detect_conversation_history_loss(
         for s in &steps[start + 1..end] {
             if s.event_type == "ToolCallCompleted"
                 && matches!(s.tool_name.as_deref(), Some("read_file"))
-            {
-                if pre_compaction_hot_files
+                && pre_compaction_hot_files
                     .iter()
                     .any(|f| s.payload_summary.contains(f))
                 {
                     return true;
                 }
-            }
         }
     }
     false

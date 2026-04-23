@@ -103,7 +103,7 @@ pub fn compute_loop_metrics(
         .iter()
         .filter(|s| s.event_type == "LlmCallStart")
         .count() as u32;
-    let mut dist: HashMap<String, PhaseMetric>;
+    let dist: HashMap<String, PhaseMetric>;
     let denom = total_iterations.max(1) as f64;
     let explore = steps.iter().filter(|s| s.event_type == "RetrievalExecuted").count() as u32;
     let edit = steps

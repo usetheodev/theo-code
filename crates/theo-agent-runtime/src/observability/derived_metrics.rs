@@ -119,11 +119,9 @@ pub fn compute_llm_efficiency(steps: &[ProjectedStep]) -> SurrogateMetric {
     for s in steps {
         if s.event_type == "ToolCallCompleted"
             && matches!(s.outcome, Some(StepOutcome::Success))
-        {
-            if let Some(tn) = &s.tool_name {
+            && let Some(tn) = &s.tool_name {
                 distinct.insert(tn.clone());
             }
-        }
     }
     let num = distinct.len() as f64;
     let den = llm_calls as f64;

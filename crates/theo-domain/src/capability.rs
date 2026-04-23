@@ -15,8 +15,10 @@ use crate::tool::ToolCategory;
 /// `AllowedTools::All` and `AllowedTools::Only(set)` make the distinction explicit.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[derive(Default)]
 pub enum AllowedTools {
     /// All tools are permitted (subject to denied_tools).
+    #[default]
     All,
     /// Only the listed tools are permitted (subject to denied_tools).
     Only { tools: BTreeSet<String> },
@@ -64,11 +66,6 @@ impl AllowedTools {
     }
 }
 
-impl Default for AllowedTools {
-    fn default() -> Self {
-        AllowedTools::All
-    }
-}
 
 /// Defines what an agent is allowed to do.
 ///

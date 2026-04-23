@@ -119,32 +119,29 @@ pub fn validate_against_schema(
             });
         }
     }
-    if let Some(required) = schema.get("required").and_then(|v| v.as_array()) {
-        if let Some(obj) = value.as_object() {
+    if let Some(required) = schema.get("required").and_then(|v| v.as_array())
+        && let Some(obj) = value.as_object() {
             for field in required {
-                if let Some(name) = field.as_str() {
-                    if !obj.contains_key(name) {
+                if let Some(name) = field.as_str()
+                    && !obj.contains_key(name) {
                         return Err(OutputError::SchemaMismatch {
                             reason: format!("missing required field: {}", name),
                         });
                     }
-                }
             }
         }
-    }
     // Recursive: validate items in arrays
-    if let Some(items_schema) = schema.get("items") {
-        if let Some(arr) = value.as_array() {
+    if let Some(items_schema) = schema.get("items")
+        && let Some(arr) = value.as_array() {
             for (i, item) in arr.iter().enumerate() {
                 validate_against_schema(item, items_schema).map_err(|e| OutputError::SchemaMismatch {
                     reason: format!("items[{}]: {}", i, e),
                 })?;
             }
         }
-    }
     // Recursive: validate properties of objects
-    if let Some(props) = schema.get("properties").and_then(|v| v.as_object()) {
-        if let Some(obj) = value.as_object() {
+    if let Some(props) = schema.get("properties").and_then(|v| v.as_object())
+        && let Some(obj) = value.as_object() {
             for (key, field_schema) in props {
                 if let Some(field_value) = obj.get(key) {
                     validate_against_schema(field_value, field_schema)
@@ -154,15 +151,13 @@ pub fn validate_against_schema(
                 }
             }
         }
-    }
     // Recursive: validate enum
-    if let Some(allowed) = schema.get("enum").and_then(|v| v.as_array()) {
-        if !allowed.contains(value) {
+    if let Some(allowed) = schema.get("enum").and_then(|v| v.as_array())
+        && !allowed.contains(value) {
             return Err(OutputError::SchemaMismatch {
                 reason: format!("value not in enum: {}", value),
             });
         }
-    }
     Ok(())
 }
 

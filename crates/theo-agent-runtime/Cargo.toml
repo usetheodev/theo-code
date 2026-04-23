@@ -31,3 +31,9 @@ theo-infra-mcp.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 tempfile.workspace = true
 proptest = { workspace = true }
+
+[features]
+default = []
+# Phase 12 — OpenTelemetry GenAI emission. Currently opt-in (no-op flag);
+# wires real opentelemetry crate when consumers compile with --features otel.
+otel = []

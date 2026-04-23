@@ -9,7 +9,7 @@
 //! 3. `cleanup(handle)` removes the worktree (leaves branch behind if uncommitted)
 
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 
 use serde::{Deserialize, Serialize};
