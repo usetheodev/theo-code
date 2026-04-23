@@ -22,6 +22,8 @@ serde_yaml.workspace = true
 sha2.workspace = true
 tokio-util.workspace = true
 dashmap.workspace = true
+notify.workspace = true
+notify-debouncer-mini.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }

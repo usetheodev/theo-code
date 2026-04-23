@@ -12,6 +12,7 @@ pub mod approval;
 pub mod builtins;
 pub mod parser;
 pub mod registry;
+pub mod watcher;
 
 pub use approval::{ApprovalManifest, ApprovalMode, ApprovedEntry};
 pub use parser::{parse_agent_spec, ParseError};
