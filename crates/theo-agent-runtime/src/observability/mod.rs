@@ -32,9 +32,11 @@ pub use failure_sensors::{
     detect_weak_verification,
 };
 pub use report::{
-    compute_context_health, compute_loop_metrics, compute_memory_metrics,
-    compute_token_metrics, compute_tool_breakdown, BudgetUtilization, ContextHealthMetrics,
-    LoopMetrics, MemoryMetrics, PhaseMetric, RunReport, TokenMetrics, ToolBreakdown,
+    compute_context_health, compute_error_taxonomy, compute_loop_metrics,
+    compute_memory_metrics, compute_subagent_metrics, compute_token_metrics,
+    compute_tool_breakdown, BudgetUtilization, ContextHealthMetrics, ErrorTaxonomy,
+    LoopMetrics, MemoryMetrics, PhaseMetric, RunReport, SubagentMetrics, TokenMetrics,
+    ToolBreakdown,
 };
 
 use std::path::PathBuf;
@@ -288,6 +290,8 @@ pub fn finalize_trajectory_summary(
         inputs.failure_fingerprints_new,
         inputs.failure_fingerprints_recurrent,
     );
+    let subagent_metrics = report::compute_subagent_metrics(&projection.steps);
+    let error_taxonomy = report::compute_error_taxonomy(&projection.steps);
 
     let detected = DetectedFailureModes {
         premature_termination: failure_sensors::detect_premature_termination(&projection.steps),
@@ -309,6 +313,8 @@ pub fn finalize_trajectory_summary(
         tool_breakdown,
         context_health,
         memory_metrics,
+        subagent_metrics,
+        error_taxonomy,
         integrity,
     };
 

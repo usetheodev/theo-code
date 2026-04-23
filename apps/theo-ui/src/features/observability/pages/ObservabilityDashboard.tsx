@@ -6,16 +6,33 @@ import { IntegrityBadge } from "../components/IntegrityBadge";
 import { TimelineView } from "../components/TimelineView";
 import { ToolUsageChart } from "../components/ToolUsageChart";
 import { FailureModePanel } from "../components/FailureModePanel";
+import { TokenEconomyPanel } from "../components/TokenEconomyPanel";
+import { LoopHealthPanel } from "../components/LoopHealthPanel";
+import { ContextHealthPanel } from "../components/ContextHealthPanel";
+import { MemoryPerformancePanel } from "../components/MemoryPerformancePanel";
+import { ToolReliabilityPanel } from "../components/ToolReliabilityPanel";
+import { SubagentErrorPanel } from "../components/SubagentErrorPanel";
+import { SystemOverview } from "../components/SystemOverview";
 import { emptyDerivedMetrics } from "../types";
 
 export function ObservabilityDashboard() {
-  const { runs, selectedRun, loading, error, loadRuns, selectRun } =
-    useObservability();
+  const {
+    runs,
+    selectedRun,
+    selectedReport,
+    systemStats,
+    loading,
+    error,
+    loadRuns,
+    loadSystemStats,
+    selectRun,
+  } = useObservability();
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   useEffect(() => {
     loadRuns();
-  }, [loadRuns]);
+    loadSystemStats();
+  }, [loadRuns, loadSystemStats]);
 
   useEffect(() => {
     if (!selectedId && runs.length > 0) {
@@ -48,7 +65,7 @@ export function ObservabilityDashboard() {
           >
             {runs.map((r) => (
               <option key={r.run_id} value={r.run_id}>
-                {r.run_id.slice(0, 12)} · {new Date(r.timestamp).toLocaleString()}
+                {r.run_id.slice(0, 12)} · {new Date(r.timestamp).toLocaleString()} · {r.total_tool_calls} tools
               </option>
             ))}
           </select>
@@ -80,10 +97,9 @@ export function ObservabilityDashboard() {
         </div>
       ) : (
         <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-6">
-          <section
-            className="grid grid-cols-1 md:grid-cols-5 gap-3"
-            data-testid="metric-cards"
-          >
+          {systemStats && <SystemOverview stats={systemStats} />}
+
+          <section className="grid grid-cols-1 md:grid-cols-5 gap-3" data-testid="metric-cards">
             <MetricCard
               label="Doom Loop"
               metric={metrics.doom_loop_frequency}
@@ -111,6 +127,17 @@ export function ObservabilityDashboard() {
               thresholds={{ good: 2000, warning: 5000, lowerIsBetter: true }}
             />
           </section>
+
+          {selectedReport && (
+            <>
+              <TokenEconomyPanel tokens={selectedReport.token_metrics} />
+              <LoopHealthPanel loop={selectedReport.loop_metrics} />
+              <ContextHealthPanel context={selectedReport.context_health} />
+              <MemoryPerformancePanel memory={selectedReport.memory_metrics} />
+              <ToolReliabilityPanel tools={selectedReport.tool_breakdown} />
+              <SubagentErrorPanel subagent={selectedReport.subagent_metrics} errors={selectedReport.error_taxonomy} />
+            </>
+          )}
 
           {selectedRun && (
             <>
