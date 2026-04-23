@@ -55,7 +55,10 @@ impl RuntimeFeatures {
 
     /// Print a concise status banner when any feature is active.
     pub fn print_status(&self) {
-        if self.watcher.is_some() {
+        // The watcher field is None when ownership moved to the background
+        // thread (current implementation). The reloadable field is the
+        // user-visible signal that --watch-agents is active.
+        if self.reloadable.is_some() || self.watcher.is_some() {
             eprintln!(
                 "✓ --watch-agents active: filesystem changes in .theo/agents/ trigger registry reload"
             );
