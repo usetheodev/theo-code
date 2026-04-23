@@ -81,10 +81,16 @@ EOF
 # ── 4. Approve agents ─────────────────────────────────────────────────
 "$CLI" agents approve --all --repo "$WORK"
 
-# ── 5. Run agent with delegate_task ───────────────────────────────────
+# ── 5. Run agent ──────────────────────────────────────────────────────
+# Force `delegate_task_single` (the split-API variant introduced in the
+# Phase 29 follow-up). The unified `delegate_task` schema confused
+# weaker tool-callers like Codex (they emit JSON mixing both `agent` and
+# `parallel`). The split variant has a fixed required-field set so the
+# model produces valid JSON.
 echo "[sota12-oauth-smoke] Executing agent..."
-RESULT_JSON=$(THEO_SKIP_ONBOARDING=1 "$CLI" agent --headless --repo "$WORK" --max-iter 6 \
-  'Call delegate_task with {"agent":"sota12-validator","objective":"glob ** in this repo and report"}. Then end with done.' \
+RESULT_JSON=$(THEO_SKIP_ONBOARDING=1 THEO_FORCE_TOOL_CHOICE=function:delegate_task_single \
+  "$CLI" agent --headless --repo "$WORK" --max-iter 6 \
+  'Use delegate_task_single with agent="sota12-validator" objective="audit"' \
   2>/dev/null | tail -1)
 
 echo "[sota12-oauth-smoke] result line:"

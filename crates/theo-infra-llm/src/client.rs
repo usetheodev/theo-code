@@ -195,6 +195,15 @@ impl LlmClient {
             .await
             .map_err(|e| LlmError::Parse(format!("read stream: {e}")))?;
 
+        // Phase 29 follow-up debug: when THEO_DEBUG_CODEX=1, dump first
+        // 4KB of the SSE body to stderr so we can see what the model
+        // actually returned (helps diagnose tool_choice issues).
+        if std::env::var("THEO_DEBUG_CODEX").is_ok() {
+            eprintln!(
+                "[theo:codex] raw SSE body (first 4KB):\n{}\n[theo:codex] --- end ---",
+                &full_body[..full_body.len().min(4096)]
+            );
+        }
         codex::from_codex_stream(&full_body).ok_or_else(|| {
             LlmError::Parse(format!(
                 "failed to parse Codex stream response. Body start: {}",
@@ -245,6 +254,17 @@ impl LlmClient {
             use futures::StreamExt;
 
             let body = codex::to_codex_body(request);
+            // THEO_DEBUG_CODEX=1 dumps outgoing tool_choice + raw SSE
+            // function_call extracts to stderr. Used during gap #7
+            // diagnostics; left in for future operator debugging.
+            if std::env::var("THEO_DEBUG_CODEX").is_ok() {
+                eprintln!(
+                    "[theo:codex] outgoing tool_choice = {}",
+                    body.get("tool_choice")
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| "<absent>".into())
+                );
+            }
             let resolved_key = self.resolve_api_key().await;
             let builder = self.apply_auth_with_key(self.http.post(&url).json(&body), &resolved_key);
             let response = builder.send().await?;
@@ -309,6 +329,33 @@ impl LlmClient {
             }
 
             // Build ChatResponse from the accumulated SSE body
+            if std::env::var("THEO_DEBUG_CODEX").is_ok() {
+                let chunk_count = full_body.matches("\n\n").count();
+                let function_count = full_body.matches("\"function_call\"").count();
+                eprintln!(
+                    "[theo:codex] streaming completed: {} chunks, {} function_call mentions, {} bytes",
+                    chunk_count,
+                    function_count,
+                    full_body.len()
+                );
+                if function_count > 0 {
+                    // Surface every function_call event for inspection
+                    let mut search_start = 0;
+                    let mut occurrence = 0;
+                    while let Some(idx) = full_body[search_start..].find("\"function_call\"") {
+                        occurrence += 1;
+                        let abs = search_start + idx;
+                        let start = abs.saturating_sub(50);
+                        let end = (abs + 400).min(full_body.len());
+                        eprintln!(
+                            "[theo:codex] fc#{}: {}",
+                            occurrence,
+                            &full_body[start..end].replace('\n', " ")
+                        );
+                        search_start = abs + 1;
+                    }
+                }
+            }
             codex::from_codex_stream(&full_body)
                 .ok_or_else(|| LlmError::Parse("failed to parse Codex stream".to_string()))
         } else {

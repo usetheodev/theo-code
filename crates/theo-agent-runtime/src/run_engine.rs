@@ -1029,6 +1029,38 @@ impl AgentRunEngine {
                 request = request.with_reasoning_effort(effort);
             }
 
+            // Phase 29 follow-up (sota-gaps-followup) — closes gap #7.
+            // THEO_FORCE_TOOL_CHOICE env var lets operators force the model
+            // to call a tool. Useful for benchmarks / OAuth E2E tests where
+            // chatty models like gpt-5.3-codex would otherwise generate
+            // text instead of invoking delegate_task.
+            //   - "required" / "any"  → model MUST call some tool (any)
+            //   - "none"              → model MUST NOT call a tool
+            //   - "function:NAME"     → shorthand for forcing a specific tool
+            //   - JSON `{"type":"function","name":"X"}` → passed through verbatim
+            //   - any other value     → passed through verbatim (string)
+            // Skipped silently when no tools are exposed for this turn.
+            if !tool_defs.is_empty()
+                && let Ok(forced) = std::env::var("THEO_FORCE_TOOL_CHOICE")
+                && !forced.is_empty()
+            {
+                let normalized = match forced.as_str() {
+                    "any" => "required".to_string(),
+                    other if other.starts_with("function:") => {
+                        let name = other.trim_start_matches("function:");
+                        format!(r#"{{"type":"function","name":"{}"}}"#, name)
+                    }
+                    other => other.to_string(),
+                };
+                if std::env::var("THEO_DEBUG_CODEX").is_ok() {
+                    eprintln!(
+                        "[theo] THEO_FORCE_TOOL_CHOICE active: {} → {}",
+                        forced, normalized
+                    );
+                }
+                request = request.with_tool_choice(normalized);
+            }
+
             // Publish LLM call start (triggers "Thinking..." in CLI)
             self.event_bus.publish(DomainEvent::new(
                 EventType::LlmCallStart,
@@ -1570,10 +1602,34 @@ impl AgentRunEngine {
 
                 // Handle `delegate_task` meta-tool — Phase 4 unified API.
                 // Validates schema and routes to single or parallel mode.
-                if name == "delegate_task" {
-                    let args = call.parse_arguments().unwrap_or_default();
+                // Phase 29 follow-up: also accept the split single/parallel
+                // variants (delegate_task_single / delegate_task_parallel)
+                // which weaker tool-callers like Codex handle correctly
+                // because each has a fixed `required` field set.
+                if name == "delegate_task"
+                    || name == "delegate_task_single"
+                    || name == "delegate_task_parallel"
+                {
+                    let raw_args = call.parse_arguments().unwrap_or_default();
+                    // Normalize the split variants to the unified shape
+                    // expected by handle_delegate_task.
+                    let args = match name.as_str() {
+                        "delegate_task_single" => {
+                            // {agent, objective, context} → unified shape unchanged
+                            raw_args
+                        }
+                        "delegate_task_parallel" => {
+                            // {tasks: [...]} → {parallel: [...]}
+                            let tasks = raw_args
+                                .get("tasks")
+                                .cloned()
+                                .unwrap_or(serde_json::Value::Null);
+                            serde_json::json!({"parallel": tasks})
+                        }
+                        _ => raw_args,
+                    };
                     let result_msg = self.handle_delegate_task(args).await;
-                    messages.push(Message::tool_result(&call.id, "delegate_task", &result_msg));
+                    messages.push(Message::tool_result(&call.id, name, &result_msg));
                     continue;
                 }
 
@@ -3231,6 +3287,18 @@ mod tests {
             names.contains(&"delegate_task"),
             "delegate_task must be in tool definitions"
         );
+    }
+
+    // ── Phase 29 follow-up: split tool variants ──
+
+    #[test]
+    fn delegate_task_single_tool_def_is_registered() {
+        let registry = theo_tooling::registry::create_default_registry();
+        let defs = crate::tool_bridge::registry_to_definitions(&registry);
+        let names: Vec<&str> = defs.iter().map(|d| d.function.name.as_str()).collect();
+        assert!(names.contains(&"delegate_task_single"));
+        assert!(names.contains(&"delegate_task_parallel"));
+        assert!(names.contains(&"delegate_task")); // legacy alias
     }
 
     #[tokio::test]

@@ -424,7 +424,7 @@ Após este plano: **0 gaps reais**. Sistema SOTA não só no design (já era), m
 | #4 tier_chosen telemetria | ✓ Fase 27 |
 | #5 SSE EventBus push | ✓ Fase 28 |
 | #6 MCP server real test | ✓ Fase 22 |
-| #7 OAuth Codex E2E | ⚠ Fase 29 PARCIAL — script + token + skip funcionam, mas Codex não invoca delegate_task espontaneamente (precisa tool_choice forçado, épico separado) |
+| #7 OAuth Codex E2E | ✓ Fase 29 + follow-up: validado real com 4 chamadas `delegate_task_single` via Codex, 4 HandoffEvaluated, 4 sub-agent runs persistidos, dashboard responde. Fix exigiu split do schema unificado em `delegate_task_single`/`delegate_task_parallel` (Codex confundia o one-of original) + `THEO_FORCE_TOOL_CHOICE=function:NAME` + headless mode passou a usar `build_injections`. |
 | #8 `theo mcp discover` CLI | ✓ Fase 21 |
 | #9 Cache invalidação no reload | ✓ Fase 21 |
 | #10 Resume worktree restore | ✓ Fase 26 |

@@ -724,7 +724,20 @@ fn cmd_headless(
         );
 
         let registry = theo_application::facade::tooling::create_default_registry();
-        let agent = theo_application::facade::agent::AgentLoop::new(config, registry);
+        let mut agent = theo_application::facade::agent::AgentLoop::new(config, registry);
+
+        // Phase 29 follow-up (sota-gaps-followup) — closes gap #7.
+        // Headless previously bypassed `build_injections`, so MCP discovery,
+        // run_store persistence, handoff guardrails, etc. were silently
+        // disabled in benchmarks / CI / OAuth E2E smokes. Now we apply the
+        // same injection chain interactive `theo agent` uses.
+        let features = runtime_features::RuntimeFeatures::from_flags(
+            false, // --watch-agents not supported in headless
+            false, // --enable-checkpoints not supported in headless
+            &project_dir,
+        );
+        let injections = build_injections(&features, &project_dir);
+        agent = injections.apply_to(agent);
 
         let started = Instant::now();
         let mut result = agent

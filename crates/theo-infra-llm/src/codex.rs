@@ -96,7 +96,20 @@ pub fn to_codex_body(request: &ChatRequest) -> serde_json::Value {
     }
     if let Some(tools) = tools {
         body["tools"] = serde_json::json!(tools);
-        body["tool_choice"] = serde_json::json!("auto");
+        // Phase 29 follow-up (sota-gaps-followup) — closes gap #7.
+        // Honor `request.tool_choice` when set (e.g. THEO_FORCE_TOOL_CHOICE
+        // env via run_engine). Strings starting with `{` are parsed as
+        // JSON to support the per-tool forcing format
+        // `{"type":"function","name":"delegate_task"}`. Other values are
+        // emitted as the bare string (auto / required / none).
+        // Default stays "auto" for backward-compat.
+        let raw = request.tool_choice.as_deref().unwrap_or("auto");
+        let choice_value: serde_json::Value = if raw.starts_with('{') {
+            serde_json::from_str(raw).unwrap_or_else(|_| serde_json::json!("auto"))
+        } else {
+            serde_json::json!(raw)
+        };
+        body["tool_choice"] = choice_value;
     }
 
     // Reasoning effort (Codex Responses API format)
@@ -460,5 +473,80 @@ mod tests {
         assert_eq!(tc.len(), 1);
         assert_eq!(tc[0].function.name, "read");
         assert_eq!(resp.finish_reason(), Some("tool_calls"));
+    }
+
+    // ── Phase 29 follow-up (sota-gaps-followup) ──
+
+    #[test]
+    fn to_codex_body_defaults_tool_choice_to_auto() {
+        use crate::types::ToolDefinition;
+        let req = ChatRequest::new("gpt-5.3-codex", vec![])
+            .with_tools(vec![ToolDefinition::new(
+                "x",
+                "y",
+                serde_json::json!({"type": "object"}),
+            )]);
+        // with_tools sets tool_choice to "auto" by default.
+        let body = to_codex_body(&req);
+        assert_eq!(body.get("tool_choice").and_then(|v| v.as_str()), Some("auto"));
+    }
+
+    #[test]
+    fn to_codex_body_honors_required_tool_choice() {
+        use crate::types::ToolDefinition;
+        let req = ChatRequest::new("gpt-5.3-codex", vec![])
+            .with_tools(vec![ToolDefinition::new(
+                "x",
+                "y",
+                serde_json::json!({"type": "object"}),
+            )])
+            .with_tool_choice("required");
+        let body = to_codex_body(&req);
+        assert_eq!(
+            body.get("tool_choice").and_then(|v| v.as_str()),
+            Some("required")
+        );
+    }
+
+    #[test]
+    fn to_codex_body_omits_tool_choice_when_no_tools() {
+        let req = ChatRequest::new("gpt-5.3-codex", vec![])
+            .with_tool_choice("required");
+        let body = to_codex_body(&req);
+        // No tools → tool_choice not emitted (Codex would reject it).
+        assert!(body.get("tool_choice").is_none());
+    }
+
+    #[test]
+    fn to_codex_body_parses_per_tool_choice_json_object() {
+        use crate::types::ToolDefinition;
+        let req = ChatRequest::new("gpt-5.3-codex", vec![])
+            .with_tools(vec![ToolDefinition::new(
+                "delegate_task",
+                "y",
+                serde_json::json!({"type": "object"}),
+            )])
+            .with_tool_choice(r#"{"type":"function","name":"delegate_task"}"#);
+        let body = to_codex_body(&req);
+        let tc = body.get("tool_choice").expect("must be set");
+        assert_eq!(tc.get("type").and_then(|v| v.as_str()), Some("function"));
+        assert_eq!(tc.get("name").and_then(|v| v.as_str()), Some("delegate_task"));
+    }
+
+    #[test]
+    fn to_codex_body_falls_back_to_auto_for_malformed_json_choice() {
+        use crate::types::ToolDefinition;
+        let req = ChatRequest::new("gpt-5.3-codex", vec![])
+            .with_tools(vec![ToolDefinition::new(
+                "x",
+                "y",
+                serde_json::json!({"type": "object"}),
+            )])
+            .with_tool_choice("{not valid json");
+        let body = to_codex_body(&req);
+        assert_eq!(
+            body.get("tool_choice").and_then(|v| v.as_str()),
+            Some("auto")
+        );
     }
 }
