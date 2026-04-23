@@ -116,7 +116,7 @@ pub struct SubagentEvent {
 }
 
 /// File-based store. Layout:
-/// ```
+/// ```text
 /// {base}/runs/{run_id}.json         # SubagentRun
 /// {base}/runs/{run_id}.events.jsonl # append-only SubagentEvent stream
 /// ```

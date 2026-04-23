@@ -143,10 +143,12 @@ pub fn parse_agent_spec(
     let (output_format, output_format_strict) = match raw.output_format {
         None => (None, None),
         Some(of) => {
-            let strict = of
-                .enforcement
-                .as_deref()
-                .map(|s| s.eq_ignore_ascii_case("strict"));
+            // best_effort (default) → None; strict (explicit) → Some(true).
+            // We never emit Some(false) — that ambiguates with "not specified".
+            let strict = match of.enforcement.as_deref() {
+                Some(s) if s.eq_ignore_ascii_case("strict") => Some(true),
+                _ => None, // best_effort or unspecified
+            };
             (Some(of.schema), strict)
         }
     };

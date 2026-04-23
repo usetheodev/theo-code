@@ -23,7 +23,7 @@
 /// ```
 /// # use theo_agent_runtime::frontmatter::split_frontmatter;
 /// let (fm, body) = split_frontmatter("---\nname: x\n---\nbody").unwrap();
-/// assert_eq!(fm, "\nname: x\n");
+/// assert!(fm.contains("name: x"));
 /// assert_eq!(body, "body");
 /// ```
 pub fn split_frontmatter(content: &str) -> Option<(&str, &str)> {

@@ -109,7 +109,11 @@ pub fn validate_against_schema(
 ) -> Result<(), OutputError> {
     if let Some(expected_type) = schema.get("type").and_then(|v| v.as_str()) {
         let actual_type = json_type(value);
-        if actual_type != expected_type {
+        // JSON Schema "integer" accepts numbers without fractional part
+        let matches = actual_type == expected_type
+            || (expected_type == "integer"
+                && matches!(value.as_f64(), Some(n) if n.fract() == 0.0));
+        if !matches {
             return Err(OutputError::SchemaMismatch {
                 reason: format!("expected type {}, got {}", expected_type, actual_type),
             });
