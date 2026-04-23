@@ -591,6 +591,14 @@ pub mod run_engine_hooks {
         }
     }
 
+    /// Result of episode injection including promotion stats.
+    pub struct EpisodeInjectionResult {
+        /// Number of episodes assembled into context.
+        pub injected_count: usize,
+        /// Number of Cooling episodes promoted back to Active.
+        pub promoted_count: usize,
+    }
+
     /// Phase 0 T0.3: feed eligible episode summaries back into the
     /// session context.
     ///
@@ -603,18 +611,17 @@ pub mod run_engine_hooks {
     /// - Caps the injected block at 5% of the context window using a
     ///   rough chars/4 token estimate (AC-0.3.6).
     /// - No episodes → no message pushed (AC-0.3.7).
-    /// Returns the number of episodes actually injected (0 if none were
-    /// eligible or the run had no prior episode history).
     pub fn inject_episode_history(
         project_dir: &std::path::Path,
         context_window_tokens: usize,
         messages: &mut Vec<Message>,
-    ) -> usize {
+    ) -> EpisodeInjectionResult {
         use theo_domain::episode::{MemoryLifecycle as Lc, TtlPolicy};
+        use theo_domain::memory::{MemoryLifecycleEnforcer, PromotionThresholds};
 
-        let all = crate::state_manager::StateManager::load_episode_summaries(project_dir);
+        let mut all = crate::state_manager::StateManager::load_episode_summaries(project_dir);
         if all.is_empty() {
-            return 0;
+            return EpisodeInjectionResult { injected_count: 0, promoted_count: 0 };
         }
 
         let now_ms = std::time::SystemTime::now()
@@ -622,6 +629,32 @@ pub mod run_engine_hooks {
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0);
 
+        // Phase 1: Promote hot Cooling episodes back to Active.
+        let promo_thresholds = PromotionThresholds::default();
+        let mut promoted_count = 0usize;
+        for ep in &mut all {
+            let age_in_tier_secs = now_ms
+                .saturating_sub(ep.last_transition_at.unwrap_or(ep.created_at))
+                / 1000;
+            let secs_since_transition = now_ms
+                .saturating_sub(ep.last_transition_at.unwrap_or(0))
+                / 1000;
+            if MemoryLifecycleEnforcer::should_promote(
+                ep.lifecycle,
+                ep.hit_count,
+                age_in_tier_secs,
+                secs_since_transition,
+                &promo_thresholds,
+            ) {
+                ep.lifecycle = Lc::Active;
+                ep.last_transition_at = Some(now_ms);
+                ep.hit_count = 0; // reset to prevent immediate re-promotion
+                let _ = crate::state_manager::StateManager::save_episode_summary(project_dir, ep);
+                promoted_count += 1;
+            }
+        }
+
+        // Phase 2: Filter (existing logic, unchanged).
         let eligible: Vec<_> = all
             .iter()
             .rev()
@@ -634,10 +667,28 @@ pub mod run_engine_hooks {
                 }
             })
             .take(5)
+            .cloned()
             .collect();
 
         if eligible.is_empty() {
-            return 0;
+            return EpisodeInjectionResult { injected_count: 0, promoted_count };
+        }
+
+        // Phase 3: Record hits on selected episodes.
+        for ep in &eligible {
+            // Load fresh, increment, save — avoids stale write.
+            let path = project_dir
+                .join(".theo/memory/episodes")
+                .join(format!("{}.json", ep.summary_id));
+            if let Ok(content) = std::fs::read_to_string(&path)
+                && let Ok(mut fresh) =
+                    serde_json::from_str::<theo_domain::episode::EpisodeSummary>(&content)
+            {
+                fresh.record_hit(now_ms);
+                let _ = crate::state_manager::StateManager::save_episode_summary(
+                    project_dir, &fresh,
+                );
+            }
         }
 
         let injected_count = eligible.len();
@@ -672,7 +723,7 @@ pub mod run_engine_hooks {
             body.push_str("\n… [truncated to 5% context budget]");
         }
         messages.push(Message::system(&body));
-        injected_count
+        EpisodeInjectionResult { injected_count, promoted_count }
     }
 }
 
@@ -1020,6 +1071,168 @@ mod tests {
             let mut messages: Vec<Message> = Vec::new();
             inject_episode_history(dir.path(), 100_000, &mut messages);
             assert!(messages.is_empty(), "no episodes → no system message");
+        }
+
+        // --- Reverse promotion tests ---
+
+        fn write_episode_with_hits(
+            dir: &std::path::Path,
+            id: &str,
+            lifecycle: &str,
+            hit_count: u32,
+            last_transition_at: Option<u64>,
+            created_at: u64,
+        ) {
+            let episodes_dir = dir.join(".theo/memory/episodes");
+            std::fs::create_dir_all(&episodes_dir).expect("t");
+            let payload = serde_json::json!({
+                "summary_id": id,
+                "run_id": id,
+                "task_id": null,
+                "window_start_event_id": "",
+                "window_end_event_id": "",
+                "machine_summary": {
+                    "objective": format!("goal-{id}"),
+                    "key_actions": [],
+                    "outcome": "Success",
+                    "successful_steps": [],
+                    "failed_attempts": [],
+                    "learned_constraints": [],
+                    "files_touched": []
+                },
+                "human_summary": null,
+                "evidence_event_ids": [],
+                "affected_files": ["src/main.rs"],
+                "open_questions": [],
+                "unresolved_hypotheses": [],
+                "referenced_community_ids": [],
+                "supersedes_summary_id": null,
+                "schema_version": 2,
+                "created_at": created_at,
+                "ttl_policy": "Permanent",
+                "lifecycle": lifecycle,
+                "hit_count": hit_count,
+                "last_hit_at": null,
+                "last_transition_at": last_transition_at
+            });
+            std::fs::write(
+                episodes_dir.join(format!("{id}.json")),
+                serde_json::to_string(&payload).expect("t"),
+            )
+            .expect("t");
+        }
+
+        #[test]
+        fn test_inject_promotes_hot_cooling_episode() {
+            let dir = tempfile::tempdir().expect("t");
+            // Cooling episode with 3 hits, transition 1h ago.
+            let one_hour_ago_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as u64
+                - 3_600_000;
+            write_episode_with_hits(
+                dir.path(),
+                "ep-hot",
+                "Cooling",
+                3,
+                Some(one_hour_ago_ms),
+                one_hour_ago_ms,
+            );
+            let mut messages: Vec<Message> = Vec::new();
+            let result = inject_episode_history(dir.path(), 100_000, &mut messages);
+            assert_eq!(result.promoted_count, 1, "should promote 1 episode");
+            assert_eq!(result.injected_count, 1);
+
+            // Verify on disk: lifecycle should be Active, hit_count reset.
+            let path = dir.path().join(".theo/memory/episodes/ep-hot.json");
+            let content = std::fs::read_to_string(&path).expect("t");
+            let ep: theo_domain::episode::EpisodeSummary =
+                serde_json::from_str(&content).expect("t");
+            assert_eq!(
+                ep.lifecycle,
+                theo_domain::episode::MemoryLifecycle::Active,
+                "promoted episode must be Active on disk"
+            );
+            // hit_count was reset to 0 on promotion, then +1 from injection hit.
+            assert_eq!(ep.hit_count, 1, "reset to 0 on promotion, then +1 from injection");
+        }
+
+        #[test]
+        fn test_inject_does_not_promote_cold_cooling() {
+            let dir = tempfile::tempdir().expect("t");
+            let one_hour_ago_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as u64
+                - 3_600_000;
+            write_episode_with_hits(
+                dir.path(),
+                "ep-cold",
+                "Cooling",
+                0, // no hits
+                Some(one_hour_ago_ms),
+                one_hour_ago_ms,
+            );
+            let mut messages: Vec<Message> = Vec::new();
+            let result = inject_episode_history(dir.path(), 100_000, &mut messages);
+            assert_eq!(result.promoted_count, 0, "should not promote 0-hit episode");
+
+            let path = dir.path().join(".theo/memory/episodes/ep-cold.json");
+            let content = std::fs::read_to_string(&path).expect("t");
+            let ep: theo_domain::episode::EpisodeSummary =
+                serde_json::from_str(&content).expect("t");
+            assert_eq!(
+                ep.lifecycle,
+                theo_domain::episode::MemoryLifecycle::Cooling,
+                "cold episode must stay Cooling"
+            );
+        }
+
+        #[test]
+        fn test_inject_respects_anti_thrash_cooldown() {
+            let dir = tempfile::tempdir().expect("t");
+            // Transition just now — within 600s cooldown.
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as u64;
+            write_episode_with_hits(
+                dir.path(),
+                "ep-thrash",
+                "Cooling",
+                10, // plenty of hits
+                Some(now_ms), // transition just now
+                now_ms - 3_600_000,
+            );
+            let mut messages: Vec<Message> = Vec::new();
+            let result = inject_episode_history(dir.path(), 100_000, &mut messages);
+            assert_eq!(
+                result.promoted_count, 0,
+                "should not promote within cooldown window"
+            );
+        }
+
+        #[test]
+        fn test_inject_records_hits_on_selected() {
+            let dir = tempfile::tempdir().expect("t");
+            write_episode_with_hits(
+                dir.path(),
+                "ep-track",
+                "Active",
+                0,
+                None,
+                1,
+            );
+            let mut messages: Vec<Message> = Vec::new();
+            inject_episode_history(dir.path(), 100_000, &mut messages);
+
+            let path = dir.path().join(".theo/memory/episodes/ep-track.json");
+            let content = std::fs::read_to_string(&path).expect("t");
+            let ep: theo_domain::episode::EpisodeSummary =
+                serde_json::from_str(&content).expect("t");
+            assert_eq!(ep.hit_count, 1, "hit_count should be incremented");
+            assert!(ep.last_hit_at.is_some(), "last_hit_at should be set");
         }
     }
 }

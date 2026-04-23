@@ -435,12 +435,12 @@ impl AgentRunEngine {
         // Phase 0 T0.3: feed eligible episode summaries back into context
         // (lifecycle != Archived, TTL not expired, 5% token budget).
         if !self.config.is_subagent {
-            let injected = crate::memory_lifecycle::run_engine_hooks::inject_episode_history(
+            let result = crate::memory_lifecycle::run_engine_hooks::inject_episode_history(
                 &self.project_dir,
                 self.config.context_window_tokens,
                 &mut messages,
             );
-            self.episodes_injected = self.episodes_injected.saturating_add(injected as u32);
+            self.episodes_injected = self.episodes_injected.saturating_add(result.injected_count as u32);
         }
 
         // Boot sequence: inject progress from previous sessions + recent git activity.

@@ -96,6 +96,63 @@ impl MemoryLifecycleEnforcer {
             MemoryLifecycle::Archived => MemoryLifecycle::Archived,
         }
     }
+
+    /// Check if a Cooling episode should be promoted back to Active.
+    ///
+    /// Separate from `tick()` which handles demotion only. Promotion
+    /// is an explicit, distinct code path with its own thresholds
+    /// and anti-thrashing guards.
+    ///
+    /// Reference: 2Q cache admission (promote on second access),
+    /// ByteRover AKL (access=+3, threshold-based tiers),
+    /// SM-2 spaced repetition (interval-based promotion).
+    pub fn should_promote(
+        current: MemoryLifecycle,
+        hit_count: u32,
+        age_in_current_tier_secs: u64,
+        secs_since_last_transition: u64,
+        thresholds: &PromotionThresholds,
+    ) -> bool {
+        if current != MemoryLifecycle::Cooling {
+            return false;
+        }
+        // Anti-thrash: respect cooldown after any tier transition.
+        if secs_since_last_transition < thresholds.cooldown_after_transition_secs {
+            return false;
+        }
+        // Promotion window expired: episode is headed toward Archived.
+        if age_in_current_tier_secs > thresholds.promotion_window_secs {
+            return false;
+        }
+        hit_count >= thresholds.min_hits_to_promote
+    }
+}
+
+/// Thresholds for reverse promotion (Cooling → Active).
+///
+/// Three anti-thrashing layers:
+/// 1. `cooldown_after_transition_secs` — no transition within this window.
+/// 2. Hit count reset on promotion — needs fresh hits to survive.
+/// 3. `promotion_window_secs` — cap on how long promotion is possible.
+#[derive(Debug, Clone)]
+pub struct PromotionThresholds {
+    /// Minimum hits accumulated while in Cooling before eligible.
+    pub min_hits_to_promote: u32,
+    /// Seconds since last tier transition before allowing another.
+    pub cooldown_after_transition_secs: u64,
+    /// Maximum time in Cooling (seconds) after which promotion is
+    /// no longer possible — episode goes toward Archived instead.
+    pub promotion_window_secs: u64,
+}
+
+impl Default for PromotionThresholds {
+    fn default() -> Self {
+        Self {
+            min_hits_to_promote: 2,
+            cooldown_after_transition_secs: 600,          // 10 minutes
+            promotion_window_secs: 3 * 24 * 60 * 60,     // 3 days
+        }
+    }
 }
 
 #[cfg(test)]
@@ -235,5 +292,112 @@ mod tests {
         let t = DecayThresholds::default();
         assert!((t.active_usefulness_floor - 0.30).abs() < 1e-6);
         assert!(t.archived_usefulness_floor < t.active_usefulness_floor);
+    }
+
+    // ── Reverse promotion: should_promote ──────────────────────
+    fn pthr() -> PromotionThresholds {
+        PromotionThresholds::default()
+    }
+
+    #[test]
+    fn test_should_promote_cooling_with_enough_hits() {
+        let result = MemoryLifecycleEnforcer::should_promote(
+            MemoryLifecycle::Cooling,
+            2,      // hits >= min_hits_to_promote (2)
+            3600,   // 1h in tier
+            3600,   // 1h since last transition (> 600s cooldown)
+            &pthr(),
+        );
+        assert!(result, "Cooling with 2 hits past cooldown should promote");
+    }
+
+    #[test]
+    fn test_should_promote_cooling_insufficient_hits() {
+        let result = MemoryLifecycleEnforcer::should_promote(
+            MemoryLifecycle::Cooling,
+            1,      // < min_hits_to_promote (2)
+            3600,
+            3600,
+            &pthr(),
+        );
+        assert!(!result, "1 hit is not enough to promote");
+    }
+
+    #[test]
+    fn test_should_promote_within_cooldown_blocked() {
+        let result = MemoryLifecycleEnforcer::should_promote(
+            MemoryLifecycle::Cooling,
+            5,      // plenty of hits
+            3600,
+            30,     // only 30s since transition (< 600s cooldown)
+            &pthr(),
+        );
+        assert!(!result, "within cooldown window must block promotion");
+    }
+
+    #[test]
+    fn test_should_promote_past_window_blocked() {
+        let result = MemoryLifecycleEnforcer::should_promote(
+            MemoryLifecycle::Cooling,
+            10,
+            5 * 24 * 60 * 60, // 5 days in tier (> 3 day window)
+            5 * 24 * 60 * 60,
+            &pthr(),
+        );
+        assert!(!result, "past promotion window must block promotion");
+    }
+
+    #[test]
+    fn test_should_promote_active_is_noop() {
+        let result = MemoryLifecycleEnforcer::should_promote(
+            MemoryLifecycle::Active,
+            100, 0, 3600, &pthr(),
+        );
+        assert!(!result, "Active episodes cannot be promoted");
+    }
+
+    #[test]
+    fn test_should_promote_archived_is_noop() {
+        let result = MemoryLifecycleEnforcer::should_promote(
+            MemoryLifecycle::Archived,
+            100, 0, 3600, &pthr(),
+        );
+        assert!(!result, "Archived episodes cannot be promoted");
+    }
+
+    #[test]
+    fn test_promotion_defaults_are_sensible() {
+        let t = PromotionThresholds::default();
+        assert_eq!(t.min_hits_to_promote, 2);
+        assert_eq!(t.cooldown_after_transition_secs, 600);
+        assert_eq!(t.promotion_window_secs, 3 * 24 * 60 * 60);
+    }
+
+    #[test]
+    fn test_should_promote_at_exact_boundary() {
+        // Exactly at cooldown boundary — should pass.
+        let result = MemoryLifecycleEnforcer::should_promote(
+            MemoryLifecycle::Cooling,
+            2,
+            600,  // exactly at window boundary (3 days)
+            600,  // exactly at cooldown boundary
+            &pthr(),
+        );
+        assert!(result, "exact boundary should promote");
+    }
+
+    #[test]
+    fn test_should_promote_at_exact_window_boundary() {
+        // Exactly at promotion window boundary — should NOT pass
+        // (> not >=).
+        let window = 3 * 24 * 60 * 60;
+        let result = MemoryLifecycleEnforcer::should_promote(
+            MemoryLifecycle::Cooling,
+            2,
+            window + 1, // just past the window
+            3600,
+            &pthr(),
+        );
+        assert!(!result, "just past promotion window must block");
     }
 }

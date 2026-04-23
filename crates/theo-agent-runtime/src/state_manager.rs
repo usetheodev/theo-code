@@ -138,6 +138,22 @@ impl StateManager {
         summaries.sort_by_key(|s| s.created_at);
         summaries
     }
+
+    /// Persist a single episode summary back to disk.
+    ///
+    /// Used by the promotion and hit-tracking paths to update episodes
+    /// after lifecycle transitions or context assembly hits.
+    pub fn save_episode_summary(
+        project_dir: &Path,
+        summary: &theo_domain::episode::EpisodeSummary,
+    ) -> std::io::Result<()> {
+        let dir = project_dir.join(".theo").join("memory").join("episodes");
+        std::fs::create_dir_all(&dir)?;
+        let path = dir.join(format!("{}.json", summary.summary_id));
+        let json = serde_json::to_string_pretty(summary)
+            .map_err(std::io::Error::other)?;
+        std::fs::write(&path, json)
+    }
 }
 
 #[cfg(test)]

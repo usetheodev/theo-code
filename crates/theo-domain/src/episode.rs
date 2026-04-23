@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use crate::event::DomainEvent;
 
 /// Current schema version for EpisodeSummary.
-pub const CURRENT_SCHEMA_VERSION: u32 = 1;
+pub const CURRENT_SCHEMA_VERSION: u32 = 2;
 
 /// A compacted summary of an execution episode (a window of events).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,6 +65,18 @@ pub struct EpisodeSummary {
     /// Added in Phase 1 T1.1 — serde default keeps legacy JSONs readable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token_usage: Option<crate::budget::TokenUsage>,
+    /// Number of times this episode was assembled into context.
+    /// Used for reverse promotion (Cooling → Active) when hit_count
+    /// exceeds `PromotionThresholds::min_hits_to_promote`.
+    #[serde(default)]
+    pub hit_count: u32,
+    /// Unix ms of the most recent context assembly hit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_hit_at: Option<u64>,
+    /// Unix ms of the last lifecycle tier transition (for anti-thrashing).
+    /// Prevents rapid Cooling→Active→Cooling cycles.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_transition_at: Option<u64>,
 }
 
 /// Machine-readable episode summary for agent resume.
@@ -417,6 +429,12 @@ pub fn infer_ttl_policy(events: &[crate::event::DomainEvent]) -> TtlPolicy {
 }
 
 impl EpisodeSummary {
+    /// Record a context assembly hit on this episode.
+    pub fn record_hit(&mut self, now_ms: u64) {
+        self.hit_count += 1;
+        self.last_hit_at = Some(now_ms);
+    }
+
     /// Creates an EpisodeSummary from a slice of DomainEvents.
     ///
     /// Extracts structured information deterministically (no LLM needed).
@@ -613,6 +631,9 @@ impl EpisodeSummary {
             lifecycle: MemoryLifecycle::Active,
             memory_kind,
             token_usage: None,
+            hit_count: 0,
+            last_hit_at: None,
+            last_transition_at: None,
         }
     }
 }
@@ -1320,5 +1341,48 @@ mod tests {
         );
         assert_eq!(hypotheses[0].source, HypothesisSource::Inferred);
         assert_eq!(hypotheses[0].confidence, 0.3);
+    }
+
+    // --- Reverse promotion: hit tracking + backward compat ---
+
+    #[test]
+    fn test_schema_version_is_2() {
+        assert_eq!(CURRENT_SCHEMA_VERSION, 2);
+    }
+
+    #[test]
+    fn test_record_hit_increments_and_timestamps() {
+        let mut ep = EpisodeSummary::from_events("r-1", None, "task", &[]);
+        assert_eq!(ep.hit_count, 0);
+        assert_eq!(ep.last_hit_at, None);
+
+        ep.record_hit(1000);
+        assert_eq!(ep.hit_count, 1);
+        assert_eq!(ep.last_hit_at, Some(1000));
+
+        ep.record_hit(2000);
+        assert_eq!(ep.hit_count, 2);
+        assert_eq!(ep.last_hit_at, Some(2000));
+    }
+
+    #[test]
+    fn test_episode_backward_compat_no_hit_fields() {
+        let mut val =
+            serde_json::to_value(EpisodeSummary::from_events("r-1", None, "t", &[])).unwrap();
+        val.as_object_mut().unwrap().remove("hit_count");
+        val.as_object_mut().unwrap().remove("last_hit_at");
+        val.as_object_mut().unwrap().remove("last_transition_at");
+        let back: EpisodeSummary = serde_json::from_value(val).unwrap();
+        assert_eq!(back.hit_count, 0);
+        assert_eq!(back.last_hit_at, None);
+        assert_eq!(back.last_transition_at, None);
+    }
+
+    #[test]
+    fn test_new_episode_has_zero_hits() {
+        let ep = EpisodeSummary::from_events("r-1", None, "task", &[]);
+        assert_eq!(ep.hit_count, 0);
+        assert_eq!(ep.last_hit_at, None);
+        assert_eq!(ep.last_transition_at, None);
     }
 }

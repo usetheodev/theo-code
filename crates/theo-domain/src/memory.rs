@@ -21,7 +21,7 @@
 pub mod decay;
 pub mod lesson;
 pub mod wiki_backend;
-pub use decay::{DecayThresholds, MemoryLifecycleEnforcer};
+pub use decay::{DecayThresholds, MemoryLifecycleEnforcer, PromotionThresholds};
 pub use lesson::{
     GateConfig, GateReject, LessonCategory, LessonStatus, MemoryLesson, apply_gates,
     jaccard_similarity, normalize_lesson, promote_if_ready,
