@@ -24,7 +24,7 @@ use serde::Deserialize;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::ServeDir;
 
-use theo_application::use_cases::observability_ui;
+use theo_application::use_cases::{agents_dashboard, observability_ui};
 
 #[derive(Clone)]
 struct AppState {
@@ -88,6 +88,28 @@ async fn compare_runs_handler(
     Json(metrics).into_response()
 }
 
+// ---------------------------------------------------------------------------
+// Phase 15: per-agent dashboard endpoints
+// ---------------------------------------------------------------------------
+
+/// GET /api/agents — aggregated stats per sub-agent name.
+async fn list_agents_handler(State(state): State<AppState>) -> Response {
+    let agents = agents_dashboard::list_agents(&state.project_dir);
+    Json(agents).into_response()
+}
+
+/// GET /api/agents/:name — detail for one agent (stats + recent runs).
+async fn get_agent_handler(
+    State(state): State<AppState>,
+    AxumPath(agent_name): AxumPath<String>,
+) -> Response {
+    match agents_dashboard::get_agent(&state.project_dir, &agent_name, 20) {
+        Some(d) => Json(d).into_response(),
+        None => (StatusCode::NOT_FOUND, format!("agent '{}' not found", agent_name))
+            .into_response(),
+    }
+}
+
 /// Build the router.
 fn build_router(project_dir: PathBuf, static_dir: Option<PathBuf>) -> Router {
     let state = AppState {
@@ -101,6 +123,9 @@ fn build_router(project_dir: PathBuf, static_dir: Option<PathBuf>) -> Router {
         .route("/run/:run_id/report", get(get_report_handler))
         .route("/system/stats", get(system_stats_handler))
         .route("/runs/compare", post(compare_runs_handler))
+        // Phase 15 (sota-gaps): per-agent breakdown endpoints
+        .route("/agents", get(list_agents_handler))
+        .route("/agents/:name", get(get_agent_handler))
         .with_state(state);
 
     let mut app = Router::new().nest("/api", api);
