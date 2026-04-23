@@ -78,6 +78,29 @@ pub enum EventType {
     /// Computational sensor executed after a write tool (e.g., clippy, cargo test).
     /// Payload contains "file", "exit_code", "output_preview".
     SensorExecuted,
+
+    // Sub-agent lifecycle (Track A — Phase 3)
+    /// Emitted when a sub-agent starts. Payload:
+    /// {
+    ///   "agent_name": String,
+    ///   "agent_source": "builtin|project|global|on_demand",
+    ///   "objective": String,
+    /// }
+    SubagentStarted,
+    /// Emitted when a sub-agent finishes. Payload includes per-agent cost metrics (D4):
+    /// {
+    ///   "agent_name": String,
+    ///   "agent_source": String,
+    ///   "success": bool,
+    ///   "summary": String,
+    ///   "duration_ms": u64,
+    ///   "tokens_used": u64,
+    ///   "input_tokens": u64,
+    ///   "output_tokens": u64,
+    ///   "llm_calls": u64,
+    ///   "iterations_used": u64,
+    /// }
+    SubagentCompleted,
 }
 
 /// Scope of a learned constraint.
@@ -231,6 +254,10 @@ impl EventType {
             // Streaming — partial output (excluded from trajectories)
             EventType::ReasoningDelta => EventKind::Streaming,
             EventType::ContentDelta => EventKind::Streaming,
+
+            // Sub-agent lifecycle (Phase 3)
+            EventType::SubagentStarted => EventKind::Lifecycle,
+            EventType::SubagentCompleted => EventKind::Lifecycle,
         }
     }
 }
@@ -260,12 +287,14 @@ impl std::fmt::Display for EventType {
             EventType::DecisionMade => write!(f, "DecisionMade"),
             EventType::ConstraintLearned => write!(f, "ConstraintLearned"),
             EventType::SensorExecuted => write!(f, "SensorExecuted"),
+            EventType::SubagentStarted => write!(f, "SubagentStarted"),
+            EventType::SubagentCompleted => write!(f, "SubagentCompleted"),
         }
     }
 }
 
 /// All EventType variants for iteration in tests.
-pub const ALL_EVENT_TYPES: [EventType; 22] = [
+pub const ALL_EVENT_TYPES: [EventType; 24] = [
     EventType::TaskCreated,
     EventType::TaskStateChanged,
     EventType::ToolCallQueued,
@@ -288,6 +317,8 @@ pub const ALL_EVENT_TYPES: [EventType; 22] = [
     EventType::DecisionMade,
     EventType::ConstraintLearned,
     EventType::SensorExecuted,
+    EventType::SubagentStarted,
+    EventType::SubagentCompleted,
 ];
 
 /// A domain event representing a significant occurrence in the system.
@@ -618,8 +649,8 @@ mod tests {
         assert!(ALL_EVENT_TYPES.contains(&EventType::HypothesisInvalidated));
         assert!(ALL_EVENT_TYPES.contains(&EventType::DecisionMade));
         assert!(ALL_EVENT_TYPES.contains(&EventType::ConstraintLearned));
-        // 22 since PLAN_CONTEXT_WIRING Phase 4 added RetrievalExecuted.
-        assert_eq!(ALL_EVENT_TYPES.len(), 22);
+        // Track A — Phase 3 added SubagentStarted + SubagentCompleted (was 22).
+        assert_eq!(ALL_EVENT_TYPES.len(), 24);
     }
 
     // --- P-1 BF2: Contextual validation tests ---

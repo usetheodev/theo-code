@@ -647,6 +647,7 @@ impl AgentRunEngine {
                     llm_calls: self.metrics.snapshot().total_llm_calls,
                     retries: self.metrics.snapshot().total_retries,
                     duration_ms: 0,
+                    ..Default::default()
                 };
             }
 
@@ -980,6 +981,7 @@ impl AgentRunEngine {
                     llm_calls: self.metrics.snapshot().total_llm_calls,
                     retries: self.metrics.snapshot().total_retries,
                     duration_ms: 0,
+                    ..Default::default()
                     };
                 }
             };
@@ -1084,6 +1086,7 @@ impl AgentRunEngine {
                     llm_calls: self.metrics.snapshot().total_llm_calls,
                     retries: self.metrics.snapshot().total_retries,
                     duration_ms: 0,
+                    ..Default::default()
                 };
             }
 
@@ -1153,6 +1156,7 @@ impl AgentRunEngine {
                     llm_calls: self.metrics.snapshot().total_llm_calls,
                     retries: self.metrics.snapshot().total_retries,
                     duration_ms: 0,
+                    ..Default::default()
                         });
                         break;
                     }
@@ -1329,6 +1333,7 @@ impl AgentRunEngine {
                     llm_calls: self.metrics.snapshot().total_llm_calls,
                     retries: self.metrics.snapshot().total_retries,
                     duration_ms: 0,
+                    ..Default::default()
                     });
                     break;
                 }
@@ -1891,6 +1896,7 @@ impl AgentRunEngine {
                     llm_calls: self.metrics.snapshot().total_llm_calls,
                     retries: self.metrics.snapshot().total_retries,
                     duration_ms: 0,
+                    ..Default::default()
                             };
                         }
                     }
@@ -2480,6 +2486,7 @@ mod tests {
             llm_calls: 0,
             retries: 0,
             duration_ms: 0,
+            ..Default::default()
         };
         assert!(result.success);
         assert_eq!(result.summary, "done");

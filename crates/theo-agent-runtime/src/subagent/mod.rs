@@ -23,7 +23,9 @@ use std::sync::Arc;
 use crate::agent_loop::{AgentLoop, AgentResult};
 use crate::config::AgentConfig;
 use crate::event_bus::EventBus;
+use theo_domain::agent_spec::AgentSpec;
 use theo_domain::capability::CapabilitySet;
+use theo_domain::event::{DomainEvent, EventType};
 use theo_infra_llm::types::Message;
 
 // ---------------------------------------------------------------------------
@@ -172,16 +174,59 @@ pub struct SubAgentManager {
     event_bus: Arc<EventBus>,
     project_dir: PathBuf,
     depth: usize,
+    /// Optional registry for spec-based spawning (Phase 3). If `None`, the
+    /// legacy role-based API (`spawn`) is used. The registry is opt-in so
+    /// existing call sites don't need updating until Phase 4.
+    registry: Option<Arc<SubAgentRegistry>>,
 }
 
 impl SubAgentManager {
+    /// Legacy constructor (preserves backward compat for 530+ existing tests).
     pub fn new(config: AgentConfig, event_bus: Arc<EventBus>, project_dir: PathBuf) -> Self {
         Self {
             config,
             event_bus,
             project_dir,
             depth: 0,
+            registry: None,
         }
+    }
+
+    /// Phase 3: new constructor that injects a registry for spec-based spawning.
+    /// Prefer this over `new()` in new code.
+    pub fn with_registry(
+        config: AgentConfig,
+        event_bus: Arc<EventBus>,
+        project_dir: PathBuf,
+        registry: Arc<SubAgentRegistry>,
+    ) -> Self {
+        Self {
+            config,
+            event_bus,
+            project_dir,
+            depth: 0,
+            registry: Some(registry),
+        }
+    }
+
+    /// Phase 3: convenience — builds a default registry (with the 4 builtins).
+    /// Drop-in replacement for `new()` that unlocks the spec-based API.
+    pub fn with_builtins(
+        config: AgentConfig,
+        event_bus: Arc<EventBus>,
+        project_dir: PathBuf,
+    ) -> Self {
+        Self::with_registry(
+            config,
+            event_bus,
+            project_dir,
+            Arc::new(SubAgentRegistry::with_builtins()),
+        )
+    }
+
+    /// Access the registry, if any.
+    pub fn registry(&self) -> Option<&SubAgentRegistry> {
+        self.registry.as_deref()
     }
 
     /// Spawn a sub-agent with a specific role and objective.
@@ -307,13 +352,159 @@ impl SubAgentManager {
 
         results
     }
+
+    // ---------------------------------------------------------------------
+    // Phase 3: spec-based API
+    // ---------------------------------------------------------------------
+
+    /// Phase 3: spawn a sub-agent from an `AgentSpec`.
+    ///
+    /// Differences vs. legacy `spawn`:
+    /// - Uses `spec.system_prompt`, `spec.capability_set`, `spec.max_iterations`,
+    ///   `spec.timeout_secs` directly (no hardcoded role match).
+    /// - Emits `SubagentStarted` before spawn and `SubagentCompleted` after.
+    /// - Populates `AgentResult.agent_name` and `AgentResult.context_used`.
+    ///
+    /// Backward-compat invariants preserved:
+    /// - max_depth=1 enforcement
+    /// - Sub-agent config: `is_subagent=true`, capability_set injected
+    /// - EventBus forwarding via `PrefixedEventForwarder` (now tagged by `spec.name`)
+    pub fn spawn_with_spec(
+        &self,
+        spec: &AgentSpec,
+        objective: &str,
+        context: Option<Vec<Message>>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = AgentResult> + Send + '_>> {
+        let spec = spec.clone();
+        let objective = objective.to_string();
+        let context_text: Option<String> = context.as_ref().and_then(|msgs| {
+            msgs.iter()
+                .find_map(|m| m.content.as_ref().map(|c| c.to_string()))
+        });
+
+        Box::pin(async move {
+            // Emit SubagentStarted
+            self.event_bus.publish(DomainEvent::new(
+                EventType::SubagentStarted,
+                format!("subagent:{}", spec.name).as_str(),
+                serde_json::json!({
+                    "agent_name": spec.name,
+                    "agent_source": spec.source.as_str(),
+                    "objective": objective,
+                }),
+            ));
+
+            let start = std::time::Instant::now();
+
+            // Enforce max_depth
+            if self.depth >= MAX_DEPTH {
+                let r = AgentResult {
+                    success: false,
+                    summary: "Sub-agent depth limit reached. Sub-agents cannot spawn sub-agents."
+                        .to_string(),
+                    agent_name: spec.name.clone(),
+                    context_used: context_text.clone(),
+                    duration_ms: start.elapsed().as_millis() as u64,
+                    ..Default::default()
+                };
+                self.publish_completed(&spec, &r);
+                return r;
+            }
+
+            // Build sub-agent config from spec
+            let mut sub_config = self.config.clone();
+            sub_config.system_prompt = spec.system_prompt.clone();
+            sub_config.max_iterations = spec.max_iterations;
+            sub_config.is_subagent = true;
+            sub_config.capability_set = Some(spec.capability_set.clone());
+            if let Some(m) = &spec.model_override {
+                sub_config.model = m.clone();
+            }
+
+            // Create sub-agent EventBus with prefixed listener tagged by spec.name
+            let sub_bus = Arc::new(crate::event_bus::EventBus::new());
+            let prefixed = Arc::new(PrefixedEventForwarder {
+                role_name: spec.name.clone(),
+                parent_bus: self.event_bus.clone(),
+            });
+            sub_bus.subscribe(prefixed);
+
+            // Prefix role name + project dir restriction (same format as legacy spawn)
+            sub_config.system_prompt = format!(
+                "[{}] {}\n\nIMPORTANT: You MUST only operate within the project directory: {}. \
+             Do NOT search, read, or access files outside this directory.",
+                spec.name,
+                sub_config.system_prompt,
+                self.project_dir.display()
+            );
+
+            let registry = theo_tooling::registry::create_default_registry();
+            let agent = AgentLoop::new(sub_config, registry);
+
+            let history = context.unwrap_or_default();
+            let timeout = std::time::Duration::from_secs(spec.timeout_secs);
+
+            let mut result = match tokio::time::timeout(
+                timeout,
+                agent.run_with_history(&objective, &self.project_dir, history, Some(sub_bus)),
+            )
+            .await
+            {
+                Ok(result) => result,
+                Err(_) => AgentResult {
+                    success: false,
+                    summary: format!(
+                        "Sub-agent ({}) timed out after {}s. Objective: {}",
+                        spec.name, spec.timeout_secs, objective
+                    ),
+                    ..Default::default()
+                },
+            };
+
+            // Annotate result with spec metadata
+            result.agent_name = spec.name.clone();
+            result.context_used = context_text;
+            result.duration_ms = start.elapsed().as_millis() as u64;
+
+            self.publish_completed(&spec, &result);
+            result
+        })
+    }
+
+    /// Helper: builds user messages from a plain string and delegates to spawn_with_spec.
+    pub fn spawn_with_spec_text(
+        &self,
+        spec: &AgentSpec,
+        objective: &str,
+        context: Option<&str>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = AgentResult> + Send + '_>> {
+        let messages = context.map(|c| vec![Message::user(c)]);
+        self.spawn_with_spec(spec, objective, messages)
+    }
+
+    fn publish_completed(&self, spec: &AgentSpec, result: &AgentResult) {
+        self.event_bus.publish(DomainEvent::new(
+            EventType::SubagentCompleted,
+            format!("subagent:{}", spec.name).as_str(),
+            serde_json::json!({
+                "agent_name": spec.name,
+                "agent_source": spec.source.as_str(),
+                "success": result.success,
+                "summary": result.summary,
+                "duration_ms": result.duration_ms,
+                "tokens_used": result.tokens_used,
+                "input_tokens": result.input_tokens,
+                "output_tokens": result.output_tokens,
+                "llm_calls": result.llm_calls,
+                "iterations_used": result.iterations_used,
+            }),
+        ));
+    }
 }
 
 // ---------------------------------------------------------------------------
 // PrefixedEventForwarder — tags sub-agent events with role name
 // ---------------------------------------------------------------------------
-
-use theo_domain::event::DomainEvent;
 
 struct PrefixedEventForwarder {
     role_name: String,
@@ -469,6 +660,7 @@ mod tests {
             event_bus: bus,
             project_dir: PathBuf::from("/tmp"),
             depth: 1, // Already at max
+            registry: None,
         };
 
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -476,5 +668,145 @@ mod tests {
             rt.block_on(async { manager.spawn(SubAgentRole::Explorer, "test", None).await });
         assert!(!result.success);
         assert!(result.summary.contains("depth limit"));
+    }
+
+    // ── Phase 3: spec-based spawn + events ───────────────────────────────
+
+    use crate::event_bus::EventListener;
+    use std::sync::Mutex;
+    use theo_domain::event::{DomainEvent, EventType};
+
+    /// Test helper: captures events published to the bus.
+    struct CaptureListener {
+        events: Mutex<Vec<DomainEvent>>,
+    }
+    impl CaptureListener {
+        fn new() -> Self {
+            Self {
+                events: Mutex::new(Vec::new()),
+            }
+        }
+        fn events(&self) -> Vec<DomainEvent> {
+            self.events.lock().unwrap().clone()
+        }
+    }
+    impl EventListener for CaptureListener {
+        fn on_event(&self, e: &DomainEvent) {
+            self.events.lock().unwrap().push(e.clone());
+        }
+    }
+
+    #[test]
+    fn with_builtins_preserves_backward_compat_constructor_signature() {
+        // Drop-in replacement for `new()`. Legacy call sites work unchanged.
+        let bus = Arc::new(EventBus::new());
+        let manager =
+            SubAgentManager::with_builtins(AgentConfig::default(), bus, PathBuf::from("/tmp"));
+        assert!(manager.registry().is_some());
+        // Has 4 builtin specs
+        assert_eq!(manager.registry().unwrap().len(), 4);
+    }
+
+    #[test]
+    fn with_registry_uses_provided_registry() {
+        let bus = Arc::new(EventBus::new());
+        let mut custom = SubAgentRegistry::new();
+        custom.register(theo_domain::agent_spec::AgentSpec::on_demand("x", "y"));
+        let manager = SubAgentManager::with_registry(
+            AgentConfig::default(),
+            bus,
+            PathBuf::from("/tmp"),
+            Arc::new(custom),
+        );
+        assert_eq!(manager.registry().unwrap().len(), 1);
+        assert!(manager.registry().unwrap().contains("x"));
+    }
+
+    #[test]
+    fn spawn_with_spec_at_max_depth_emits_events_and_fails() {
+        let bus = Arc::new(EventBus::new());
+        let capture = Arc::new(CaptureListener::new());
+        bus.subscribe(capture.clone() as Arc<dyn EventListener>);
+
+        let manager = SubAgentManager {
+            config: AgentConfig::default(),
+            event_bus: bus,
+            project_dir: PathBuf::from("/tmp"),
+            depth: 1,
+            registry: Some(Arc::new(SubAgentRegistry::with_builtins())),
+        };
+
+        let spec = theo_domain::agent_spec::AgentSpec::on_demand("scout", "check x");
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let result = rt.block_on(async { manager.spawn_with_spec(&spec, "check x", None).await });
+
+        // Result reflects the depth-limit failure
+        assert!(!result.success);
+        assert!(result.summary.contains("depth limit"));
+        assert_eq!(result.agent_name, "scout");
+
+        // Events published: SubagentStarted + SubagentCompleted
+        let events = capture.events();
+        assert!(
+            events
+                .iter()
+                .any(|e| e.event_type == EventType::SubagentStarted),
+            "SubagentStarted event missing"
+        );
+        let completed: Vec<&DomainEvent> = events
+            .iter()
+            .filter(|e| e.event_type == EventType::SubagentCompleted)
+            .collect();
+        assert_eq!(completed.len(), 1);
+        assert_eq!(
+            completed[0].payload.get("agent_name").and_then(|v| v.as_str()),
+            Some("scout")
+        );
+        assert_eq!(
+            completed[0].payload.get("agent_source").and_then(|v| v.as_str()),
+            Some("on_demand")
+        );
+        assert_eq!(
+            completed[0].payload.get("success").and_then(|v| v.as_bool()),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn spawn_with_spec_populates_agent_name_and_context() {
+        let bus = Arc::new(EventBus::new());
+        let manager = SubAgentManager {
+            config: AgentConfig::default(),
+            event_bus: bus,
+            project_dir: PathBuf::from("/tmp"),
+            depth: 1, // trigger depth-limit early return (no real LLM)
+            registry: Some(Arc::new(SubAgentRegistry::with_builtins())),
+        };
+        let spec = theo_domain::agent_spec::AgentSpec::on_demand("x", "y");
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let result = rt.block_on(async {
+            manager
+                .spawn_with_spec_text(&spec, "do y", Some("some context"))
+                .await
+        });
+        assert_eq!(result.agent_name, "x");
+        assert_eq!(result.context_used.as_deref(), Some("some context"));
+    }
+
+    #[test]
+    fn spawn_with_spec_text_none_context_leaves_context_used_none() {
+        let bus = Arc::new(EventBus::new());
+        let manager = SubAgentManager {
+            config: AgentConfig::default(),
+            event_bus: bus,
+            project_dir: PathBuf::from("/tmp"),
+            depth: 1,
+            registry: None,
+        };
+        let spec = theo_domain::agent_spec::AgentSpec::on_demand("y", "z");
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let result =
+            rt.block_on(async { manager.spawn_with_spec_text(&spec, "do z", None).await });
+        assert!(result.context_used.is_none());
     }
 }

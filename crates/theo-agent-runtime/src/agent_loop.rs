@@ -41,6 +41,13 @@ pub struct AgentResult {
     pub retries: u64,
     /// Wall-clock duration of the run, milliseconds. Filled by the caller.
     pub duration_ms: u64,
+    /// Phase 3: name of the agent that produced this result (empty string
+    /// for top-level / pre-refactor paths — backward compat).
+    #[doc(hidden)]
+    pub agent_name: String,
+    /// Phase 3: optional raw context string passed to the sub-agent (if any).
+    #[doc(hidden)]
+    pub context_used: Option<String>,
 }
 
 /// The main agent loop that orchestrates LLM ↔ tool execution.
