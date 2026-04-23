@@ -6590,6 +6590,7 @@ dependencies = [
  "syntect",
  "tempfile",
  "textwrap",
+ "theo-agent-runtime",
  "theo-application",
  "theo-domain",
  "thiserror 2.0.18",

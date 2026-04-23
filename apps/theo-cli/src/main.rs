@@ -9,6 +9,7 @@ mod pilot;
 mod render;
 mod renderer;
 mod status_line;
+mod subagent_admin;
 mod tui;
 mod tty;
 
@@ -178,6 +179,24 @@ enum Commands {
         #[arg(long)]
         static_dir: Option<PathBuf>,
     },
+
+    /// Manage persisted sub-agent runs (Phase 10).
+    Subagent {
+        #[command(subcommand)]
+        action: subagent_admin::SubagentCmd,
+    },
+
+    /// Manage workdir checkpoints (shadow git repos, Phase 9).
+    Checkpoints {
+        #[command(subcommand)]
+        action: subagent_admin::CheckpointsCmd,
+    },
+
+    /// Manage project agents approval (Phase 2 / S3 manifest).
+    Agents {
+        #[command(subcommand)]
+        action: subagent_admin::AgentsCmd,
+    },
 }
 
 #[derive(Subcommand)]
@@ -259,6 +278,27 @@ fn main() {
                 std::process::exit(code);
             }
         },
+        Some(Commands::Subagent { action }) => {
+            let project = cli.repo.clone();
+            if let Err(e) = subagent_admin::handle_subagent(action, &project) {
+                eprintln!("Error: {}", e);
+                std::process::exit(1);
+            }
+        }
+        Some(Commands::Checkpoints { action }) => {
+            let workdir = cli.repo.clone();
+            if let Err(e) = subagent_admin::handle_checkpoints(action, &workdir) {
+                eprintln!("Error: {}", e);
+                std::process::exit(1);
+            }
+        }
+        Some(Commands::Agents { action }) => {
+            let project = cli.repo.clone();
+            if let Err(e) = subagent_admin::handle_agents(action, &project) {
+                eprintln!("Error: {}", e);
+                std::process::exit(1);
+            }
+        }
         None => {
             if cli.headless {
                 cmd_headless(cli.prompt, cli.repo, cli.provider, cli.model, cli.max_iter, cli.mode, cli.temperature, cli.seed);

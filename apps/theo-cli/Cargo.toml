@@ -10,6 +10,10 @@ license.workspace = true
 # through the `theo_application::facade` module.
 theo-domain.workspace = true
 theo-application.workspace = true
+# Track A/C/D: admin CLI commands (subagent/checkpoints/agents) call directly
+# into runtime-side stores. This is an explicit exception to ADR-010 for
+# operational tooling that doesn't go through the use_cases pipeline.
+theo-agent-runtime.workspace = true
 tokio.workspace = true
 async-trait.workspace = true
 clap.workspace = true
