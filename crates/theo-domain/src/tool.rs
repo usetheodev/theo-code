@@ -311,6 +311,11 @@ pub struct ToolDefinition {
     pub description: String,
     pub category: ToolCategory,
     pub schema: ToolSchema,
+    /// Phase 17 (sota-gaps): when present, this raw JSON Schema replaces
+    /// `schema.to_json_schema()` in the LLM tool list. Used by MCP-bridged
+    /// tools whose schema cannot be represented as `ToolParam`s.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub llm_schema_override: Option<serde_json::Value>,
 }
 
 // ── Tool Context ────────────────────────────────────────────────────
@@ -414,6 +419,7 @@ pub trait Tool: Send + Sync {
             description: self.description().to_string(),
             category: self.category(),
             schema: self.schema(),
+            llm_schema_override: self.llm_schema_override(),
         }
     }
 
@@ -452,6 +458,23 @@ pub trait Tool: Send + Sync {
     /// (e.g. "apply multi-file patch diff", "fetch web url contents").
     /// Returning `None` means the tool is only matched by its id.
     fn search_hint(&self) -> Option<&str> {
+        None
+    }
+
+    /// Override the JSON Schema serialised to the LLM tool list.
+    ///
+    /// The default implementation returns `None`, which means
+    /// `tool_bridge::registry_to_definitions` falls back to
+    /// `self.schema().to_json_schema()`. Tools whose argument shape is
+    /// declared elsewhere (e.g. an MCP server's `inputSchema`) override
+    /// this to inject the raw schema verbatim — preserving nested types,
+    /// enums, and oneOf/anyOf clauses that `ToolSchema::ToolParam` cannot
+    /// express.
+    ///
+    /// Phase 17 (sota-gaps): used by `subagent::mcp_tools::McpToolAdapter`
+    /// so MCP servers' tools enter the LLM `tools` array with their full
+    /// fidelity instead of relying on a textual hint.
+    fn llm_schema_override(&self) -> Option<serde_json::Value> {
         None
     }
 
@@ -1053,6 +1076,7 @@ mod tests {
             description: "Read a file".to_string(),
             category: ToolCategory::FileOps,
             schema: ToolSchema::new(),
+            llm_schema_override: None,
         };
         let json = serde_json::to_value(&def).unwrap();
         assert_eq!(json["id"], "read");

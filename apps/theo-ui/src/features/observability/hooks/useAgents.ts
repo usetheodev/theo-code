@@ -4,7 +4,7 @@
 // CLI dashboard server (apps/theo-cli/src/dashboard.rs). Tauri shell support
 // is intentionally omitted — this dashboard is browser-only (CLI mode).
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export interface AgentStats {
   agent_name: string;
@@ -39,9 +39,19 @@ export interface AgentDetail {
   recent_runs: RecentRun[];
 }
 
+export interface SubagentRunEvent {
+  type: "subagent_run_added" | "subagent_run_updated";
+  agent_name: string;
+  run_id: string;
+  status: string;
+  tokens_used: number;
+}
+
 interface AgentsState {
   agents: AgentStats[];
   selected: AgentDetail | null;
+  selectedRuns: RecentRun[];
+  liveEvents: SubagentRunEvent[];
   loading: boolean;
   error: string | null;
 }
@@ -49,9 +59,13 @@ interface AgentsState {
 const initial: AgentsState = {
   agents: [],
   selected: null,
+  selectedRuns: [],
+  liveEvents: [],
   loading: false,
   error: null,
 };
+
+const MAX_LIVE_EVENTS = 50;
 
 export function useAgents() {
   const [state, setState] = useState<AgentsState>(initial);
@@ -71,22 +85,58 @@ export function useAgents() {
   const selectAgent = useCallback(async (agentName: string) => {
     setState((s) => ({ ...s, loading: true, error: null }));
     try {
-      const r = await fetch(`/api/agents/${encodeURIComponent(agentName)}`);
-      if (!r.ok) throw new Error(`get agent failed: ${r.status}`);
-      const detail = (await r.json()) as AgentDetail;
-      setState((s) => ({ ...s, selected: detail, loading: false }));
+      const [detailRes, runsRes] = await Promise.all([
+        fetch(`/api/agents/${encodeURIComponent(agentName)}`),
+        fetch(`/api/agents/${encodeURIComponent(agentName)}/runs`),
+      ]);
+      if (!detailRes.ok) throw new Error(`get agent failed: ${detailRes.status}`);
+      const detail = (await detailRes.json()) as AgentDetail;
+      const runs = runsRes.ok ? ((await runsRes.json()) as RecentRun[]) : [];
+      setState((s) => ({
+        ...s,
+        selected: detail,
+        selectedRuns: runs,
+        loading: false,
+      }));
     } catch (e) {
       setState((s) => ({ ...s, error: String(e), loading: false }));
     }
   }, []);
 
   const clearSelection = useCallback(() => {
-    setState((s) => ({ ...s, selected: null }));
+    setState((s) => ({ ...s, selected: null, selectedRuns: [] }));
+  }, []);
+
+  // Live event stream — auto-attached when the hook mounts. Browser-only.
+  const eventSourceRef = useRef<EventSource | null>(null);
+  useEffect(() => {
+    if (typeof EventSource === "undefined") return;
+    const es = new EventSource("/api/agents/events");
+    eventSourceRef.current = es;
+    const handleAdd = (ev: MessageEvent) => {
+      try {
+        const payload = JSON.parse(ev.data) as SubagentRunEvent;
+        setState((s) => ({
+          ...s,
+          liveEvents: [payload, ...s.liveEvents].slice(0, MAX_LIVE_EVENTS),
+        }));
+      } catch {
+        /* ignore malformed event */
+      }
+    };
+    es.addEventListener("subagent_run_added", handleAdd);
+    es.addEventListener("subagent_run_updated", handleAdd);
+    return () => {
+      es.close();
+      eventSourceRef.current = null;
+    };
   }, []);
 
   return {
     agents: state.agents,
     selected: state.selected,
+    selectedRuns: state.selectedRuns,
+    liveEvents: state.liveEvents,
     loading: state.loading,
     error: state.error,
     loadAgents,

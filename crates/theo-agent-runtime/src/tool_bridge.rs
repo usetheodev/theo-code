@@ -14,7 +14,13 @@ pub fn registry_to_definitions(registry: &ToolRegistry) -> Vec<ToolDefinition> {
     let mut defs: Vec<ToolDefinition> = registry
         .visible_definitions()
         .into_iter()
-        .map(|def| ToolDefinition::new(def.id, &def.description, def.schema.to_json_schema()))
+        .map(|def| {
+            let parameters = def
+                .llm_schema_override
+                .clone()
+                .unwrap_or_else(|| def.schema.to_json_schema());
+            ToolDefinition::new(def.id, &def.description, parameters)
+        })
         .collect();
 
     // Add the `tool_search` meta-tool — lets the model discover deferred
@@ -202,7 +208,13 @@ pub fn registry_to_definitions_for_subagent(registry: &ToolRegistry) -> Vec<Tool
     let mut defs: Vec<ToolDefinition> = registry
         .definitions()
         .into_iter()
-        .map(|def| ToolDefinition::new(def.id, &def.description, def.schema.to_json_schema()))
+        .map(|def| {
+            let parameters = def
+                .llm_schema_override
+                .clone()
+                .unwrap_or_else(|| def.schema.to_json_schema());
+            ToolDefinition::new(def.id, &def.description, parameters)
+        })
         .collect();
 
     // `done` is CRITICAL for sub-agents — it's how they signal completion.

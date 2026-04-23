@@ -133,6 +133,35 @@ pub struct RecentRun {
     pub summary: Option<String>,
 }
 
+/// List ALL runs for a given agent name (no aggregation), sorted DESC by
+/// `started_at`. Used by `/api/agents/:name/runs` for the dashboard's
+/// per-agent run-history table.
+pub fn list_agent_runs(project_dir: &Path, agent_name: &str) -> Vec<RecentRun> {
+    let store = store(project_dir);
+    let ids = match store.list() {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+    let mut runs: Vec<SubagentRun> = ids
+        .into_iter()
+        .filter_map(|id| store.load(&id).ok())
+        .filter(|r| r.agent_name == agent_name)
+        .collect();
+    runs.sort_by(|a, b| b.started_at.cmp(&a.started_at));
+    runs.into_iter()
+        .map(|r| RecentRun {
+            run_id: r.run_id,
+            status: format!("{:?}", r.status).to_lowercase(),
+            started_at: r.started_at,
+            finished_at: r.finished_at,
+            iterations_used: r.iterations_used,
+            tokens_used: r.tokens_used,
+            objective: r.objective,
+            summary: r.summary,
+        })
+        .collect()
+}
+
 /// Get detail for a specific agent name. Returns `None` if no runs exist.
 pub fn get_agent(project_dir: &Path, agent_name: &str, limit: usize) -> Option<AgentDetail> {
     let store = store(project_dir);
@@ -340,6 +369,46 @@ mod tests {
         assert_eq!(detail.stats.run_count, 1);
         assert_eq!(detail.stats.total_tokens_used, 100);
     }
+
+    // ── list_agent_runs ──
+
+    #[test]
+    fn list_agent_runs_empty_for_unknown_name() {
+        let dir = TempDir::new().unwrap();
+        assert!(list_agent_runs(dir.path(), "missing").is_empty());
+    }
+
+    #[test]
+    fn list_agent_runs_returns_only_matching_agent() {
+        let (dir, store) = fixture_project();
+        save_run(&store, "x", RunStatus::Completed, 100, 3, 1);
+        save_run(&store, "y", RunStatus::Completed, 200, 5, 2);
+        save_run(&store, "x", RunStatus::Failed, 50, 2, 3);
+        let runs = list_agent_runs(dir.path(), "x");
+        assert_eq!(runs.len(), 2);
+        assert!(runs.iter().all(|r| !r.run_id.contains("-y-")));
+    }
+
+    #[test]
+    fn list_agent_runs_sorts_descending_by_started_at() {
+        let (dir, store) = fixture_project();
+        save_run(&store, "z", RunStatus::Completed, 0, 0, 5);
+        save_run(&store, "z", RunStatus::Completed, 0, 0, 1);
+        save_run(&store, "z", RunStatus::Completed, 0, 0, 100);
+        let runs = list_agent_runs(dir.path(), "z");
+        let ts: Vec<i64> = runs.iter().map(|r| r.started_at).collect();
+        assert_eq!(ts, vec![100, 5, 1]);
+    }
+
+    #[test]
+    fn list_agent_runs_includes_status_in_lowercase() {
+        let (dir, store) = fixture_project();
+        save_run(&store, "z", RunStatus::Failed, 0, 0, 1);
+        let runs = list_agent_runs(dir.path(), "z");
+        assert_eq!(runs[0].status, "failed");
+    }
+
+    // ── general ──
 
     #[test]
     fn agent_stats_default_has_zero_metrics() {

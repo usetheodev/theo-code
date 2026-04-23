@@ -11,15 +11,20 @@
 //! Intended for remote access via port-forward — `theo dashboard --repo .`
 //! and then `ssh -L 5173:localhost:5173 <machine>` from the client.
 
+use std::collections::HashSet;
+use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::extract::{Json, Path as AxumPath, State};
 use axum::http::StatusCode;
+use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::Router;
+use futures::Stream;
 use serde::Deserialize;
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::services::ServeDir;
@@ -110,6 +115,89 @@ async fn get_agent_handler(
     }
 }
 
+/// GET /api/agents/:name/runs — every persisted run for that agent.
+async fn list_agent_runs_handler(
+    State(state): State<AppState>,
+    AxumPath(agent_name): AxumPath<String>,
+) -> Response {
+    let runs = agents_dashboard::list_agent_runs(&state.project_dir, &agent_name);
+    Json(runs).into_response()
+}
+
+/// GET /api/agents/events — SSE stream of new sub-agent runs.
+///
+/// Poll-based for now: the dashboard server is a separate process from the
+/// agent runtime, so we can't share an in-memory `EventBus`. Every 2s we
+/// re-list `.theo/subagent/runs/`; previously unseen `run_id`s are emitted
+/// as `subagent_run_added` events. Status changes on existing runs are
+/// emitted as `subagent_run_updated` events. Keep-alive comments every 15s.
+async fn agents_events_handler(
+    State(state): State<AppState>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    use async_stream::stream;
+    let project_dir = state.project_dir.clone();
+    let stream = stream! {
+        let mut seen: HashSet<String> = HashSet::new();
+        let mut statuses: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        let mut interval = tokio::time::interval(Duration::from_secs(2));
+        loop {
+            interval.tick().await;
+            let agents = agents_dashboard::list_agents(&project_dir);
+            for stats in agents {
+                let detail = match agents_dashboard::get_agent(
+                    &project_dir,
+                    &stats.agent_name,
+                    50,
+                ) {
+                    Some(d) => d,
+                    None => continue,
+                };
+                for run in detail.recent_runs {
+                    if seen.insert(run.run_id.clone()) {
+                        let payload = serde_json::json!({
+                            "type": "subagent_run_added",
+                            "agent_name": stats.agent_name,
+                            "run_id": run.run_id,
+                            "status": run.status,
+                            "tokens_used": run.tokens_used,
+                        });
+                        statuses.insert(run.run_id.clone(), run.status.clone());
+                        if let Ok(ev) = Event::default()
+                            .event("subagent_run_added")
+                            .json_data(&payload)
+                        {
+                            yield Ok::<_, Infallible>(ev);
+                        }
+                    } else if let Some(prior) = statuses.get(&run.run_id)
+                        && prior != &run.status
+                    {
+                        let payload = serde_json::json!({
+                            "type": "subagent_run_updated",
+                            "agent_name": stats.agent_name,
+                            "run_id": run.run_id,
+                            "status": run.status,
+                            "tokens_used": run.tokens_used,
+                        });
+                        statuses.insert(run.run_id.clone(), run.status.clone());
+                        if let Ok(ev) = Event::default()
+                            .event("subagent_run_updated")
+                            .json_data(&payload)
+                        {
+                            yield Ok::<_, Infallible>(ev);
+                        }
+                    }
+                }
+            }
+        }
+    };
+    Sse::new(stream).keep_alive(
+        KeepAlive::new()
+            .interval(Duration::from_secs(15))
+            .text("keep-alive"),
+    )
+}
+
 /// Build the router.
 fn build_router(project_dir: PathBuf, static_dir: Option<PathBuf>) -> Router {
     let state = AppState {
@@ -125,7 +213,9 @@ fn build_router(project_dir: PathBuf, static_dir: Option<PathBuf>) -> Router {
         .route("/runs/compare", post(compare_runs_handler))
         // Phase 15 (sota-gaps): per-agent breakdown endpoints
         .route("/agents", get(list_agents_handler))
+        .route("/agents/events", get(agents_events_handler))
         .route("/agents/:name", get(get_agent_handler))
+        .route("/agents/:name/runs", get(list_agent_runs_handler))
         .with_state(state);
 
     let mut app = Router::new().nest("/api", api);

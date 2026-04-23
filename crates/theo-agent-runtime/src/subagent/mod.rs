@@ -9,6 +9,7 @@
 
 pub mod approval;
 pub mod builtins;
+pub mod mcp_tools;
 pub mod parser;
 pub mod registry;
 pub mod reloadable;
@@ -18,6 +19,7 @@ pub mod watcher;
 pub use reloadable::ReloadableRegistry;
 
 pub use approval::{ApprovalManifest, ApprovalMode, ApprovedEntry};
+pub use mcp_tools::{build_adapters_for_spec, McpToolAdapter};
 pub use parser::{parse_agent_spec, ParseError};
 pub use registry::{LoadOutcome, RegistryWarning, SubAgentRegistry, WarningKind};
 pub use resume::{reconstruct_history, ResumeContext, ResumeError, Resumer};
@@ -478,7 +480,33 @@ impl SubAgentManager {
                 }
             }
 
-            let registry = theo_tooling::registry::create_default_registry();
+            let mut registry = theo_tooling::registry::create_default_registry();
+
+            // Phase 17 (sota-gaps): inject McpToolAdapter for every discovered
+            // MCP tool so the LLM sees concrete tool defs (not just a hint).
+            // The dispatcher is built lazily per-spawn from the registry; if
+            // either piece is missing we silently skip (graceful degradation).
+            if !spec.mcp_servers.is_empty()
+                && let (Some(cache), Some(global)) = (&self.mcp_discovery, &self.mcp_registry)
+            {
+                let dispatcher = std::sync::Arc::new(
+                    theo_infra_mcp::McpDispatcher::new(global.clone()),
+                );
+                let adapters = mcp_tools::build_adapters_for_spec(
+                    cache,
+                    &spec.mcp_servers,
+                    dispatcher,
+                );
+                for adapter in adapters {
+                    if let Err(e) = registry.register(Box::new(adapter)) {
+                        eprintln!(
+                            "[subagent {}] WARNING: failed to register MCP tool: {}",
+                            spec.name, e
+                        );
+                    }
+                }
+            }
+
             let agent = AgentLoop::new(sub_config, registry);
 
             let history = context.unwrap_or_default();

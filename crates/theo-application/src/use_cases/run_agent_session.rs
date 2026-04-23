@@ -30,6 +30,14 @@ pub struct SubagentInjections {
     pub checkpoint: Option<Arc<theo_agent_runtime::checkpoint::CheckpointManager>>,
     pub worktree: Option<Arc<theo_isolation::WorktreeProvider>>,
     pub mcp: Option<Arc<theo_infra_mcp::McpRegistry>>,
+    /// Phase 17 (sota-gaps): pre-populated discovery cache so sub-agents
+    /// receive concrete MCP tool definitions in their tool array (not only
+    /// a textual hint).
+    pub mcp_discovery: Option<Arc<theo_infra_mcp::DiscoveryCache>>,
+    /// Phase 18 (sota-gaps): handoff guardrail chain. When `None`, a
+    /// default chain (built-ins) is constructed per `delegate_task` call.
+    pub handoff_guardrails:
+        Option<Arc<theo_agent_runtime::handoff_guardrail::GuardrailChain>>,
     pub reloadable: Option<theo_agent_runtime::subagent::ReloadableRegistry>,
 }
 
@@ -56,6 +64,12 @@ impl SubagentInjections {
         }
         if let Some(m) = &self.mcp {
             loop_ = loop_.with_subagent_mcp(m.clone());
+        }
+        if let Some(d) = &self.mcp_discovery {
+            loop_ = loop_.with_subagent_mcp_discovery(d.clone());
+        }
+        if let Some(g) = &self.handoff_guardrails {
+            loop_ = loop_.with_subagent_handoff_guardrails(g.clone());
         }
         if let Some(r) = &self.reloadable {
             loop_ = loop_.with_subagent_reloadable(r.clone());

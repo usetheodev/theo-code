@@ -87,6 +87,11 @@ pub struct AgentLoop {
     subagent_checkpoint: Option<Arc<crate::checkpoint::CheckpointManager>>,
     subagent_worktree: Option<Arc<theo_isolation::WorktreeProvider>>,
     subagent_mcp: Option<Arc<theo_infra_mcp::McpRegistry>>,
+    /// Phase 17 (sota-gaps): MCP discovery cache forwarded to AgentRunEngine.
+    subagent_mcp_discovery: Option<Arc<theo_infra_mcp::DiscoveryCache>>,
+    /// Phase 18 (sota-gaps): handoff guardrail chain forwarded to AgentRunEngine.
+    subagent_handoff_guardrails:
+        Option<Arc<crate::handoff_guardrail::GuardrailChain>>,
     subagent_reloadable: Option<crate::subagent::ReloadableRegistry>,
 }
 
@@ -113,6 +118,8 @@ impl AgentLoop {
             subagent_checkpoint: None,
             subagent_worktree: None,
             subagent_mcp: None,
+            subagent_mcp_discovery: None,
+            subagent_handoff_guardrails: None,
             subagent_reloadable: None,
         }
     }
@@ -178,6 +185,24 @@ impl AgentLoop {
         self
     }
 
+    /// Phase 17 (sota-gaps): inject the MCP discovery cache.
+    pub fn with_subagent_mcp_discovery(
+        mut self,
+        cache: Arc<theo_infra_mcp::DiscoveryCache>,
+    ) -> Self {
+        self.subagent_mcp_discovery = Some(cache);
+        self
+    }
+
+    /// Phase 18 (sota-gaps): inject the handoff guardrail chain.
+    pub fn with_subagent_handoff_guardrails(
+        mut self,
+        chain: Arc<crate::handoff_guardrail::GuardrailChain>,
+    ) -> Self {
+        self.subagent_handoff_guardrails = Some(chain);
+        self
+    }
+
     pub fn with_subagent_reloadable(
         mut self,
         r: crate::subagent::ReloadableRegistry,
@@ -208,6 +233,12 @@ impl AgentLoop {
         }
         if let Some(m) = &self.subagent_mcp {
             engine = engine.with_subagent_mcp(m.clone());
+        }
+        if let Some(d) = &self.subagent_mcp_discovery {
+            engine = engine.with_subagent_mcp_discovery(d.clone());
+        }
+        if let Some(g) = &self.subagent_handoff_guardrails {
+            engine = engine.with_subagent_handoff_guardrails(g.clone());
         }
         if let Some(r) = &self.subagent_reloadable {
             engine = engine.with_subagent_reloadable(r.clone());

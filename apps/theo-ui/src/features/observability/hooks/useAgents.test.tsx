@@ -69,26 +69,32 @@ describe("useAgents", () => {
     expect(result.current.error).toContain("500");
   });
 
-  it("selectAgent fetches the detail endpoint", async () => {
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        stats: sampleStats,
-        recent_runs: [
-          {
-            run_id: "r-1",
-            status: "completed",
-            started_at: 1_700_000_000,
-            finished_at: 1_700_000_010,
-            iterations_used: 3,
-            tokens_used: 150,
-            objective: "obj",
-            summary: "ok",
-          },
-        ],
-      }),
-    });
+  it("selectAgent fetches the detail endpoint and runs endpoint", async () => {
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          stats: sampleStats,
+          recent_runs: [
+            {
+              run_id: "r-1",
+              status: "completed",
+              started_at: 1_700_000_000,
+              finished_at: 1_700_000_010,
+              iterations_used: 3,
+              tokens_used: 150,
+              objective: "obj",
+              summary: "ok",
+            },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => [],
+      });
     const { result } = renderHook(() => useAgents());
     await act(async () => {
       await result.current.selectAgent("explorer");
@@ -96,14 +102,21 @@ describe("useAgents", () => {
     expect(result.current.selected?.stats.agent_name).toBe("explorer");
     expect(result.current.selected?.recent_runs.length).toBe(1);
     expect(fetchMock).toHaveBeenCalledWith("/api/agents/explorer");
+    expect(fetchMock).toHaveBeenCalledWith("/api/agents/explorer/runs");
   });
 
-  it("selectAgent URL-encodes the agent name", async () => {
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: async () => ({ stats: sampleStats, recent_runs: [] }),
-    });
+  it("selectAgent URL-encodes the agent name on both endpoints", async () => {
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ stats: sampleStats, recent_runs: [] }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => [],
+      });
     const { result } = renderHook(() => useAgents());
     await act(async () => {
       await result.current.selectAgent("agent with space");
@@ -111,14 +124,53 @@ describe("useAgents", () => {
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/agents/agent%20with%20space",
     );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/agents/agent%20with%20space/runs",
+    );
   });
 
-  it("clearSelection resets selected to null", async () => {
-    fetchMock.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: async () => ({ stats: sampleStats, recent_runs: [] }),
+  it("selectAgent populates selectedRuns from /runs endpoint", async () => {
+    const sampleRun = {
+      run_id: "r-1",
+      status: "completed",
+      started_at: 100,
+      finished_at: 110,
+      iterations_used: 2,
+      tokens_used: 50,
+      objective: "do x",
+      summary: null,
+    };
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ stats: sampleStats, recent_runs: [] }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => [sampleRun, sampleRun],
+      });
+    const { result } = renderHook(() => useAgents());
+    await act(async () => {
+      await result.current.selectAgent("explorer");
     });
+    expect(result.current.selectedRuns.length).toBe(2);
+    expect(result.current.selectedRuns[0].run_id).toBe("r-1");
+  });
+
+  it("clearSelection resets selected to null and selectedRuns to []", async () => {
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ stats: sampleStats, recent_runs: [] }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => [],
+      });
     const { result } = renderHook(() => useAgents());
     await act(async () => {
       await result.current.selectAgent("explorer");
@@ -128,5 +180,11 @@ describe("useAgents", () => {
       result.current.clearSelection();
     });
     expect(result.current.selected).toBeNull();
+    expect(result.current.selectedRuns).toEqual([]);
+  });
+
+  it("liveEvents starts as an empty array", () => {
+    const { result } = renderHook(() => useAgents());
+    expect(result.current.liveEvents).toEqual([]);
   });
 });

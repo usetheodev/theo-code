@@ -17,6 +17,8 @@ export function AgentsPage() {
   const {
     agents,
     selected,
+    selectedRuns,
+    liveEvents,
     loading,
     error,
     loadAgents,
@@ -128,33 +130,68 @@ export function AgentsPage() {
                 </tr>
               </thead>
               <tbody>
-                {selected.recent_runs.map((run) => (
-                  <tr
-                    key={run.run_id}
-                    className="border-t border-border/50"
-                    data-testid={`recent-run-${run.run_id}`}
-                  >
-                    <td className="py-1.5 font-mono text-text-2">
-                      {run.run_id}
-                    </td>
-                    <td className="py-1.5">
-                      <span className="inline-block rounded bg-surface-3 px-1.5 py-0.5">
-                        {run.status}
-                      </span>
-                    </td>
-                    <td className="py-1.5 text-right">
-                      {run.iterations_used}
-                    </td>
-                    <td className="py-1.5 text-right">{run.tokens_used}</td>
-                    <td className="py-1.5 pl-3 text-text-2">
-                      {run.objective.length > 80
-                        ? run.objective.slice(0, 80) + "…"
-                        : run.objective}
-                    </td>
-                  </tr>
-                ))}
+                {(selectedRuns.length > 0 ? selectedRuns : selected.recent_runs).map(
+                  (run) => (
+                    <tr
+                      key={run.run_id}
+                      className="border-t border-border/50"
+                      data-testid={`recent-run-${run.run_id}`}
+                    >
+                      <td className="py-1.5 font-mono text-text-2">
+                        {run.run_id}
+                      </td>
+                      <td className="py-1.5">
+                        <span className="inline-block rounded bg-surface-3 px-1.5 py-0.5">
+                          {run.status}
+                        </span>
+                      </td>
+                      <td className="py-1.5 text-right">
+                        {run.iterations_used}
+                      </td>
+                      <td className="py-1.5 text-right">{run.tokens_used}</td>
+                      <td className="py-1.5 pl-3 text-text-2">
+                        {run.objective.length > 80
+                          ? run.objective.slice(0, 80) + "…"
+                          : run.objective}
+                      </td>
+                    </tr>
+                  ),
+                )}
               </tbody>
             </table>
+          </section>
+        )}
+
+        {liveEvents.length > 0 && (
+          <section
+            data-testid="live-events"
+            className="mt-8 rounded-xl border border-border bg-surface-2 p-4"
+          >
+            <header className="flex items-center justify-between mb-3">
+              <h2 className="text-base font-semibold text-text-1">
+                Live events
+              </h2>
+              <span className="text-[10px] uppercase text-text-3">
+                {liveEvents.length} recent
+              </span>
+            </header>
+            <ul className="space-y-1 text-xs">
+              {liveEvents.slice(0, 10).map((ev, idx) => (
+                <li
+                  key={`${ev.run_id}-${idx}`}
+                  className="flex items-center gap-2"
+                >
+                  <span className="rounded bg-accent-blue/10 text-accent-blue px-1.5 py-0.5">
+                    {ev.type === "subagent_run_added" ? "added" : "updated"}
+                  </span>
+                  <span className="font-semibold text-text-1">
+                    {ev.agent_name}
+                  </span>
+                  <span className="text-text-3">{ev.run_id}</span>
+                  <span className="ml-auto text-text-2">{ev.status}</span>
+                </li>
+              ))}
+            </ul>
           </section>
         )}
       </div>

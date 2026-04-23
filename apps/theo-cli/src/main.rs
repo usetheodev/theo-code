@@ -394,6 +394,16 @@ fn build_injections(
         inj.checkpoint = Some(cp.clone());
     }
 
+    // Phase 17 (sota-gaps): MCP discovery cache. Always-on; the cache stays
+    // empty when no MCP registry is configured, so the cost is zero.
+    inj.mcp_discovery = Some(Arc::new(theo_infra_mcp::DiscoveryCache::new()));
+
+    // Phase 18 (sota-gaps): handoff guardrail chain with built-in defaults.
+    // Project-specific guardrails can be appended later via a config loader.
+    inj.handoff_guardrails = Some(Arc::new(
+        theo_agent_runtime::handoff_guardrail::GuardrailChain::with_default_builtins(),
+    ));
+
     inj
 }
 
