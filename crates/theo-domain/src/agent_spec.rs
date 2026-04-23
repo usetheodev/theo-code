@@ -86,6 +86,15 @@ pub struct AgentSpec {
     pub timeout_secs: u64,
     /// Origin of the spec (Builtin / Project / Global / OnDemand).
     pub source: AgentSpecSource,
+    /// Phase 7: optional structured output schema. If `Some(...)` the parser
+    /// tries to extract JSON from the sub-agent's summary and validate.
+    /// Pure JSON value (Draft-7-style schema) — see `theo-agent-runtime::output_format`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_format: Option<serde_json::Value>,
+    /// Phase 7: enforcement mode for `output_format`.
+    /// "best_effort" (default) keeps free-text on failure; "strict" fails the run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_format_strict: Option<bool>,
 }
 
 impl AgentSpec {
@@ -119,6 +128,8 @@ impl AgentSpec {
             max_iterations: 10,
             timeout_secs: 120,
             source: AgentSpecSource::OnDemand,
+            output_format: None,
+            output_format_strict: None,
         }
     }
 }
@@ -139,6 +150,8 @@ mod tests {
             max_iterations: 30,
             timeout_secs: 300,
             source,
+            output_format: None,
+            output_format_strict: None,
         }
     }
 

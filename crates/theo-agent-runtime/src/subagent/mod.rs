@@ -179,6 +179,10 @@ pub struct SubAgentManager {
     /// legacy role-based API (`spawn`) is used. The registry is opt-in so
     /// existing call sites don't need updating until Phase 4.
     registry: Option<Arc<SubAgentRegistry>>,
+    /// Phase 10: optional persistence store. When Some, every spawn_with_spec
+    /// creates a SubagentRun record (started → completed/failed/cancelled)
+    /// and appends iteration events. None = no persistence (legacy).
+    run_store: Option<Arc<crate::subagent_runs::FileSubagentRunStore>>,
 }
 
 impl SubAgentManager {
@@ -190,6 +194,7 @@ impl SubAgentManager {
             project_dir,
             depth: 0,
             registry: None,
+            run_store: None,
         }
     }
 
@@ -207,6 +212,7 @@ impl SubAgentManager {
             project_dir,
             depth: 0,
             registry: Some(registry),
+            run_store: None,
         }
     }
 
@@ -225,9 +231,21 @@ impl SubAgentManager {
         )
     }
 
+    /// Phase 10: attach a persistence store for sub-agent runs.
+    /// When set, every `spawn_with_spec` persists a `SubagentRun` record.
+    pub fn with_run_store(mut self, store: Arc<crate::subagent_runs::FileSubagentRunStore>) -> Self {
+        self.run_store = Some(store);
+        self
+    }
+
     /// Access the registry, if any.
     pub fn registry(&self) -> Option<&SubAgentRegistry> {
         self.registry.as_deref()
+    }
+
+    /// Access the persistence store, if any.
+    pub fn run_store(&self) -> Option<&crate::subagent_runs::FileSubagentRunStore> {
+        self.run_store.as_deref()
     }
 
     /// Spawn a sub-agent with a specific role and objective.
@@ -384,6 +402,27 @@ impl SubAgentManager {
         });
 
         Box::pin(async move {
+            // Phase 10: persist run start
+            let run_id = format!(
+                "subagent-{}-{}",
+                spec.name,
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_micros())
+                    .unwrap_or(0)
+            );
+            if let Some(store) = &self.run_store {
+                let run = crate::subagent_runs::SubagentRun::new_running(
+                    &run_id,
+                    None,
+                    &spec,
+                    &objective,
+                    self.project_dir.to_string_lossy(),
+                    None,
+                );
+                let _ = store.save(&run);
+            }
+
             // Emit SubagentStarted
             self.event_bus.publish(DomainEvent::new(
                 EventType::SubagentStarted,
@@ -392,6 +431,7 @@ impl SubAgentManager {
                     "agent_name": spec.name,
                     "agent_source": spec.source.as_str(),
                     "objective": objective,
+                    "run_id": run_id,
                 }),
             ));
 
@@ -408,6 +448,20 @@ impl SubAgentManager {
                     duration_ms: start.elapsed().as_millis() as u64,
                     ..Default::default()
                 };
+                // Persist final state for early return path (Phase 10)
+                if let Some(store) = &self.run_store {
+                    if let Ok(mut run) = store.load(&run_id) {
+                        run.status = crate::subagent_runs::RunStatus::Failed;
+                        run.finished_at = Some(
+                            std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map(|d| d.as_secs() as i64)
+                                .unwrap_or(0),
+                        );
+                        run.summary = Some(r.summary.clone());
+                        let _ = store.save(&run);
+                    }
+                }
                 self.publish_completed(&spec, &r);
                 return r;
             }
@@ -466,6 +520,55 @@ impl SubAgentManager {
             result.agent_name = spec.name.clone();
             result.context_used = context_text;
             result.duration_ms = start.elapsed().as_millis() as u64;
+
+            // Phase 10: update persisted run with final status + metrics
+            if let Some(store) = &self.run_store {
+                if let Ok(mut run) = store.load(&run_id) {
+                    run.status = if result.success {
+                        crate::subagent_runs::RunStatus::Completed
+                    } else {
+                        crate::subagent_runs::RunStatus::Failed
+                    };
+                    run.finished_at = Some(
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_secs() as i64)
+                            .unwrap_or(0),
+                    );
+                    run.iterations_used = result.iterations_used;
+                    run.tokens_used = result.tokens_used;
+                    run.summary = Some(result.summary.clone());
+                    let _ = store.save(&run);
+                }
+            }
+
+            // Phase 7: try output format parsing
+            if let Some(schema) = &spec.output_format {
+                let strict = spec.output_format_strict.unwrap_or(false);
+                match crate::output_format::try_parse_structured(&result.summary, schema) {
+                    Ok(value) => {
+                        result.structured = Some(value.clone());
+                        // Phase 10: also persist structured_output if store attached
+                        if let Some(store) = &self.run_store {
+                            if let Ok(mut run) = store.load(&run_id) {
+                                run.structured_output = Some(value);
+                                let _ = store.save(&run);
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        if strict {
+                            // Strict mode: fail the run, append error to summary
+                            result.success = false;
+                            result.summary = format!(
+                                "{}\n\n[output_format strict] {}",
+                                result.summary, err
+                            );
+                        }
+                        // best_effort (default): keep free-text, structured=None
+                    }
+                }
+            }
 
             self.publish_completed(&spec, &result);
             result
@@ -662,6 +765,7 @@ mod tests {
             project_dir: PathBuf::from("/tmp"),
             depth: 1, // Already at max
             registry: None,
+            run_store: None,
         };
 
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -735,6 +839,7 @@ mod tests {
             project_dir: PathBuf::from("/tmp"),
             depth: 1,
             registry: Some(Arc::new(SubAgentRegistry::with_builtins())),
+            run_store: None,
         };
 
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("scout", "check x");
@@ -782,6 +887,7 @@ mod tests {
             project_dir: PathBuf::from("/tmp"),
             depth: 1, // trigger depth-limit early return (no real LLM)
             registry: Some(Arc::new(SubAgentRegistry::with_builtins())),
+            run_store: None,
         };
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("x", "y");
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -795,6 +901,66 @@ mod tests {
     }
 
     #[test]
+    fn spawn_with_spec_with_run_store_persists_run_record() {
+        use crate::subagent_runs::FileSubagentRunStore;
+        let tempdir = tempfile::TempDir::new().unwrap();
+        let store = Arc::new(FileSubagentRunStore::new(tempdir.path()));
+        let bus = Arc::new(EventBus::new());
+        let manager = SubAgentManager {
+            config: AgentConfig::default(),
+            event_bus: bus,
+            project_dir: PathBuf::from("/tmp"),
+            depth: 1, // depth-limit early return (no real LLM)
+            registry: None,
+            run_store: Some(store.clone()),
+        };
+        let spec = theo_domain::agent_spec::AgentSpec::on_demand("persisted", "test");
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let _ = rt.block_on(async { manager.spawn_with_spec(&spec, "test", None).await });
+        let runs = store.list().unwrap();
+        assert_eq!(runs.len(), 1);
+        let run = store.load(&runs[0]).unwrap();
+        assert_eq!(run.agent_name, "persisted");
+        // Final status set after early return
+        assert!(matches!(
+            run.status,
+            crate::subagent_runs::RunStatus::Failed | crate::subagent_runs::RunStatus::Completed
+        ));
+    }
+
+    #[test]
+    fn spawn_with_spec_without_run_store_does_not_persist() {
+        let bus = Arc::new(EventBus::new());
+        let manager = SubAgentManager {
+            config: AgentConfig::default(),
+            event_bus: bus,
+            project_dir: PathBuf::from("/tmp"),
+            depth: 1,
+            registry: None,
+            run_store: None,
+        };
+        let spec = theo_domain::agent_spec::AgentSpec::on_demand("x", "y");
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        // Should not panic / not require store
+        let _ = rt.block_on(async { manager.spawn_with_spec(&spec, "y", None).await });
+    }
+
+    #[test]
+    fn with_run_store_builder_stores_reference() {
+        use crate::subagent_runs::FileSubagentRunStore;
+        let tempdir = tempfile::TempDir::new().unwrap();
+        let store = Arc::new(FileSubagentRunStore::new(tempdir.path()));
+        let bus = Arc::new(EventBus::new());
+        let manager = SubAgentManager::with_builtins(
+            AgentConfig::default(),
+            bus,
+            PathBuf::from("/tmp"),
+        )
+        .with_run_store(store);
+        assert!(manager.run_store().is_some());
+    }
+
+    #[test]
     fn spawn_with_spec_text_none_context_leaves_context_used_none() {
         let bus = Arc::new(EventBus::new());
         let manager = SubAgentManager {
@@ -803,6 +969,7 @@ mod tests {
             project_dir: PathBuf::from("/tmp"),
             depth: 1,
             registry: None,
+            run_store: None,
         };
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("y", "z");
         let rt = tokio::runtime::Runtime::new().unwrap();

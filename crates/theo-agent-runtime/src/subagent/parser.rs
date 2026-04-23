@@ -61,6 +61,18 @@ struct RawFrontmatter {
     /// Optional explicit network access toggle (default: false for safety).
     #[serde(default)]
     network_access: Option<bool>,
+    /// Phase 7: optional structured-output JSON Schema.
+    #[serde(default)]
+    output_format: Option<RawOutputFormat>,
+}
+
+/// Frontmatter representation of OutputFormat config.
+#[derive(Debug, Deserialize)]
+struct RawOutputFormat {
+    schema: serde_json::Value,
+    /// "best_effort" (default) or "strict".
+    #[serde(default)]
+    enforcement: Option<String>,
 }
 
 /// Parse a markdown file containing a YAML frontmatter + system prompt body.
@@ -115,6 +127,17 @@ pub fn parse_agent_spec(
         network_access,
     };
 
+    let (output_format, output_format_strict) = match raw.output_format {
+        None => (None, None),
+        Some(of) => {
+            let strict = of
+                .enforcement
+                .as_deref()
+                .map(|s| s.eq_ignore_ascii_case("strict"));
+            (Some(of.schema), strict)
+        }
+    };
+
     Ok(AgentSpec {
         name,
         description,
@@ -124,6 +147,8 @@ pub fn parse_agent_spec(
         max_iterations,
         timeout_secs,
         source,
+        output_format,
+        output_format_strict,
     })
 }
 

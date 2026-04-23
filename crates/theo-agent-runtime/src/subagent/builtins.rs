@@ -47,6 +47,8 @@ pub fn explorer() -> AgentSpec {
         max_iterations: 30,
         timeout_secs: 300,
         source: AgentSpecSource::Builtin,
+        output_format: None,
+        output_format_strict: None,
     }
 }
 
@@ -76,6 +78,8 @@ pub fn implementer() -> AgentSpec {
         max_iterations: 100,
         timeout_secs: 600,
         source: AgentSpecSource::Builtin,
+        output_format: None,
+        output_format_strict: None,
     }
 }
 
@@ -117,6 +121,8 @@ pub fn verifier() -> AgentSpec {
         max_iterations: 20,
         timeout_secs: 600,
         source: AgentSpecSource::Builtin,
+        output_format: None,
+        output_format_strict: None,
     }
 }
 
@@ -146,6 +152,8 @@ pub fn reviewer() -> AgentSpec {
         max_iterations: 20,
         timeout_secs: 300,
         source: AgentSpecSource::Builtin,
+        output_format: None,
+        output_format_strict: None,
     }
 }
 

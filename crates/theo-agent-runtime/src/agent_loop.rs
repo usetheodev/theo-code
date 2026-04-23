@@ -48,6 +48,11 @@ pub struct AgentResult {
     /// Phase 3: optional raw context string passed to the sub-agent (if any).
     #[doc(hidden)]
     pub context_used: Option<String>,
+    /// Phase 7: structured output extracted from `summary` per the spec's
+    /// `output_format`. `None` if no schema declared, parse failed in
+    /// best_effort mode, or output is plain text.
+    #[doc(hidden)]
+    pub structured: Option<serde_json::Value>,
 }
 
 /// The main agent loop that orchestrates LLM ↔ tool execution.

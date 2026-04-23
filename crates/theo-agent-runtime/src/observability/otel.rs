@@ -237,6 +237,8 @@ mod tests {
             max_iterations: 30,
             timeout_secs: 300,
             source: AgentSpecSource::Builtin,
+            output_format: None,
+            output_format_strict: None,
         };
         let span = AgentRunSpan::from_spec(&spec, "run-abc");
         assert_eq!(span.attributes[ATTR_AGENT_ID], "run-abc");
