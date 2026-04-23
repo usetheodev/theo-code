@@ -161,7 +161,7 @@ impl TruncationRule {
 // ── Tool Schema & Category ──────────────────────────────────────────
 
 /// Category of a tool — used for filtering and building minimal tool sets.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ToolCategory {
     /// File read/write/edit operations

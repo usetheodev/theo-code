@@ -3,6 +3,15 @@
 //! The main agent can delegate work to specialized sub-agents, each with
 //! its own role, capability set, budget, and system prompt.
 //! Sub-agent = RunEngine with specialized config. Zero new subsystems.
+//!
+//! Track A — Phase 1: dynamic specs via `AgentSpec` + `SubAgentRegistry`.
+//! The legacy `SubAgentRole` enum is kept for backward compat; the new
+//! `builtins` module is the source of truth and is consumed by the registry.
+
+pub mod builtins;
+pub mod registry;
+
+pub use registry::{RegistryWarning, SubAgentRegistry, WarningKind};
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -100,15 +109,16 @@ impl SubAgentRole {
             SubAgentRole::Explorer => CapabilitySet::read_only(),
             SubAgentRole::Implementer => CapabilitySet::unrestricted(),
             SubAgentRole::Verifier => {
-                use std::collections::HashSet;
-                let mut denied = HashSet::new();
+                use std::collections::BTreeSet;
+                use theo_domain::capability::AllowedTools;
+                let mut denied = BTreeSet::new();
                 denied.insert("edit".to_string());
                 denied.insert("write".to_string());
                 denied.insert("apply_patch".to_string());
                 CapabilitySet {
-                    allowed_tools: HashSet::new(),
+                    allowed_tools: AllowedTools::All,
                     denied_tools: denied,
-                    allowed_categories: HashSet::new(),
+                    allowed_categories: BTreeSet::new(),
                     max_file_size_bytes: u64::MAX,
                     allowed_paths: Vec::new(),
                     network_access: false,
@@ -370,7 +380,10 @@ mod tests {
     fn implementer_capability_is_unrestricted() {
         let caps = SubAgentRole::Implementer.capability_set();
         assert!(caps.denied_tools.is_empty());
-        assert!(caps.allowed_tools.is_empty()); // empty = all allowed
+        assert_eq!(
+            caps.allowed_tools,
+            theo_domain::capability::AllowedTools::All
+        );
     }
 
     #[test]

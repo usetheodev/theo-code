@@ -1,4 +1,5 @@
 pub mod agent_run;
+pub mod agent_spec;
 pub mod budget;
 pub mod capability;
 pub mod code_intel;

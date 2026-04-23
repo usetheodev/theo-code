@@ -6494,10 +6494,13 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "futures",
+ "indexmap 2.14.0",
  "proptest",
  "regex",
  "serde",
  "serde_json",
+ "serde_yaml",
+ "sha2",
  "tempfile",
  "theo-domain",
  "theo-infra-auth",

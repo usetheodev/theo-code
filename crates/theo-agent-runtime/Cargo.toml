@@ -17,6 +17,9 @@ futures = "0.3"
 theo-infra-auth = { path = "../theo-infra-auth" }
 toml.workspace = true
 regex = { workspace = true }
+indexmap.workspace = true
+serde_yaml.workspace = true
+sha2.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
