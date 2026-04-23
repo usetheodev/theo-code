@@ -13,21 +13,63 @@ use theo_domain::routing::{
     ComplexityTier, ModelChoice, ModelRouter, RoutingContext, RoutingFailureHint,
 };
 
-use crate::routing::complexity::{ComplexityClassifier, ComplexitySignals};
+use std::sync::Arc;
+
+use crate::routing::complexity::{ComplexityClassifier, ComplexitySignals, TaskType};
 use crate::routing::rules::RuleBasedRouter;
+
+/// Phase 27 (sota-gaps-followup): callback invoked once per routing
+/// decision. Receives `(task_type, tier, model_id)` so the caller can
+/// aggregate the data however it wants (typically into a histogram in
+/// `MetricsCollector`).
+///
+/// Generic by design: `theo-infra-llm` MUST NOT depend on
+/// `theo-agent-runtime` per ADR-016. The callback is the bridge.
+pub type RoutingMetricsRecorder = Arc<dyn Fn(&str, &str, &str) + Send + Sync>;
 
 pub struct AutomaticModelRouter {
     inner: RuleBasedRouter,
     enabled: bool,
+    /// Optional metrics recorder. When attached, every `route()` call that
+    /// produces a non-trivial classification fires the callback.
+    metrics: Option<RoutingMetricsRecorder>,
 }
 
 impl AutomaticModelRouter {
     pub fn new(inner: RuleBasedRouter, enabled: bool) -> Self {
-        Self { inner, enabled }
+        Self {
+            inner,
+            enabled,
+            metrics: None,
+        }
+    }
+
+    /// Phase 27 builder: attach a metrics recorder.
+    pub fn with_metrics(mut self, recorder: RoutingMetricsRecorder) -> Self {
+        self.metrics = Some(recorder);
+        self
     }
 
     pub fn enabled(&self) -> bool {
         self.enabled
+    }
+
+    fn task_type_label(t: TaskType) -> &'static str {
+        match t {
+            TaskType::Retrieval => "Retrieval",
+            TaskType::Implementation => "Implementation",
+            TaskType::Analysis => "Analysis",
+            TaskType::Planning => "Planning",
+            TaskType::Generic => "Generic",
+        }
+    }
+
+    fn tier_label(t: ComplexityTier) -> &'static str {
+        match t {
+            ComplexityTier::Cheap => "Cheap",
+            ComplexityTier::Default => "Default",
+            ComplexityTier::Strong => "Strong",
+        }
     }
 
     /// Build complexity signals from the routing context.
@@ -65,7 +107,16 @@ impl ModelRouter for AutomaticModelRouter {
         let tier = ComplexityClassifier::classify(&signals);
         let mut tiered = ctx.clone();
         tiered.complexity_hint = Some(tier);
-        self.inner.route(&tiered)
+        let choice = self.inner.route(&tiered);
+        // Phase 27 (sota-gaps-followup): record the decision for telemetry.
+        if let Some(recorder) = &self.metrics {
+            recorder(
+                Self::task_type_label(signals.task_type),
+                Self::tier_label(tier),
+                &choice.model_id,
+            );
+        }
+        choice
     }
 
     fn fallback(
@@ -196,5 +247,123 @@ mod tests {
         let s = AutomaticModelRouter::build_signals(&ctx);
         assert_eq!(s.task_type, super::super::complexity::TaskType::Analysis);
         assert!(s.objective_tokens > 0);
+    }
+
+    // ── Phase 27 (sota-gaps-followup): metrics recording ──
+
+    pub mod with_metrics {
+        use super::*;
+        use std::sync::Mutex;
+
+        #[derive(Default)]
+        struct Recorder {
+            captured: Mutex<Vec<(String, String, String)>>,
+        }
+
+        fn build_recorder() -> (
+            std::sync::Arc<Recorder>,
+            std::sync::Arc<dyn Fn(&str, &str, &str) + Send + Sync>,
+        ) {
+            let r = std::sync::Arc::new(Recorder::default());
+            let r_clone = r.clone();
+            let f: std::sync::Arc<dyn Fn(&str, &str, &str) + Send + Sync> =
+                std::sync::Arc::new(move |t, ti, m| {
+                    r_clone
+                        .captured
+                        .lock()
+                        .unwrap()
+                        .push((t.to_string(), ti.to_string(), m.to_string()));
+                });
+            (r, f)
+        }
+
+        #[test]
+        fn router_with_metrics_handle_records_each_decision() {
+            let (recorder, callback) = build_recorder();
+            let inner = router_with_slots();
+            let auto = AutomaticModelRouter::new(inner, true).with_metrics(callback);
+
+            let mut ctx = RoutingContext::new(RoutingPhase::Normal);
+            ctx.latest_user_message = Some("audit security");
+            let _ = auto.route(&ctx);
+
+            let g = recorder.captured.lock().unwrap();
+            assert_eq!(g.len(), 1);
+            assert_eq!(g[0].0, "Analysis");
+            assert_eq!(g[0].1, "Strong");
+            assert_eq!(g[0].2, "opus");
+        }
+
+        #[test]
+        fn router_records_multiple_distinct_decisions() {
+            let (recorder, callback) = build_recorder();
+            let inner = router_with_slots();
+            let auto = AutomaticModelRouter::new(inner, true).with_metrics(callback);
+
+            let mut c1 = RoutingContext::new(RoutingPhase::Normal);
+            c1.latest_user_message = Some("read foo");
+            let _ = auto.route(&c1);
+
+            let mut c2 = RoutingContext::new(RoutingPhase::Normal);
+            c2.latest_user_message = Some("plan refactor");
+            let _ = auto.route(&c2);
+
+            let g = recorder.captured.lock().unwrap();
+            assert_eq!(g.len(), 2);
+            assert_eq!(g[0], ("Retrieval".into(), "Cheap".into(), "haiku".into()));
+            assert_eq!(g[1], ("Planning".into(), "Strong".into(), "opus".into()));
+        }
+
+        #[test]
+        fn router_without_metrics_handle_silently_skips_recording() {
+            // No `with_metrics` call → no callback invoked, no panic.
+            let inner = router_with_slots();
+            let auto = AutomaticModelRouter::new(inner, true);
+            let mut ctx = RoutingContext::new(RoutingPhase::Normal);
+            ctx.latest_user_message = Some("audit");
+            let choice = auto.route(&ctx);
+            assert_eq!(choice.model_id, "opus");
+        }
+
+        #[test]
+        fn router_does_not_record_when_disabled() {
+            let (recorder, callback) = build_recorder();
+            let inner = router_with_slots();
+            let auto = AutomaticModelRouter::new(inner, false).with_metrics(callback);
+            let mut ctx = RoutingContext::new(RoutingPhase::Normal);
+            ctx.latest_user_message = Some("audit");
+            let _ = auto.route(&ctx);
+            let g = recorder.captured.lock().unwrap();
+            assert!(g.is_empty(), "disabled router must not record");
+        }
+
+        #[test]
+        fn router_does_not_record_when_model_override_present() {
+            let (recorder, callback) = build_recorder();
+            let inner = router_with_slots();
+            let auto = AutomaticModelRouter::new(inner, true).with_metrics(callback);
+            let mut ctx = RoutingContext::new(RoutingPhase::Normal);
+            ctx.latest_user_message = Some("audit");
+            ctx.model_override = Some("forced-model");
+            let _ = auto.route(&ctx);
+            let g = recorder.captured.lock().unwrap();
+            assert!(
+                g.is_empty(),
+                "model_override skips classification → no recording"
+            );
+        }
+
+        #[test]
+        fn router_does_not_record_when_complexity_hint_present() {
+            let (recorder, callback) = build_recorder();
+            let inner = router_with_slots();
+            let auto = AutomaticModelRouter::new(inner, true).with_metrics(callback);
+            let mut ctx = RoutingContext::new(RoutingPhase::Normal);
+            ctx.latest_user_message = Some("audit");
+            ctx.complexity_hint = Some(ComplexityTier::Cheap);
+            let _ = auto.route(&ctx);
+            let g = recorder.captured.lock().unwrap();
+            assert!(g.is_empty(), "pre-classified context → pass through");
+        }
     }
 }

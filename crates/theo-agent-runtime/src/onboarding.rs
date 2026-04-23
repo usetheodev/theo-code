@@ -67,7 +67,18 @@ pub fn user_profile_path(memory_dir: &Path) -> PathBuf {
 ///
 /// Returns `false` otherwise so the prompt is injected only once per
 /// user profile lifetime.
+///
+/// Phase 29 (sota-gaps-followup): `THEO_SKIP_ONBOARDING=1` env var
+/// short-circuits to `false` so headless / CI / E2E benchmarks bypass
+/// the Q&A and execute the prompt literally. This is the "headless-direct"
+/// mode the plan described.
 pub fn needs_bootstrap(memory_dir: &Path) -> bool {
+    if std::env::var("THEO_SKIP_ONBOARDING")
+        .map(|v| v != "0" && v.to_ascii_lowercase() != "false")
+        .unwrap_or(false)
+    {
+        return false;
+    }
     let path = user_profile_path(memory_dir);
     match std::fs::read_to_string(&path) {
         Ok(raw) => raw.trim().len() < USER_MD_MIN_CONTENT_BYTES,
@@ -331,6 +342,36 @@ mod tests {
         let body = "---\nrole: data-scientist\n---\n# User\nA very useful description here.";
         std::fs::write(tmp.path().join(USER_MD_FILENAME), body).unwrap();
         assert!(!needs_bootstrap(tmp.path()));
+    }
+
+    // ── Phase 29 (sota-gaps-followup): THEO_SKIP_ONBOARDING bypass ──
+    #[test]
+    fn needs_bootstrap_returns_false_when_skip_env_set() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        // No USER.md → would normally return true.
+        unsafe { std::env::set_var("THEO_SKIP_ONBOARDING", "1"); }
+        let result = needs_bootstrap(tmp.path());
+        unsafe { std::env::remove_var("THEO_SKIP_ONBOARDING"); }
+        assert!(!result, "THEO_SKIP_ONBOARDING=1 must skip bootstrap");
+    }
+
+    #[test]
+    fn needs_bootstrap_returns_true_when_skip_env_set_to_zero() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        unsafe { std::env::set_var("THEO_SKIP_ONBOARDING", "0"); }
+        let result = needs_bootstrap(tmp.path());
+        unsafe { std::env::remove_var("THEO_SKIP_ONBOARDING"); }
+        assert!(result, "THEO_SKIP_ONBOARDING=0 keeps default behavior");
+    }
+
+    #[test]
+    fn needs_bootstrap_returns_false_when_skip_env_set_to_true_lowercase() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        unsafe { std::env::set_var("THEO_SKIP_ONBOARDING", "true"); }
+        let result = needs_bootstrap(tmp.path());
+        unsafe { std::env::remove_var("THEO_SKIP_ONBOARDING"); }
+        // Any non-zero / non-false value enables skip.
+        assert!(!result);
     }
 
     // ── AC-5.2 ─────────────────────────────────────────────────

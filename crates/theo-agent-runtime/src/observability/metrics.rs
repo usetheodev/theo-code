@@ -52,6 +52,44 @@ impl RuntimeMetrics {
     }
 }
 
+/// Phase 27 (sota-gaps-followup): single routing decision recorded for
+/// post-mortem analysis. Aggregated in `RuntimeMetrics::routing_decisions`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct RoutingDecisionMetric {
+    /// Detected task type (Retrieval/Implementation/Analysis/Planning/Generic).
+    pub task_type: String,
+    /// Tier chosen by `ComplexityClassifier::classify`.
+    pub tier: String,
+    /// Concrete model id selected from the slot config.
+    pub model_id: String,
+}
+
+/// Aggregated routing histogram. Map key = (task_type, tier, model_id),
+/// value = count.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct RoutingHistogram {
+    pub buckets: std::collections::BTreeMap<String, u64>,
+}
+
+impl RoutingHistogram {
+    pub fn record(&mut self, decision: &RoutingDecisionMetric) {
+        let key = format!(
+            "{}|{}|{}",
+            decision.task_type, decision.tier, decision.model_id
+        );
+        *self.buckets.entry(key).or_insert(0) += 1;
+    }
+
+    pub fn total(&self) -> u64 {
+        self.buckets.values().sum()
+    }
+
+    pub fn count_for(&self, task_type: &str, tier: &str, model_id: &str) -> u64 {
+        let key = format!("{}|{}|{}", task_type, tier, model_id);
+        *self.buckets.get(&key).unwrap_or(&0)
+    }
+}
+
 /// Thread-safe metrics collector.
 ///
 /// Uses RwLock to allow concurrent reads (snapshot) and exclusive writes (record).
@@ -59,6 +97,8 @@ pub struct MetricsCollector {
     metrics: Arc<RwLock<RuntimeMetrics>>,
     /// Phase 12: per-agent metrics breakdown for the dashboard (A4 gap).
     by_agent: Arc<RwLock<crate::observability::otel::MetricsByAgent>>,
+    /// Phase 27 (sota-gaps-followup): routing decisions histogram.
+    routing: Arc<RwLock<RoutingHistogram>>,
 }
 
 impl MetricsCollector {
@@ -68,7 +108,30 @@ impl MetricsCollector {
             by_agent: Arc::new(RwLock::new(
                 crate::observability::otel::MetricsByAgent::new(),
             )),
+            routing: Arc::new(RwLock::new(RoutingHistogram::default())),
         }
+    }
+
+    /// Phase 27: record a single routing decision. Aggregated into the
+    /// `RoutingHistogram` for post-mortem analysis.
+    pub fn record_routing_decision(
+        &self,
+        task_type: &str,
+        tier: &str,
+        model_id: &str,
+    ) {
+        if let Ok(mut g) = self.routing.write() {
+            g.record(&RoutingDecisionMetric {
+                task_type: task_type.to_string(),
+                tier: tier.to_string(),
+                model_id: model_id.to_string(),
+            });
+        }
+    }
+
+    /// Phase 27: snapshot of the routing histogram (cloned for safe reading).
+    pub fn routing_snapshot(&self) -> RoutingHistogram {
+        self.routing.read().map(|g| g.clone()).unwrap_or_default()
     }
 
     /// Phase 12: record per-agent run completion (called from spawn_with_spec
@@ -380,5 +443,64 @@ mod tests {
             m.total_llm_calls, 1,
             "delegated tokens should NOT increment llm_calls"
         );
+    }
+
+    // ── Phase 27 (sota-gaps-followup): routing telemetry ──
+
+    pub mod routing {
+        use super::*;
+
+        #[test]
+        fn metrics_collector_records_routing_decision() {
+            let c = MetricsCollector::new();
+            c.record_routing_decision("Retrieval", "Cheap", "haiku");
+            let snap = c.routing_snapshot();
+            assert_eq!(snap.total(), 1);
+            assert_eq!(snap.count_for("Retrieval", "Cheap", "haiku"), 1);
+        }
+
+        #[test]
+        fn metrics_collector_aggregates_decisions_by_tier() {
+            let c = MetricsCollector::new();
+            c.record_routing_decision("Retrieval", "Cheap", "haiku");
+            c.record_routing_decision("Retrieval", "Cheap", "haiku");
+            c.record_routing_decision("Planning", "Strong", "opus");
+            let snap = c.routing_snapshot();
+            assert_eq!(snap.total(), 3);
+            assert_eq!(snap.count_for("Retrieval", "Cheap", "haiku"), 2);
+            assert_eq!(snap.count_for("Planning", "Strong", "opus"), 1);
+        }
+
+        #[test]
+        fn metrics_collector_routing_count_zero_for_unseen_combination() {
+            let c = MetricsCollector::new();
+            c.record_routing_decision("Planning", "Strong", "opus");
+            assert_eq!(c.routing_snapshot().count_for("Planning", "Cheap", "haiku"), 0);
+        }
+
+        #[test]
+        fn routing_histogram_serde_roundtrip() {
+            let mut h = RoutingHistogram::default();
+            h.record(&RoutingDecisionMetric {
+                task_type: "Analysis".into(),
+                tier: "Strong".into(),
+                model_id: "opus".into(),
+            });
+            let json = serde_json::to_string(&h).unwrap();
+            let back: RoutingHistogram = serde_json::from_str(&json).unwrap();
+            assert_eq!(back.total(), 1);
+        }
+
+        #[test]
+        fn routing_decision_metric_serde_preserves_all_fields() {
+            let m = RoutingDecisionMetric {
+                task_type: "Implementation".into(),
+                tier: "Default".into(),
+                model_id: "sonnet".into(),
+            };
+            let json = serde_json::to_string(&m).unwrap();
+            let back: RoutingDecisionMetric = serde_json::from_str(&json).unwrap();
+            assert_eq!(m, back);
+        }
     }
 }

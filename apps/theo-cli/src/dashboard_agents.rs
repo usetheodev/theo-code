@@ -72,9 +72,16 @@ async fn agents_events_handler(
         let mut seen: HashSet<String> = HashSet::new();
         let mut statuses: std::collections::HashMap<String, String> =
             std::collections::HashMap::new();
-        let mut interval = tokio::time::interval(Duration::from_secs(2));
+        // Phase 28 (sota-gaps-followup): two parallel sources of events.
+        //  1. Run-store poll (200 ms) → subagent_run_added / _updated
+        //  2. Trajectory file-tail (200 ms) → HandoffEvaluated /
+        //     SubagentStarted / SubagentCompleted observed in real-time
+        let mut tailers = TrajectoryTailers::new(project_dir.clone());
+        let mut interval = tokio::time::interval(Duration::from_millis(200));
         loop {
             interval.tick().await;
+
+            // — 1. Run-store poll (existing behavior, kept for persistence-only path).
             let agents = agents_dashboard::list_agents(&project_dir);
             for stats in agents {
                 let detail = match agents_dashboard::get_agent(
@@ -121,6 +128,30 @@ async fn agents_events_handler(
                     }
                 }
             }
+
+            // — 2. Trajectory file-tail: emit HandoffEvaluated /
+            //   SubagentStarted / SubagentCompleted in real-time.
+            for raw_event in tailers.poll_new_events() {
+                let event_type = raw_event
+                    .get("event_type")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                if !is_subagent_event(event_type) {
+                    continue;
+                }
+                let kind_label = match event_type {
+                    "HandoffEvaluated" => "handoff_evaluated",
+                    "SubagentStarted" => "subagent_started",
+                    "SubagentCompleted" => "subagent_completed",
+                    _ => continue,
+                };
+                if let Ok(ev) = Event::default()
+                    .event(kind_label)
+                    .json_data(&raw_event)
+                {
+                    yield Ok::<_, Infallible>(ev);
+                }
+            }
         }
     };
     Sse::new(stream).keep_alive(
@@ -128,6 +159,79 @@ async fn agents_events_handler(
             .interval(Duration::from_secs(15))
             .text("keep-alive"),
     )
+}
+
+/// Phase 28 (sota-gaps-followup): true when `event_type` is one of the
+/// sub-agent lifecycle events the dashboard surfaces.
+fn is_subagent_event(event_type: &str) -> bool {
+    matches!(
+        event_type,
+        "HandoffEvaluated" | "SubagentStarted" | "SubagentCompleted"
+    )
+}
+
+/// Phase 28 (sota-gaps-followup): tracks file offsets per trajectory JSONL
+/// so each `poll_new_events` call returns only events appended since the
+/// last call. Picks up new trajectory files (new run_ids) on every poll.
+struct TrajectoryTailers {
+    base_dir: PathBuf,
+    offsets: std::collections::HashMap<PathBuf, u64>,
+}
+
+impl TrajectoryTailers {
+    fn new(project_dir: Arc<PathBuf>) -> Self {
+        Self {
+            base_dir: project_dir.join(".theo").join("trajectories"),
+            offsets: std::collections::HashMap::new(),
+        }
+    }
+
+    /// Read all new lines from every JSONL file in `<project>/.theo/trajectories/`
+    /// and return parsed events in append order. Files are tracked by their
+    /// absolute path; new files added between polls are picked up.
+    fn poll_new_events(&mut self) -> Vec<serde_json::Value> {
+        use std::io::{BufRead, BufReader, Seek, SeekFrom};
+        let mut out = Vec::new();
+        let entries = match std::fs::read_dir(&self.base_dir) {
+            Ok(e) => e,
+            Err(_) => return out, // dir doesn't exist yet → nothing to tail
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) != Some("jsonl") {
+                continue;
+            }
+            let prev_offset = *self.offsets.get(&path).unwrap_or(&0);
+            let mut file = match std::fs::File::open(&path) {
+                Ok(f) => f,
+                Err(_) => continue,
+            };
+            if file.seek(SeekFrom::Start(prev_offset)).is_err() {
+                continue;
+            }
+            let mut reader = BufReader::new(&file);
+            let mut bytes_read: u64 = 0;
+            loop {
+                let mut line = String::new();
+                match reader.read_line(&mut line) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        bytes_read += n as u64;
+                        let trimmed = line.trim_end_matches('\n').trim_end_matches('\r');
+                        if trimmed.is_empty() {
+                            continue;
+                        }
+                        if let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                            out.push(v);
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+            self.offsets.insert(path, prev_offset + bytes_read);
+        }
+        out
+    }
 }
 
 /// Build the per-agent sub-router. Mounted under `/api/agents` by the
@@ -455,5 +559,238 @@ mod tests {
             .and_then(|v| v.to_str().ok())
             .unwrap_or("");
         assert!(ct.contains("text/event-stream"), "got: {}", ct);
+    }
+
+    // ── Phase 28 (sota-gaps-followup): file-tail bridge ──
+
+    pub mod sse_handler {
+        use super::*;
+        use std::io::Write;
+
+        fn write_trajectory_event(
+            project_dir: &std::path::Path,
+            run_id: &str,
+            event_type: &str,
+            payload: serde_json::Value,
+        ) {
+            let dir = project_dir.join(".theo").join("trajectories");
+            std::fs::create_dir_all(&dir).unwrap();
+            let path = dir.join(format!("{}.jsonl", run_id));
+            let envelope = serde_json::json!({
+                "v": 1,
+                "ts": 0,
+                "run_id": run_id,
+                "kind": "event",
+                "event_type": event_type,
+                "entity_id": run_id,
+                "payload": payload,
+            });
+            let mut f = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&path)
+                .unwrap();
+            writeln!(f, "{}", serde_json::to_string(&envelope).unwrap()).unwrap();
+        }
+
+        #[test]
+        fn is_subagent_event_filters_correctly() {
+            assert!(is_subagent_event("HandoffEvaluated"));
+            assert!(is_subagent_event("SubagentStarted"));
+            assert!(is_subagent_event("SubagentCompleted"));
+            assert!(!is_subagent_event("ToolCallCompleted"));
+            assert!(!is_subagent_event("LlmCallStart"));
+            assert!(!is_subagent_event(""));
+        }
+
+        #[test]
+        fn trajectory_tailers_returns_empty_when_no_dir() {
+            let dir = TempDir::new().unwrap();
+            let mut t = TrajectoryTailers::new(Arc::new(dir.path().to_path_buf()));
+            assert!(t.poll_new_events().is_empty());
+        }
+
+        #[test]
+        fn trajectory_tailers_returns_event_when_jsonl_appended() {
+            let dir = TempDir::new().unwrap();
+            write_trajectory_event(
+                dir.path(),
+                "r1",
+                "SubagentStarted",
+                serde_json::json!({"agent_name": "explorer"}),
+            );
+            let mut t = TrajectoryTailers::new(Arc::new(dir.path().to_path_buf()));
+            let events = t.poll_new_events();
+            assert_eq!(events.len(), 1);
+            assert_eq!(
+                events[0].get("event_type").and_then(|v| v.as_str()),
+                Some("SubagentStarted")
+            );
+        }
+
+        #[test]
+        fn trajectory_tailers_only_returns_appended_lines_on_subsequent_poll() {
+            let dir = TempDir::new().unwrap();
+            write_trajectory_event(
+                dir.path(),
+                "r1",
+                "SubagentStarted",
+                serde_json::json!({}),
+            );
+            let mut t = TrajectoryTailers::new(Arc::new(dir.path().to_path_buf()));
+            let _ = t.poll_new_events(); // consume first batch
+
+            // Second poll with no new events → empty
+            assert!(t.poll_new_events().is_empty());
+
+            // Append → only the new line is returned
+            write_trajectory_event(
+                dir.path(),
+                "r1",
+                "SubagentCompleted",
+                serde_json::json!({}),
+            );
+            let new_events = t.poll_new_events();
+            assert_eq!(new_events.len(), 1);
+            assert_eq!(
+                new_events[0].get("event_type").and_then(|v| v.as_str()),
+                Some("SubagentCompleted")
+            );
+        }
+
+        #[test]
+        fn trajectory_tailers_picks_up_new_files_between_polls() {
+            let dir = TempDir::new().unwrap();
+            write_trajectory_event(dir.path(), "r1", "SubagentStarted", serde_json::json!({}));
+            let mut t = TrajectoryTailers::new(Arc::new(dir.path().to_path_buf()));
+            let _ = t.poll_new_events();
+
+            // Brand-new run_id appears
+            write_trajectory_event(dir.path(), "r2", "HandoffEvaluated", serde_json::json!({}));
+            let new_events = t.poll_new_events();
+            assert_eq!(new_events.len(), 1);
+            assert_eq!(
+                new_events[0].get("event_type").and_then(|v| v.as_str()),
+                Some("HandoffEvaluated")
+            );
+        }
+
+        #[tokio::test]
+        async fn sse_handler_emits_handoff_evaluated_within_500ms_of_event_append() {
+            use axum::body::Body;
+            use axum::http::Request;
+            use http_body_util::BodyExt;
+            use std::time::Duration;
+            use tower::ServiceExt;
+
+            let dir = TempDir::new().unwrap();
+            let app = router_for(dir.path());
+
+            // Append BEFORE the SSE handler starts so the first poll picks it up.
+            write_trajectory_event(
+                dir.path(),
+                "r1",
+                "HandoffEvaluated",
+                serde_json::json!({"decision": "block", "reason": "test"}),
+            );
+
+            let resp = app
+                .oneshot(
+                    Request::builder()
+                        .uri("/api/agents/events")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), StatusCode::OK);
+
+            let mut body = resp.into_body();
+            let deadline = std::time::Instant::now() + Duration::from_secs(2);
+            let mut buf = Vec::new();
+            while std::time::Instant::now() < deadline {
+                match tokio::time::timeout(
+                    Duration::from_millis(300),
+                    body.frame(),
+                )
+                .await
+                {
+                    Ok(Some(Ok(frame))) => {
+                        if let Some(data) = frame.data_ref() {
+                            buf.extend_from_slice(data);
+                            let s = String::from_utf8_lossy(&buf);
+                            if s.contains("handoff_evaluated") {
+                                return;
+                            }
+                        }
+                    }
+                    _ => continue,
+                }
+            }
+            panic!(
+                "SSE did not surface handoff_evaluated within 2s; buf:\n{}",
+                String::from_utf8_lossy(&buf)
+            );
+        }
+
+        #[tokio::test]
+        async fn sse_handler_filters_out_non_subagent_events() {
+            // Append a ToolCallCompleted event → must NOT appear in the stream.
+            use axum::body::Body;
+            use axum::http::Request;
+            use http_body_util::BodyExt;
+            use std::time::Duration;
+            use tower::ServiceExt;
+
+            let dir = TempDir::new().unwrap();
+            let app = router_for(dir.path());
+            write_trajectory_event(
+                dir.path(),
+                "r1",
+                "ToolCallCompleted",
+                serde_json::json!({"tool_name": "bash"}),
+            );
+
+            let resp = app
+                .oneshot(
+                    Request::builder()
+                        .uri("/api/agents/events")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+
+            let mut body = resp.into_body();
+            // Tail for ~1s; nothing relevant should be emitted.
+            let deadline = std::time::Instant::now() + Duration::from_secs(1);
+            let mut buf = Vec::new();
+            while std::time::Instant::now() < deadline {
+                match tokio::time::timeout(
+                    Duration::from_millis(300),
+                    body.frame(),
+                )
+                .await
+                {
+                    Ok(Some(Ok(frame))) => {
+                        if let Some(data) = frame.data_ref() {
+                            buf.extend_from_slice(data);
+                        }
+                    }
+                    _ => break,
+                }
+            }
+            let s = String::from_utf8_lossy(&buf);
+            assert!(
+                !s.contains("ToolCallCompleted"),
+                "ToolCallCompleted must be filtered out; got:\n{}",
+                s
+            );
+            assert!(
+                !s.contains("tool_call_completed"),
+                "ToolCallCompleted must be filtered out; got:\n{}",
+                s
+            );
+        }
     }
 }
