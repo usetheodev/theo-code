@@ -1,5 +1,6 @@
 mod config;
 mod dashboard;
+mod dashboard_agents;
 mod init;
 mod input;
 mod json_output;

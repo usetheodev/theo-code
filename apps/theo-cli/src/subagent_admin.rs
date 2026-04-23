@@ -427,41 +427,6 @@ mod tests {
     }
 
     #[test]
-    fn handle_subagent_resume_unknown_returns_err() {
-        let dir = TempDir::new().unwrap();
-        let res = handle_subagent(
-            SubagentCmd::Resume {
-                run_id: "missing".into(),
-                objective: None,
-            },
-            dir.path(),
-        );
-        assert!(res.is_err(), "resume of missing run should error");
-    }
-
-    #[test]
-    fn handle_subagent_resume_terminal_run_returns_err() {
-        use theo_agent_runtime::subagent_runs::{SubagentRun, RunStatus, FileSubagentRunStore};
-        use theo_domain::agent_spec::AgentSpec;
-        let dir = TempDir::new().unwrap();
-        let store_dir = dir.path().join(".theo").join("subagent");
-        let store = FileSubagentRunStore::new(&store_dir);
-        let spec = AgentSpec::on_demand("x", "y");
-        let mut run = SubagentRun::new_running("r-term", None, &spec, "y", "/tmp", None);
-        run.status = RunStatus::Completed;
-        store.save(&run).unwrap();
-
-        let res = handle_subagent(
-            SubagentCmd::Resume {
-                run_id: "r-term".into(),
-                objective: None,
-            },
-            dir.path(),
-        );
-        assert!(res.is_err(), "terminal run resume must reject");
-    }
-
-    #[test]
     fn handle_agents_approve_all_creates_manifest() {
         let dir = TempDir::new().unwrap();
         let agents = dir.path().join(".theo").join("agents");
@@ -480,5 +445,57 @@ mod tests {
         let approved = load_approved(dir.path()).unwrap();
         assert_eq!(approved.approved.len(), 1);
         assert_eq!(approved.approved[0].file, "custom.md");
+    }
+}
+
+
+// ---------------------------------------------------------------------------
+// Phase 16 (sota-gaps): resume CLI tests in a top-level submodule so
+// `cargo test -p theo --bin theo subagent_admin::resume` (the plan’s
+// literal verify command) targets exactly this surface.
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+pub mod resume {
+    use super::{handle_subagent, SubagentCmd};
+    use tempfile::TempDir;
+
+    #[test]
+    fn handle_subagent_resume_unknown_returns_err() {
+        let dir = TempDir::new().unwrap();
+        let res = handle_subagent(
+            SubagentCmd::Resume {
+                run_id: "missing".into(),
+                objective: None,
+            },
+            dir.path(),
+        );
+        assert!(res.is_err(), "resume of missing run should error");
+    }
+
+    #[test]
+    fn handle_subagent_resume_terminal_run_returns_err() {
+        use theo_agent_runtime::subagent_runs::{
+            FileSubagentRunStore, RunStatus, SubagentRun,
+        };
+        use theo_domain::agent_spec::AgentSpec;
+        let dir = TempDir::new().unwrap();
+        let store_dir = dir.path().join(".theo").join("subagent");
+        let store = FileSubagentRunStore::new(&store_dir);
+        let spec = AgentSpec::on_demand("x", "y");
+        let mut run = SubagentRun::new_running(
+            "r-term", None, &spec, "y", "/tmp", None,
+        );
+        run.status = RunStatus::Completed;
+        store.save(&run).unwrap();
+
+        let res = handle_subagent(
+            SubagentCmd::Resume {
+                run_id: "r-term".into(),
+                objective: None,
+            },
+            dir.path(),
+        );
+        assert!(res.is_err(), "terminal run resume must reject");
     }
 }
