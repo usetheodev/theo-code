@@ -91,6 +91,24 @@ impl DiscoveryCache {
         }
     }
 
+    /// Drop the cached entry for `server`. The next `discover_all` call
+    /// will re-spawn a client and re-fetch the tool list. Used after a
+    /// known server upgrade or when the server reports a new capability.
+    pub fn invalidate(&self, server: &str) -> bool {
+        match self.tools_by_server.write() {
+            Ok(mut g) => g.remove(server).is_some(),
+            Err(_) => false,
+        }
+    }
+
+    /// Drop every cached entry. Equivalent to instantiating a fresh cache
+    /// without losing the `Arc` handle subscribers may still hold.
+    pub fn clear_all(&self) {
+        if let Ok(mut g) = self.tools_by_server.write() {
+            g.clear();
+        }
+    }
+
     /// Discovers tools from every server in the registry.
     /// Per-server failures (timeout or RPC) are collected in the report;
     /// successful discoveries are cached.
@@ -434,6 +452,77 @@ mod tests {
         let (name, reason) = &r.failed[0];
         assert_eq!(name, "xyz");
         assert!(!reason.is_empty(), "must carry a non-empty reason");
+    }
+
+    // ── invalidate / clear_all ──
+
+    #[test]
+    fn invalidate_returns_true_when_server_was_cached() {
+        let c = DiscoveryCache::new();
+        c.put("github", vec![fake_tool("a", "")]);
+        assert!(c.invalidate("github"));
+        assert!(c.get("github").is_none());
+    }
+
+    #[test]
+    fn invalidate_returns_false_when_server_was_not_cached() {
+        let c = DiscoveryCache::new();
+        assert!(!c.invalidate("ghost"));
+    }
+
+    #[test]
+    fn invalidate_only_removes_specified_server() {
+        let c = DiscoveryCache::new();
+        c.put("a", vec![fake_tool("x", "")]);
+        c.put("b", vec![fake_tool("y", "")]);
+        c.invalidate("a");
+        assert!(c.get("a").is_none());
+        assert!(c.get("b").is_some());
+    }
+
+    #[test]
+    fn clear_all_empties_cache() {
+        let c = DiscoveryCache::new();
+        c.put("a", vec![fake_tool("x", "")]);
+        c.put("b", vec![fake_tool("y", "")]);
+        c.put("c", vec![fake_tool("z", "")]);
+        assert_eq!(c.cached_servers().len(), 3);
+        c.clear_all();
+        assert!(c.cached_servers().is_empty());
+        assert_eq!(c.total_tools(), 0);
+    }
+
+    #[test]
+    fn clear_all_on_empty_cache_is_noop() {
+        let c = DiscoveryCache::new();
+        c.clear_all();
+        assert!(c.cached_servers().is_empty());
+    }
+
+    // ── caching semantics: discover_all is idempotent across calls ──
+
+    #[tokio::test]
+    async fn discover_all_idempotent_for_failed_servers() {
+        // Failed servers stay un-cached; calling discover_all twice still
+        // surfaces them in the failed list (no false-positive cache hit).
+        let c = DiscoveryCache::new();
+        let mut reg = McpRegistry::new();
+        reg.register(unreachable_cfg("dead"));
+        let r1 = c.discover_all(&reg, Duration::from_secs(1)).await;
+        let r2 = c.discover_all(&reg, Duration::from_secs(1)).await;
+        assert_eq!(r1.failed.len(), 1);
+        assert_eq!(r2.failed.len(), 1, "second call must NOT hide the failure");
+        assert!(c.cached_servers().is_empty());
+    }
+
+    #[test]
+    fn put_overwrites_existing_cache_entry() {
+        // Idempotency: re-discovering the same server replaces (not appends)
+        // — matches the semantics `discover_all` would have on cache hit.
+        let c = DiscoveryCache::new();
+        c.put("github", vec![fake_tool("a", "")]);
+        c.put("github", vec![fake_tool("a", ""), fake_tool("b", "")]);
+        assert_eq!(c.get("github").unwrap().len(), 2);
     }
 
     #[test]

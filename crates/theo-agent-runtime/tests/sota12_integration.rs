@@ -165,7 +165,57 @@ fn phase16_resume_running_returns_context_with_spec_snapshot() {
     assert_eq!(ctx.prior_tokens_used, 7777);
 }
 
-// ── Phase 17: MCP discovery cache ──
+// ── Phase 17: MCP discovery cache + tool injection ──
+
+#[test]
+fn phase17_mcp_tool_adapter_appears_in_tool_bridge_definitions() {
+    // Plan §17 DOD: tools added to LLM tool array with prefix mcp:server:tool.
+    // Verifies end-to-end:
+    //   1. Build a ToolRegistry seeded with default tools.
+    //   2. Register an McpToolAdapter for a "discovered" tool.
+    //   3. tool_bridge::registry_to_definitions() exposes it with the
+    //      qualified name AND the raw inputSchema (not the empty placeholder).
+    use std::sync::Arc;
+    use theo_agent_runtime::subagent::McpToolAdapter;
+    use theo_agent_runtime::tool_bridge::registry_to_definitions;
+    use theo_infra_mcp::{McpDispatcher, McpRegistry, McpTool};
+
+    let mut registry = theo_tooling::registry::create_default_registry();
+    let raw_schema = serde_json::json!({
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "search term"}
+        },
+        "required": ["query"]
+    });
+    let tool = McpTool {
+        name: "search_code".into(),
+        description: Some("Search GitHub repositories".into()),
+        input_schema: raw_schema.clone(),
+    };
+    let dispatcher = Arc::new(McpDispatcher::new(Arc::new(McpRegistry::new())));
+    let adapter = McpToolAdapter::new("github", &tool, dispatcher);
+    registry
+        .register(Box::new(adapter))
+        .expect("adapter must register cleanly");
+
+    let defs = registry_to_definitions(&registry);
+    let mcp_def = defs
+        .iter()
+        .find(|d| d.function.name == "mcp:github:search_code")
+        .expect("MCP tool must appear in the LLM-side tool definitions");
+    // The raw schema (with `required`) survives — verifying that
+    // llm_schema_override defeats the empty-ToolSchema fallback.
+    let params = &mcp_def.function.parameters;
+    assert_eq!(params, &raw_schema);
+    assert_eq!(
+        params.get("required").and_then(|v| v.as_array()).map(|a| a.len()),
+        Some(1)
+    );
+    assert!(mcp_def.function.description.contains("GitHub"));
+}
+
+
 
 #[test]
 fn phase17_discovery_cache_renders_concrete_tool_names_in_hint() {
@@ -224,7 +274,9 @@ fn phase18_default_chain_has_two_builtins() {
 }
 
 #[test]
-fn phase18_explorer_implementing_blocks_with_clear_reason() {
+fn phase18_explorer_implementing_redirects_to_implementer() {
+    // Plan §18 default behavior: built-in `ReadOnlyAgentMustNotMutate`
+    // redirects (instead of blocking) so the LLM's intent survives.
     let chain = GuardrailChain::with_default_builtins();
     let target = builtins::explorer();
     let ctx = HandoffContext {
@@ -234,9 +286,12 @@ fn phase18_explorer_implementing_blocks_with_clear_reason() {
         objective: "implement caching layer",
         source_capabilities: None,
     };
-    let (id, reason) = chain.first_block(&ctx).expect("must block");
+    let (id, decision) = chain.first_decision(&ctx).expect("must decide");
     assert_eq!(id, "builtin.read_only_agent_must_not_mutate");
-    assert!(reason.contains("read-only"));
+    assert!(decision.is_redirect(), "expected Redirect, got {:?}", decision);
+    if let GuardrailDecision::Redirect { new_agent_name } = decision {
+        assert_eq!(new_agent_name, "implementer");
+    }
 }
 
 #[test]
@@ -313,10 +368,10 @@ fn sota12_all_features_can_be_constructed_together_without_panic() {
 }
 
 #[test]
-fn sota12_explorer_blocked_handoff_does_not_persist_a_run() {
-    // When the guardrail chain rejects the handoff, no SubagentRun should
-    // be written. (The actual integration that emits the audit event is
-    // tested in run_engine::tests::delegate_task_emits_handoff_evaluated_event.)
+fn sota12_explorer_redirect_decision_does_not_touch_persistence() {
+    // Plan §18: the ReadOnly guardrail now redirects rather than blocks.
+    // Either way, evaluating the chain alone (without invoking spawn) must
+    // never touch the persistence store.
     let dir = TempDir::new().unwrap();
     let store = FileSubagentRunStore::new(dir.path().join(".theo").join("subagent"));
 
@@ -329,10 +384,13 @@ fn sota12_explorer_blocked_handoff_does_not_persist_a_run() {
         objective: "implement security fixes",
         source_capabilities: None,
     };
-    let blocked = chain.first_block(&ctx);
-    assert!(blocked.is_some(), "must block read-only target asked to implement");
+    let (id, decision) = chain
+        .first_decision(&ctx)
+        .expect("must produce a decision (redirect) for read-only target asked to mutate");
+    assert_eq!(id, "builtin.read_only_agent_must_not_mutate");
+    assert!(decision.is_redirect(), "expected Redirect, got {:?}", decision);
 
-    // The store remains empty because the spawn never ran.
+    // Pure evaluation: store untouched.
     assert!(store.list().unwrap().is_empty());
 }
 

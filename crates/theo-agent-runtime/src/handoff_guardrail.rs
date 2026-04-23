@@ -21,6 +21,8 @@
 
 use std::sync::Arc;
 
+use serde::{Deserialize, Serialize};
+
 use theo_domain::agent_spec::AgentSpec;
 use theo_domain::capability::CapabilitySet;
 use theo_domain::tool::ToolCategory;
@@ -51,14 +53,27 @@ pub struct HandoffContext<'a> {
 // ---------------------------------------------------------------------------
 
 /// Outcome of a single guardrail's evaluation.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// `GuardrailDecision` matches the OpenAI Agents SDK guardrail vocabulary
+/// (Allow/Block plus the two mutating outcomes Redirect/RewriteObjective)
+/// so dashboards and audit logs can serialise the verdict without lossy
+/// label-only mapping.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum GuardrailDecision {
-    /// Allow the handoff.
+    /// Allow the handoff unchanged.
     Allow,
     /// Deny the handoff with a human-readable reason.
     Block { reason: String },
     /// Allow but emit a warning to the caller (logged + included in event payload).
     Warn { message: String },
+    /// Substitute the target sub-agent with `new_agent_name`. The existing
+    /// objective is forwarded unchanged. Used when the requested agent is
+    /// the wrong tier for the task (e.g. a read-only target asked to mutate).
+    Redirect { new_agent_name: String },
+    /// Forward to the original target but with a new objective string.
+    /// Used to coach the agent (e.g. inject context, narrow scope).
+    RewriteObjective { new_objective: String },
 }
 
 impl GuardrailDecision {
@@ -71,11 +86,23 @@ impl GuardrailDecision {
     pub fn is_warn(&self) -> bool {
         matches!(self, GuardrailDecision::Warn { .. })
     }
+    pub fn is_redirect(&self) -> bool {
+        matches!(self, GuardrailDecision::Redirect { .. })
+    }
+    pub fn is_rewrite(&self) -> bool {
+        matches!(self, GuardrailDecision::RewriteObjective { .. })
+    }
+    /// True when the decision changes the spawn arguments (target or objective).
+    pub fn is_mutating(&self) -> bool {
+        self.is_redirect() || self.is_rewrite()
+    }
     pub fn label(&self) -> &'static str {
         match self {
             GuardrailDecision::Allow => "allow",
             GuardrailDecision::Block { .. } => "block",
             GuardrailDecision::Warn { .. } => "warn",
+            GuardrailDecision::Redirect { .. } => "redirect",
+            GuardrailDecision::RewriteObjective { .. } => "rewrite",
         }
     }
 }
@@ -151,6 +178,26 @@ impl GuardrailChain {
         }
         None
     }
+
+    /// Walk the chain returning the first non-`Allow` decision (Block,
+    /// Redirect, RewriteObjective, or Warn) paired with its guardrail id.
+    /// Returns `None` if every guardrail allowed.
+    ///
+    /// Phase 18: chains stop at the first opinionated decision so a custom
+    /// guardrail registered after a built-in does not silently override
+    /// the built-in's verdict.
+    pub fn first_decision(
+        &self,
+        ctx: &HandoffContext<'_>,
+    ) -> Option<(String, GuardrailDecision)> {
+        for g in &self.guardrails {
+            let decision = g.evaluate(ctx);
+            if !decision.is_allow() {
+                return Some((g.id().to_string(), decision));
+            }
+        }
+        None
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -197,13 +244,13 @@ impl HandoffGuardrail for ReadOnlyAgentMustNotMutate {
             return GuardrailDecision::Allow;
         }
         if Self::is_capability_set_read_only(&ctx.target_spec.capability_set) {
-            return GuardrailDecision::Block {
-                reason: format!(
-                    "Target agent '{}' is read-only but objective requests mutation: '{}'. \
-                     Choose an implementation-class agent or relax the spec's capability_set.",
-                    ctx.target_agent,
-                    truncate(ctx.objective, 80),
-                ),
+            // Plan §18 default: redirect to `implementer` rather than block —
+            // the LLM rarely benefits from a refusal here; transparently
+            // upgrading the target preserves intent. The handle_delegate_task
+            // path emits a `HandoffEvaluated` audit event so the operator can
+            // see exactly which redirection happened.
+            return GuardrailDecision::Redirect {
+                new_agent_name: "implementer".to_string(),
             };
         }
         GuardrailDecision::Allow
@@ -350,14 +397,31 @@ mod tests {
     }
 
     #[test]
-    fn read_only_guardrail_blocks_explorer_implementing() {
+    fn read_only_guardrail_redirects_explorer_implementing_to_implementer() {
         let target = explorer_spec();
         let g = ReadOnlyAgentMustNotMutate;
         let d = g.evaluate(&ctx(&target, "implement caching layer"));
-        assert!(d.is_block(), "must block read-only target with mutation objective");
-        let GuardrailDecision::Block { reason } = d else { unreachable!() };
-        assert!(reason.contains("read-only"));
-        assert!(reason.contains(&target.name));
+        assert!(d.is_redirect(), "must redirect read-only target with mutation objective; got {:?}", d);
+        let GuardrailDecision::Redirect { new_agent_name } = d else {
+            unreachable!()
+        };
+        assert_eq!(new_agent_name, "implementer");
+    }
+
+    #[test]
+    fn read_only_guardrail_redirect_targets_implementer_for_implement_keyword() {
+        let target = explorer_spec();
+        let g = ReadOnlyAgentMustNotMutate;
+        let d = g.evaluate(&ctx(&target, "implement OAuth"));
+        assert!(d.is_redirect(), "implement keyword must redirect; got {:?}", d);
+    }
+
+    #[test]
+    fn read_only_guardrail_redirect_targets_implementer_for_write_keyword() {
+        let target = explorer_spec();
+        let g = ReadOnlyAgentMustNotMutate;
+        let d = g.evaluate(&ctx(&target, "write a new module"));
+        assert!(d.is_redirect(), "write keyword must redirect; got {:?}", d);
     }
 
     #[test]
@@ -440,14 +504,22 @@ mod tests {
     }
 
     #[test]
-    fn chain_first_block_returns_first_blocking_id_and_reason() {
+    fn chain_first_decision_returns_redirect_for_explorer_implementing() {
         let c = GuardrailChain::with_default_builtins();
         let target = explorer_spec();
-        let result = c.first_block(&ctx(&target, "implement OAuth"));
-        assert!(result.is_some());
-        let (id, reason) = result.unwrap();
+        let (id, decision) = c
+            .first_decision(&ctx(&target, "implement OAuth"))
+            .expect("must return a decision");
         assert_eq!(id, "builtin.read_only_agent_must_not_mutate");
-        assert!(!reason.is_empty());
+        assert!(decision.is_redirect());
+    }
+
+    #[test]
+    fn chain_first_block_returns_none_for_redirect_decision() {
+        // Redirect is non-blocking, so first_block ignores it.
+        let c = GuardrailChain::with_default_builtins();
+        let target = explorer_spec();
+        assert!(c.first_block(&ctx(&target, "implement OAuth")).is_none());
     }
 
     #[test]
@@ -501,6 +573,112 @@ mod tests {
         // Builtins all allow (good objective + impl agent), so custom blocks.
         let r = c.first_block(&ctx(&target, "implement foo")).unwrap();
         assert_eq!(r.0, "project.last_resort");
+    }
+
+    // ── serde roundtrip (audit trail uses these) ──
+
+    #[test]
+    fn handoff_decision_serde_roundtrip_allow() {
+        let d = GuardrailDecision::Allow;
+        let json = serde_json::to_string(&d).unwrap();
+        let back: GuardrailDecision = serde_json::from_str(&json).unwrap();
+        assert_eq!(d, back);
+        assert!(json.contains("\"kind\":\"allow\""));
+    }
+
+    #[test]
+    fn handoff_decision_serde_roundtrip_block() {
+        let d = GuardrailDecision::Block { reason: "boom".into() };
+        let json = serde_json::to_string(&d).unwrap();
+        let back: GuardrailDecision = serde_json::from_str(&json).unwrap();
+        assert_eq!(d, back);
+        assert!(json.contains("\"kind\":\"block\""));
+        assert!(json.contains("boom"));
+    }
+
+    #[test]
+    fn handoff_decision_serde_roundtrip_redirect() {
+        let d = GuardrailDecision::Redirect {
+            new_agent_name: "implementer".into(),
+        };
+        let json = serde_json::to_string(&d).unwrap();
+        let back: GuardrailDecision = serde_json::from_str(&json).unwrap();
+        assert_eq!(d, back);
+        assert!(json.contains("\"kind\":\"redirect\""));
+        assert!(json.contains("implementer"));
+    }
+
+    #[test]
+    fn handoff_decision_serde_roundtrip_rewrite() {
+        let d = GuardrailDecision::RewriteObjective {
+            new_objective: "scoped objective".into(),
+        };
+        let json = serde_json::to_string(&d).unwrap();
+        let back: GuardrailDecision = serde_json::from_str(&json).unwrap();
+        assert_eq!(d, back);
+        assert!(json.contains("\"kind\":\"rewrite_objective\""));
+        assert!(json.contains("scoped objective"));
+    }
+
+    #[test]
+    fn decision_classifier_methods_handle_all_variants() {
+        assert!(GuardrailDecision::Allow.is_allow());
+        assert!(GuardrailDecision::Block { reason: "x".into() }.is_block());
+        assert!(GuardrailDecision::Warn { message: "x".into() }.is_warn());
+        assert!(GuardrailDecision::Redirect { new_agent_name: "y".into() }.is_redirect());
+        assert!(GuardrailDecision::RewriteObjective { new_objective: "z".into() }.is_rewrite());
+    }
+
+    #[test]
+    fn decision_is_mutating_only_for_redirect_and_rewrite() {
+        assert!(!GuardrailDecision::Allow.is_mutating());
+        assert!(!GuardrailDecision::Block { reason: "x".into() }.is_mutating());
+        assert!(!GuardrailDecision::Warn { message: "x".into() }.is_mutating());
+        assert!(GuardrailDecision::Redirect { new_agent_name: "y".into() }.is_mutating());
+        assert!(GuardrailDecision::RewriteObjective { new_objective: "z".into() }.is_mutating());
+    }
+
+    #[test]
+    fn decision_label_returns_canonical_strings_for_redirect_and_rewrite() {
+        assert_eq!(
+            GuardrailDecision::Redirect { new_agent_name: "x".into() }.label(),
+            "redirect"
+        );
+        assert_eq!(
+            GuardrailDecision::RewriteObjective { new_objective: "y".into() }.label(),
+            "rewrite"
+        );
+    }
+
+    // ── chain.first_decision returns mutating decisions ──
+
+    #[derive(Debug)]
+    struct AlwaysRewrite(&'static str);
+    impl HandoffGuardrail for AlwaysRewrite {
+        fn id(&self) -> &str { self.0 }
+        fn evaluate(&self, _ctx: &HandoffContext<'_>) -> GuardrailDecision {
+            GuardrailDecision::RewriteObjective {
+                new_objective: "scoped".into(),
+            }
+        }
+    }
+
+    #[test]
+    fn chain_first_decision_returns_rewrite_when_first_guardrail_rewrites() {
+        let mut c = GuardrailChain::new();
+        c.add(Arc::new(AlwaysRewrite("project.scope_tightener")));
+        let target = implementer_spec();
+        let (id, d) = c.first_decision(&ctx(&target, "do something")).unwrap();
+        assert_eq!(id, "project.scope_tightener");
+        assert!(d.is_rewrite());
+    }
+
+    #[test]
+    fn chain_first_decision_returns_none_when_all_allow() {
+        let c = GuardrailChain::with_default_builtins();
+        let target = implementer_spec();
+        // implementer + non-mutation objective → all allow
+        assert!(c.first_decision(&ctx(&target, "review existing tests")).is_none());
     }
 
     // ── HandoffContext ──

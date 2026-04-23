@@ -2357,23 +2357,53 @@ impl AgentRunEngine {
                     .to_string();
             }
 
-            let spec = manager
+            let initial_spec = manager
                 .registry()
                 .and_then(|r| r.get(&agent_name).cloned())
                 .unwrap_or_else(|| {
                     theo_domain::agent_spec::AgentSpec::on_demand(&agent_name, &objective)
                 });
 
-            // Phase 18: handoff guardrail evaluation.
-            if let Some(refusal) = self.evaluate_handoff_or_refuse(
+            // Phase 18: handoff guardrail evaluation. Block short-circuits;
+            // Redirect/Rewrite mutate the spawn arguments before continuing.
+            let (spec, objective, redirect_note) = match self.evaluate_handoff(
                 &guardrails,
                 "main",
                 &agent_name,
-                &spec,
+                &initial_spec,
                 &objective,
             ) {
-                return refusal;
-            }
+                crate::run_engine::HandoffOutcome::Block { refusal_message } => {
+                    return refusal_message;
+                }
+                crate::run_engine::HandoffOutcome::Allow => (initial_spec, objective, None),
+                crate::run_engine::HandoffOutcome::Redirect {
+                    guardrail_id,
+                    new_agent_name,
+                } => {
+                    let new_spec = manager
+                        .registry()
+                        .and_then(|r| r.get(&new_agent_name).cloned())
+                        .unwrap_or_else(|| {
+                            theo_domain::agent_spec::AgentSpec::on_demand(
+                                &new_agent_name,
+                                &objective,
+                            )
+                        });
+                    let note = format!(
+                        "[handoff redirected by {} → {}]",
+                        guardrail_id, new_agent_name
+                    );
+                    (new_spec, objective, Some(note))
+                }
+                crate::run_engine::HandoffOutcome::RewriteObjective {
+                    guardrail_id,
+                    new_objective,
+                } => {
+                    let note = format!("[handoff objective rewritten by {}]", guardrail_id);
+                    (initial_spec, new_objective, Some(note))
+                }
+            };
 
             let result = manager
                 .spawn_with_spec_text(&spec, &objective, context.as_deref())
@@ -2383,14 +2413,21 @@ impl AgentRunEngine {
             self.budget_enforcer.record_tokens(result.tokens_used);
             self.metrics.record_delegated_tokens(result.tokens_used);
 
-            // Mirror legacy formatter
+            // Mirror legacy formatter — prefix the redirect/rewrite note
+            // when present so the parent LLM sees the mutation explicitly.
+            let prefix = redirect_note
+                .map(|n| format!("{} ", n))
+                .unwrap_or_default();
             if result.success {
                 format!(
-                    "[{} sub-agent completed] {}",
-                    spec.name, result.summary
+                    "{}[{} sub-agent completed] {}",
+                    prefix, spec.name, result.summary
                 )
             } else {
-                format!("[{} sub-agent failed] {}", spec.name, result.summary)
+                format!(
+                    "{}[{} sub-agent failed] {}",
+                    prefix, spec.name, result.summary
+                )
             }
         } else {
             // Parallel mode
@@ -2426,7 +2463,7 @@ impl AgentRunEngine {
                     ));
                     continue;
                 }
-                let spec = manager
+                let initial_spec = manager
                     .registry()
                     .and_then(|r| r.get(&agent_name).cloned())
                     .unwrap_or_else(|| {
@@ -2434,21 +2471,53 @@ impl AgentRunEngine {
                     });
 
                 // Phase 18: per-entry handoff guardrail evaluation.
-                if let Some(refusal) = self.evaluate_handoff_or_refuse(
+                let (spec, objective, redirect_note) = match self.evaluate_handoff(
                     &guardrails,
                     "main",
                     &agent_name,
-                    &spec,
+                    &initial_spec,
                     &objective,
                 ) {
-                    combined.push_str(&format!(
-                        "[Sub-agent {}] ❌ {} (handoff refused): {}\n",
-                        i + 1,
-                        spec.name,
-                        refusal,
-                    ));
-                    continue;
-                }
+                    crate::run_engine::HandoffOutcome::Block { refusal_message } => {
+                        combined.push_str(&format!(
+                            "[Sub-agent {}] ❌ {} (handoff refused): {}\n",
+                            i + 1,
+                            initial_spec.name,
+                            refusal_message,
+                        ));
+                        continue;
+                    }
+                    crate::run_engine::HandoffOutcome::Allow => (initial_spec, objective, None),
+                    crate::run_engine::HandoffOutcome::Redirect {
+                        guardrail_id,
+                        new_agent_name,
+                    } => {
+                        let new_spec = manager
+                            .registry()
+                            .and_then(|r| r.get(&new_agent_name).cloned())
+                            .unwrap_or_else(|| {
+                                theo_domain::agent_spec::AgentSpec::on_demand(
+                                    &new_agent_name,
+                                    &objective,
+                                )
+                            });
+                        let note = format!(
+                            "[handoff redirected by {} → {}]",
+                            guardrail_id, new_agent_name
+                        );
+                        (new_spec, objective, Some(note))
+                    }
+                    crate::run_engine::HandoffOutcome::RewriteObjective {
+                        guardrail_id,
+                        new_objective,
+                    } => {
+                        let note = format!(
+                            "[handoff objective rewritten by {}]",
+                            guardrail_id
+                        );
+                        (initial_spec, new_objective, Some(note))
+                    }
+                };
 
                 let result = manager
                     .spawn_with_spec_text(&spec, &objective, context.as_deref())
@@ -2458,10 +2527,14 @@ impl AgentRunEngine {
                 self.metrics.record_delegated_tokens(result.tokens_used);
 
                 let mark = if result.success { "✅" } else { "❌" };
+                let prefix = redirect_note
+                    .map(|n| format!("{} ", n))
+                    .unwrap_or_default();
                 combined.push_str(&format!(
-                    "[Sub-agent {}] {} {} ({}): {}\n",
+                    "[Sub-agent {}] {} {}{} ({}): {}\n",
                     i + 1,
                     mark,
+                    prefix,
                     spec.name,
                     spec.source.as_str(),
                     result.summary,
@@ -2475,22 +2548,20 @@ impl AgentRunEngine {
     // Phase 18: handoff guardrail evaluation
     // ---------------------------------------------------------------------
 
-    /// Evaluate the handoff guardrail chain + the PreHandoff lifecycle
-    /// hook. Returns `Some(refusal_message)` to short-circuit the spawn,
-    /// or `None` to allow it.
+    /// Outcome of a handoff evaluation.
     ///
-    /// Side effects:
-    /// - publishes a `EventType::HandoffEvaluated` audit record (always)
-    /// - dispatches `HookEvent::PreHandoff` after the chain (if hooks are
-    ///   attached) — a hook `Block` becomes the final blocker.
-    pub fn evaluate_handoff_or_refuse(
+    /// `Block` short-circuits the spawn with a refusal message returned to
+    /// the LLM. `Redirect`/`Rewrite` mutate the spawn arguments; the caller
+    /// then continues with the new (target_agent, objective) pair.
+    /// `Allow` is the default — proceed unchanged.
+    pub fn evaluate_handoff(
         &self,
         chain: &crate::handoff_guardrail::GuardrailChain,
         source_agent: &str,
         target_agent: &str,
         target_spec: &theo_domain::agent_spec::AgentSpec,
         objective: &str,
-    ) -> Option<String> {
+    ) -> HandoffOutcome {
         use crate::handoff_guardrail::{GuardrailDecision, HandoffContext};
         let ctx = HandoffContext {
             source_agent,
@@ -2512,8 +2583,18 @@ impl AgentRunEngine {
                 _ => None,
             })
             .collect();
+        let mutating = decisions.iter().find_map(|(id, d)| match d {
+            GuardrailDecision::Redirect { new_agent_name } => {
+                Some(("redirect", id.clone(), Some(new_agent_name.clone()), None))
+            }
+            GuardrailDecision::RewriteObjective { new_objective } => {
+                Some(("rewrite", id.clone(), None, Some(new_objective.clone())))
+            }
+            _ => None,
+        });
 
-        // Phase 18: PreHandoff hook (only if no chain block — chain wins first).
+        // Phase 18: PreHandoff hook only fires when no chain block — chain
+        // wins first. Hooks may also Block, becoming the final blocker.
         let hook_block = if blocked_by.is_none() {
             self.subagent_hooks.as_ref().and_then(|hooks| {
                 use crate::lifecycle_hooks::{HookContext, HookEvent, HookResponse};
@@ -2539,6 +2620,8 @@ impl AgentRunEngine {
         let final_block = blocked_by.clone().or(hook_block.clone());
         let decision_label = if final_block.is_some() {
             "block"
+        } else if let Some((label, _, _, _)) = &mutating {
+            *label
         } else if !warnings.is_empty() {
             "warn"
         } else {
@@ -2557,18 +2640,74 @@ impl AgentRunEngine {
                 "decision": decision_label,
                 "reason": final_block.as_ref().map(|(_, r)| r.clone()),
                 "blocked_by": final_block.as_ref().map(|(id, _)| id.clone()),
+                "redirect_to": mutating.as_ref().and_then(|(_, _, n, _)| n.clone()),
+                "rewrite_objective": mutating
+                    .as_ref()
+                    .and_then(|(_, _, _, o)| o.clone())
+                    .map(|s| truncate_handoff_objective(&s)),
+                "mutated_by": mutating.as_ref().map(|(_, id, _, _)| id.clone()),
                 "guardrails_evaluated": chain.ids(),
                 "warnings": warnings,
             }),
         ));
 
-        final_block.map(|(id, reason)| {
-            format!(
-                "[handoff refused by {}] {}",
-                id, reason
-            )
-        })
+        if let Some((id, reason)) = final_block {
+            return HandoffOutcome::Block {
+                refusal_message: format!("[handoff refused by {}] {}", id, reason),
+            };
+        }
+        match mutating {
+            Some(("redirect", id, Some(new), _)) => HandoffOutcome::Redirect {
+                guardrail_id: id,
+                new_agent_name: new,
+            },
+            Some(("rewrite", id, _, Some(new))) => HandoffOutcome::RewriteObjective {
+                guardrail_id: id,
+                new_objective: new,
+            },
+            _ => HandoffOutcome::Allow,
+        }
     }
+
+    /// Backwards-compatible wrapper used by tests written before the
+    /// outcome enum existed. Returns `Some(refusal)` on Block, `None`
+    /// otherwise — note: redirects/rewrites now return None (caller is
+    /// expected to handle them by inspecting the outcome enum directly).
+    #[deprecated(note = "use evaluate_handoff instead")]
+    pub fn evaluate_handoff_or_refuse(
+        &self,
+        chain: &crate::handoff_guardrail::GuardrailChain,
+        source_agent: &str,
+        target_agent: &str,
+        target_spec: &theo_domain::agent_spec::AgentSpec,
+        objective: &str,
+    ) -> Option<String> {
+        match self.evaluate_handoff(chain, source_agent, target_agent, target_spec, objective) {
+            HandoffOutcome::Block { refusal_message } => Some(refusal_message),
+            _ => None,
+        }
+    }
+}
+
+/// Outcome of `AgentRunEngine::evaluate_handoff`. Phase 18 (sota-gaps).
+#[derive(Debug, Clone)]
+pub enum HandoffOutcome {
+    /// Proceed with the spawn unchanged.
+    Allow,
+    /// Refuse the spawn and surface `refusal_message` to the LLM.
+    Block { refusal_message: String },
+    /// Spawn `new_agent_name` instead of the requested target. Objective
+    /// is preserved. `guardrail_id` is logged for the audit event prefix.
+    Redirect {
+        guardrail_id: String,
+        new_agent_name: String,
+    },
+    /// Spawn the requested target but with `new_objective` replacing the
+    /// LLM-provided one.
+    RewriteObjective {
+        guardrail_id: String,
+        new_objective: String,
+    },
 }
 
 fn truncate_handoff_objective(s: &str) -> String {
@@ -3142,12 +3281,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn delegate_task_blocked_when_explorer_asked_to_implement() {
-        // Built-in `ReadOnlyAgentMustNotMutate` should refuse: explorer is
-        // read-only, "implement" is a mutation verb.
+    async fn delegate_task_redirects_when_explorer_asked_to_implement() {
+        // Built-in `ReadOnlyAgentMustNotMutate` now redirects (instead of
+        // blocking): explorer is read-only, "implement" is a mutation verb,
+        // therefore the spawn should target `implementer` and the result
+        // should carry a `[handoff redirected …]` prefix.
         let setup = TestSetup::new();
         let reg = crate::subagent::SubAgentRegistry::with_builtins();
-        // Make sure explorer is in the registry (with_builtins includes it).
         let _ = reg.get("explorer").expect("explorer builtin must exist");
         let engine = setup
             .create_engine("test")
@@ -3160,15 +3300,126 @@ mod tests {
         });
         let result = engine.handle_delegate_task(args).await;
         assert!(
-            result.contains("handoff refused"),
-            "expected handoff refusal, got: {}",
+            result.contains("handoff redirected"),
+            "expected redirect prefix, got: {}",
             result
         );
         assert!(
-            result.contains("read_only_agent_must_not_mutate"),
-            "expected guardrail id in result, got: {}",
+            result.contains("implementer"),
+            "expected redirect target name in result, got: {}",
             result
         );
+    }
+
+    #[tokio::test]
+    async fn delegate_task_redirect_emits_handoff_evaluated_with_decision_redirect() {
+        use crate::event_bus::EventListener;
+        use std::sync::Mutex;
+        use theo_domain::event::{DomainEvent, EventType};
+
+        struct Capture(Mutex<Vec<DomainEvent>>);
+        impl EventListener for Capture {
+            fn on_event(&self, e: &DomainEvent) {
+                self.0.lock().unwrap().push(e.clone());
+            }
+        }
+
+        let setup = TestSetup::new();
+        let capture = std::sync::Arc::new(Capture(Mutex::new(Vec::new())));
+        setup
+            .bus
+            .subscribe(capture.clone() as std::sync::Arc<dyn EventListener>);
+        let mut engine = setup.create_engine("test");
+        let args = serde_json::json!({
+            "agent": "explorer",
+            "objective": "implement evil mutation"
+        });
+        let _ = engine.handle_delegate_task(args).await;
+        let events = capture.0.lock().unwrap().clone();
+        let evt = events
+            .iter()
+            .find(|e| e.event_type == EventType::HandoffEvaluated)
+            .expect("HandoffEvaluated must be emitted");
+        assert_eq!(
+            evt.payload.get("decision").and_then(|v| v.as_str()),
+            Some("redirect"),
+            "decision label must be redirect; payload={}",
+            evt.payload
+        );
+        assert_eq!(
+            evt.payload.get("redirect_to").and_then(|v| v.as_str()),
+            Some("implementer")
+        );
+    }
+
+    #[tokio::test]
+    async fn delegate_task_rewrite_uses_new_objective() {
+        use crate::handoff_guardrail::{
+            GuardrailChain, GuardrailDecision, HandoffContext, HandoffGuardrail,
+        };
+
+        #[derive(Debug)]
+        struct ScopeRewriter;
+        impl HandoffGuardrail for ScopeRewriter {
+            fn id(&self) -> &str { "test.scope_rewriter" }
+            fn evaluate(&self, _ctx: &HandoffContext<'_>) -> GuardrailDecision {
+                GuardrailDecision::RewriteObjective {
+                    new_objective: "scoped: list crates only".into(),
+                }
+            }
+        }
+
+        let setup = TestSetup::new();
+        let mut chain = GuardrailChain::new();
+        chain.add(std::sync::Arc::new(ScopeRewriter));
+        let mut engine = setup
+            .create_engine("test")
+            .with_subagent_handoff_guardrails(std::sync::Arc::new(chain));
+        let args = serde_json::json!({
+            "agent": "explorer",
+            "objective": "list everything in the universe"
+        });
+        let result = engine.handle_delegate_task(args).await;
+        assert!(
+            result.contains("handoff objective rewritten"),
+            "expected rewrite prefix, got: {}",
+            result
+        );
+        assert!(
+            result.contains("test.scope_rewriter"),
+            "expected guardrail id in prefix, got: {}",
+            result
+        );
+    }
+
+    #[tokio::test]
+    async fn delegate_task_block_keeps_returning_refusal_when_chain_blocks() {
+        use crate::handoff_guardrail::{
+            GuardrailChain, GuardrailDecision, HandoffContext, HandoffGuardrail,
+        };
+
+        #[derive(Debug)]
+        struct AlwaysBlock;
+        impl HandoffGuardrail for AlwaysBlock {
+            fn id(&self) -> &str { "test.always_block" }
+            fn evaluate(&self, _ctx: &HandoffContext<'_>) -> GuardrailDecision {
+                GuardrailDecision::Block { reason: "policy".into() }
+            }
+        }
+
+        let setup = TestSetup::new();
+        let mut chain = GuardrailChain::new();
+        chain.add(std::sync::Arc::new(AlwaysBlock));
+        let mut engine = setup
+            .create_engine("test")
+            .with_subagent_handoff_guardrails(std::sync::Arc::new(chain));
+        let args = serde_json::json!({
+            "agent": "implementer",
+            "objective": "anything"
+        });
+        let result = engine.handle_delegate_task(args).await;
+        assert!(result.contains("handoff refused"), "got: {}", result);
+        assert!(result.contains("test.always_block"), "got: {}", result);
     }
 
     #[tokio::test]
@@ -3188,8 +3439,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn delegate_task_emits_handoff_evaluated_event() {
+    async fn delegate_task_emits_handoff_evaluated_event_with_block_payload() {
         use crate::event_bus::EventListener;
+        use crate::handoff_guardrail::{
+            GuardrailChain, GuardrailDecision, HandoffContext, HandoffGuardrail,
+        };
         use std::sync::Mutex;
         use theo_domain::event::{DomainEvent, EventType};
 
@@ -3200,29 +3454,47 @@ mod tests {
             }
         }
 
+        #[derive(Debug)]
+        struct AlwaysBlock;
+        impl HandoffGuardrail for AlwaysBlock {
+            fn id(&self) -> &str { "test.always_block_for_audit" }
+            fn evaluate(&self, _ctx: &HandoffContext<'_>) -> GuardrailDecision {
+                GuardrailDecision::Block {
+                    reason: "audit-test".into(),
+                }
+            }
+        }
+
         let setup = TestSetup::new();
         let capture = std::sync::Arc::new(Capture(Mutex::new(Vec::new())));
-        setup.bus.subscribe(capture.clone() as std::sync::Arc<dyn EventListener>);
-        let mut engine = setup.create_engine("test");
+        setup
+            .bus
+            .subscribe(capture.clone() as std::sync::Arc<dyn EventListener>);
+        let mut chain = GuardrailChain::new();
+        chain.add(std::sync::Arc::new(AlwaysBlock));
+        let mut engine = setup
+            .create_engine("test")
+            .with_subagent_handoff_guardrails(std::sync::Arc::new(chain));
         let args = serde_json::json!({
             "agent": "explorer",
-            "objective": "implement evil mutation"
+            "objective": "anything"
         });
         let _ = engine.handle_delegate_task(args).await;
         let events = capture.0.lock().unwrap().clone();
-        assert!(
-            events.iter().any(|e| e.event_type == EventType::HandoffEvaluated),
-            "HandoffEvaluated event must be emitted"
-        );
         let evt = events
             .iter()
             .find(|e| e.event_type == EventType::HandoffEvaluated)
-            .unwrap();
+            .expect("HandoffEvaluated must be emitted");
         assert_eq!(
             evt.payload.get("decision").and_then(|v| v.as_str()),
             Some("block")
         );
-        assert!(evt.payload.get("blocked_by").and_then(|v| v.as_str()).is_some());
+        assert!(
+            evt.payload
+                .get("blocked_by")
+                .and_then(|v| v.as_str())
+                .is_some()
+        );
     }
 
     #[test]
