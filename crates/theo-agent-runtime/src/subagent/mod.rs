@@ -313,7 +313,16 @@ impl SubAgentManager {
                 }
             }
 
-            // Emit SubagentStarted
+            // Phase 12: build OTel-compatible span attributes for the start event
+            let mut start_span =
+                crate::observability::otel::AgentRunSpan::from_spec(&spec, &run_id);
+            start_span.set("gen_ai.operation.name", "subagent.spawn");
+            start_span.set("theo.subagent.objective", objective.clone());
+            if let Some(cp) = &checkpoint_before {
+                start_span.set("theo.subagent.checkpoint_before", cp.clone());
+            }
+
+            // Emit SubagentStarted (payload includes OTel-aligned attrs)
             self.event_bus.publish(DomainEvent::new(
                 EventType::SubagentStarted,
                 format!("subagent:{}", spec.name).as_str(),
@@ -323,6 +332,7 @@ impl SubAgentManager {
                     "objective": objective,
                     "run_id": run_id,
                     "checkpoint_before": checkpoint_before,
+                    "otel": start_span.to_json(),
                 }),
             ));
 
@@ -593,6 +603,38 @@ impl SubAgentManager {
     }
 
     fn publish_completed(&self, spec: &AgentSpec, result: &AgentResult) {
+        // Phase 12: OTel-aligned attributes for the completion event.
+        let mut span =
+            crate::observability::otel::AgentRunSpan::from_spec(spec, &result.agent_name);
+        span.set(
+            crate::observability::otel::ATTR_USAGE_INPUT_TOKENS,
+            result.input_tokens,
+        );
+        span.set(
+            crate::observability::otel::ATTR_USAGE_OUTPUT_TOKENS,
+            result.output_tokens,
+        );
+        span.set(
+            crate::observability::otel::ATTR_USAGE_TOTAL_TOKENS,
+            result.tokens_used,
+        );
+        span.set(
+            crate::observability::otel::ATTR_THEO_DURATION_MS,
+            result.duration_ms,
+        );
+        span.set(
+            crate::observability::otel::ATTR_THEO_ITERATIONS,
+            result.iterations_used as u64,
+        );
+        span.set(
+            crate::observability::otel::ATTR_THEO_LLM_CALLS,
+            result.llm_calls,
+        );
+        span.set(
+            crate::observability::otel::ATTR_THEO_SUCCESS,
+            result.success,
+        );
+
         self.event_bus.publish(DomainEvent::new(
             EventType::SubagentCompleted,
             format!("subagent:{}", spec.name).as_str(),
@@ -609,6 +651,7 @@ impl SubAgentManager {
                 "iterations_used": result.iterations_used,
                 "cancelled": result.cancelled,
                 "worktree_path": result.worktree_path.as_ref().map(|p| p.to_string_lossy().to_string()),
+                "otel": span.to_json(),
             }),
         ));
         // Phase 12: per-agent metrics aggregation

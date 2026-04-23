@@ -87,6 +87,7 @@ pub struct AgentLoop {
     subagent_checkpoint: Option<Arc<crate::checkpoint::CheckpointManager>>,
     subagent_worktree: Option<Arc<theo_isolation::WorktreeProvider>>,
     subagent_mcp: Option<Arc<theo_infra_mcp::McpRegistry>>,
+    subagent_reloadable: Option<crate::subagent::ReloadableRegistry>,
 }
 
 impl AgentLoop {
@@ -112,6 +113,7 @@ impl AgentLoop {
             subagent_checkpoint: None,
             subagent_worktree: None,
             subagent_mcp: None,
+            subagent_reloadable: None,
         }
     }
 
@@ -176,6 +178,14 @@ impl AgentLoop {
         self
     }
 
+    pub fn with_subagent_reloadable(
+        mut self,
+        r: crate::subagent::ReloadableRegistry,
+    ) -> Self {
+        self.subagent_reloadable = Some(r);
+        self
+    }
+
     /// Forward all subagent integrations to a freshly-built AgentRunEngine.
     fn forward_subagent_integrations(&self, mut engine: AgentRunEngine) -> AgentRunEngine {
         if let Some(r) = &self.subagent_registry {
@@ -198,6 +208,9 @@ impl AgentLoop {
         }
         if let Some(m) = &self.subagent_mcp {
             engine = engine.with_subagent_mcp(m.clone());
+        }
+        if let Some(r) = &self.subagent_reloadable {
+            engine = engine.with_subagent_reloadable(r.clone());
         }
         engine
     }

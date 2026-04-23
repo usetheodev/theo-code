@@ -95,6 +95,11 @@ pub struct AgentRunEngine {
     subagent_checkpoint: Option<Arc<crate::checkpoint::CheckpointManager>>,
     subagent_worktree: Option<Arc<theo_isolation::WorktreeProvider>>,
     subagent_mcp: Option<Arc<theo_infra_mcp::McpRegistry>>,
+    /// Phase 13: optional ReloadableRegistry. When Some, takes precedence
+    /// over `subagent_registry`: each delegate_task call reads
+    /// `reloadable.snapshot()` so changes from the watcher take effect
+    /// immediately without restart.
+    subagent_reloadable: Option<crate::subagent::ReloadableRegistry>,
     /// Phase 9: turns since the last checkpoint (one snapshot per turn,
     /// only when a mutating tool first fires within that turn).
     checkpoint_taken_this_turn: std::sync::atomic::AtomicBool,
@@ -197,6 +202,7 @@ impl AgentRunEngine {
             subagent_checkpoint: None,
             subagent_worktree: None,
             subagent_mcp: None,
+            subagent_reloadable: None,
             checkpoint_taken_this_turn: std::sync::atomic::AtomicBool::new(false),
         }
     }
@@ -295,6 +301,18 @@ impl AgentRunEngine {
     /// `mcp:server:tool` namespace.
     pub fn with_subagent_mcp(mut self, mcp: Arc<theo_infra_mcp::McpRegistry>) -> Self {
         self.subagent_mcp = Some(mcp);
+        self
+    }
+
+    /// Phase 13: inject a ReloadableRegistry. Takes precedence over
+    /// `with_subagent_registry`: delegate_task reads a fresh snapshot
+    /// each call, so filesystem changes (via RegistryWatcher) take effect
+    /// without needing to restart the agent.
+    pub fn with_subagent_reloadable(
+        mut self,
+        reloadable: crate::subagent::ReloadableRegistry,
+    ) -> Self {
+        self.subagent_reloadable = Some(reloadable);
         self
     }
 
@@ -750,6 +768,10 @@ impl AgentRunEngine {
         loop {
             self.run.iteration += 1;
             let iteration = self.run.iteration;
+
+            // Phase 9: reset per-turn checkpoint flag so the first mutating
+            // tool of THIS iteration triggers a snapshot.
+            self.reset_turn_checkpoint();
 
             // Budget check (Invariant 8) — record iteration BEFORE check
             self.budget_enforcer.record_iteration();
@@ -1817,6 +1839,21 @@ impl AgentRunEngine {
                     }
                 }
 
+                // ── PHASE 9: PRE-MUTATION CHECKPOINT ──
+                // Snapshot the workdir BEFORE the first mutating tool of
+                // each iteration. Idempotent within an iteration (CAS).
+                // No-op when no checkpoint manager is attached.
+                if let Some(sha) = self.maybe_checkpoint_for_tool(name, iteration as u32) {
+                    self.event_bus.publish(DomainEvent::new(
+                        EventType::RunStateChanged,
+                        self.run.run_id.as_str(),
+                        serde_json::json!({
+                            "from": "Executing",
+                            "to": format!("Checkpoint:{}:turn-{}", &sha[..sha.len().min(12)], iteration),
+                        }),
+                    ));
+                }
+
                 // Execute regular tool via ToolCallManager (Invariants 2, 3, 5)
                 let tool_args = match call.parse_arguments() {
                     Ok(args) => args,
@@ -2155,19 +2192,23 @@ impl AgentRunEngine {
                 .to_string();
         }
 
-        // Use injected registry when available; otherwise build a default one
-        // with builtins + load_all (TrustAll fallback for non-interactive paths).
-        let registry: Arc<crate::subagent::SubAgentRegistry> = match &self.subagent_registry {
-            Some(r) => r.clone(),
-            None => {
-                let mut reg = crate::subagent::SubAgentRegistry::with_builtins();
-                let _ = reg.load_all(
-                    Some(&self.project_dir),
-                    None,
-                    crate::subagent::ApprovalMode::TrustAll,
-                );
-                Arc::new(reg)
-            }
+        // Phase 13: ReloadableRegistry takes precedence — fresh snapshot
+        // per call so filesystem changes via RegistryWatcher are picked up
+        // immediately. Falls back to static registry, then to builtins+load_all.
+        let registry: Arc<crate::subagent::SubAgentRegistry> = if let Some(rel) =
+            &self.subagent_reloadable
+        {
+            Arc::new(rel.snapshot())
+        } else if let Some(r) = &self.subagent_registry {
+            r.clone()
+        } else {
+            let mut reg = crate::subagent::SubAgentRegistry::with_builtins();
+            let _ = reg.load_all(
+                Some(&self.project_dir),
+                None,
+                crate::subagent::ApprovalMode::TrustAll,
+            );
+            Arc::new(reg)
         };
 
         // Build the manager and chain ALL Phase 5-12 integrations.

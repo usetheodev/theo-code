@@ -1,5 +1,6 @@
 # Plano: Dynamic Sub-Agent System (SOTA — Built-in + Custom + On-demand + Lifecycle + Integration + Isolation)
 
+> **Versao 3.1 (IMPLEMENTADO 100% sem legacy)** — TODAS as 13 fases entregues + integrações end-to-end no pipeline. Sistema novo: `SubAgentRole` enum, `spawn(role,...)`, `subagent`/`subagent_parallel` tools — REMOVIDOS. Apenas `AgentSpec` + `delegate_task` + `spawn_with_spec`. ~2000 testes passando, zero regressão. Hot-reload, MCP, checkpoint per-mutation, OTel spans, todos ATIVOS no execute() loop.
 > **Versao 3.0 (SOTA)** — Revisao 2026-04-23: expansao para nivel SOTA baseado em evidencias diretas dos `referencias/` (Archon, OpenDev, Hermes, Pi-Mono, OpenCode, Rippletide, FFF.nvim, QMD/llm-wiki-compiler) e literatura recente. Escopo elevado de 4 para **13 fases** organizadas em **4 tracks paralelos**: Track A (Fundacao MVP — fases originais), Track B (SOTA Lifecycle), Track C (SOTA Integration), Track D (SOTA Isolation & Observability).
 > **Versao 2.1** — Fechados 3 gaps (G1 manifest aprovacao, G2 path-prefix-containment, G3 AllowedTools enum) e 5 ambiguidades (A1-A5).
 > **Versao 2.0** — Revisado apos reuniao 20260423-021723 (16 agentes, veredito REVISED). Escopo 7 → 4 fases. Seguranca reforcada. TDD detalhado.
@@ -607,7 +608,7 @@ pub struct AgentResult {
 }
 ```
 
-Apenas 2 campos novos. `AgentFinding`/`FindingSeverity` sao DEFERIDOS — serao desenhados quando houver dados reais de output para basear o schema.
+Apenas 2 campos novos visíveis ao MVP. **Status v3.1**: `AgentResult` agora carrega `agent_name`, `context_used`, `structured` (Phase 7), `cancelled` (Phase 6) e `worktree_path` (Phase 11). `AgentFinding`/`FindingSeverity` permanecem como evolucao futura — `structured` aceita `serde_json::Value` arbitrario, suficiente para todos os schemas atuais.
 
 ### Eventos Frontend para Sub-Agents
 
@@ -902,7 +903,7 @@ If delegate_task returns success=false:
 | `crates/theo-domain/src/capability.rs` | `AllowedTools` enum (G3); `BTreeSet` para denied_tools; `CapabilitySet::intersect()` (S2/G2) |
 | `crates/theo-domain/src/event.rs` | Variantes `SubagentStarted`, `SubagentCompleted` |
 | `crates/theo-agent-runtime/src/config.rs` | `AgentConfig.max_on_demand_per_session: usize` (default 20) — A5 |
-| `crates/theo-agent-runtime/src/subagent/mod.rs` | `SubAgentManager` recebe `Arc<SubAgentRegistry>`, `spawn()` recebe `&AgentSpec`, emite eventos. `with_builtins()` para backward compat. |
+| `crates/theo-agent-runtime/src/subagent/mod.rs` | `SubAgentManager` com 7 builders (registry, run_store, hooks, cancellation, checkpoint, worktree_provider, metrics, mcp_registry). Apenas `spawn_with_spec` — `spawn(role)` e `spawn_parallel` REMOVIDOS na v3.1. |
 | `crates/theo-agent-runtime/src/tool_bridge.rs` | Substituir `subagent`/`subagent_parallel` por `delegate_task` com schema dinamico |
 | `crates/theo-agent-runtime/src/run_engine.rs` | `AgentRunEngine.subagent_registry: Arc<SubAgentRegistry>`. Dispatch de `delegate_task` nos 3 sites antigos (linhas 1361/1427/1509). Counter de on-demand por sessao (A5). |
 | `crates/theo-agent-runtime/src/agent_loop.rs` | `AgentResult` ganha `agent_name`, `context_used` |
@@ -1108,7 +1109,7 @@ O `theo-cli` faz prompt textual; `theo-desktop` abre dialog Tauri. Em ambos, apo
 
 **Objetivo:** SubAgentManager usa AgentSpec/Registry. Eventos emitidos. Backward compat.
 
-**Risco principal:** 530+ testes existentes podem quebrar. Mitigacao: `with_builtins()` preserva assinatura antiga.
+**Risco principal:** 530+ testes existentes podem quebrar. **Status v3.1**: TODOS os testes legacy migrados para spec-based API. `SubAgentRole`, `spawn(role)`, `spawn_parallel`, handlers `subagent`/`subagent_parallel` REMOVIDOS. ~2000 testes passando, zero regressão.
 
 **TDD Sequence:**
 
@@ -1128,7 +1129,7 @@ GREEN:
   1. Adicionar SubagentStarted/SubagentCompleted a DomainEvent
   2. Refatorar SubAgentManager:
      - new() recebe Arc<SubAgentRegistry>
-     - with_builtins() para backward compat
+     - with_builtins() — convenience constructor (com 4 builtins pre-loaded)
      - spawn() recebe &AgentSpec (+ context: Option<Vec<Message>>)
      - spawn_with_text_context() helper
      - Emitir SubagentStarted antes do spawn, SubagentCompleted apos
@@ -2005,7 +2006,7 @@ GREEN:
 | Path traversal via intersect | G2: path-prefix-containment garante intersect <= self |
 | Parser de frontmatter fragil | Testes extensivos (8 test cases). Frontmatter invalido → skip com warning (pattern OpenDev) |
 | Breaking change na tool API | `delegate_task` substitui `subagent` + `subagent_parallel` atomicamente na Fase 4 |
-| 530+ testes quebram na Fase 3 | `with_builtins()` preserva assinatura antiga. Bulk-replace em commit dedicado |
+| 530+ testes quebram na Fase 3 | RESOLVIDO v3.1: TODOS migrados para spec-based API. Legacy enum/spawn REMOVIDOS. ~2000 testes 100% passando. |
 | On-demand agent burn tokens (per-agent) | S1: read_only + max_iterations=10 + timeout=120s. Cost guard efetivo |
 | On-demand burn por volume (sessao inteira) | A5: AgentConfig.max_on_demand_per_session (default 20). Erro tipado quando excedido |
 | Project agents de repo malicioso | S3/G1: SHA-256 manifest em `.theo/.agents-approved`. Modificacao de spec → re-aprovacao |

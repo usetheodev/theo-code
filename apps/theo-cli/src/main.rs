@@ -361,21 +361,22 @@ fn build_injections(
     use std::sync::Arc;
     let mut inj = theo_application::use_cases::run_agent_session::SubagentInjections::default();
 
-    // Registry: prefer the watcher-backed reloadable snapshot if active,
-    // otherwise build a fresh builtins+project registry once.
-    let registry = match &features.reloadable {
-        Some(rel) => Arc::new(rel.snapshot()),
-        None => {
-            let mut reg = theo_agent_runtime::subagent::SubAgentRegistry::with_builtins();
-            let _ = reg.load_all(
-                Some(project_dir),
-                None,
-                theo_agent_runtime::subagent::ApprovalMode::TrustAll,
-            );
-            Arc::new(reg)
-        }
-    };
-    inj.registry = Some(registry);
+    // Registry: when --watch-agents is active, expose the LIVE reloadable
+    // (so AgentRunEngine reads a fresh snapshot per delegate_task call).
+    // Otherwise inject a static registry built once with builtins + project.
+    if let Some(rel) = &features.reloadable {
+        inj.reloadable = Some(rel.clone());
+        // Also seed a static snapshot as fallback.
+        inj.registry = Some(Arc::new(rel.snapshot()));
+    } else {
+        let mut reg = theo_agent_runtime::subagent::SubAgentRegistry::with_builtins();
+        let _ = reg.load_all(
+            Some(project_dir),
+            None,
+            theo_agent_runtime::subagent::ApprovalMode::TrustAll,
+        );
+        inj.registry = Some(Arc::new(reg));
+    }
 
     // Persistent run store under <project>/.theo/subagent/
     let store = theo_agent_runtime::subagent_runs::FileSubagentRunStore::new(

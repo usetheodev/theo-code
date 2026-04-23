@@ -30,6 +30,7 @@ pub struct SubagentInjections {
     pub checkpoint: Option<Arc<theo_agent_runtime::checkpoint::CheckpointManager>>,
     pub worktree: Option<Arc<theo_isolation::WorktreeProvider>>,
     pub mcp: Option<Arc<theo_infra_mcp::McpRegistry>>,
+    pub reloadable: Option<theo_agent_runtime::subagent::ReloadableRegistry>,
 }
 
 impl SubagentInjections {
@@ -55,6 +56,9 @@ impl SubagentInjections {
         }
         if let Some(m) = &self.mcp {
             loop_ = loop_.with_subagent_mcp(m.clone());
+        }
+        if let Some(r) = &self.reloadable {
+            loop_ = loop_.with_subagent_reloadable(r.clone());
         }
         loop_
     }
