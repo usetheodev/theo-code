@@ -173,12 +173,7 @@ impl SubAgentManager {
                 .unwrap_or_else(|| self.project_dir.clone());
 
             // Phase 9: auto-snapshot the workdir BEFORE the run (pre-mutation safety)
-            let checkpoint_before: Option<String> = self
-                .checkpoint_manager
-                .as_ref()
-                .and_then(|cm| {
-                    cm.snapshot(&format!("pre-run:{}", spec.name)).ok()
-                });
+            let checkpoint_before: Option<String> = self.snapshot_pre_run(&spec);
 
             // Phase 10: persist run start (no-op when run_store absent)
             let run_id = spawn_helpers::generate_run_id(&spec);
@@ -206,22 +201,15 @@ impl SubAgentManager {
             let start = std::time::Instant::now();
 
             // Phase 6: register child cancellation token (early-bail if root already cancelled)
-            let cancellation_token = self
-                .cancellation
-                .as_ref()
-                .map(|tree| tree.child(&run_id));
-            if let Some(tok) = &cancellation_token
-                && tok.is_cancelled() {
-                    let r = AgentResult {
-                        success: false,
-                        summary: "Sub-agent cancelled before start (parent cancelled)".to_string(),
-                        agent_name: spec.name.clone(),
-                        context_used: context_text.clone(),
-                        duration_ms: start.elapsed().as_millis() as u64,
-                        cancelled: true,
-                        worktree_path: worktree_handle.as_ref().map(|h| h.path.clone()),
-                        ..Default::default()
-                    };
+            let cancellation_token = match self.register_cancellation_or_bail(
+                &run_id,
+                &spec,
+                &context_text,
+                start,
+                worktree_handle.as_ref(),
+            ) {
+                Ok(tok) => tok,
+                Err(r) => {
                     self.persist_early_exit(
                         &run_id,
                         crate::subagent_runs::RunStatus::Cancelled,
@@ -230,18 +218,10 @@ impl SubAgentManager {
                     self.publish_completed(&spec, &r);
                     return r;
                 }
+            };
 
             // Enforce max_depth
-            if self.depth >= MAX_DEPTH {
-                let r = AgentResult {
-                    success: false,
-                    summary: "Sub-agent depth limit reached. Sub-agents cannot spawn sub-agents."
-                        .to_string(),
-                    agent_name: spec.name.clone(),
-                    context_used: context_text.clone(),
-                    duration_ms: start.elapsed().as_millis() as u64,
-                    ..Default::default()
-                };
+            if let Err(r) = self.enforce_max_depth(&spec, &context_text, start) {
                 self.persist_early_exit(
                     &run_id,
                     crate::subagent_runs::RunStatus::Failed,
@@ -254,29 +234,17 @@ impl SubAgentManager {
             // Build sub-agent config (prompt prefix, capabilities, MCP hint, etc.)
             let sub_config = self.build_sub_config(&spec, &agent_cwd, worktree_handle.is_some());
 
-            // Create sub-agent EventBus with prefixed listener tagged by spec.name
-            let sub_bus = Arc::new(crate::event_bus::EventBus::new());
-            let prefixed = Arc::new(PrefixedEventForwarder {
-                role_name: spec.name.clone(),
-                parent_bus: self.event_bus.clone(),
-            });
-            sub_bus.subscribe(prefixed);
+            // Sub-agent EventBus forwards every event to the parent, tagged by spec.name
+            let sub_bus = self.build_prefixed_sub_bus(&spec);
 
             let mut registry = theo_tooling::registry::create_default_registry();
 
             // Phase 17 + Phase 20: register MCP tool adapters (fail-soft).
             self.register_mcp_tool_adapters(&spec, &mut registry).await;
 
-            // Phase 30 (resume-runtime-wiring) — gap #3: consume the
-            // pending resume context (set by Resumer right before this
-            // spawn). When present, the spawned AgentLoop runs in
-            // replay-mode: known call_ids return cached tool_results
-            // instead of re-executing the tool.
-            let pending_resume = self
-                .pending_resume_context
-                .lock()
-                .ok()
-                .and_then(|mut g| g.take());
+            // Phase 30 (resume-runtime-wiring) — gap #3: consume pending
+            // resume context so the spawned AgentLoop runs in replay-mode.
+            let pending_resume = self.take_pending_resume_context();
 
             let mut agent = AgentLoop::new(sub_config, registry);
             if let Some(rc) = pending_resume {
@@ -286,45 +254,18 @@ impl SubAgentManager {
             let history = context.unwrap_or_default();
             let timeout = std::time::Duration::from_secs(spec.timeout_secs);
 
-            // Phase 6: race the agent against (timeout || cancellation)
-            // Phase 11: agent uses worktree path when isolated
+            // Race the agent run against (timeout || cancellation). The
+            // agent uses the worktree path when isolated (Phase 11).
             let agent_run = agent.run_with_history(&objective, &agent_cwd, history, Some(sub_bus));
-            let mut result = if let Some(tok) = cancellation_token {
-                tokio::select! {
-                    res = tokio::time::timeout(timeout, agent_run) => match res {
-                        Ok(r) => r,
-                        Err(_) => AgentResult {
-                            success: false,
-                            summary: format!(
-                                "Sub-agent ({}) timed out after {}s. Objective: {}",
-                                spec.name, spec.timeout_secs, objective
-                            ),
-                            ..Default::default()
-                        },
-                    },
-                    _ = tok.cancelled() => AgentResult {
-                        success: false,
-                        summary: format!(
-                            "Sub-agent ({}) cancelled mid-run by parent",
-                            spec.name
-                        ),
-                        cancelled: true,
-                        ..Default::default()
-                    },
-                }
-            } else {
-                match tokio::time::timeout(timeout, agent_run).await {
-                    Ok(r) => r,
-                    Err(_) => AgentResult {
-                        success: false,
-                        summary: format!(
-                            "Sub-agent ({}) timed out after {}s. Objective: {}",
-                            spec.name, spec.timeout_secs, objective
-                        ),
-                        ..Default::default()
-                    },
-                }
-            };
+            let mut result = spawn_helpers::run_agent_with_timeout(
+                agent_run,
+                timeout,
+                cancellation_token,
+                &spec.name,
+                spec.timeout_secs,
+                &objective,
+            )
+            .await;
 
             // Annotate result with spec metadata
             result.agent_name = spec.name.clone();

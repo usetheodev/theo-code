@@ -24,6 +24,53 @@ use crate::subagent::{SubAgentManager, WorktreeOverride};
 use theo_domain::agent_spec::AgentSpec;
 use theo_domain::event::{DomainEvent, EventType};
 
+/// Race an agent run `future` against a timeout and an optional cancellation
+/// token. Returns the agent's `AgentResult` on success, a synthesized
+/// timeout result, or a synthesized cancellation result. Centralizes the
+/// two legacy branches (with/without token) so the hot path stays readable.
+pub(super) async fn run_agent_with_timeout<F>(
+    future: F,
+    timeout: std::time::Duration,
+    cancellation_token: Option<tokio_util::sync::CancellationToken>,
+    spec_name: &str,
+    timeout_secs: u64,
+    objective: &str,
+) -> AgentResult
+where
+    F: std::future::Future<Output = AgentResult>,
+{
+    let timeout_result = || AgentResult {
+        success: false,
+        summary: format!(
+            "Sub-agent ({}) timed out after {}s. Objective: {}",
+            spec_name, timeout_secs, objective
+        ),
+        ..Default::default()
+    };
+    let cancelled_result = || AgentResult {
+        success: false,
+        summary: format!("Sub-agent ({}) cancelled mid-run by parent", spec_name),
+        cancelled: true,
+        ..Default::default()
+    };
+
+    match cancellation_token {
+        Some(tok) => {
+            tokio::select! {
+                res = tokio::time::timeout(timeout, future) => match res {
+                    Ok(r) => r,
+                    Err(_) => timeout_result(),
+                },
+                _ = tok.cancelled() => cancelled_result(),
+            }
+        }
+        None => match tokio::time::timeout(timeout, future).await {
+            Ok(r) => r,
+            Err(_) => timeout_result(),
+        },
+    }
+}
+
 /// Build a deterministic-unique run_id for a sub-agent invocation using
 /// `spec.name` + wall-clock micros. Collisions require sub-microsecond
 /// spawns of the *same* spec within the same parent — unlikely in practice
@@ -40,6 +87,100 @@ pub(super) fn generate_run_id(spec: &AgentSpec) -> String {
 }
 
 impl SubAgentManager {
+    /// Phase 9: auto-snapshot the workdir BEFORE the run (pre-mutation safety).
+    /// No-op when no `checkpoint_manager` is attached. Failures are swallowed —
+    /// the run proceeds even if snapshot fails (returns `None`).
+    pub(super) fn snapshot_pre_run(&self, spec: &AgentSpec) -> Option<String> {
+        self.checkpoint_manager
+            .as_ref()
+            .and_then(|cm| cm.snapshot(&format!("pre-run:{}", spec.name)).ok())
+    }
+
+    /// Build a child `EventBus` for the sub-agent that forwards every event
+    /// back to the parent bus, tagged by `spec.name`. Returned bus is
+    /// shared-owned (Arc) so it can be cloned into `AgentLoop`.
+    pub(super) fn build_prefixed_sub_bus(
+        &self,
+        spec: &AgentSpec,
+    ) -> std::sync::Arc<crate::event_bus::EventBus> {
+        let sub_bus = std::sync::Arc::new(crate::event_bus::EventBus::new());
+        let prefixed = std::sync::Arc::new(super::PrefixedEventForwarder {
+            role_name: spec.name.clone(),
+            parent_bus: self.event_bus.clone(),
+        });
+        sub_bus.subscribe(prefixed);
+        sub_bus
+    }
+
+    /// Phase 6: register a child cancellation token (scoped to `run_id`) and
+    /// bail out early when the parent is already cancelled. Returns the token
+    /// on the happy path, or a `ready-to-publish` AgentResult when we must
+    /// short-circuit (cancelled-before-start). `None` token return means no
+    /// cancellation tree is attached — the agent runs without cancellation.
+    #[allow(clippy::type_complexity)]
+    pub(super) fn register_cancellation_or_bail(
+        &self,
+        run_id: &str,
+        spec: &AgentSpec,
+        context_text: &Option<String>,
+        start_instant: std::time::Instant,
+        worktree_handle: Option<&theo_isolation::WorktreeHandle>,
+    ) -> Result<Option<tokio_util::sync::CancellationToken>, AgentResult> {
+        let token = self.cancellation.as_ref().map(|tree| tree.child(run_id));
+        if let Some(tok) = &token
+            && tok.is_cancelled()
+        {
+            return Err(AgentResult {
+                success: false,
+                summary: "Sub-agent cancelled before start (parent cancelled)".to_string(),
+                agent_name: spec.name.clone(),
+                context_used: context_text.clone(),
+                duration_ms: start_instant.elapsed().as_millis() as u64,
+                cancelled: true,
+                worktree_path: worktree_handle.map(|h| h.path.clone()),
+                ..Default::default()
+            });
+        }
+        Ok(token)
+    }
+
+    /// Enforce `MAX_DEPTH` on sub-agent nesting. Returns `Err(AgentResult)`
+    /// when the limit is reached (caller persists + publishes); `Ok(())`
+    /// otherwise.
+    pub(super) fn enforce_max_depth(
+        &self,
+        spec: &AgentSpec,
+        context_text: &Option<String>,
+        start_instant: std::time::Instant,
+    ) -> Result<(), AgentResult> {
+        if self.depth >= super::MAX_DEPTH {
+            return Err(AgentResult {
+                success: false,
+                summary: "Sub-agent depth limit reached. Sub-agents cannot spawn sub-agents."
+                    .to_string(),
+                agent_name: spec.name.clone(),
+                context_used: context_text.clone(),
+                duration_ms: start_instant.elapsed().as_millis() as u64,
+                ..Default::default()
+            });
+        }
+        Ok(())
+    }
+
+    /// Phase 30 (resume-runtime-wiring) — gap #3: consume (take) the pending
+    /// resume context set by `Resumer` right before this spawn. When `Some`,
+    /// the spawned `AgentLoop` runs in replay-mode: known call_ids return
+    /// cached tool_results instead of re-executing the tool. Returns `None`
+    /// when no resume is pending or the mutex is poisoned.
+    pub(super) fn take_pending_resume_context(
+        &self,
+    ) -> Option<std::sync::Arc<crate::subagent::resume::ResumeContext>> {
+        self.pending_resume_context
+            .lock()
+            .ok()
+            .and_then(|mut g| g.take())
+    }
+
     /// Phase 17 + Phase 20 (sota-gaps): register McpToolAdapter instances for
     /// every discovered MCP tool advertised in `spec.mcp_servers`. Triggers
     /// auto-discovery (fail-soft) when the cache doesn't already cover the
