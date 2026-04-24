@@ -1,4 +1,4 @@
-//! Memory reviewer trait — Phase 1 of PLAN_AUTO_EVOLUTION_SOTA.
+//! Memory reviewer trait — 
 //!
 //! Background memory reviewer spawned after `memory_review_nudge_interval`
 //! turns. Runs fire-and-forget so it never competes with the user's task

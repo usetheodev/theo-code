@@ -1,6 +1,6 @@
 //! Output format schema for sub-agents (D3 enforcement opcional).
 //!
-//! Track B — Phase 7.
+//! Track B — 
 //!
 //! Permite que `AgentSpec` declare um JSON schema para validar/parsear o
 //! output do sub-agent. Modos:

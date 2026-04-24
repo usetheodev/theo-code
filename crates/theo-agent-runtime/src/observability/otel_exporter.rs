@@ -1,4 +1,4 @@
-//! OTLP exporter — Phase 41 (otlp-exporter-plan).
+//! OTLP exporter — 
 //!
 //! Env-driven configuration that drives the OpenTelemetry SDK exporter.
 //! When `OTLP_ENDPOINT` is unset, `init_otlp_exporter` is a no-op so the

@@ -33,10 +33,10 @@ pub fn registry_to_definitions(registry: &ToolRegistry) -> Vec<ToolDefinition> {
     defs.push(meta_schemas::batch_execute());
     defs.push(meta_schemas::done());
     defs.push(meta_schemas::skill());
-    // Phase 29 follow-up (sota-gaps-followup) — gap #7 fix: the unified
-    // `delegate_task` schema confused weaker tool-callers like Codex, so
-    // we split it into two single-purpose tools with fixed required-shape
-    // schemas. The legacy unified variant stays for backward-compat.
+    // The unified `delegate_task` schema confused weaker tool-callers
+    // like Codex, so we split it into two single-purpose tools with
+    // fixed required-shape schemas. The legacy unified variant stays
+    // for backward-compat.
     defs.push(meta_schemas::delegate_task_single());
     defs.push(meta_schemas::delegate_task_parallel());
     defs.push(meta_schemas::delegate_task_legacy());
@@ -188,7 +188,7 @@ mod tests {
             !names.contains(&"skill"),
             "sub-agents must not see 'skill' tool"
         );
-        // Phase 29 follow-up: also exclude the split variants
+        // follow-up: also exclude the split variants
         assert!(
             !names.contains(&"delegate_task_single"),
             "sub-agents must not see 'delegate_task_single' tool"

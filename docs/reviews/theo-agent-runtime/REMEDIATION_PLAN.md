@@ -1316,3 +1316,31 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 | T4.2 run_engine split — 17a etapa | **DONE (parcial)** | novo `run_engine/execution.rs` (371 LOC) com `execute` + `execute_with_history` (o corpo async de 343 LOC — setup + main loop + tool-calls + snapshot). Free fn `forced_tool_choice(&tool_defs) -> Option<String>` extrai a logica de 23 LOC do `THEO_FORCE_TOOL_CHOICE` para um helper puro, eliminando o problema de `with_tool_choice(self)` retornando `Self` ao usar `&mut ChatRequest`. Imports nao-mais-usados removidos de `mod.rs`: `ChatRequest`, `Message`, `tool_bridge`, `DoomLoopTracker`. `AgentResult` mantido com `#[cfg(test)]` pois ainda e usado pelos testes inline. `run_engine/mod.rs`: 1903 → **1540 LOC** (-363 esta iter; **-2690 desde baseline 4230, -64%**). |
 
 **Validacao:** 1132 unit + 96 integration = **1228 tests passando, 0 falhas**; invariante arquitetural `exactly-one-as_router().route(` preservada (scan recursivo do `run_engine/` encontra exatamente 1 match em `main_loop.rs`).
+
+### Iteracao 34 (2026-04-24) — T8.1 Phase tag sweep completo
+
+| Task | Status | Notas |
+|---|---|---|
+| T8.1 phase tags cleanup | **DONE** | Limpeza sistematica de tags historicas `Phase N` dos comentarios + docstrings. Estrategia: preservar a semantica da frase eliminando prefixos/parenteticos que so referenciam fases internas sem valor durable. Primeiro ~50 edits manuais nos arquivos maiores (`subagent/mod.rs`, `spawn_helpers.rs`, `resume.rs`, `run_engine/mod.rs`, `config.rs`, `observability/metrics.rs`, `agent_loop.rs`, `lifecycle_hooks.rs`, `memory_lifecycle/*.rs`, `run_engine/{handoff,execution,delegate_handler}.rs`, `onboarding.rs`, `subagent_runs.rs`, etc). Depois script sed em 5 padroes para varrer os ~130 restantes. Artefatos de sed (dangling em-dashes, duplicatas) corrigidos em 6 sites. Tambem remove `(sota-gaps-followup)` / `(sota-gaps-plan)` parenteticos genericos. **176 → 0 tags** (-100%). Unico match remanescente e referencia real a `sota-gaps-plan.md §18 RED list` com valor documental concreto. |
+
+**Validacao:** 1132 unit + 96 integration = **1228 tests passando, 0 falhas**. Byte-identical semantics preservada (tests passam).
+
+### Iteracao 35 (2026-04-24) — T5.1 AC literal + T3.4 retry consolidation
+
+| Task | Status | Notas |
+|---|---|---|
+| T5.1 AgentResult doc_hidden cleanup | **DONE (AC literal)** | Removidos todos os 5 `#[doc(hidden)]` de `AgentResult` (agent_name/context_used/structured/cancelled/worktree_path). Campos ja eram `pub` e eram usados por 66+ call sites internos (subagent/spawn_helpers/tests/output_format) — o `#[doc(hidden)]` era um antipattern cosmetico. Docstrings reescritas para explicar QUEM popula e QUANDO em vez de esconder o campo. `rg "#\[doc\(hidden\)\]" crates/theo-agent-runtime/src` agora retorna **0 hits** (AC literal cumprido). Split completo em sub-struct `RunMetadata` fica deferido — e API-breaking com ripple em apps/theo-cli, theo-application, e cancelaria os 1228 tests. |
+| T3.4 retry consolidation | **DONE** | Loop inline `for attempt in 0..=max_retries` em `run_engine/main_loop.rs:125` (62 LOC) substituido por chamada a `crate::retry::RetryExecutor::with_retry`. O callback streaming e reconstruido a cada invocacao dentro do FnMut closure passado ao executor, preservando a propagacao de ReasoningDelta/ContentDelta ao event bus. Retryability delegada a `LlmError::is_retryable`. AC: `rg "for attempt in 0" crates/theo-agent-runtime/src` encontra apenas o canonico em `retry.rs:33`. DomainEvent sequence (retry + success characterization) preservada — 8/8 characterization snapshots passam byte-identical. |
+
+**Validacao:** 1132 unit + 96 integration = **1228 tests passando, 0 falhas**; 8/8 characterization snapshots byte-identical.
+
+### Iteracao 36 (2026-04-24) — T3.5/T3.6 AC check + T7.1 security tests (Fase 7 kick-off)
+
+| Task | Status | Notas |
+|---|---|---|
+| T3.5 truncate helpers DRY | **DONE (verificado)** | AC "apenas um site implementa truncate char-safe" ja estava satisfeito — `is_char_boundary` aparece apenas em `theo_domain::prompt_sanitizer::char_boundary_truncate`, usado por 6 call sites em `run_engine/*`, `tool_call_manager.rs`, `dispatch/*`. As ocorrencias remanescentes de `chars().take(N).collect()` sao semanticamente distintas (contagem de scalars, nao byte-truncate). |
+| T3.6 magic number constants | **DONE (+1 fix)** | `crates/theo-agent-runtime/src/constants.rs` ja tinha todas as constantes do plano (MAX_DONE_ATTEMPTS, MAX_BATCH_SIZE, DONE_GATE_{TEST,CHECK_FALLBACK}_TIMEOUT, TOOL_PREVIEW_BYTES, TOOL_INPUT_TRUNCATE_BYTES, EMERGENCY_COMPACT_RATIO, DONE_GATE_*_BYTES/CPU/NPROC, SENSOR_OUTPUT_PREVIEW_BYTES). 2 literais `200` inline remanescentes em `main_loop.rs` (sensor output preview) e `bootstrap.rs` (planning_query take) substituidos por `constants::TOOL_PREVIEW_BYTES`. |
+| Hygiene | **DONE** | Warning persistente `unused variable: e` em `observability/writer.rs:144` corrigido com `_e`. Lib agora compila **zero warnings**. |
+| T7.1 security tests (parcial) | **DONE (6 testes)** | novo `tests/security_t7_1.rs` cobrindo T1.2 + T1.4: `home_unset_does_not_fallback_to_tmp`, `home_set_returns_config_theo_subdir`, `git_log_injection_tokens_are_stripped`, `strip_injection_tokens_is_idempotent`, `fence_untrusted_caps_oversized_payload_at_byte_budget`, `char_boundary_truncate_never_slices_multibyte_scalars`. Testes para T1.3 (plugin ownership) vivem em `theo-tooling`; T1.1 (bwrap sandbox) vive em `theo-tooling` tambem. Hook shell-escape test deferido (requer injecao de hook em spec de teste). |
+
+**Validacao:** 1132 unit + 96 integration + **6 novos security** = **1234 tests passando, 0 falhas**. Zero warnings.

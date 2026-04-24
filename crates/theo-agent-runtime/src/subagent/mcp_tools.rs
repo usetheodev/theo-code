@@ -1,6 +1,6 @@
 //! `McpToolAdapter` — wraps a discovered MCP tool as a regular `Tool` so
 //! the sub-agent's `ToolRegistry` can route calls through the standard
-//! dispatch path. Phase 17 (sota-gaps-plan).
+//! dispatch path.
 //!
 //! The adapter:
 //! - Identifies itself with `mcp:<server>:<tool>` (Claude Code convention

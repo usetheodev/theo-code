@@ -87,7 +87,7 @@ pub(super) fn generate_run_id(spec: &AgentSpec) -> String {
 }
 
 impl SubAgentManager {
-    /// Phase 9: auto-snapshot the workdir BEFORE the run (pre-mutation safety).
+    /// Auto-snapshot the workdir BEFORE the run (pre-mutation safety).
     /// No-op when no `checkpoint_manager` is attached. Failures are swallowed —
     /// the run proceeds even if snapshot fails (returns `None`).
     pub(super) fn snapshot_pre_run(&self, spec: &AgentSpec) -> Option<String> {
@@ -112,7 +112,7 @@ impl SubAgentManager {
         sub_bus
     }
 
-    /// Phase 6: register a child cancellation token (scoped to `run_id`) and
+    /// Register a child cancellation token (scoped to `run_id`) and
     /// bail out early when the parent is already cancelled. Returns the token
     /// on the happy path, or a `ready-to-publish` AgentResult when we must
     /// short-circuit (cancelled-before-start). `None` token return means no
@@ -167,7 +167,7 @@ impl SubAgentManager {
         Ok(())
     }
 
-    /// Phase 30 (resume-runtime-wiring) — gap #3: consume (take) the pending
+    /// Consume (take) the pending resume context — resume-runtime-wiring.
     /// resume context set by `Resumer` right before this spawn. When `Some`,
     /// the spawned `AgentLoop` runs in replay-mode: known call_ids return
     /// cached tool_results instead of re-executing the tool. Returns `None`
@@ -181,7 +181,7 @@ impl SubAgentManager {
             .and_then(|mut g| g.take())
     }
 
-    /// Phase 17 + Phase 20 (sota-gaps): register McpToolAdapter instances for
+    /// Register McpToolAdapter instances for
     /// every discovered MCP tool advertised in `spec.mcp_servers`. Triggers
     /// auto-discovery (fail-soft) when the cache doesn't already cover the
     /// requested servers, unless disabled via `THEO_MCP_AUTO_DISCOVERY=0`.
@@ -225,7 +225,7 @@ impl SubAgentManager {
         }
     }
 
-    /// Phase 10: persist the SubagentRun "running" record at spawn start.
+    /// Persist the SubagentRun "running" record at spawn start.
     /// No-op when `run_store` is None. Errors are swallowed — failing to
     /// persist start must never block the actual run.
     pub(super) fn persist_run_start(
@@ -247,7 +247,7 @@ impl SubAgentManager {
         let _ = store.save(&run);
     }
 
-    /// Phase 12: build OTel-aligned start span attributes and publish the
+    /// Build OTel-aligned start span attributes and publish the
     /// `SubagentStarted` event with the payload embedding them.
     pub(super) fn emit_subagent_started(
         &self,
@@ -277,7 +277,7 @@ impl SubAgentManager {
         ));
     }
 
-    /// Phase 5: dispatch `SubagentStart` hook. Returns `Some(blocked_result)`
+    /// Dispatch `SubagentStart` hook. Returns `Some(blocked_result)`
     /// when the hook requested a `Block` (caller must short-circuit); returns
     /// `None` to let the run proceed.
     pub(super) fn dispatch_start_hook_or_block(
@@ -301,7 +301,7 @@ impl SubAgentManager {
         }
     }
 
-    /// Phase 10: persist final state for an early-exit path (cancelled,
+    /// Persist final state for an early-exit path (cancelled,
     /// max-depth reached, hook-blocked). Mirrors `finalize_persisted_run`
     /// but accepts an explicit status (the early paths know their outcome
     /// upfront, without waiting for `result.success`).
@@ -324,7 +324,7 @@ impl SubAgentManager {
         let _ = store.save(&run);
     }
 
-    /// Phase 11 + Phase 31: resolve a worktree handle honoring the override.
+    /// Resolve a worktree handle honoring the override.
     /// Precedence:
     ///   - `Reuse(path)` → wrap the existing path with `WorktreeHandle::existing`
     ///     (synthetic branch `"(reused)"` flags it for cleanup-skip).
@@ -368,7 +368,7 @@ impl SubAgentManager {
         }
     }
 
-    /// Phase 5: dispatch `WorktreeCreate` hook (informational). Only fires on
+    /// Dispatch `WorktreeCreate` hook (informational). Only fires on
     /// `Ok(handle)` and only when a `hook_manager` is attached.
     fn dispatch_worktree_create_hook(
         &self,
@@ -387,7 +387,7 @@ impl SubAgentManager {
         );
     }
 
-    /// Phase 10: persist final run status + metrics after the sub-agent loop
+    /// Persist final run status + metrics after the sub-agent loop
     /// completes. No-op when `run_store` is `None` or the run record cannot
     /// be loaded (race / disk failure). Errors are swallowed by design —
     /// failing to persist must never crash the run.
@@ -413,7 +413,7 @@ impl SubAgentManager {
         let _ = store.save(&run);
     }
 
-    /// Phase 7: try to parse the summary against `spec.output_format`.
+    /// Try to parse the summary against `spec.output_format`.
     /// Mutates `result.structured` on success; in strict mode a parse failure
     /// flips `result.success = false` and appends the error to the summary.
     /// In best-effort mode (default) parse failures are silent.
@@ -444,7 +444,7 @@ impl SubAgentManager {
         }
     }
 
-    /// Phase 5: dispatch `SubagentStop` hook (informational — the run already
+    /// Dispatch `SubagentStop` hook (informational — the run already
     /// finished). A `Block` response is treated as a warning suffix appended
     /// to `result.summary` (it cannot cancel post-hoc).
     pub(super) fn dispatch_stop_hook_annotate(
@@ -502,7 +502,7 @@ impl SubAgentManager {
             )
         };
 
-        // Phase 8 + Phase 17: MCP integration — inject prompt hint.
+        // MCP integration — inject prompt hint.
         // Preference: discovery cache (concrete tool names) → registry
         // (legacy namespace placeholder).
         if !spec.mcp_servers.is_empty() {
@@ -525,8 +525,8 @@ impl SubAgentManager {
         sub_config
     }
 
-    /// Phase 11: cleanup worktree on success (default policy: OnSuccess).
-    /// Failures preserve the worktree for inspection. Phase 31 (resume
+    /// Cleanup worktree on success (default policy: OnSuccess).
+    /// Failures preserve the worktree for inspection. Resume-runtime
     /// wiring) — skip removal when the handle's synthetic branch is
     /// `"(reused)"`, since in that case this manager does NOT own the
     /// directory (it was reused from a crashed prior run).

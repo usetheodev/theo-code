@@ -1,4 +1,4 @@
-//! Skill reviewer trait — Phase 3 of PLAN_AUTO_EVOLUTION_SOTA.
+//! Skill reviewer trait — 
 //!
 //! Background skill reviewer spawned after `skill_review_nudge_interval`
 //! tool iterations in a task without any skill being created. Mirror of

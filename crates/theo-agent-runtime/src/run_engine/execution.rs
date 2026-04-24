@@ -97,7 +97,7 @@ impl AgentRunEngine {
             self.run.iteration += 1;
             let iteration = self.run.iteration;
 
-            // Phase 9: reset per-turn checkpoint flag so the first mutating
+            // Reset per-turn checkpoint flag so the first mutating
             // tool of THIS iteration triggers a snapshot.
             self.reset_turn_checkpoint();
 
@@ -331,7 +331,6 @@ impl AgentRunEngine {
     }
 }
 
-/// Phase 29 follow-up (sota-gaps-followup) — closes gap #7.
 /// `THEO_FORCE_TOOL_CHOICE` env var lets operators force the model to call
 /// a tool. Useful for benchmarks / OAuth E2E tests where chatty models like
 /// gpt-5.3-codex would otherwise generate text instead of invoking

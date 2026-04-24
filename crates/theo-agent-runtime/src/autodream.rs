@@ -1,4 +1,4 @@
-//! Autodream — post-session memory consolidation (Phase 2 of
+//! Autodream — post-session memory consolidation (of
 //! `PLAN_AUTO_EVOLUTION_SOTA`).
 //!
 //! Pattern ported from `referencias/opendev/crates/opendev-agents/src/

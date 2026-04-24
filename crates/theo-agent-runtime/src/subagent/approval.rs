@@ -8,7 +8,7 @@
 //! This is the supply-chain attack defense for cloned repos with malicious
 //! `.theo/agents/`.
 //!
-//! Track A — Phase 2 / Decisão S3 / Gap G1.
+//! Track A — approval manifest.
 
 use std::fs;
 use std::io;

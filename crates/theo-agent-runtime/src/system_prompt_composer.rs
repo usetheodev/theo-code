@@ -44,7 +44,7 @@ pub struct SystemPromptComposer {
     mcps: Option<String>,
     subdir: Option<String>,
     skills: Option<String>,
-    /// Phase 4 / D2 + D5: heurísticas de delegate_task — quando delegar e
+    /// / D2 + D5: heurísticas de delegate_task — quando delegar e
     /// como reagir a falhas. Renderizado quando subagents estão disponíveis.
     delegation: Option<String>,
 }
@@ -97,7 +97,7 @@ impl SystemPromptComposer {
         self
     }
 
-    /// Phase 4 / D2 + D5: attach delegation heuristics — when to use
+    /// / D2 + D5: attach delegation heuristics — when to use
     /// `delegate_task` vs do work inline, and how to react when sub-agents fail.
     pub fn with_delegation(mut self, enabled: bool, body: impl Into<String>) -> Self {
         if enabled {

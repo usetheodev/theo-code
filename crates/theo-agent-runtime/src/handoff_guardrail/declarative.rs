@@ -1,7 +1,6 @@
 //! `DeclarativeGuardrail` — TOML/YAML-driven `HandoffGuardrail` impl.
 //!
-//! Phase 23 (sota-gaps-followup): closes gap #2 (PreHandoff hook sem
-//! YAML loader). Schema (`.theo/handoff_guardrails.toml`):
+//! Schema (`.theo/handoff_guardrails.toml`):
 //!
 //! ```toml
 //! [[guardrail]]

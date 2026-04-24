@@ -1,7 +1,5 @@
 //! Lifecycle hooks system — 22 Claude Agent SDK-aligned events.
 //!
-//! Track B — Phase 5.
-//!
 //! Distinct from `hooks.rs` (shell-script-based external hooks). This module
 //! implements **declarative**, **deterministic** hooks with static responses
 //! defined in YAML frontmatter (per-agent) or `AgentConfig` (global).
@@ -50,7 +48,7 @@ pub enum HookEvent {
     WorktreeCreate,
     WorktreeRemove,
     InstructionsLoaded,
-    /// Phase 18: fired right before a `delegate_task` spawn. Hook may
+    /// Fired right before a `delegate_task` spawn. Hook may
     /// `Block` the handoff (returns `HookResponse::Block`) — the
     /// guardrail chain runs first, the hook is the final gate.
     PreHandoff,
@@ -124,7 +122,7 @@ pub struct HookContext {
     pub tool_args: Option<serde_json::Value>,
     /// For PostToolUse: tool result.
     pub tool_result: Option<serde_json::Value>,
-    /// For PreHandoff: target sub-agent name. Phase 24 (sota-gaps-followup).
+    /// For PreHandoff: target sub-agent name.
     pub target_agent: Option<String>,
     /// For PreHandoff: objective string the parent passed to delegate_task.
     pub target_objective: Option<String>,
@@ -180,7 +178,7 @@ impl HookMatcher {
     ///
     /// Match target precedence (first non-None wins):
     /// 1. `tool_name` — PreToolUse / PostToolUse
-    /// 2. `target_agent` — PreHandoff (Phase 24 sota-gaps-followup)
+    /// 2. `target_agent` — PreHandoff
     /// 3. `target_objective` — PreHandoff fallback if target_agent absent
     pub fn matches(&self, ctx: &HookContext) -> Result<bool, regex::Error> {
         match &self.matcher {
@@ -541,7 +539,7 @@ mod tests {
         assert_eq!(back.event_count(), mgr.event_count());
     }
 
-    // ── Phase 24 (sota-gaps-followup): PreHandoff matcher ──
+    // ── PreHandoff matcher ──
 
     pub mod pre_handoff {
         use super::*;

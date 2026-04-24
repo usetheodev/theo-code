@@ -70,7 +70,7 @@ impl GuardrailChain {
     /// Redirect, RewriteObjective, or Warn) paired with its guardrail id.
     /// Returns `None` if every guardrail allowed.
     ///
-    /// Phase 18: chains stop at the first opinionated decision so a custom
+    /// chains stop at the first opinionated decision so a custom
     /// guardrail registered after a built-in does not silently override
     /// the built-in's verdict.
     pub fn first_decision(

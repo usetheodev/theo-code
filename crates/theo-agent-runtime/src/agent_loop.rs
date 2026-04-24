@@ -41,28 +41,27 @@ pub struct AgentResult {
     pub retries: u64,
     /// Wall-clock duration of the run, milliseconds. Filled by the caller.
     pub duration_ms: u64,
-    /// Phase 3: name of the agent that produced this result (empty string
-    /// for top-level / pre-refactor paths — backward compat).
-    #[doc(hidden)]
+    /// Name of the agent that produced this result. Empty string for
+    /// top-level / pre-refactor paths — backward compat. Sub-agent
+    /// callers (including tests) populate this via
+    /// `SubAgentManager::spawn_with_spec`.
     pub agent_name: String,
-    /// Phase 3: optional raw context string passed to the sub-agent (if any).
-    #[doc(hidden)]
+    /// Raw context string passed to the sub-agent, when any. Set by the
+    /// spawn path to the first non-empty `Message.content` of the
+    /// supplied history vec. `None` on the top-level path.
     pub context_used: Option<String>,
-    /// Phase 7: structured output extracted from `summary` per the spec's
+    /// Structured output extracted from `summary` per the spec's
     /// `output_format`. `None` if no schema declared, parse failed in
     /// best_effort mode, or output is plain text.
-    #[doc(hidden)]
     pub structured: Option<serde_json::Value>,
-    /// Phase 6: true when the run terminated via cooperative cancellation
-    /// (parent cancelled, root token, or per-agent token). Distinct from
+    /// True when the run terminated via cooperative cancellation (parent
+    /// cancelled, root token, or per-agent token). Distinct from
     /// `success: false` which covers errors / timeouts.
-    #[doc(hidden)]
     pub cancelled: bool,
-    /// Phase 11: path of the isolated worktree when isolation=worktree.
-    /// `None` when the sub-agent ran in shared CWD.
-    #[doc(hidden)]
+    /// Path of the isolated worktree when `spec.isolation == "worktree"`.
+    /// `None` when the sub-agent ran in the shared project CWD.
     pub worktree_path: Option<std::path::PathBuf>,
-    /// Phase 59 (headless-error-classification-plan): typed reason for
+    /// Typed reason for
     /// the outcome. `None` only on legacy paths that haven't been
     /// migrated. Headless v3 schema emits this field; downstream
     /// statistical comparators use it to separate real agent failures
@@ -584,7 +583,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Phase 30 (resume-runtime-wiring) — gap #3 builder forwarding
+    // Resume-runtime-wiring builder forwarding
     // -----------------------------------------------------------------------
 
     mod with_resume_context {

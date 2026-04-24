@@ -7,7 +7,7 @@
 //! - `subagent::parser` (YAML frontmatter → AgentSpec)
 //! - `skill::parse_skill_file` (key-value frontmatter → SkillDefinition)
 //!
-//! Track A — Phase 2.
+//! Track A — frontmatter parser.
 
 /// Split a markdown content string into `(frontmatter, body)` if it starts
 /// with a `---`-delimited frontmatter block.

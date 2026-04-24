@@ -12,7 +12,7 @@ use super::{
 };
 use crate::config::AgentConfig;
 
-/// PLAN_AUTO_EVOLUTION_SOTA Phase 2 — autodream at session START.
+/// PLAN_AUTO_EVOLUTION_SOTA — autodream at session START.
 /// Fire-and-forget. Respects the provided `attempted` flag so repeat
 /// calls within the same `AgentRunEngine` are no-ops.
 pub fn maybe_spawn_autodream(
@@ -54,7 +54,7 @@ pub fn maybe_spawn_autodream(
     });
 }
 
-/// Phase 5 wiring helper: maybe prepend the bootstrap Q&A prompt.
+/// Wiring helper: maybe prepend the bootstrap Q&A prompt.
 pub fn maybe_prepend_bootstrap(
     cfg: &AgentConfig,
     project_dir: &std::path::Path,
@@ -71,7 +71,7 @@ pub fn maybe_prepend_bootstrap(
     }
 }
 
-/// Phase 4 wiring helper: transcript indexing.
+/// Wiring helper: transcript indexing.
 ///
 /// Runs on the session shutdown path (`record_session_exit`), so we
 /// `.await` the indexer inline instead of `tokio::spawn`ing. A detached
@@ -100,7 +100,7 @@ pub async fn maybe_index_transcript(
     }
 }
 
-/// Phase 1 + 3 wiring helper: evaluate nudges at end-of-turn and spawn
+/// Wiring helper: evaluate nudges at end-of-turn and spawn
 /// reviewers when needed. Returns `true` if either reviewer was spawned
 /// (callers use this for telemetry).
 pub fn maybe_spawn_reviewers(

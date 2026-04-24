@@ -3,8 +3,8 @@
 //! Classifies failure patterns from agent run results and generates
 //! targeted corrective guidance. Pure functions — no IO, no async.
 //!
-//! Phase 1 of the self-improving pilot: heuristic classification.
-//! Phase 2 adds learning persistence. Phase 4 adds LLM-based reflection.
+//! of the self-improving pilot: heuristic classification.
+//! adds learning persistence. adds LLM-based reflection.
 
 // ---------------------------------------------------------------------------
 // FailurePattern
@@ -128,7 +128,7 @@ pub fn guidance_for_pattern(
 /// Heuristic reflector that classifies failures and generates guidance.
 ///
 /// Stateless for the legacy `corrective_guidance` API, but holds an internal
-/// `LoopDetector` (Phase 4, T4.4) that consumes normalized tool calls and
+/// `LoopDetector`  that consumes normalized tool calls and
 /// returns corrective guidance when the detector reports a verdict other
 /// than `Ok`.
 #[derive(Default)]

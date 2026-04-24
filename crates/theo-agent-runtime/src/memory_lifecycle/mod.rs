@@ -69,7 +69,7 @@ impl MemoryLifecycle {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 1 (PLAN_AUTO_EVOLUTION_SOTA): Nudge counter + background reviewer.
+// PLAN_AUTO_EVOLUTION_SOTA: nudge counter + background reviewer.
 // ---------------------------------------------------------------------------
 
 /// Decision emitted by [`should_trigger_memory_review`].
@@ -170,7 +170,7 @@ pub fn recent_review_window(
     messages[start..].to_vec()
 }
 
-// ─── Phase 1/2/3/4/5 wiring helpers (invoked from run_engine.rs) ───
+// ─── Wiring helpers (invoked from run_engine.rs) ───
 // Moved to `wiring.rs`; re-exported here so the public path
 // `crate::memory_lifecycle::maybe_*` stays byte-identical for all callers.
 mod wiring;
@@ -363,7 +363,7 @@ mod phase1_tests {
     }
 }
 
-/// Run-engine helpers (Phase 0 T0.1). Moved to a sibling file to keep
+/// Run-engine helpers. Moved to a sibling file to keep
 /// `memory_lifecycle/mod.rs` below the structural-hygiene cap. Re-exported
 /// here as `pub mod` so the public path
 /// `crate::memory_lifecycle::run_engine_hooks::*` stays byte-identical for
@@ -550,7 +550,7 @@ mod tests {
         MemoryLifecycle::on_session_end(&cfg).await;
     }
 
-    // ── Phase 0 T0.3 tests: inject_episode_history ──────────────
+    // ── inject_episode_history tests ──────────────
     mod t0_3 {
         use super::super::run_engine_hooks::inject_episode_history;
         use theo_infra_llm::types::Message;
