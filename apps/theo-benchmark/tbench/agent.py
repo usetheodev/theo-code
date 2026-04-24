@@ -101,7 +101,7 @@ class TheoAgent(AbstractInstalledAgent):
          the container (post-process step).
     """
 
-    SCHEMA_VERSION = "theo.headless.v2"
+    SCHEMA_VERSION = "theo.headless.v3"
 
     @staticmethod
     def name() -> str:
@@ -309,5 +309,9 @@ class TheoAgent(AbstractInstalledAgent):
                 model,
             )
             data["adapter_version"] = cls.version()
+            # Phase 60 (headless-error-classification-plan): error_class
+            # is optional in v3; preserve as-is when present, default to
+            # None when consumer parses a v2 record.
+            data.setdefault("error_class", None)
             return data
         return {}

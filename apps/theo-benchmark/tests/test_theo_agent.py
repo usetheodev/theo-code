@@ -138,6 +138,32 @@ class TestParseResult(unittest.TestCase):
         # v1 is accepted because the prefix match `theo.headless.*` is loose
         self.assertTrue(result.get("success"))
 
+    def test_v3_schema_propagates_error_class(self) -> None:
+        # Phase 60 (headless-error-classification-plan)
+        line = json.dumps({
+            "schema": "theo.headless.v3",
+            "success": False,
+            "tokens": {"input": 1000, "output": 100},
+            "model": "gpt-5.4",
+            "error_class": "rate_limited",
+        })
+        result = TheoAgent.parse_result(line)
+        self.assertEqual(result.get("error_class"), "rate_limited")
+        self.assertFalse(result.get("success"))
+
+    def test_v2_record_defaults_error_class_to_none(self) -> None:
+        # Backcompat: v2 records (no error_class) get None on parse so
+        # downstream consumers can branch uniformly.
+        line = json.dumps({
+            "schema": "theo.headless.v2",
+            "success": True,
+            "tokens": {"input": 100, "output": 50},
+            "model": "gpt-5.4",
+        })
+        result = TheoAgent.parse_result(line)
+        self.assertIsNone(result.get("error_class"))
+        self.assertTrue(result.get("success"))
+
     def test_returns_empty_when_no_valid_json_line(self) -> None:
         stdout = "[noise] no JSON here\nanother line\n"
         self.assertEqual(TheoAgent.parse_result(stdout), {})

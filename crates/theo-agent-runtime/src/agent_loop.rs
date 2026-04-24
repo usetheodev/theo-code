@@ -62,6 +62,15 @@ pub struct AgentResult {
     /// `None` when the sub-agent ran in shared CWD.
     #[doc(hidden)]
     pub worktree_path: Option<std::path::PathBuf>,
+    /// Phase 59 (headless-error-classification-plan): typed reason for
+    /// the outcome. `None` only on legacy paths that haven't been
+    /// migrated. Headless v3 schema emits this field; downstream
+    /// statistical comparators use it to separate real agent failures
+    /// from infra failures (rate-limit, auth, sandbox).
+    ///
+    /// Invariant (validated by tests): `success == true ⇔ class ==
+    /// Some(ErrorClass::Solved)`.
+    pub error_class: Option<theo_domain::error_class::ErrorClass>,
 }
 
 /// The main agent loop that orchestrates LLM ↔ tool execution.

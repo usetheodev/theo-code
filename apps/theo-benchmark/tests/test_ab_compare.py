@@ -25,10 +25,13 @@ from runner.ab_compare import (  # noqa: E402
     build_per_task_matrix,
     choose_recommendation,
     compute_pair_stats,
+    count_infra_failures,
+    is_real_outcome,
     load_records,
     main,
     mcnemar_test,
     write_per_task_matrix_csv,
+    INFRA_FAILURE_CLASSES,
 )
 
 
@@ -199,6 +202,77 @@ class TestMainIntegration(unittest.TestCase):
             md = (ab / "comparison.md").read_text()
             self.assertIn("# Prompt A/B Comparison", md)
             self.assertIn("McNemar", md)
+
+
+class TestPhase62InfraExclusion(unittest.TestCase):
+    """Phase 62 (headless-error-classification-plan) — infra failures
+    must be excluded from paired statistical analysis."""
+
+    def test_is_real_outcome_returns_false_for_infra_failures(self) -> None:
+        for ec in INFRA_FAILURE_CLASSES:
+            rec = {"task_id": "x", "passed": False, "error_class": ec}
+            self.assertFalse(is_real_outcome(rec), f"infra class {ec!r} must be excluded")
+
+    def test_is_real_outcome_returns_true_for_solved_or_exhausted(self) -> None:
+        for ec in ("solved", "exhausted", "aborted", "cancelled"):
+            rec = {"task_id": "x", "passed": True, "error_class": ec}
+            self.assertTrue(is_real_outcome(rec), f"non-infra class {ec!r} must be included")
+
+    def test_is_real_outcome_treats_v2_records_as_real(self) -> None:
+        # Backcompat: legacy records WITHOUT error_class get the benefit
+        # of the doubt and count as real outcomes.
+        rec = {"task_id": "x", "passed": True}
+        self.assertTrue(is_real_outcome(rec))
+
+    def test_compute_pair_stats_excludes_infra_failures(self) -> None:
+        # Trial t2 is rate-limited in B → drops out of paired set
+        records = {
+            "A": {
+                "t1": {"task_id": "t1", "passed": True, "error_class": "solved",
+                       "cost_usd": 0.10, "iterations": 5},
+                "t2": {"task_id": "t2", "passed": False, "error_class": "exhausted",
+                       "cost_usd": 0.20, "iterations": 35},
+                "t3": {"task_id": "t3", "passed": True, "error_class": "solved",
+                       "cost_usd": 0.15, "iterations": 7},
+            },
+            "B": {
+                "t1": {"task_id": "t1", "passed": False, "error_class": "exhausted",
+                       "cost_usd": 0.30, "iterations": 35},
+                "t2": {"task_id": "t2", "passed": False, "error_class": "rate_limited",
+                       "cost_usd": 0.0, "iterations": 1},  # EXCLUDED
+                "t3": {"task_id": "t3", "passed": True, "error_class": "solved",
+                       "cost_usd": 0.20, "iterations": 8},
+            },
+        }
+        stats = compute_pair_stats("A", "B", records)
+        # 3 candidate, 1 excluded → 2 paired
+        self.assertEqual(stats["n_paired"], 2)
+        self.assertEqual(stats["n_excluded_b"], 1)
+        self.assertEqual(stats["n_excluded_a"], 0)
+
+    def test_count_infra_failures(self) -> None:
+        recs = {
+            "t1": {"error_class": "solved"},
+            "t2": {"error_class": "rate_limited"},
+            "t3": {"error_class": "quota_exceeded"},
+            "t4": {"error_class": "exhausted"},
+            "t5": {"error_class": "auth_failed"},
+        }
+        # rate_limited + quota_exceeded + auth_failed = 3
+        self.assertEqual(count_infra_failures(recs), 3)
+
+    def test_recommendation_warns_when_too_many_excluded(self) -> None:
+        # Synthetic: 1 paired vs 5 excluded → quality warning fires
+        pair_stats = [{
+            "variant_a": "sota", "variant_b": "sota-lean",
+            "n_paired": 1,
+            "n_excluded_a": 0,
+            "n_excluded_b": 5,
+            "a_pass": 1, "b_pass": 0,
+            "mcnemar": {"p_value": 0.5, "b": 1, "c": 0},
+        }]
+        rec = choose_recommendation(pair_stats)
+        self.assertIn("Data quality concern", rec)
 
 
 if __name__ == "__main__":

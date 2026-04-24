@@ -5,6 +5,7 @@ pub mod capability;
 pub mod code_intel;
 pub mod episode;
 pub mod error;
+pub mod error_class;
 pub mod event;
 pub mod evolution;
 pub mod graph_context;

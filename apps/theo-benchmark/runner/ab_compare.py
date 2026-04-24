@@ -121,6 +121,50 @@ def bootstrap_paired_diff_ci(
     }
 
 
+# --------------------------------------------------------------------------- #
+# Phase 62 (headless-error-classification-plan) — infra failure exclusion     #
+# --------------------------------------------------------------------------- #
+
+# error_class values that represent infrastructure failures (provider 429,
+# auth, sandbox denial, context window). These outcomes do NOT reflect agent
+# behavior, so the paired statistical comparison MUST exclude them — counting
+# them as "agent failed" would bias the A/B against any variant that runs
+# after a costly variant (the smoke3 incident).
+INFRA_FAILURE_CLASSES = frozenset({
+    "rate_limited",
+    "quota_exceeded",
+    "auth_failed",
+    "context_overflow",
+    "sandbox_denied",
+})
+
+
+def is_real_outcome(record: dict | None) -> bool:
+    """True if `record` reflects a genuine agent outcome (not infra failure).
+
+    A trial counts as "real" when:
+      - the record exists (we ran the trial), AND
+      - error_class is NOT in INFRA_FAILURE_CLASSES.
+
+    Records without `error_class` (legacy v2 schema) are treated as real —
+    we have no evidence of infra failure, so trust the success/passed flag.
+    """
+    if record is None:
+        return False
+    ec = record.get("error_class")
+    if ec is None:
+        return True  # legacy v2 — no classification, assume real
+    return ec not in INFRA_FAILURE_CLASSES
+
+
+def count_infra_failures(records_by_task: dict[str, dict]) -> int:
+    """Count records with error_class in INFRA_FAILURE_CLASSES."""
+    return sum(
+        1 for r in records_by_task.values()
+        if r is not None and r.get("error_class") in INFRA_FAILURE_CLASSES
+    )
+
+
 def build_per_task_matrix(
     variants: list[str],
     records: dict[str, dict[str, dict]],
@@ -145,11 +189,25 @@ def compute_pair_stats(
     variant_a: str, variant_b: str,
     records: dict[str, dict[str, dict]],
 ) -> dict:
-    """Build the full statistical packet for one variant pair."""
-    common = set(records.get(variant_a, {}).keys()) & set(records.get(variant_b, {}).keys())
-    common_ids = sorted(common)
-    a_recs = [records[variant_a][t] for t in common_ids]
-    b_recs = [records[variant_b][t] for t in common_ids]
+    """Build the full statistical packet for one variant pair.
+
+    Phase 62: excludes tasks where EITHER variant had an infra failure
+    (rate-limited, quota exceeded, etc.) from the paired McNemar — those
+    outcomes don't reflect agent behavior, so counting them would bias
+    the comparison.
+    """
+    a_records = records.get(variant_a, {})
+    b_records = records.get(variant_b, {})
+    # Phase 62: paired set is intersection of REAL outcomes only
+    candidate = set(a_records.keys()) & set(b_records.keys())
+    common_ids = sorted(
+        t for t in candidate
+        if is_real_outcome(a_records.get(t)) and is_real_outcome(b_records.get(t))
+    )
+    a_recs = [a_records[t] for t in common_ids]
+    b_recs = [b_records[t] for t in common_ids]
+    n_excluded_a = count_infra_failures(a_records)
+    n_excluded_b = count_infra_failures(b_records)
 
     # McNemar
     b_count = sum(1 for ra, rb in zip(a_recs, b_recs)
@@ -185,6 +243,8 @@ def compute_pair_stats(
         "variant_a": variant_a,
         "variant_b": variant_b,
         "n_paired": len(common_ids),
+        "n_excluded_a": n_excluded_a,
+        "n_excluded_b": n_excluded_b,
         "a_pass": a_pass,
         "b_pass": b_pass,
         "a_pass_rate": round(a_pass / len(common_ids), 4) if common_ids else 0.0,
@@ -201,7 +261,24 @@ def choose_recommendation(pair_stats: list[dict], significance: float = 0.05) ->
 
     Picks the variant with highest pass rate that has at least one
     statistically significant (p<significance) win against another.
+
+    Phase 62: also warns when too many trials were excluded due to
+    infra failures — high exclusion ratio means the dataset is unreliable.
     """
+    # Data quality check: total exclusions vs total paired
+    total_paired = sum(ps.get("n_paired", 0) for ps in pair_stats)
+    total_excluded = sum(
+        ps.get("n_excluded_a", 0) + ps.get("n_excluded_b", 0)
+        for ps in pair_stats
+    )
+    quality_warning = ""
+    if total_paired > 0 and total_excluded > total_paired:
+        quality_warning = (
+            f"\n\n**Data quality concern**: {total_excluded} infra-failure "
+            f"exclusions vs {total_paired} valid paired trials. Re-run with "
+            "more headroom on TPM/quota before trusting these results."
+        )
+
     significant_wins = {}
     for ps in pair_stats:
         if ps["mcnemar"]["p_value"] < significance:
@@ -212,12 +289,14 @@ def choose_recommendation(pair_stats: list[dict], significance: float = 0.05) ->
             "**Inconclusive** — no pair reached statistical significance at "
             f"p<{significance}. Consider running with larger N (current sample "
             "may be too small to detect the effect)."
+            + quality_warning
         )
     top = max(significant_wins, key=significant_wins.get)
     n_wins = significant_wins[top]
     return (
         f"**Adopt `{top}`** — wins {n_wins} significant pairwise comparison(s) "
         f"at p<{significance}."
+        + quality_warning
     )
 
 
@@ -311,14 +390,22 @@ def render_comparison_md(
     lines.append("")
     lines.append("## Pairwise comparisons (McNemar)")
     lines.append("")
-    lines.append("| Pair | n | b (A>B) | c (B>A) | p-value | Method | Cost diff (95% CI) |")
-    lines.append("|---|---:|---:|---:|---:|---|---|")
+    lines.append(
+        "Phase 62: trials with infra failures (rate-limited, quota exceeded, "
+        "auth, sandbox) are EXCLUDED from the paired set — they reflect "
+        "provider state, not agent behavior."
+    )
+    lines.append("")
+    lines.append("| Pair | n | excl A | excl B | b (A>B) | c (B>A) | p-value | Method | Cost diff (95% CI) |")
+    lines.append("|---|---:|---:|---:|---:|---:|---:|---|---|")
     for ps in pair_stats:
         cd = ps["cost_diff_usd"]
         ci_str = f"${cd['mean']:+.4f} [{cd['ci_low']:+.4f}, {cd['ci_high']:+.4f}]"
         lines.append(
             f"| `{ps['variant_a']}` vs `{ps['variant_b']}` | "
-            f"{ps['n_paired']} | {ps['mcnemar']['b']} | {ps['mcnemar']['c']} | "
+            f"{ps['n_paired']} | "
+            f"{ps.get('n_excluded_a', 0)} | {ps.get('n_excluded_b', 0)} | "
+            f"{ps['mcnemar']['b']} | {ps['mcnemar']['c']} | "
             f"{ps['mcnemar']['p_value']:.4f} | {ps['mcnemar']['method']} | "
             f"{ci_str} |"
         )

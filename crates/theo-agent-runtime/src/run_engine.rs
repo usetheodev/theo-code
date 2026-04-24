@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use theo_domain::agent_run::{AgentRun, RunState};
 use theo_domain::budget::Budget;
+use theo_domain::error_class::ErrorClass;
 use theo_domain::event::{DomainEvent, EventType};
 use theo_domain::identifiers::{RunId, TaskId};
 use theo_domain::session::{MessageId, SessionId};
@@ -902,6 +903,8 @@ impl AgentRunEngine {
                     llm_calls: self.metrics.snapshot().total_llm_calls,
                     retries: self.metrics.snapshot().total_retries,
                     duration_ms: 0,
+                    // Phase 59: budget exhaustion = Exhausted
+                    error_class: Some(theo_domain::error_class::ErrorClass::Exhausted),
                     ..Default::default()
                 };
             }
@@ -1283,6 +1286,10 @@ impl AgentRunEngine {
                         .task_manager
                         .transition(&self.task_id, TaskState::Failed);
                     self.metrics.record_run_complete(false);
+                    // Phase 59: classify the LLM error so headless v3
+                    // consumers (ab_compare) can separate infra failures
+                    // (rate-limit, auth, overflow) from real outcomes.
+                    let class = llm_error_to_class(&e);
                     return AgentResult {
                         success: false,
                         summary: format!("LLM error: {e}"),
@@ -1297,6 +1304,7 @@ impl AgentRunEngine {
                     llm_calls: self.metrics.snapshot().total_llm_calls,
                     retries: self.metrics.snapshot().total_retries,
                     duration_ms: 0,
+                    error_class: Some(class),
                     ..Default::default()
                     };
                 }
@@ -1402,6 +1410,7 @@ impl AgentRunEngine {
                     llm_calls: self.metrics.snapshot().total_llm_calls,
                     retries: self.metrics.snapshot().total_retries,
                     duration_ms: 0,
+                    error_class: Some(ErrorClass::Solved),
                     ..Default::default()
                 };
             }
@@ -1505,6 +1514,7 @@ impl AgentRunEngine {
                     llm_calls: self.metrics.snapshot().total_llm_calls,
                     retries: self.metrics.snapshot().total_retries,
                     duration_ms: 0,
+                    error_class: Some(ErrorClass::Solved),
                     ..Default::default()
                         });
                         break;
@@ -1682,6 +1692,7 @@ impl AgentRunEngine {
                     llm_calls: self.metrics.snapshot().total_llm_calls,
                     retries: self.metrics.snapshot().total_retries,
                     duration_ms: 0,
+                    error_class: Some(ErrorClass::Solved),
                     ..Default::default()
                     });
                     break;
@@ -2191,6 +2202,7 @@ impl AgentRunEngine {
                     llm_calls: self.metrics.snapshot().total_llm_calls,
                     retries: self.metrics.snapshot().total_retries,
                     duration_ms: 0,
+                    error_class: Some(ErrorClass::Aborted),
                     ..Default::default()
                             };
                         }
@@ -2863,6 +2875,27 @@ pub enum HandoffOutcome {
     },
 }
 
+/// Phase 59 (headless-error-classification-plan): map an LLM error to its
+/// canonical `ErrorClass`. Used at every site in `execute_with_history`
+/// that returns `AgentResult` from a failed LLM call so headless v3
+/// consumers can distinguish infra failures (rate-limit, quota, auth)
+/// from agent failures.
+fn llm_error_to_class(e: &theo_infra_llm::LlmError) -> ErrorClass {
+    use theo_infra_llm::LlmError;
+    match e {
+        LlmError::RateLimited { .. } => ErrorClass::RateLimited,
+        // Phase 61: distinct from RateLimited because retry doesn't help
+        // for quota exhaustion — only the billing cycle reset clears it.
+        LlmError::QuotaExceeded { .. } => ErrorClass::QuotaExceeded,
+        LlmError::AuthFailed(_) => ErrorClass::AuthFailed,
+        LlmError::ContextOverflow { .. } => ErrorClass::ContextOverflow,
+        // Network / Timeout / ServiceUnavailable / Parse / Api / etc.
+        // — none of these match a more specific class, so they fall
+        // into the catch-all "internal abort".
+        _ => ErrorClass::Aborted,
+    }
+}
+
 fn truncate_handoff_objective(s: &str) -> String {
     if s.chars().count() <= 200 {
         s.to_string()
@@ -3292,6 +3325,110 @@ mod tests {
         assert_eq!(result.summary, "done");
         assert_eq!(result.files_edited.len(), 1);
         assert_eq!(result.iterations_used, 5);
+    }
+
+    #[test]
+    fn agent_result_default_has_no_error_class() {
+        // Phase 59 backcompat — legacy tests that build AgentResult via
+        // ..Default::default() must keep working even if they don't set
+        // error_class. Default is None.
+        let r = AgentResult::default();
+        assert!(r.error_class.is_none());
+    }
+
+    #[test]
+    fn invariant_solved_iff_success_true() {
+        // Property: if AgentResult.error_class == Some(Solved), then
+        // success MUST be true. Conversely, if success == true, the
+        // class (if set) MUST be Solved. This is the headline invariant
+        // of the headless v3 schema.
+        use theo_domain::error_class::ErrorClass;
+        let variants = [
+            ErrorClass::Solved,
+            ErrorClass::Exhausted,
+            ErrorClass::RateLimited,
+            ErrorClass::QuotaExceeded,
+            ErrorClass::AuthFailed,
+            ErrorClass::ContextOverflow,
+            ErrorClass::SandboxDenied,
+            ErrorClass::Cancelled,
+            ErrorClass::Aborted,
+            ErrorClass::InvalidTask,
+        ];
+        for v in variants {
+            // Construct the legitimate combinations.
+            let solved_pair = AgentResult {
+                success: true,
+                error_class: Some(ErrorClass::Solved),
+                ..Default::default()
+            };
+            assert!(solved_pair.success);
+            assert_eq!(solved_pair.error_class, Some(ErrorClass::Solved));
+            // success=false with any non-Solved class is OK.
+            if v != ErrorClass::Solved {
+                let failed_pair = AgentResult {
+                    success: false,
+                    error_class: Some(v),
+                    ..Default::default()
+                };
+                assert!(!failed_pair.success);
+                assert_ne!(failed_pair.error_class, Some(ErrorClass::Solved));
+            }
+        }
+    }
+
+    mod llm_error_class_mapping {
+        use super::*;
+        use theo_domain::error_class::ErrorClass;
+        use theo_infra_llm::LlmError;
+
+        #[test]
+        fn llm_error_to_class_maps_rate_limit() {
+            let class = super::super::llm_error_to_class(
+                &LlmError::RateLimited { retry_after: None },
+            );
+            assert_eq!(class, ErrorClass::RateLimited);
+        }
+
+        #[test]
+        fn llm_error_to_class_maps_auth_failure() {
+            let class = super::super::llm_error_to_class(
+                &LlmError::AuthFailed("bad token".into()),
+            );
+            assert_eq!(class, ErrorClass::AuthFailed);
+        }
+
+        #[test]
+        fn llm_error_to_class_maps_context_overflow() {
+            let class = super::super::llm_error_to_class(&LlmError::ContextOverflow {
+                provider: "openai".into(),
+                message: "too long".into(),
+            });
+            assert_eq!(class, ErrorClass::ContextOverflow);
+        }
+
+        #[test]
+        fn llm_error_to_class_falls_back_to_aborted_for_unknown() {
+            // Network error doesn't have a dedicated ErrorClass — should
+            // map to Aborted (catch-all) so consumers know the run did
+            // terminate unexpectedly without misclassifying as infra.
+            let class = super::super::llm_error_to_class(&LlmError::Timeout);
+            assert_eq!(class, ErrorClass::Aborted);
+            let class = super::super::llm_error_to_class(&LlmError::ServiceUnavailable);
+            assert_eq!(class, ErrorClass::Aborted);
+        }
+
+        #[test]
+        fn llm_error_to_class_maps_quota_exceeded() {
+            // Phase 61: distinct from RateLimited so ab_compare can
+            // separate "agent retry exhausted" from "account hit billing
+            // ceiling — bench is unusable until reset."
+            let class = super::super::llm_error_to_class(&LlmError::QuotaExceeded {
+                provider: "openai".into(),
+                message: "insufficient_quota".into(),
+            });
+            assert_eq!(class, ErrorClass::QuotaExceeded);
+        }
     }
 
     #[test]
@@ -4023,6 +4160,29 @@ mod tests {
             assert!(r.success, "done accepted is the ONLY success-true path");
             assert!(r.summary.contains("[accepted after"));
         }
+
+        // Phase 59 (headless-error-classification-plan) — error_class
+        // population on the canonical helpers.
+
+        #[test]
+        fn budget_exceeded_returns_exhausted_class() {
+            let r = budget_exceeded_result(0, vec![], 35, "max_iterations");
+            assert!(!r.success);
+            assert_eq!(
+                r.error_class,
+                Some(theo_domain::error_class::ErrorClass::Exhausted)
+            );
+        }
+
+        #[test]
+        fn done_accepted_returns_solved_class() {
+            let r = done_accepted_result("ok", vec![], 5, 1);
+            assert!(r.success);
+            assert_eq!(
+                r.error_class,
+                Some(theo_domain::error_class::ErrorClass::Solved)
+            );
+        }
     }
 
     // Helpers below mirror the code paths in execute_with_history. They
@@ -4047,6 +4207,7 @@ mod tests {
             ),
             files_edited: edits_files,
             iterations_used: iteration,
+            error_class: Some(theo_domain::error_class::ErrorClass::Exhausted),
             ..Default::default()
         }
     }
@@ -4062,6 +4223,7 @@ mod tests {
             summary: format!("{} [accepted after {} done attempts]", summary, done_attempts),
             files_edited: edits_files,
             iterations_used: iteration,
+            error_class: Some(theo_domain::error_class::ErrorClass::Solved),
             ..Default::default()
         }
     }

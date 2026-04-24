@@ -834,8 +834,11 @@ tool, time pressure), say so honestly — don't claim success.\n";
             .await;
         result.duration_ms = started.elapsed().as_millis() as u64;
 
-        let json = serde_json::json!({
-            "schema": "theo.headless.v2",
+        // Phase 60 (headless-error-classification-plan): bump schema to
+        // v3 + emit error_class. Field is omitted (not null) when None
+        // so v2 consumers ignore it without surprise.
+        let mut json = serde_json::json!({
+            "schema": "theo.headless.v3",
             "success": result.success,
             "summary": result.summary,
             "iterations": result.iterations_used,
@@ -862,6 +865,9 @@ tool, time pressure), say so honestly — don't claim success.\n";
                 "theo_version": env!("CARGO_PKG_VERSION"),
             },
         });
+        if let Some(ec) = result.error_class {
+            json["error_class"] = serde_json::Value::String(ec.to_string());
+        }
         println!("{}", serde_json::to_string(&json).unwrap_or_default());
 
         std::process::exit(if result.success { 0 } else { 1 });
