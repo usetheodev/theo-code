@@ -6,6 +6,7 @@ mod bootstrap;
 mod builders;
 mod dispatch;
 mod lifecycle;
+mod main_loop;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -568,43 +569,15 @@ impl AgentRunEngine {
             // LLM call
             self.transition_run(RunState::Planning);
 
-            // --- Routing decision (plan §R3) ---
-            // Consult the configured router; when absent, fall back to
-            // the session defaults. The router is called exactly once
-            // per turn at this single call site (invariant enforced by
-            // structural_hygiene.rs).
-            let latest_user_msg = messages
-                .iter()
-                .rev()
-                .find(|m| matches!(m.role, theo_infra_llm::types::Role::User))
-                .and_then(|m| m.content.as_deref());
-            let mut routing_ctx =
-                theo_domain::routing::RoutingContext::new(theo_domain::routing::RoutingPhase::Normal);
-            routing_ctx.latest_user_message = latest_user_msg;
-            routing_ctx.conversation_tokens = estimated_context_tokens as u64;
-            routing_ctx.iteration = iteration;
-            routing_ctx.requires_tool_use = !tool_defs.is_empty();
-            let (chosen_model, chosen_effort, routing_reason): (String, Option<String>, &'static str) =
-                match &self.config.router {
-                    Some(handle) => {
-                        let choice = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            handle.as_router().route(&routing_ctx)
-                        }));
-                        match choice {
-                            Ok(c) => (c.model_id, c.reasoning_effort, c.routing_reason),
-                            Err(_) => (
-                                self.config.model.clone(),
-                                self.config.reasoning_effort.clone(),
-                                "router_panic_fallback_default",
-                            ),
-                        }
-                    }
-                    None => (
-                        self.config.model.clone(),
-                        self.config.reasoning_effort.clone(),
-                        "no_router",
-                    ),
-                };
+            // Routing decision — extracted to main_loop::choose_model.
+            // The router is called exactly once per turn at this single
+            // call site (invariant enforced by structural_hygiene.rs).
+            let (chosen_model, chosen_effort, routing_reason) = self.choose_model(
+                &messages,
+                iteration,
+                estimated_context_tokens as u64,
+                !tool_defs.is_empty(),
+            );
 
             let mut request = ChatRequest::new(&chosen_model, messages.clone())
                 .with_tools(tool_defs.clone())
@@ -804,61 +777,15 @@ impl AgentRunEngine {
                     resp
                 }
                 Err(e) if e.is_context_overflow() => {
-                    // T5.5 FM-6: snapshot hot files BEFORE compaction destroys them.
-                    for f in &self.working_set.hot_files {
-                        self.pre_compaction_hot_files.insert(f.clone());
-                    }
-                    // Reactive context overflow recovery: emergency compact at 50%
-                    // and retry once. Pi-mono ref: packages/ai/src/utils/overflow.ts
-                    self.event_bus.publish(DomainEvent::new(
-                        EventType::ContextOverflowRecovery,
-                        self.run.run_id.as_str(),
-                        serde_json::json!({
-                            "error": e.to_string(),
-                            "action": "emergency_compaction",
-                            "target_ratio": 0.5,
-                        }),
-                    ));
-
-                    // Emergency compaction: keep only a bounded fraction of context.
-                    let model_ctx = self.config.context_window_tokens;
-                    let target = (model_ctx as f64
-                        * crate::constants::EMERGENCY_COMPACT_RATIO)
-                        as usize;
-                    let before_len = messages.len();
-                    crate::compaction::compact_messages_to_target(
-                        &mut messages,
-                        target,
-                        "", // No task objective available at this level
-                    );
-                    eprintln!(
-                        "[theo] Context overflow recovery: compacted {} → {} messages (target {})",
-                        before_len,
-                        messages.len(),
-                        target
-                    );
-
-                    // Do NOT retry inline — the next loop iteration will re-call LLM
-                    // with the compacted context.
+                    // Extracted to main_loop::handle_context_overflow.
+                    // Do NOT retry inline — the next loop iteration will
+                    // re-call LLM with the compacted context.
+                    self.handle_context_overflow(&e, &mut messages);
                     continue;
                 }
                 Err(e) => {
-                    self.transition_run(RunState::Aborted);
-                    let _ = self
-                        .task_manager
-                        .transition(&self.task_id, TaskState::Failed);
-                    self.metrics.record_run_complete(false);
-                    // Phase 59: classify the LLM error so headless v3
-                    // consumers (ab_compare) can separate infra failures
-                    // (rate-limit, auth, overflow) from real outcomes.
-                    let class = llm_error_to_class(&e);
-                    return AgentResult::from_engine_state(
-                        self,
-                        false,
-                        format!("LLM error: {e}"),
-                        false,
-                        class,
-                    );
+                    // Extracted to main_loop::build_llm_abort_result.
+                    return self.build_llm_abort_result(&e);
                 }
             };
 
@@ -1914,9 +1841,7 @@ pub enum HandoffOutcome {
 // ---------------------------------------------------------------------------
 
 use crate::doom_loop::DoomLoopTracker;
-use crate::run_engine_helpers::{
-    derive_provider_hint, llm_error_to_class, truncate_handoff_objective,
-};
+use crate::run_engine_helpers::{derive_provider_hint, truncate_handoff_objective};
 use theo_domain::clock::now_millis;
 
 // NOTE: `derive_provider_hint`, `llm_error_to_class`,
@@ -2215,7 +2140,7 @@ mod tests {
 
         #[test]
         fn llm_error_to_class_maps_rate_limit() {
-            let class = super::super::llm_error_to_class(
+            let class = crate::run_engine_helpers::llm_error_to_class(
                 &LlmError::RateLimited { retry_after: None },
             );
             assert_eq!(class, ErrorClass::RateLimited);
@@ -2223,7 +2148,7 @@ mod tests {
 
         #[test]
         fn llm_error_to_class_maps_auth_failure() {
-            let class = super::super::llm_error_to_class(
+            let class = crate::run_engine_helpers::llm_error_to_class(
                 &LlmError::AuthFailed("bad token".into()),
             );
             assert_eq!(class, ErrorClass::AuthFailed);
@@ -2231,7 +2156,7 @@ mod tests {
 
         #[test]
         fn llm_error_to_class_maps_context_overflow() {
-            let class = super::super::llm_error_to_class(&LlmError::ContextOverflow {
+            let class = crate::run_engine_helpers::llm_error_to_class(&LlmError::ContextOverflow {
                 provider: "openai".into(),
                 message: "too long".into(),
             });
@@ -2243,9 +2168,9 @@ mod tests {
             // Network error doesn't have a dedicated ErrorClass — should
             // map to Aborted (catch-all) so consumers know the run did
             // terminate unexpectedly without misclassifying as infra.
-            let class = super::super::llm_error_to_class(&LlmError::Timeout);
+            let class = crate::run_engine_helpers::llm_error_to_class(&LlmError::Timeout);
             assert_eq!(class, ErrorClass::Aborted);
-            let class = super::super::llm_error_to_class(&LlmError::ServiceUnavailable);
+            let class = crate::run_engine_helpers::llm_error_to_class(&LlmError::ServiceUnavailable);
             assert_eq!(class, ErrorClass::Aborted);
         }
 
@@ -2254,7 +2179,7 @@ mod tests {
             // Phase 61: distinct from RateLimited so ab_compare can
             // separate "agent retry exhausted" from "account hit billing
             // ceiling — bench is unusable until reset."
-            let class = super::super::llm_error_to_class(&LlmError::QuotaExceeded {
+            let class = crate::run_engine_helpers::llm_error_to_class(&LlmError::QuotaExceeded {
                 provider: "openai".into(),
                 message: "insufficient_quota".into(),
             });
