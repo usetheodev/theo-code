@@ -1290,3 +1290,13 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 | T4.6 handoff_guardrail split | **DONE (parcial)** | Adicionados 2 children em `handoff_guardrail/`: `chain.rs` (88 LOC) com `GuardrailChain` (add/evaluate/first_block/first_decision + with_default_builtins); `builtins.rs` (94 LOC) com `ReadOnlyAgentMustNotMutate` + `ObjectiveMustNotBeEmpty` (inclusive heuristica `objective_implies_mutation` + `is_capability_set_read_only`). Re-exportados via `pub use chain::*; pub use builtins::*` para manter paths publicos byte-identical. Corrigido import de `ToolCategory` (de `theo_domain::capability` — onde nao existe — para `theo_domain::tool::ToolCategory`). `handoff_guardrail/mod.rs`: 811 → **657 LOC** (-154, **-19% vs baseline**). |
 
 **Validacao:** 1132 unit + 96 integration = **1228 tests passando, 0 falhas**; 53/53 handoff_guardrail unit tests.
+
+### Iteracao 31 (2026-04-24) — Fase 4: T4.6 observability/report split (ultimo god-file)
+
+| Task | Status | Notas |
+|---|---|---|
+| T4.6 observability/report split | **DONE (parcial)** | `observability/report.rs` (832 LOC) convertido para `observability/report/` com child `metrics.rs` (454 LOC) contendo 7 metricas completas + seus `compute_*`: `TokenMetrics` (T3.8), `LoopMetrics` + `PhaseMetric` + `BudgetUtilization` (T3.9), `ToolBreakdown` (T3.10), `ContextHealthMetrics` + helper `extract_u64` (T3.11), `MemoryMetrics` (T3.12), `SubagentMetrics`, `ErrorTaxonomy`. Free fn `safe_div` duplicado no child (privado) para manter desacoplamento. `mod.rs` agora mantem apenas `RunReport` (struct agregador) + 29 unit tests + re-exports via `pub use metrics::*`. Imports de tipos usados so em testes (`Budget`, `BudgetUsage`, `TokenUsage`, `ProjectedStep`, `StepOutcome`) marcados `#[cfg(test)]`. `observability/report/mod.rs`: 832 → **410 LOC** (-422, **-51% vs baseline**). |
+
+**Validacao:** 1132 unit + 96 integration = **1228 tests passando, 0 falhas**; 29/29 report unit tests.
+
+**Marco:** Com este split, TODOS os 9 god-files originais foram refatorados. Zero arquivos com >=800 LOC intocados na crate `theo-agent-runtime`.
