@@ -130,6 +130,28 @@ def run_scenario(scenario: dict, theo_bin: Path, keep_tmp: bool, temperature: fl
         else:
             error = "no JSON line on stdout"
 
+        # Phase 46 (benchmark-validation-plan): attach cost_usd from pricing.toml
+        if headless and "tokens" in headless:
+            try:
+                # Lazy import to avoid hard dep when adapter unavailable
+                import sys as _sys
+                from pathlib import Path as _Path
+                _root = _Path(__file__).resolve().parents[1]
+                if str(_root) not in _sys.path:
+                    _sys.path.insert(0, str(_root))
+                from pricing import compute_cost as _cost
+                tokens = headless.get("tokens", {}) or {}
+                model = headless.get("model", "") or os.environ.get("THEO_MODEL", "")
+                headless["cost_usd"] = _cost(
+                    int(tokens.get("input", 0) or 0),
+                    int(tokens.get("output", 0) or 0),
+                    model,
+                )
+            except Exception as _e:
+                # Pricing failure must NOT abort the smoke run.
+                headless["cost_usd"] = 0.0
+                headless["cost_error"] = str(_e)
+
         # Run success_check
         check_passed = False
         check_stderr = ""
@@ -186,6 +208,7 @@ def aggregate(results: list[dict]) -> dict:
     total_input = total_output = total_iter = total_tools = 0
     total_llm_calls = total_retries = 0
     total_duration_ms = 0
+    total_cost_usd = 0.0
     for r in results:
         cat = r["category"]
         slot = by_cat.setdefault(cat, {"total": 0, "passed": 0})
@@ -203,9 +226,10 @@ def aggregate(results: list[dict]) -> dict:
         total_llm_calls += llm.get("calls", 0) or 0
         total_retries += llm.get("retries", 0) or 0
         total_duration_ms += h.get("duration_ms", 0) or 0
+        total_cost_usd += float(h.get("cost_usd", 0.0) or 0.0)
 
     return {
-        "schema": "theo.smoke.v1",
+        "schema": "theo.smoke.v2",  # v2 bumps for cost_usd
         "scenarios_total": total,
         "scenarios_passed": passed,
         "pass_rate": round(passed / total, 3) if total else 0.0,
@@ -217,6 +241,7 @@ def aggregate(results: list[dict]) -> dict:
             "llm_calls": total_llm_calls,
             "retries": total_retries,
             "duration_ms": total_duration_ms,
+            "cost_usd": round(total_cost_usd, 6),
         },
         "by_category": by_cat,
     }
