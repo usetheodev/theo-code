@@ -16,7 +16,7 @@ docker run --rm \
   -v "$REPO:/repo" \
   -v "/opt/theo-target-portable:/repo/target" \
   -w /repo \
-  rust:1.83-slim-bullseye \
+  rust:1.95-slim-bullseye \
   bash -c "
     apt-get update -qq && apt-get install -y -qq pkg-config libssl-dev cmake build-essential >/dev/null
     cargo build --release --features otel -p theo --bin theo
