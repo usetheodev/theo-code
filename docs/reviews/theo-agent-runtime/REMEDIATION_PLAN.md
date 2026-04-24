@@ -1282,3 +1282,11 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 | T4.6 session_tree split | **DONE (parcial)** | `session_tree.rs` (921 LOC) convertido para modulo `session_tree/` com 2 children: `types.rs` (171 LOC) com `EntryId` + `SessionEntry` + `SessionTreeError` (tipos puros, sem referencias a SessionTree); `context_builder.rs` (104 LOC) com `impl SessionTree` de `build_context` + `walk_to_root` + free fn `build_context_with_compaction` que encapsula a logica de reconstruir o slice pos-compaction. Re-exportados via `pub use types::*` para manter paths publicos byte-identical. `build_context`: 62 LOC → 39 LOC com o helper `build_context_with_compaction`. `session_tree/mod.rs`: 921 → **684 LOC** (-237, **-26% vs baseline**). |
 
 **Validacao:** 1132 unit + 96 integration = **1228 tests passando, 0 falhas**; 14/14 session_tree unit tests.
+
+### Iteracao 30 (2026-04-24) — Fase 4: T4.6 handoff_guardrail split
+
+| Task | Status | Notas |
+|---|---|---|
+| T4.6 handoff_guardrail split | **DONE (parcial)** | Adicionados 2 children em `handoff_guardrail/`: `chain.rs` (88 LOC) com `GuardrailChain` (add/evaluate/first_block/first_decision + with_default_builtins); `builtins.rs` (94 LOC) com `ReadOnlyAgentMustNotMutate` + `ObjectiveMustNotBeEmpty` (inclusive heuristica `objective_implies_mutation` + `is_capability_set_read_only`). Re-exportados via `pub use chain::*; pub use builtins::*` para manter paths publicos byte-identical. Corrigido import de `ToolCategory` (de `theo_domain::capability` — onde nao existe — para `theo_domain::tool::ToolCategory`). `handoff_guardrail/mod.rs`: 811 → **657 LOC** (-154, **-19% vs baseline**). |
+
+**Validacao:** 1132 unit + 96 integration = **1228 tests passando, 0 falhas**; 53/53 handoff_guardrail unit tests.
