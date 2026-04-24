@@ -9,8 +9,6 @@ pub mod compaction_stages;
 pub mod compaction_summary;
 pub mod config;
 pub mod convergence;
-#[doc(hidden)] // Dead code: exported but never instantiated externally
-pub mod correction;
 pub mod dlq;
 pub mod event_bus;
 pub mod evolution;
@@ -47,8 +45,6 @@ pub mod roadmap;
 pub mod sanitizer;
 pub mod run_engine;
 pub mod sensor;
-#[doc(hidden)] // Dead code: exported but never instantiated externally
-pub mod scheduler;
 pub mod session_tree;
 pub mod session_bootstrap;
 pub mod state_manager;

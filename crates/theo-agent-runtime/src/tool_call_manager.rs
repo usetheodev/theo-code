@@ -107,7 +107,7 @@ impl ToolCallManager {
         }
 
         // 1. Transition Queued → Dispatched (under lock)
-        let lmm_call = {
+        let llm_call = {
             let mut records = self.records.lock().expect("records lock poisoned");
             let record = records
                 .get_mut(call_id)
@@ -147,7 +147,7 @@ impl ToolCallManager {
 
         // 3. Execute tool via tool_bridge (no lock held)
         let start = std::time::Instant::now();
-        let (message, success) = tool_bridge::execute_tool_call(registry, &lmm_call, ctx).await;
+        let (message, success) = tool_bridge::execute_tool_call(registry, &llm_call, ctx).await;
         let duration_ms = start.elapsed().as_millis() as u64;
 
         // 4. Determine final state
@@ -304,12 +304,7 @@ fn truncate_input_for_event(mut input: serde_json::Value) -> serde_json::Value {
     input
 }
 
-fn now_millis() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("system clock before UNIX epoch")
-        .as_millis() as u64
-}
+use theo_domain::clock::now_millis;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ToolCallManagerError {

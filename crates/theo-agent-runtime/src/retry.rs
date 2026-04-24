@@ -30,8 +30,6 @@ impl RetryExecutor {
         Fut: Future<Output = Result<T, E>>,
         E: Display,
     {
-        let mut last_error: Option<E> = None;
-
         for attempt in 0..=policy.max_retries {
             match f().await {
                 Ok(value) => return Ok(value),
@@ -60,12 +58,17 @@ impl RetryExecutor {
 
                     let delay = policy.delay_for_attempt(attempt);
                     tokio::time::sleep(delay).await;
-                    last_error = Some(e);
                 }
             }
         }
 
-        Err(last_error.expect("retry loop should have returned"))
+        // Unreachable: the loop covers 0..=max_retries inclusive; the
+        // branch `attempt == max_retries` returns `Err(e)` before falling
+        // through. Kept as `unreachable!()` (not `.expect()`) so refactors
+        // that break this invariant surface as a compile-time lint or a
+        // clearer panic message instead of the ambiguous "retry loop
+        // should have returned".
+        unreachable!("retry loop always returns from within via Ok(v) or Err(e) paths")
     }
 }
 

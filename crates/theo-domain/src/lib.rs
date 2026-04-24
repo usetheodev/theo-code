@@ -2,6 +2,7 @@ pub mod agent_run;
 pub mod agent_spec;
 pub mod budget;
 pub mod capability;
+pub mod clock;
 pub mod code_intel;
 pub mod episode;
 pub mod error;

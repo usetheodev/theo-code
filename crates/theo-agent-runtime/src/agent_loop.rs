@@ -441,44 +441,6 @@ fn load_plugin_tools(registry: &mut theo_tooling::registry::ToolRegistry, projec
     }
 }
 
-#[allow(dead_code)]
-async fn has_real_changes(project_dir: &Path) -> bool {
-    let output = tokio::process::Command::new("git")
-        .args(["diff", "--stat"])
-        .current_dir(project_dir)
-        .output()
-        .await;
-
-    match output {
-        Ok(out) => {
-            let stdout = String::from_utf8_lossy(&out.stdout);
-            !stdout.trim().is_empty()
-        }
-        Err(_) => true,
-    }
-}
-
-/// Generate a phase-specific nudge message if appropriate.
-/// Kept as free function for backward compatibility with existing tests.
-#[allow(dead_code)]
-fn phase_nudge(
-    state: &crate::loop_state::ContextLoopState,
-    iteration: usize,
-    max_iterations: usize,
-) -> Option<String> {
-    let two_thirds = (max_iterations * 2) / 3;
-
-    match state.phase {
-        crate::loop_state::LoopPhase::Edit if iteration >= two_thirds && state.edits_succeeded == 0 => {
-            Some("URGENT: You have very few iterations left and NO successful edits. Stop reading/searching and EDIT a file NOW.".to_string())
-        }
-        crate::loop_state::LoopPhase::Edit if state.edit_attempts > 3 && state.edits_succeeded == 0 => {
-            Some("Your edits keep failing. Read the target file again carefully, then try a different edit approach.".to_string())
-        }
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -491,22 +453,6 @@ mod tests {
             ..Default::default()
         };
         assert!(!result.success);
-    }
-
-    #[test]
-    fn test_phase_nudge_urgent() {
-        let mut state = crate::loop_state::ContextLoopState::new();
-        state.phase = crate::loop_state::LoopPhase::Edit;
-        let nudge = phase_nudge(&state, 10, 15);
-        assert!(nudge.is_some());
-        assert!(nudge.unwrap().contains("URGENT"));
-    }
-
-    #[test]
-    fn test_phase_nudge_none_in_explore() {
-        let state = crate::loop_state::ContextLoopState::new();
-        let nudge = phase_nudge(&state, 1, 15);
-        assert!(nudge.is_none());
     }
 
     #[test]

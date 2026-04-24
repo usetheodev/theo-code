@@ -699,11 +699,14 @@ impl AgentRunEngine {
                 boot_parts.push(progress_msg);
             }
 
-            // Recent git activity (max 20 commits, best-effort)
-            if let Ok(output) = std::process::Command::new("git")
+            // Recent git activity (max 20 commits, best-effort).
+            // Uses tokio::process to avoid blocking the async worker on a
+            // slow/locked git repo.
+            if let Ok(output) = tokio::process::Command::new("git")
                 .args(["log", "--oneline", "-20"])
                 .current_dir(&self.project_dir)
                 .output()
+                .await
                 && output.status.success() {
                     let log = String::from_utf8_lossy(&output.stdout);
                     let log = log.trim();
@@ -1076,7 +1079,10 @@ impl AgentRunEngine {
                     "any" => "required".to_string(),
                     other if other.starts_with("function:") => {
                         let name = other.trim_start_matches("function:");
-                        format!(r#"{{"type":"function","name":"{}"}}"#, name)
+                        // Use serde_json to safely encode the tool name.
+                        // Hand-rolled format!(r#"{{"name":"{}"}}"#, name)
+                        // produces broken JSON if `name` contains a quote.
+                        serde_json::json!({"type": "function", "name": name}).to_string()
                     }
                     other => other.to_string(),
                 };
@@ -3057,13 +3063,7 @@ fn detect_project_name_simple(project_dir: &std::path::Path) -> Option<String> {
 // ---------------------------------------------------------------------------
 
 use crate::doom_loop::DoomLoopTracker;
-
-fn now_millis() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("system clock before UNIX epoch")
-        .as_millis() as u64
-}
+use theo_domain::clock::now_millis;
 
 /// Phase 43 (otlp-exporter-plan) — heuristic mapping `base_url → provider`
 /// for the OTel `gen_ai.system` attribute. Conservative: returns
