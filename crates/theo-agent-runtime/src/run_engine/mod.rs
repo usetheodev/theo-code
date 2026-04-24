@@ -30,7 +30,6 @@ use crate::event_bus::EventBus;
 use crate::loop_state::ContextLoopState;
 use crate::metrics::{MetricsCollector, RuntimeMetrics};
 use crate::persistence::SnapshotStore;
-use crate::snapshot::RunSnapshot;
 use crate::task_manager::TaskManager;
 use crate::tool_bridge;
 use crate::tool_call_manager::ToolCallManager;
@@ -704,36 +703,9 @@ impl AgentRunEngine {
             // ── EVALUATING phase ──
             self.transition_run(RunState::Evaluating);
 
-            // Save snapshot if store is configured (Invariant 7)
-            if let Some(ref store) = self.snapshot_store
-                && let Some(task) = self.task_manager.get(&self.task_id) {
-                    // Collect real tool calls and results for this task.
-                    let tool_calls = self.tool_call_manager.calls_for_task(&self.task_id);
-                    let tool_results: Vec<theo_domain::tool_call::ToolResultRecord> = tool_calls
-                        .iter()
-                        .filter_map(|tc| self.tool_call_manager.get_result(&tc.call_id))
-                        .collect();
-
-                    // Serialize conversation messages.
-                    let messages_json: Vec<serde_json::Value> = messages
-                        .iter()
-                        .filter_map(|m| serde_json::to_value(m).ok())
-                        .collect();
-
-                    let mut snapshot = RunSnapshot::new(
-                        self.run.clone(),
-                        task,
-                        tool_calls,
-                        tool_results,
-                        self.event_bus.events(),
-                        self.budget_enforcer.usage(),
-                        messages_json,
-                        vec![], // DLQ entries
-                    );
-                    snapshot.working_set = Some(self.working_set.clone());
-                    snapshot.checksum = snapshot.compute_checksum();
-                    let _ = store.save(&self.run.run_id, &snapshot).await;
-                }
+            // Snapshot persistence — extracted to
+            // main_loop::persist_snapshot_if_configured.
+            self.persist_snapshot_if_configured(&messages).await;
 
             // After executing tools, evaluate and loop back to Planning
             self.transition_run(RunState::Replanning);

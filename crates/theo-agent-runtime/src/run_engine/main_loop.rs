@@ -246,6 +246,42 @@ impl AgentRunEngine {
         Ok(resp)
     }
 
+    /// Persist the current run snapshot (if a snapshot store is
+    /// attached). Collects tool calls + results + events + messages
+    /// into `RunSnapshot` and forwards to the store. Fail-soft — any
+    /// store error is swallowed (shutdown path is best-effort per
+    /// Invariant 7).
+    pub(super) async fn persist_snapshot_if_configured(&self, messages: &[Message]) {
+        let Some(ref store) = self.snapshot_store else {
+            return;
+        };
+        let Some(task) = self.task_manager.get(&self.task_id) else {
+            return;
+        };
+        let tool_calls = self.tool_call_manager.calls_for_task(&self.task_id);
+        let tool_results: Vec<theo_domain::tool_call::ToolResultRecord> = tool_calls
+            .iter()
+            .filter_map(|tc| self.tool_call_manager.get_result(&tc.call_id))
+            .collect();
+        let messages_json: Vec<serde_json::Value> = messages
+            .iter()
+            .filter_map(|m| serde_json::to_value(m).ok())
+            .collect();
+        let mut snapshot = crate::snapshot::RunSnapshot::new(
+            self.run.clone(),
+            task,
+            tool_calls,
+            tool_results,
+            self.event_bus.events(),
+            self.budget_enforcer.usage(),
+            messages_json,
+            vec![], // DLQ entries
+        );
+        snapshot.working_set = Some(self.working_set.clone());
+        snapshot.checksum = snapshot.compute_checksum();
+        let _ = store.save(&self.run.run_id, &snapshot).await;
+    }
+
     /// Execute a non-meta tool call end-to-end: parse args →
     /// prepare_arguments → enqueue → dispatch → budget/metrics record →
     /// failure-pattern tracker. Returns `Some((success, output))` when

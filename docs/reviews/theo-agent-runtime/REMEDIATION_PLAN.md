@@ -1218,3 +1218,11 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 | T4.2 run_engine split — 14a etapa | **DONE (parcial)** | `execute_regular_tool_call` (~90 LOC) em `main_loop.rs`: parse args (Option early-return) + `prepare_arguments` hook + enqueue + ToolContext build + `dispatch_and_execute` + extract (success, output) + budget/metrics record + failure_tracker record. Retorna `Option<(bool, String)>`: `None` → caller `continue`s; `Some((success, output))` caso contrario. Bloco de ~60 LOC no main loop colapsa em let-else de 5 linhas. `mod.rs`: 2439 → **2387 LOC** (-52 esta iter; **-1843 desde baseline 4230, -44%**). main_loop.rs: 924 → 1010 LOC. |
 
 **Validacao:** 1132 unit + 96 integration = 1228 tests passando, 0 falhas.
+
+### Iteracao 22 (2026-04-24) — Fase 4: snapshot persistence
+
+| Task | Status | Notas |
+|---|---|---|
+| T4.2 run_engine split — 15a etapa | **DONE (parcial)** | `persist_snapshot_if_configured` (~35 LOC) em `main_loop.rs`: coleta tool_calls + results + events + serializa messages + builda `RunSnapshot` + `store.save()`. Fail-soft. Bloco de ~30 LOC no final do loop colapsa em 1 chamada. `mod.rs`: 2387 → **2359 LOC** (-28 esta iter; **-1871 desde baseline 4230, -44%**). main_loop.rs: 1010 → 1046 LOC. |
+
+**Validacao:** 1132 unit + 96 integration = 1228 tests passando, 0 falhas.
