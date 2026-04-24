@@ -13,13 +13,8 @@ use std::sync::Arc;
 
 use theo_domain::agent_run::{AgentRun, RunState};
 use theo_domain::budget::Budget;
-use theo_domain::error_class::ErrorClass;
 use theo_domain::event::{DomainEvent, EventType};
 use theo_domain::identifiers::{RunId, TaskId};
-use theo_domain::session::{MessageId, SessionId};
-use theo_domain::task::TaskState;
-use theo_domain::tool::ToolContext;
-use theo_domain::tool_call::ToolCallState;
 use theo_infra_llm::LlmClient;
 use theo_infra_llm::types::{ChatRequest, Message};
 use theo_tooling::registry::ToolRegistry;
@@ -35,7 +30,6 @@ use crate::event_bus::EventBus;
 use crate::loop_state::ContextLoopState;
 use crate::metrics::{MetricsCollector, RuntimeMetrics};
 use crate::persistence::SnapshotStore;
-use crate::snapshot::RunSnapshot;
 use crate::task_manager::TaskManager;
 use crate::tool_bridge;
 use crate::tool_call_manager::ToolCallManager;
@@ -458,123 +452,19 @@ impl AgentRunEngine {
             // tool of THIS iteration triggers a snapshot.
             self.reset_turn_checkpoint();
 
-            // Budget check (Invariant 8) — record iteration BEFORE check
-            self.budget_enforcer.record_iteration();
-            if let Err(violation) = self.budget_enforcer.check() {
-                self.transition_run(RunState::Aborted);
-                let _ = self
-                    .task_manager
-                    .transition(&self.task_id, TaskState::Failed);
-
-                let summary = format!(
-                    "Budget exceeded: {}. Edits succeeded: {}. Files: {}",
-                    violation,
-                    self.context_loop_state.edits_succeeded,
-                    self.context_loop_state.edits_files.join(", ")
-                );
-
-                self.metrics.record_run_complete(false);
-                // Bug #1 fix (benchmark-validation): budget exceeded ALWAYS
-                // means the task did not finish. Previously `success` was
-                // derived from edits_succeeded > 0, which lied to callers.
-                return AgentResult::from_engine_state(
-                    self,
-                    false,
-                    summary,
-                    false,
-                    theo_domain::error_class::ErrorClass::Exhausted,
-                );
+            // Budget check — extracted to main_loop::check_budget_or_exhausted.
+            if let Some(result) = self.check_budget_or_exhausted() {
+                return result;
             }
 
-            // ── SENSOR DRAIN ──
-            // Drain pending sensor results and inject as system messages before LLM call.
-            // This provides the LLM with feedback from computational verification (e.g. clippy, tests).
-            if let Some(ref sensor_runner) = sensor_runner {
-                for result in sensor_runner.drain_pending() {
-                    let severity = if result.exit_code == 0 { "OK" } else { "ISSUE" };
-                    let preview = theo_domain::prompt_sanitizer::char_boundary_truncate(
-                        &result.output,
-                        crate::constants::SENSOR_OUTPUT_PREVIEW_BYTES,
-                    );
-                    messages.push(Message::system(format!(
-                        "[SENSOR {severity}] {} (via {}): {preview}",
-                        result.file_path, result.tool_name
-                    )));
+            // Sensor drain — extracted to main_loop::drain_sensor_messages.
+            self.drain_sensor_messages(sensor_runner.as_ref(), &mut messages);
 
-                    // Publish SensorExecuted event
-                    self.event_bus.publish(DomainEvent::new(
-                        EventType::SensorExecuted,
-                        self.run.run_id.as_str(),
-                        serde_json::json!({
-                            "file": result.file_path,
-                            "exit_code": result.exit_code,
-                            "output_preview": &preview[..preview.len().min(200)],
-                            "duration_ms": result.duration_ms,
-                            "tool_name": result.tool_name,
-                        }),
-                    ));
-                }
-            }
-
-            // ── PLANNING phase ──
-            // Context loop injection
-            if iteration > 1 && iteration.is_multiple_of(self.config.context_loop_interval) {
-                let task_objective = self
-                    .task_manager
-                    .get(&self.task_id)
-                    .map(|t| t.objective.clone())
-                    .unwrap_or_default();
-                let ctx_msg = self.context_loop_state.build_context_loop(
-                    iteration,
-                    self.config.max_iterations,
-                    &task_objective,
-                );
-                messages.push(Message::user(ctx_msg));
-            }
-
-            // Phase transitions (legacy, preserved for context loop diagnostics)
-            self.context_loop_state
-                .maybe_transition(iteration, self.config.max_iterations);
-
-            // Context compaction: compress history with semantic progress context.
-            let compaction_ctx = crate::compaction::CompactionContext {
-                task_objective: messages
-                    .iter()
-                    .find(|m| m.role == theo_infra_llm::types::Role::User)
-                    .and_then(|m| m.content.clone())
-                    .unwrap_or_default()
-                    .chars()
-                    .take(100)
-                    .collect(),
-                current_phase: format!("{:?}", self.run.state),
-                target_files: self.context_loop_state.edits_files.clone(),
-                recent_errors: self
-                    .context_loop_state
-                    .edit_failures
-                    .iter()
-                    .rev()
-                    .take(2)
-                    .cloned()
-                    .collect(),
-            };
-            // Phase 0 T0.1 AC-0.1.3: pre-compression memory hook (survives truncation).
-            crate::memory_lifecycle::run_engine_hooks::pre_compress_push(&self.config, &mut messages).await;
-
-            crate::compaction_stages::compact_staged_with_policy(
-                &mut messages,
-                self.config.context_window_tokens,
-                Some(&compaction_ctx),
-                &self.config.compaction_policy,
-            );
-
-            // Record context size for metrics (estimated tokens = chars/4)
-            let estimated_context_tokens: usize = messages
-                .iter()
-                .filter_map(|m| m.content.as_ref())
-                .map(|c| c.len().div_ceil(4))
-                .sum();
-            self.context_metrics
-                .record_context_size(iteration, estimated_context_tokens);
+            // Context-loop + compaction + metrics — extracted to
+            // main_loop::inject_context_loop_and_compact.
+            let estimated_context_tokens = self
+                .inject_context_loop_and_compact(iteration, &mut messages)
+                .await;
 
             // LLM call
             self.transition_run(RunState::Planning);
@@ -666,91 +556,11 @@ impl AgentRunEngine {
             // Pi-mono ref: `packages/agent/src/agent-loop.ts:220-228`
             if tool_calls.is_empty() {
                 let content = response.content().unwrap_or("").to_string();
-
-                // Check follow-up queue before converging
-                if let Some(ref follow_up_fn) = self.message_queues.follow_up {
-                    let follow_ups = follow_up_fn().await;
-                    if !follow_ups.is_empty() {
-                        // Inject assistant response + follow-ups, continue loop
-                        messages.push(Message::assistant(&content));
-                        for fu_msg in follow_ups {
-                            messages.push(fu_msg);
-                        }
-                        continue;
-                    }
+                // Extracted to main_loop::handle_text_only_response.
+                match self.handle_text_only_response(content, &mut messages).await {
+                    dispatch::DispatchOutcome::Continue => continue,
+                    dispatch::DispatchOutcome::Converged(result) => return result,
                 }
-
-                // Plan-mode safety net: the model is supposed to end with
-                // tool calls (write the plan file + done). If it converges with
-                // text only and no plan file was written yet, give it ONE
-                // corrective nudge to actually call the tools. Without this
-                // guard the model occasionally produces a beautiful plan as
-                // text and exits without persisting it.
-                if self.config.mode == crate::config::AgentMode::Plan
-                    && !self.plan_mode_nudged
-                    && !content.is_empty()
-                {
-                    let plans_dir = self.project_dir.join(".theo/plans");
-                    let plan_written = plans_dir
-                        .read_dir()
-                        .ok()
-                        .map(|mut it| it.next().is_some())
-                        .unwrap_or(false);
-                    if !plan_written {
-                        self.plan_mode_nudged = true;
-                        messages.push(Message::assistant(&content));
-                        messages.push(Message::user(
-                            "REMINDER: You wrote a plan as text but did not persist it. \
-                             You MUST now call the `write` tool to save the plan to \
-                             `.theo/plans/01-<slug>.md` (use a kebab-case slug derived from \
-                             the task), then call `done` with a one-line summary. Do this in \
-                             your next response. Do not write more prose — just call the tools.",
-                        ));
-                        continue;
-                    }
-                }
-
-                // Phase 0 T0.1 AC-0.1.2: persist the user→assistant exchange
-                // INLINE (not fire-and-forget) — durability > latency.
-                crate::memory_lifecycle::run_engine_hooks::sync_final_turn(
-                    &self.config,
-                    &messages,
-                    &content,
-                )
-                .await;
-
-                // PLAN_AUTO_EVOLUTION_SOTA Phase 1 + Phase 3 — reviewers nudge.
-                // Relaxed is sufficient: this flag is a pure per-task
-                // counter with no happens-before dependency on any other
-                // load; it is written and read on the same task inside
-                // the serial main loop (T5.4).
-                let tool_calls_this_task = self.metrics.snapshot().total_tool_calls as usize;
-                let skill_created = self
-                    .skill_created_this_task
-                    .load(std::sync::atomic::Ordering::Relaxed);
-                crate::memory_lifecycle::maybe_spawn_reviewers(
-                    &self.config,
-                    &self.memory_nudge_counter,
-                    &self.skill_nudge_counter,
-                    &messages,
-                    tool_calls_this_task,
-                    skill_created,
-                );
-                self.skill_created_this_task
-                    .store(false, std::sync::atomic::Ordering::Relaxed);
-
-                self.transition_run(RunState::Converged);
-                let _ = self
-                    .task_manager
-                    .transition(&self.task_id, TaskState::Completed);
-                self.metrics.record_run_complete(true);
-                return AgentResult::from_engine_state(
-                    self,
-                    true,
-                    content,
-                    true,
-                    ErrorClass::Solved,
-                );
             }
 
             // ── EXECUTING phase ──
@@ -775,36 +585,9 @@ impl AgentRunEngine {
             for call in tool_calls {
                 let name = &call.function.name;
 
-                // Phase 30 (resume-runtime-wiring) — gap #3: replay
-                // short-circuit. When the engine is in resume mode AND
-                // this `call_id` already produced a result in the
-                // original run, push the cached `Message::tool_result`
-                // and emit a `ToolCallCompleted` event tagged with
-                // `replayed: true`. Skip the entire dispatch path so no
-                // side-effects re-execute (write/bash/etc.).
-                if let Some(ref ctx) = self.resume_context
-                    && ctx.should_skip_tool_call(&call.id)
-                    && let Some(cached) = ctx.cached_tool_result(&call.id)
-                {
-                    messages.push(cached.clone());
-                    // Phase 44 (otlp-exporter-plan): replay events still
-                    // get an `otel` payload — tagged with `replayed: true`
-                    // so dashboards can filter (or count separately).
-                    let mut replay_span = crate::observability::otel::tool_call_span(name);
-                    replay_span.set(crate::observability::otel::ATTR_THEO_TOOL_CALL_ID, call.id.clone());
-                    replay_span.set(crate::observability::otel::ATTR_THEO_TOOL_STATUS, "Succeeded");
-                    replay_span.set(crate::observability::otel::ATTR_THEO_TOOL_REPLAYED, true);
-                    self.event_bus.publish(DomainEvent::new(
-                        EventType::ToolCallCompleted,
-                        self.run.run_id.as_str(),
-                        serde_json::json!({
-                            "tool_name": name,
-                            "call_id": &call.id,
-                            "replayed": true,
-                            "status": "Succeeded",
-                            "otel": replay_span.to_json(),
-                        }),
-                    ));
+                // Resume-replay short-circuit — extracted to
+                // main_loop::try_replay_tool_call.
+                if self.try_replay_tool_call(call, &mut messages) {
                     continue;
                 }
 
@@ -842,76 +625,25 @@ impl AgentRunEngine {
                     continue;
                 }
 
-                // ── PLAN MODE GUARD ──
-                // In Plan mode, block write tools except writes to .theo/plans/.
-                // Also block `think` — reasoning must appear as visible assistant text.
-                if self.config.mode == crate::config::AgentMode::Plan {
-                    if name == "think" {
-                        messages.push(Message::tool_result(
-                            &call.id, name,
-                            "BLOCKED by Plan mode: The `think` tool is forbidden in plan mode. \
-                             Write your reasoning and plan as visible markdown text in your assistant message instead. \
-                             The user is reading your messages directly.",
-                        ));
-                        continue;
-                    }
-                    let is_write_tool = matches!(name.as_str(), "edit" | "write" | "apply_patch");
-                    if is_write_tool {
-                        let is_roadmap_write = name == "write"
-                            && call
-                                .parse_arguments()
-                                .ok()
-                                .and_then(|a| {
-                                    a.get("filePath").and_then(|p| p.as_str()).map(String::from)
-                                })
-                                .map(|p| p.contains(".theo/plans/"))
-                                .unwrap_or(false);
-
-                        if !is_roadmap_write {
-                            messages.push(Message::tool_result(
-                                &call.id, name,
-                                "BLOCKED by Plan mode guard: You can only write to .theo/plans/. \
-                                 Write the roadmap first. Source code edits are not allowed until user approves.",
-                            ));
-                            continue;
-                        }
-                    }
+                // Plan mode guard — extracted to
+                // main_loop::enforce_plan_mode_guard.
+                if self.enforce_plan_mode_guard(call, &mut messages) {
+                    continue;
                 }
 
-                // ── PRE-HOOK: tool.before ──
-                if let Some(ref runner) = hook_runner {
-                    let hook_args = call.parse_arguments().unwrap_or_default();
-                    let event = crate::hooks::tool_hook_event(
-                        "tool.before",
-                        name,
-                        &hook_args,
-                        &self.project_dir,
-                    );
-                    let hook_result = runner.run_pre_hook("tool.before", &event).await;
-                    if !hook_result.allowed {
-                        messages.push(Message::tool_result(
-                            &call.id,
-                            name,
-                            format!("BLOCKED by hook: {}", hook_result.output.trim()),
-                        ));
-                        continue;
-                    }
+                // Pre-hook — extracted to main_loop::run_pre_tool_hook.
+                if self
+                    .run_pre_tool_hook(hook_runner.as_ref(), call, &mut messages)
+                    .await
+                {
+                    continue;
                 }
 
-                // ── PHASE 9: PRE-MUTATION CHECKPOINT ──
-                // Snapshot the workdir BEFORE the first mutating tool of
-                // each iteration. Idempotent within an iteration (CAS).
-                // No-op when no checkpoint manager is attached.
-                if let Some(sha) = self.maybe_checkpoint_for_tool(name, iteration as u32) {
-                    self.event_bus.publish(DomainEvent::new(
-                        EventType::RunStateChanged,
-                        self.run.run_id.as_str(),
-                        serde_json::json!({
-                            "from": "Executing",
-                            "to": format!("Checkpoint:{}:turn-{}", &sha[..sha.len().min(12)], iteration),
-                        }),
-                    ));
-                }
+                // Pre-mutation checkpoint — extracted to
+                // main_loop::emit_checkpoint_event_for_tool. Idempotent
+                // within an iteration (CAS); no-op when no checkpoint
+                // manager is attached.
+                self.emit_checkpoint_event_for_tool(name, iteration);
 
                 // ── PHASE 8: MCP DISPATCH ──
                 // If the tool name is in the `mcp:<server>:<tool>`
@@ -922,283 +654,68 @@ impl AgentRunEngine {
                     continue;
                 }
 
-                // Execute regular tool via ToolCallManager (Invariants 2, 3, 5)
-                let tool_args = match call.parse_arguments() {
-                    Ok(args) => args,
-                    Err(e) => {
-                        // Report parse error to LLM so it can fix and retry
-                        messages.push(Message::tool_result(
-                            &call.id,
-                            name,
-                            format!(
-                                "Failed to parse arguments: {e}. Please retry with valid JSON."
-                            ),
-                        ));
-                        continue;
-                    }
-                };
-                // Apply tool's prepare_arguments hook (normalizes/migrates args
-                // before schema validation). Pi-mono ref: prepareArguments hook.
-                let tool_args = if let Some(tool) = self.registry.get(name) {
-                    tool.prepare_arguments(tool_args)
-                } else {
-                    tool_args
-                };
-                let tool_call_id =
-                    self.tool_call_manager
-                        .enqueue(self.task_id.clone(), name.clone(), tool_args);
-
-                let ctx = ToolContext {
-                    session_id: SessionId::new("agent"),
-                    message_id: MessageId::new(format!("iter_{iteration}")),
-                    call_id: call.id.clone(),
-                    agent: "main".to_string(),
-                    abort: abort_rx.clone(),
-                    project_dir: self.project_dir.clone(),
-                    graph_context: self.graph_context.clone(),
-                    stdout_tx: None,
+                // Regular tool dispatch — extracted to
+                // main_loop::execute_regular_tool_call.
+                let Some((success, output)) = self
+                    .execute_regular_tool_call(call, iteration, &abort_rx, &mut messages)
+                    .await
+                else {
+                    continue;
                 };
 
-                let tool_result = self
-                    .tool_call_manager
-                    .dispatch_and_execute(&tool_call_id, &self.registry, &ctx)
-                    .await;
-
-                let (success, output) = match &tool_result {
-                    Ok(r) => (r.status == ToolCallState::Succeeded, r.output.clone()),
-                    Err(e) => (false, format!("Tool call error: {}", e)),
-                };
-
-                // Record tool call in budget and metrics
-                self.budget_enforcer.record_tool_call();
-                self.metrics.record_tool_call(name, 0, success);
-
-                // Track failure patterns for steering loop suggestions
-                if !success {
-                    let pattern = format!("{}_failure", name);
-                    if let Some(suggestion) = self.failure_tracker.record_and_check(&pattern) {
-                        messages.push(Message::user(&suggestion));
-                    }
-                }
-
-                // Doom loop detection: check if this call repeats identically
-                if let Some(ref mut tracker) = doom_tracker {
-                    let args = call.parse_arguments().unwrap_or_default();
-                    if tracker.record(name, &args) {
-                        let warning = format!(
-                            "⚠️ DOOM LOOP DETECTED: You have called '{}' with identical arguments {} times in a row. \
-                             You are stuck in a loop. Try a DIFFERENT approach or tool.",
-                            name,
-                            self.config.doom_loop_threshold.unwrap_or(3)
-                        );
-                        self.event_bus.publish(DomainEvent::new(
-                            EventType::Error,
-                            self.run.run_id.as_str(),
-                            serde_json::json!({
-                                "type": "doom_loop",
-                                "tool_name": name,
-                                "threshold": self.config.doom_loop_threshold,
-                            }),
-                        ));
-                        messages.push(Message::user(&warning));
-
-                        // Hard abort after 2x threshold (warning wasn't enough)
-                        if tracker.should_abort() {
-                            self.transition_run(RunState::Aborted);
-                            let _ = self
-                                .task_manager
-                                .transition(&self.task_id, TaskState::Failed);
-                            self.metrics.record_run_complete(false);
-                            let summary = format!(
-                                "Doom loop abort: '{}' called identically {} times. Agent is stuck.",
-                                name,
-                                self.config.doom_loop_threshold.unwrap_or(3) * 2
-                            );
-                            return AgentResult::from_engine_state(
-                                self,
-                                false,
-                                summary,
-                                false,
-                                ErrorClass::Aborted,
-                            );
-                        }
-                    }
+                // Doom loop tracker — extracted to main_loop::update_doom_tracker.
+                if let Some(result) = self.update_doom_tracker(
+                    doom_tracker.as_mut(),
+                    call,
+                    name,
+                    &mut messages,
+                ) {
+                    return result;
                 }
 
                 let result_msg = Message::tool_result(&call.id, name, &output);
 
-                // Update working set + context metrics with tool interaction data.
-                // This feeds the usefulness pipeline (P0: feedback data).
-                match name.as_str() {
-                    "read" | "edit" | "write" | "apply_patch" => {
-                        if let Ok(args) = call.parse_arguments()
-                            && let Some(path) = args
-                                .get("filePath")
-                                .or(args.get("file_path"))
-                                .and_then(|p| p.as_str())
-                            {
-                                self.working_set.touch_file(path);
-                                self.context_metrics.record_artifact_fetch(path, iteration);
-                                // P0: Feed usefulness pipeline — record which files agent actually uses
-                                self.context_metrics.record_tool_reference(path);
-                            }
-                    }
-                    "grep" | "glob" | "codebase_context" => {
-                        if let Ok(args) = call.parse_arguments() {
-                            let query = args
-                                .get("pattern")
-                                .or(args.get("query"))
-                                .and_then(|p| p.as_str())
-                                .unwrap_or("");
-                            self.context_metrics
-                                .record_action(&format!("{}: {}", name, query), iteration);
-                            // Also record searched paths as references
-                            if let Some(path) = args.get("path").and_then(|p| p.as_str()) {
-                                self.context_metrics.record_tool_reference(path);
-                            }
-                        }
-                    }
-                    _ => {}
-                }
+                // Working set + context metrics — extracted to
+                // main_loop::update_working_set_post_tool.
+                self.update_working_set_post_tool(call, name, iteration);
 
-                // Record event in working set
-                self.working_set.record_event(
-                    format!("tool:{}:iter{}", name, iteration),
-                    20, // keep last 20 events
-                );
-
-                // Update context-loop diagnostics state
-                match name.as_str() {
-                    "read" => {
-                        if let Ok(args) = call.parse_arguments()
-                            && let Some(path) = args.get("filePath").and_then(|p| p.as_str()) {
-                                self.context_loop_state.record_read(path);
-                            }
-                    }
-                    "grep" | "glob" => self.context_loop_state.record_search(),
-                    "edit" | "write" | "apply_patch" => {
-                        let file = call
-                            .parse_arguments()
-                            .ok()
-                            .and_then(|args| {
-                                // For edit/write: filePath is a direct arg
-                                args.get("filePath")
-                                    .or(args.get("file_path"))
-                                    .and_then(|p| p.as_str())
-                                    .map(String::from)
-                                    // For apply_patch: extract from patchText
-                                    .or_else(|| {
-                                        args.get("patchText").and_then(|p| p.as_str()).and_then(
-                                            |patch| {
-                                                patch
-                                                    .lines()
-                                                    .find(|l| l.starts_with("+++ "))
-                                                    .and_then(|l| {
-                                                        l.strip_prefix("+++ b/")
-                                                            .or(l.strip_prefix("+++ "))
-                                                    })
-                                                    .filter(|f| *f != "/dev/null")
-                                                    .map(String::from)
-                                            },
-                                        )
-                                    })
-                            })
-                            .unwrap_or_default();
-                        self.context_loop_state.record_edit_attempt(
-                            &file,
-                            success,
-                            if success { None } else { Some(output.clone()) },
-                        );
-                    }
-                    _ => {}
-                }
+                // Context-loop state — extracted to
+                // main_loop::update_context_loop_post_tool.
+                self.update_context_loop_post_tool(call, name, success, &output);
 
                 // Persist tool result to state manager (crash recovery)
                 if let Some(ref mut sm) = state_manager {
                     let _ = sm.append_message("tool", &output);
                 }
 
-                // ── SENSOR FIRE: trigger computational verification after successful writes ──
-                if success && crate::sensor::is_write_tool(name)
-                    && let Some(ref sensor_runner) = sensor_runner {
-                        let file_path = call
-                            .parse_arguments()
-                            .ok()
-                            .and_then(|args| {
-                                args.get("filePath")
-                                    .or(args.get("file_path"))
-                                    .and_then(|p| p.as_str())
-                                    .map(String::from)
-                            })
-                            .unwrap_or_default();
-                        if !file_path.is_empty() {
-                            sensor_runner.fire(name, &file_path, &self.project_dir);
-                        }
-                    }
+                // Sensor fire — extracted to
+                // main_loop::fire_sensor_for_write_tool.
+                self.fire_sensor_for_write_tool(
+                    sensor_runner.as_ref(),
+                    call,
+                    name,
+                    success,
+                );
 
                 messages.push(result_msg);
 
-                // ── POST-HOOK: tool.after ──
-                if let Some(ref runner) = hook_runner {
-                    let hook_args = call.parse_arguments().unwrap_or_default();
-                    let event = crate::hooks::tool_hook_event(
-                        "tool.after",
-                        name,
-                        &hook_args,
-                        &self.project_dir,
-                    );
-                    runner.run_post_hook("tool.after", &event).await;
-                }
+                // Post-hook — extracted to main_loop::run_post_tool_hook.
+                self.run_post_tool_hook(hook_runner.as_ref(), call).await;
             }
 
             if let Some(result) = should_return {
                 return result;
             }
 
-            // ── Steering queue check ──
-            // After tool execution, check if the user injected messages mid-run.
-            // These are inserted as user messages before the next LLM call.
-            // Pi-mono ref: `packages/agent/src/agent-loop.ts:216`
-            if let Some(ref steering_fn) = self.message_queues.steering {
-                let steering_msgs = steering_fn().await;
-                for msg in steering_msgs {
-                    messages.push(msg);
-                }
-            }
+            // Steering queue drain — extracted to main_loop::drain_steering_queue.
+            self.drain_steering_queue(&mut messages).await;
 
             // ── EVALUATING phase ──
             self.transition_run(RunState::Evaluating);
 
-            // Save snapshot if store is configured (Invariant 7)
-            if let Some(ref store) = self.snapshot_store
-                && let Some(task) = self.task_manager.get(&self.task_id) {
-                    // Collect real tool calls and results for this task.
-                    let tool_calls = self.tool_call_manager.calls_for_task(&self.task_id);
-                    let tool_results: Vec<theo_domain::tool_call::ToolResultRecord> = tool_calls
-                        .iter()
-                        .filter_map(|tc| self.tool_call_manager.get_result(&tc.call_id))
-                        .collect();
-
-                    // Serialize conversation messages.
-                    let messages_json: Vec<serde_json::Value> = messages
-                        .iter()
-                        .filter_map(|m| serde_json::to_value(m).ok())
-                        .collect();
-
-                    let mut snapshot = RunSnapshot::new(
-                        self.run.clone(),
-                        task,
-                        tool_calls,
-                        tool_results,
-                        self.event_bus.events(),
-                        self.budget_enforcer.usage(),
-                        messages_json,
-                        vec![], // DLQ entries
-                    );
-                    snapshot.working_set = Some(self.working_set.clone());
-                    snapshot.checksum = snapshot.compute_checksum();
-                    let _ = store.save(&self.run.run_id, &snapshot).await;
-                }
+            // Snapshot persistence — extracted to
+            // main_loop::persist_snapshot_if_configured.
+            self.persist_snapshot_if_configured(&messages).await;
 
             // After executing tools, evaluate and loop back to Planning
             self.transition_run(RunState::Replanning);
@@ -1719,6 +1236,7 @@ use theo_domain::clock::now_millis;
 mod tests {
     use super::*;
     use crate::event_bus::CapturingListener;
+    use theo_domain::session::SessionId;
     use theo_domain::task::AgentType;
 
     struct TestSetup {

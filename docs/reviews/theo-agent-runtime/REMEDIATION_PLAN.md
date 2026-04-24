@@ -1156,3 +1156,73 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 | T3.4 retry encapsulado | **PARCIAL (avanço)** | retry inline foi encapsulado em helper — ainda nao consolida com o `RetryExecutor` generico mas isola bem. |
 
 **Validacao:** 1132 unit + 96 integration = **1228 tests passando, 0 falhas.** Snapshots caracterizacao byte-identicos apos 7 iteracoes de Fase 4.
+
+### Iteracao 15 (2026-04-24) — Fase 4: handle_text_only_response
+
+| Task | Status | Notas |
+|---|---|---|
+| T4.2 run_engine split — oitava etapa | **DONE (parcial)** | `handle_text_only_response` (~90 LOC) em `main_loop.rs` reutilizando `DispatchOutcome`. Encapsula 3 sub-fluxos: follow-up queue drain → Continue; plan-mode nudge → Continue; converge (sync memory + reviewers nudge + state transition) → Converged. Reutilizar `DispatchOutcome` unifica contrato entre todas as extracoes. `mod.rs`: 2841 → **2761 LOC** (-80 esta iter; **-1469 desde baseline 4230, -35%**). |
+
+**Baseline → atual (desde Iteracao 0):**
+- phase tags: 310 → 175
+- **`run_engine/mod.rs` LOC: 4230 → 2761 (-1469, -35%)**
+- main_loop.rs: 0 → 412 LOC
+
+**Validacao:** 1132 unit + 96 integration = **1228 tests passando, 0 falhas.**
+
+### Iteracao 16 (2026-04-24) — Fase 4: iteration prelude extracted
+
+| Task | Status | Notas |
+|---|---|---|
+| T4.2 run_engine split — nona etapa | **DONE (parcial)** | 3 helpers em `main_loop.rs`: `check_budget_or_exhausted` (retorna `Option<AgentResult>` para early return), `drain_sensor_messages` (sensor output → system messages + SensorExecuted event), `inject_context_loop_and_compact` (retorna `estimated_context_tokens`). ~120 LOC no main loop colapsam em 3 chamadas. `mod.rs`: 2761 → **2657 LOC** (-104 esta iter; **-1573 desde baseline 4230, -37%**). |
+
+**Validacao:** 1132 unit + 96 integration = 1228 tests passando, 0 falhas. main_loop.rs: 412 → 557 LOC.
+
+### Iteracao 17 (2026-04-24) — Fase 4: tool-loop guards extracted
+
+| Task | Status | Notas |
+|---|---|---|
+| T4.2 run_engine split — decima etapa | **DONE (parcial)** | 2 helpers em `main_loop.rs`: `try_replay_tool_call` (resume replay short-circuit, retorna `bool`), `enforce_plan_mode_guard` (think block + write-class guard, retorna `bool`). 2 blocos inline de ~70 LOC no tool-loop colapsam em `if self.try_replay_tool_call(..) { continue; }` e `if self.enforce_plan_mode_guard(..) { continue; }`. `mod.rs`: 2657 → **2600 LOC** (-57 esta iter; **-1630 desde baseline 4230, -39%**). |
+
+**Validacao:** 1132 unit + 96 integration = 1228 tests passando, 0 falhas. main_loop.rs: 557 → 646 LOC.
+
+### Iteracao 18 (2026-04-24) — Fase 4: tool-result processing extracted
+
+| Task | Status | Notas |
+|---|---|---|
+| T4.2 run_engine split — 11a etapa | **DONE (parcial)** | 3 helpers em `main_loop.rs`: `update_doom_tracker` (Option<AgentResult> para hard abort, None para soft warning), `update_working_set_post_tool` (read/edit/write/apply_patch + grep/glob/codebase_context branches), `update_context_loop_post_tool` (extracao de file path de `filePath`/`patchText`). ~170 LOC no main loop colapsam em 3 chamadas. `mod.rs`: 2600 → **2486 LOC** (-114 esta iter; **-1744 desde baseline 4230, -41%**). |
+
+**Validacao:** 1132 unit + 96 integration = 1228 tests passando, 0 falhas. main_loop.rs: 646 → 803 LOC.
+
+### Iteracao 19 (2026-04-24) — T4.5 start + T4.2 hook helpers
+
+| Task | Status | Notas |
+|---|---|---|
+| T4.5 subagent/mod.rs split — primeira etapa | **DONE (parcial)** | novo `subagent/manager_builders.rs` (188 LOC) com 11 `with_*` builders + 7 accessors + `set_pending_resume_context` do `SubAgentManager`. `subagent/mod.rs`: 1895 → **1737 LOC** (-158 esta iter). |
+| T4.2 run_engine split — 12a etapa | **DONE (parcial)** | 2 helpers em `main_loop.rs`: `run_pre_tool_hook` (bool = blocked), `run_post_tool_hook` (fire-and-forget). 2 blocos de ~20 LOC no tool-loop colapsam em if-await + await. `run_engine/mod.rs`: 2486 → **2465 LOC** (-21 esta iter; **-1765 desde baseline 4230, -42%**). |
+
+**Validacao:** 1132 unit + 96 integration = 1228 tests passando, 0 falhas.
+
+### Iteracao 20 (2026-04-24) — Fase 4: 3 small helpers
+
+| Task | Status | Notas |
+|---|---|---|
+| T4.2 run_engine split — 13a etapa | **DONE (parcial)** | 3 helpers pequenos em `main_loop.rs`: `emit_checkpoint_event_for_tool` (pre-mutation checkpoint + RunStateChanged), `fire_sensor_for_write_tool` (sensor invocation para write-class tools), `drain_steering_queue` (user-injected mid-run messages). 3 blocos inline colapsam em 3 chamadas. `mod.rs`: 2465 → **2439 LOC** (-26 esta iter; **-1791 desde baseline 4230, -42%**). main_loop.rs: 855 → 924 LOC. |
+
+**Validacao:** 1132 unit + 96 integration = 1228 tests passando, 0 falhas.
+
+### Iteracao 21 (2026-04-24) — Fase 4: execute_regular_tool_call
+
+| Task | Status | Notas |
+|---|---|---|
+| T4.2 run_engine split — 14a etapa | **DONE (parcial)** | `execute_regular_tool_call` (~90 LOC) em `main_loop.rs`: parse args (Option early-return) + `prepare_arguments` hook + enqueue + ToolContext build + `dispatch_and_execute` + extract (success, output) + budget/metrics record + failure_tracker record. Retorna `Option<(bool, String)>`: `None` → caller `continue`s; `Some((success, output))` caso contrario. Bloco de ~60 LOC no main loop colapsa em let-else de 5 linhas. `mod.rs`: 2439 → **2387 LOC** (-52 esta iter; **-1843 desde baseline 4230, -44%**). main_loop.rs: 924 → 1010 LOC. |
+
+**Validacao:** 1132 unit + 96 integration = 1228 tests passando, 0 falhas.
+
+### Iteracao 22 (2026-04-24) — Fase 4: snapshot persistence
+
+| Task | Status | Notas |
+|---|---|---|
+| T4.2 run_engine split — 15a etapa | **DONE (parcial)** | `persist_snapshot_if_configured` (~35 LOC) em `main_loop.rs`: coleta tool_calls + results + events + serializa messages + builda `RunSnapshot` + `store.save()`. Fail-soft. Bloco de ~30 LOC no final do loop colapsa em 1 chamada. `mod.rs`: 2387 → **2359 LOC** (-28 esta iter; **-1871 desde baseline 4230, -44%**). main_loop.rs: 1010 → 1046 LOC. |
+
+**Validacao:** 1132 unit + 96 integration = 1228 tests passando, 0 falhas.
