@@ -17,6 +17,7 @@ use crate::agent_loop::AgentResult;
 pub(super) mod batch;
 pub(super) mod delegate;
 pub(super) mod done;
+pub(super) mod done_gates;
 pub(in crate::run_engine) mod router;
 pub(super) mod skill;
 
