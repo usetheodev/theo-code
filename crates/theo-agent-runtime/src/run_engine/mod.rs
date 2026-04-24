@@ -581,36 +581,9 @@ impl AgentRunEngine {
             for call in tool_calls {
                 let name = &call.function.name;
 
-                // Phase 30 (resume-runtime-wiring) — gap #3: replay
-                // short-circuit. When the engine is in resume mode AND
-                // this `call_id` already produced a result in the
-                // original run, push the cached `Message::tool_result`
-                // and emit a `ToolCallCompleted` event tagged with
-                // `replayed: true`. Skip the entire dispatch path so no
-                // side-effects re-execute (write/bash/etc.).
-                if let Some(ref ctx) = self.resume_context
-                    && ctx.should_skip_tool_call(&call.id)
-                    && let Some(cached) = ctx.cached_tool_result(&call.id)
-                {
-                    messages.push(cached.clone());
-                    // Phase 44 (otlp-exporter-plan): replay events still
-                    // get an `otel` payload — tagged with `replayed: true`
-                    // so dashboards can filter (or count separately).
-                    let mut replay_span = crate::observability::otel::tool_call_span(name);
-                    replay_span.set(crate::observability::otel::ATTR_THEO_TOOL_CALL_ID, call.id.clone());
-                    replay_span.set(crate::observability::otel::ATTR_THEO_TOOL_STATUS, "Succeeded");
-                    replay_span.set(crate::observability::otel::ATTR_THEO_TOOL_REPLAYED, true);
-                    self.event_bus.publish(DomainEvent::new(
-                        EventType::ToolCallCompleted,
-                        self.run.run_id.as_str(),
-                        serde_json::json!({
-                            "tool_name": name,
-                            "call_id": &call.id,
-                            "replayed": true,
-                            "status": "Succeeded",
-                            "otel": replay_span.to_json(),
-                        }),
-                    ));
+                // Resume-replay short-circuit — extracted to
+                // main_loop::try_replay_tool_call.
+                if self.try_replay_tool_call(call, &mut messages) {
                     continue;
                 }
 
@@ -648,40 +621,10 @@ impl AgentRunEngine {
                     continue;
                 }
 
-                // ── PLAN MODE GUARD ──
-                // In Plan mode, block write tools except writes to .theo/plans/.
-                // Also block `think` — reasoning must appear as visible assistant text.
-                if self.config.mode == crate::config::AgentMode::Plan {
-                    if name == "think" {
-                        messages.push(Message::tool_result(
-                            &call.id, name,
-                            "BLOCKED by Plan mode: The `think` tool is forbidden in plan mode. \
-                             Write your reasoning and plan as visible markdown text in your assistant message instead. \
-                             The user is reading your messages directly.",
-                        ));
-                        continue;
-                    }
-                    let is_write_tool = matches!(name.as_str(), "edit" | "write" | "apply_patch");
-                    if is_write_tool {
-                        let is_roadmap_write = name == "write"
-                            && call
-                                .parse_arguments()
-                                .ok()
-                                .and_then(|a| {
-                                    a.get("filePath").and_then(|p| p.as_str()).map(String::from)
-                                })
-                                .map(|p| p.contains(".theo/plans/"))
-                                .unwrap_or(false);
-
-                        if !is_roadmap_write {
-                            messages.push(Message::tool_result(
-                                &call.id, name,
-                                "BLOCKED by Plan mode guard: You can only write to .theo/plans/. \
-                                 Write the roadmap first. Source code edits are not allowed until user approves.",
-                            ));
-                            continue;
-                        }
-                    }
+                // Plan mode guard — extracted to
+                // main_loop::enforce_plan_mode_guard.
+                if self.enforce_plan_mode_guard(call, &mut messages) {
+                    continue;
                 }
 
                 // ── PRE-HOOK: tool.before ──

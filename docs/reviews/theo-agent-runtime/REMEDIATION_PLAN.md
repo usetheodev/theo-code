@@ -1177,3 +1177,11 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 | T4.2 run_engine split — nona etapa | **DONE (parcial)** | 3 helpers em `main_loop.rs`: `check_budget_or_exhausted` (retorna `Option<AgentResult>` para early return), `drain_sensor_messages` (sensor output → system messages + SensorExecuted event), `inject_context_loop_and_compact` (retorna `estimated_context_tokens`). ~120 LOC no main loop colapsam em 3 chamadas. `mod.rs`: 2761 → **2657 LOC** (-104 esta iter; **-1573 desde baseline 4230, -37%**). |
 
 **Validacao:** 1132 unit + 96 integration = 1228 tests passando, 0 falhas. main_loop.rs: 412 → 557 LOC.
+
+### Iteracao 17 (2026-04-24) — Fase 4: tool-loop guards extracted
+
+| Task | Status | Notas |
+|---|---|---|
+| T4.2 run_engine split — decima etapa | **DONE (parcial)** | 2 helpers em `main_loop.rs`: `try_replay_tool_call` (resume replay short-circuit, retorna `bool`), `enforce_plan_mode_guard` (think block + write-class guard, retorna `bool`). 2 blocos inline de ~70 LOC no tool-loop colapsam em `if self.try_replay_tool_call(..) { continue; }` e `if self.enforce_plan_mode_guard(..) { continue; }`. `mod.rs`: 2657 → **2600 LOC** (-57 esta iter; **-1630 desde baseline 4230, -39%**). |
+
+**Validacao:** 1132 unit + 96 integration = 1228 tests passando, 0 falhas. main_loop.rs: 557 → 646 LOC.
