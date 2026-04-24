@@ -6,6 +6,7 @@ mod bootstrap;
 mod builders;
 mod dispatch;
 mod lifecycle;
+mod main_loop;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -578,43 +579,15 @@ impl AgentRunEngine {
             // LLM call
             self.transition_run(RunState::Planning);
 
-            // --- Routing decision (plan §R3) ---
-            // Consult the configured router; when absent, fall back to
-            // the session defaults. The router is called exactly once
-            // per turn at this single call site (invariant enforced by
-            // structural_hygiene.rs).
-            let latest_user_msg = messages
-                .iter()
-                .rev()
-                .find(|m| matches!(m.role, theo_infra_llm::types::Role::User))
-                .and_then(|m| m.content.as_deref());
-            let mut routing_ctx =
-                theo_domain::routing::RoutingContext::new(theo_domain::routing::RoutingPhase::Normal);
-            routing_ctx.latest_user_message = latest_user_msg;
-            routing_ctx.conversation_tokens = estimated_context_tokens as u64;
-            routing_ctx.iteration = iteration;
-            routing_ctx.requires_tool_use = !tool_defs.is_empty();
-            let (chosen_model, chosen_effort, routing_reason): (String, Option<String>, &'static str) =
-                match &self.config.router {
-                    Some(handle) => {
-                        let choice = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            handle.as_router().route(&routing_ctx)
-                        }));
-                        match choice {
-                            Ok(c) => (c.model_id, c.reasoning_effort, c.routing_reason),
-                            Err(_) => (
-                                self.config.model.clone(),
-                                self.config.reasoning_effort.clone(),
-                                "router_panic_fallback_default",
-                            ),
-                        }
-                    }
-                    None => (
-                        self.config.model.clone(),
-                        self.config.reasoning_effort.clone(),
-                        "no_router",
-                    ),
-                };
+            // Routing decision — extracted to main_loop::choose_model.
+            // The router is called exactly once per turn at this single
+            // call site (invariant enforced by structural_hygiene.rs).
+            let (chosen_model, chosen_effort, routing_reason) = self.choose_model(
+                &messages,
+                iteration,
+                estimated_context_tokens as u64,
+                !tool_defs.is_empty(),
+            );
 
             let mut request = ChatRequest::new(&chosen_model, messages.clone())
                 .with_tools(tool_defs.clone())
@@ -659,216 +632,25 @@ impl AgentRunEngine {
                 request = request.with_tool_choice(normalized);
             }
 
-            // Publish LLM call start (triggers "Thinking..." in CLI)
-            // Phase 43 (otlp-exporter-plan): attach an `otel` payload so
-            // OtelExportingListener can build a `gen_ai.*`-attributed span.
-            let provider_hint = derive_provider_hint(&self.config.base_url);
-            let llm_start_span = crate::observability::otel::llm_call_span(
-                provider_hint, &chosen_model,
-            );
-            self.event_bus.publish(DomainEvent::new(
-                EventType::LlmCallStart,
-                self.run.run_id.as_str(),
-                serde_json::json!({
-                    "iteration": iteration,
-                    "routing_reason": routing_reason,
-                    "model": chosen_model,
-                    "otel": llm_start_span.to_json(),
-                }),
-            ));
-
-            let llm_start = std::time::Instant::now();
-            let event_bus_for_stream = self.event_bus.clone();
-            let run_id_for_stream = self.run.run_id.as_str().to_string();
-
-            // LLM call with retry for retryable errors (429, 503, 504, network)
-            let retry_policy = if self.config.aggressive_retry {
-                theo_domain::retry_policy::RetryPolicy::benchmark()
-            } else {
-                theo_domain::retry_policy::RetryPolicy::default_llm()
-            };
-            let max_retries = retry_policy.max_retries;
-            let mut llm_result = None;
-
-            for attempt in 0..=max_retries {
-                let eb = event_bus_for_stream.clone();
-                let rid = run_id_for_stream.clone();
-
-                let response = self
-                    .client
-                    .chat_streaming(&request, |delta| match delta {
-                        theo_infra_llm::stream::StreamDelta::Reasoning(text) => {
-                            eb.publish(DomainEvent::new(
-                                EventType::ReasoningDelta,
-                                &rid,
-                                serde_json::json!({"text": text}),
-                            ));
-                        }
-                        theo_infra_llm::stream::StreamDelta::Content(text) => {
-                            eb.publish(DomainEvent::new(
-                                EventType::ContentDelta,
-                                &rid,
-                                serde_json::json!({"text": text}),
-                            ));
-                        }
-                        _ => {}
-                    })
-                    .await;
-
-                match response {
-                    Ok(resp) => {
-                        llm_result = Some(Ok(resp));
-                        break;
-                    }
-                    Err(ref e) if e.is_retryable() && attempt < max_retries => {
-                        let delay = retry_policy.delay_for_attempt(attempt);
-                        self.event_bus.publish(DomainEvent::new(
-                            EventType::Error,
-                            self.run.run_id.as_str(),
-                            serde_json::json!({
-                                "type": "retry",
-                                "attempt": attempt + 1,
-                                "max_retries": max_retries,
-                                "error": e.to_string(),
-                                "delay_ms": delay.as_millis() as u64,
-                            }),
-                        ));
-                        tokio::time::sleep(delay).await;
-                        continue;
-                    }
-                    Err(e) => {
-                        llm_result = Some(Err(e));
-                        break;
-                    }
-                }
-            }
-
-            // RM-pre-3: replace pre-existing `unwrap()` with a typed error.
-            // Defensive — in practice the retry loop above always assigns
-            // `llm_result` at least once, but relying on that invariant via
-            // `unwrap()` would panic on any future refactor that breaks it.
-            let llm_result = llm_result.unwrap_or_else(|| {
-                Err(theo_infra_llm::LlmError::Parse(
-                    "LLM retry loop produced no result (invariant broken)".to_string(),
-                ))
-            });
-            let response = match llm_result {
-                Ok(resp) => {
-                    let llm_duration = llm_start.elapsed().as_millis() as u64;
-                    let input_tok = resp
-                        .usage
-                        .as_ref()
-                        .map(|u| u.prompt_tokens as u64)
-                        .unwrap_or(0);
-                    let output_tok = resp
-                        .usage
-                        .as_ref()
-                        .map(|u| u.completion_tokens as u64)
-                        .unwrap_or(0);
-                    let total_tok = input_tok + output_tok;
-                    self.budget_enforcer.record_tokens(total_tok);
-                    self.metrics
-                        .record_llm_call_detailed(llm_duration, input_tok, output_tok);
-                    // Phase 1 T1.1: accumulate the 6-field token usage
-                    // (cache / reasoning stay at 0 until providers expose
-                    // them; cost recomputed lazily at episode write time).
-                    self.session_token_usage.accumulate(&theo_domain::budget::TokenUsage {
-                        input_tokens: input_tok, output_tokens: output_tok, ..Default::default()
-                    });
-                    // Emit LlmCallEnd with full accounting so observability can
-                    // plot context growth, token-per-iteration, and cache hit rate.
-                    // Phase 43 (otlp-exporter-plan): include the OTel
-                    // GenAI usage attributes for the Span end event.
-                    let mut llm_end_span = crate::observability::otel::llm_call_span(
-                        derive_provider_hint(&self.config.base_url), &chosen_model,
-                    );
-                    llm_end_span.set(
-                        crate::observability::otel::ATTR_USAGE_INPUT_TOKENS,
-                        input_tok,
-                    );
-                    llm_end_span.set(
-                        crate::observability::otel::ATTR_USAGE_OUTPUT_TOKENS,
-                        output_tok,
-                    );
-                    llm_end_span.set(
-                        crate::observability::otel::ATTR_USAGE_TOTAL_TOKENS,
-                        total_tok,
-                    );
-                    llm_end_span.set(
-                        crate::observability::otel::ATTR_THEO_DURATION_MS,
-                        llm_duration,
-                    );
-                    self.event_bus.publish(DomainEvent::new(
-                        EventType::LlmCallEnd,
-                        self.run.run_id.as_str(),
-                        serde_json::json!({
-                            "iteration": iteration,
-                            "duration_ms": llm_duration,
-                            "input_tokens": input_tok,
-                            "output_tokens": output_tok,
-                            "total_tokens": total_tok,
-                            "context_tokens": estimated_context_tokens,
-                            "otel": llm_end_span.to_json(),
-                        }),
-                    ));
-                    resp
-                }
+            // Full LLM call (start event + retry loop + end event)
+            // extracted to main_loop::call_llm_with_retry.
+            let response = match self
+                .call_llm_with_retry(
+                    &request,
+                    &chosen_model,
+                    iteration,
+                    routing_reason,
+                    estimated_context_tokens,
+                )
+                .await
+            {
+                Ok(resp) => resp,
                 Err(e) if e.is_context_overflow() => {
-                    // T5.5 FM-6: snapshot hot files BEFORE compaction destroys them.
-                    for f in &self.working_set.hot_files {
-                        self.pre_compaction_hot_files.insert(f.clone());
-                    }
-                    // Reactive context overflow recovery: emergency compact at 50%
-                    // and retry once. Pi-mono ref: packages/ai/src/utils/overflow.ts
-                    self.event_bus.publish(DomainEvent::new(
-                        EventType::ContextOverflowRecovery,
-                        self.run.run_id.as_str(),
-                        serde_json::json!({
-                            "error": e.to_string(),
-                            "action": "emergency_compaction",
-                            "target_ratio": 0.5,
-                        }),
-                    ));
-
-                    // Emergency compaction: keep only a bounded fraction of context.
-                    let model_ctx = self.config.context_window_tokens;
-                    let target = (model_ctx as f64
-                        * crate::constants::EMERGENCY_COMPACT_RATIO)
-                        as usize;
-                    let before_len = messages.len();
-                    crate::compaction::compact_messages_to_target(
-                        &mut messages,
-                        target,
-                        "", // No task objective available at this level
-                    );
-                    eprintln!(
-                        "[theo] Context overflow recovery: compacted {} → {} messages (target {})",
-                        before_len,
-                        messages.len(),
-                        target
-                    );
-
-                    // Do NOT retry inline — the next loop iteration will re-call LLM
-                    // with the compacted context.
+                    self.handle_context_overflow(&e, &mut messages);
                     continue;
                 }
                 Err(e) => {
-                    self.transition_run(RunState::Aborted);
-                    let _ = self
-                        .task_manager
-                        .transition(&self.task_id, TaskState::Failed);
-                    self.metrics.record_run_complete(false);
-                    // Phase 59: classify the LLM error so headless v3
-                    // consumers (ab_compare) can separate infra failures
-                    // (rate-limit, auth, overflow) from real outcomes.
-                    let class = llm_error_to_class(&e);
-                    return AgentResult::from_engine_state(
-                        self,
-                        false,
-                        format!("LLM error: {e}"),
-                        false,
-                        class,
-                    );
+                    return self.build_llm_abort_result(&e);
                 }
             };
 
@@ -1924,9 +1706,7 @@ pub enum HandoffOutcome {
 // ---------------------------------------------------------------------------
 
 use crate::doom_loop::DoomLoopTracker;
-use crate::run_engine_helpers::{
-    derive_provider_hint, llm_error_to_class, truncate_handoff_objective,
-};
+use crate::run_engine_helpers::truncate_handoff_objective;
 use theo_domain::clock::now_millis;
 
 // NOTE: `derive_provider_hint`, `llm_error_to_class`,
@@ -2225,7 +2005,7 @@ mod tests {
 
         #[test]
         fn llm_error_to_class_maps_rate_limit() {
-            let class = super::super::llm_error_to_class(
+            let class = crate::run_engine_helpers::llm_error_to_class(
                 &LlmError::RateLimited { retry_after: None },
             );
             assert_eq!(class, ErrorClass::RateLimited);
@@ -2233,7 +2013,7 @@ mod tests {
 
         #[test]
         fn llm_error_to_class_maps_auth_failure() {
-            let class = super::super::llm_error_to_class(
+            let class = crate::run_engine_helpers::llm_error_to_class(
                 &LlmError::AuthFailed("bad token".into()),
             );
             assert_eq!(class, ErrorClass::AuthFailed);
@@ -2241,7 +2021,7 @@ mod tests {
 
         #[test]
         fn llm_error_to_class_maps_context_overflow() {
-            let class = super::super::llm_error_to_class(&LlmError::ContextOverflow {
+            let class = crate::run_engine_helpers::llm_error_to_class(&LlmError::ContextOverflow {
                 provider: "openai".into(),
                 message: "too long".into(),
             });
@@ -2253,9 +2033,9 @@ mod tests {
             // Network error doesn't have a dedicated ErrorClass — should
             // map to Aborted (catch-all) so consumers know the run did
             // terminate unexpectedly without misclassifying as infra.
-            let class = super::super::llm_error_to_class(&LlmError::Timeout);
+            let class = crate::run_engine_helpers::llm_error_to_class(&LlmError::Timeout);
             assert_eq!(class, ErrorClass::Aborted);
-            let class = super::super::llm_error_to_class(&LlmError::ServiceUnavailable);
+            let class = crate::run_engine_helpers::llm_error_to_class(&LlmError::ServiceUnavailable);
             assert_eq!(class, ErrorClass::Aborted);
         }
 
@@ -2264,7 +2044,7 @@ mod tests {
             // Phase 61: distinct from RateLimited so ab_compare can
             // separate "agent retry exhausted" from "account hit billing
             // ceiling — bench is unusable until reset."
-            let class = super::super::llm_error_to_class(&LlmError::QuotaExceeded {
+            let class = crate::run_engine_helpers::llm_error_to_class(&LlmError::QuotaExceeded {
                 provider: "openai".into(),
                 message: "insufficient_quota".into(),
             });
@@ -2918,33 +2698,33 @@ mod tests {
 
         #[test]
         fn derive_provider_hint_recognizes_openai() {
-            assert_eq!(derive_provider_hint("https://api.openai.com/v1"), "openai");
+            assert_eq!(crate::run_engine_helpers::derive_provider_hint("https://api.openai.com/v1"), "openai");
         }
 
         #[test]
         fn derive_provider_hint_recognizes_chatgpt_oauth() {
-            assert_eq!(derive_provider_hint("https://chatgpt.com/backend-api"), "openai");
+            assert_eq!(crate::run_engine_helpers::derive_provider_hint("https://chatgpt.com/backend-api"), "openai");
         }
 
         #[test]
         fn derive_provider_hint_recognizes_anthropic() {
-            assert_eq!(derive_provider_hint("https://api.anthropic.com"), "anthropic");
+            assert_eq!(crate::run_engine_helpers::derive_provider_hint("https://api.anthropic.com"), "anthropic");
         }
 
         #[test]
         fn derive_provider_hint_recognizes_gemini() {
-            assert_eq!(derive_provider_hint("https://generativelanguage.googleapis.com"), "gemini");
+            assert_eq!(crate::run_engine_helpers::derive_provider_hint("https://generativelanguage.googleapis.com"), "gemini");
         }
 
         #[test]
         fn derive_provider_hint_falls_back_for_unknown_url() {
-            assert_eq!(derive_provider_hint("https://my-private-llm.corp"), "openai_compatible");
+            assert_eq!(crate::run_engine_helpers::derive_provider_hint("https://my-private-llm.corp"), "openai_compatible");
         }
 
         #[test]
         fn derive_provider_hint_recognizes_localhost_as_local() {
-            assert_eq!(derive_provider_hint("http://localhost:8000"), "openai_compatible_local");
-            assert_eq!(derive_provider_hint("http://127.0.0.1:8080"), "openai_compatible_local");
+            assert_eq!(crate::run_engine_helpers::derive_provider_hint("http://localhost:8000"), "openai_compatible_local");
+            assert_eq!(crate::run_engine_helpers::derive_provider_hint("http://127.0.0.1:8080"), "openai_compatible_local");
         }
     }
 

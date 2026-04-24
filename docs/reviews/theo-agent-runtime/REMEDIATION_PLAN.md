@@ -1128,3 +1128,31 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 **Validacao:** 1132 unit + 96 integration = **1228 tests passando, 0 falhas.** Caracterizacao snapshots byte-identicos.
 
 **Nao feito nesta iteracao (proximas):** T0.1 restante (7 cenarios LLM), T0.2 caracterizacao subagent, T1.1 bwrap, T3.4 retry inline, T4.2 continuar (main_loop ainda ~2000 LOC — extrair o loop principal em sub-modulos semanticos), T4.3 Strategy pattern (trait unificada sobre os 4 handlers), T4.4 Chain of Responsibility em done gates, T4.5 split subagent/mod.rs, T5.1 RunMetadata, T6.4 batch streaming, T7.*, T8.1 phase sweep restante.
+
+### Iteracao 13 (2026-04-24) — Fase 4: main_loop helpers extracted
+
+| Task | Status | Notas |
+|---|---|---|
+| T4.2 run_engine split — sexta etapa | **DONE (parcial)** | Novo `run_engine/main_loop.rs` (139 LOC) com 3 helpers de `AgentRunEngine`: `choose_model` (routing decision + panic-safe fallback — 40 LOC), `handle_context_overflow` (emergency compaction + event — 30 LOC), `build_llm_abort_result` (LLM error → AgentResult::Aborted — 18 LOC). Tres blocos inline correspondentes no main loop colapsaram em 1 chamada cada. `mod.rs`: 3061 → **2986 LOC** (-75 esta iter; **-1244 desde baseline 4230, -29%**). |
+
+**Baseline → atual (por metrica, desde Iteracao 0):**
+- `.expect/.unwrap/panic!`: 1071 → 1041
+- silent-swallow: 61 → 2
+- `std::env::var`: 25 → 6
+- `std::process::Command` producao: 2 → 1
+- phase tags: 310 → **178** (-132)
+- **`run_engine/mod.rs` LOC: 4230 → 2986 (-1244, -29%)**
+- **Modulos totais em `run_engine/`: 10 (mod + builders + bootstrap + lifecycle + main_loop + dispatch/{mod, done, delegate, skill, batch})**
+
+**Validacao:** 1132 unit + 96 integration = **1228 tests passando, 0 falhas.** Caracterizacao snapshots byte-identicos.
+
+**Nao feito nesta iteracao (proximas):** T0.1 restante, T0.2, T1.1 bwrap, T3.4 retry completo, T4.2 continuar, T4.3 Strategy, T4.4 Chain of Responsibility, T4.5 split subagent, T5.1 RunMetadata, T6.4 batch streaming, T7.*, T8.1 phase sweep.
+
+### Iteracao 14 (2026-04-24) — Fase 4: call_llm_with_retry
+
+| Task | Status | Notas |
+|---|---|---|
+| T4.2 run_engine split — setima etapa | **DONE (parcial)** | `call_llm_with_retry` (~170 LOC) em `main_loop.rs`: `LlmCallStart` + streaming retry loop + token accounting + `LlmCallEnd` em 1 funcao retornando `Result<ChatResponse, LlmError>`. Caller no main loop colapsa ~140 LOC em match de 10 linhas. `mod.rs`: 2986 → **2841 LOC** (-145 esta iter; **-1389 desde baseline 4230, -33%**). `main_loop.rs`: 139 → 309 LOC. |
+| T3.4 retry encapsulado | **PARCIAL (avanço)** | retry inline foi encapsulado em helper — ainda nao consolida com o `RetryExecutor` generico mas isola bem. |
+
+**Validacao:** 1132 unit + 96 integration = **1228 tests passando, 0 falhas.** Snapshots caracterizacao byte-identicos apos 7 iteracoes de Fase 4.
