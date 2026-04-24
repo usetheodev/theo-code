@@ -246,6 +246,163 @@ impl AgentRunEngine {
         Ok(resp)
     }
 
+    /// Feed the doom-loop tracker with the current call and return
+    /// `Some(result)` when a hard abort is warranted (2× threshold
+    /// consecutive identical calls). Non-warning cases return `None`.
+    /// When the tracker issues a soft warning, a user-directed nudge
+    /// is pushed into `messages` and `None` is returned.
+    pub(super) fn update_doom_tracker(
+        &mut self,
+        doom_tracker: Option<&mut crate::doom_loop::DoomLoopTracker>,
+        call: &theo_infra_llm::types::ToolCall,
+        name: &str,
+        messages: &mut Vec<Message>,
+    ) -> Option<AgentResult> {
+        let tracker = doom_tracker?;
+        let args = call.parse_arguments().unwrap_or_default();
+        if !tracker.record(name, &args) {
+            return None;
+        }
+        let threshold = self.config.doom_loop_threshold.unwrap_or(3);
+        let warning = format!(
+            "⚠️ DOOM LOOP DETECTED: You have called '{}' with identical arguments {} times in a row. \
+             You are stuck in a loop. Try a DIFFERENT approach or tool.",
+            name, threshold
+        );
+        self.event_bus.publish(DomainEvent::new(
+            EventType::Error,
+            self.run.run_id.as_str(),
+            serde_json::json!({
+                "type": "doom_loop",
+                "tool_name": name,
+                "threshold": self.config.doom_loop_threshold,
+            }),
+        ));
+        messages.push(Message::user(&warning));
+
+        // Hard abort after 2x threshold (warning wasn't enough).
+        if !tracker.should_abort() {
+            return None;
+        }
+        self.transition_run(RunState::Aborted);
+        let _ = self
+            .task_manager
+            .transition(&self.task_id, TaskState::Failed);
+        self.metrics.record_run_complete(false);
+        let summary = format!(
+            "Doom loop abort: '{}' called identically {} times. Agent is stuck.",
+            name,
+            threshold * 2
+        );
+        Some(AgentResult::from_engine_state(
+            self,
+            false,
+            summary,
+            false,
+            ErrorClass::Aborted,
+        ))
+    }
+
+    /// Post-dispatch working set + context metrics update. Classifies
+    /// the tool call by name (read/edit/write/apply_patch vs grep/glob/
+    /// codebase_context) and feeds the usefulness pipeline + action log.
+    pub(super) fn update_working_set_post_tool(
+        &mut self,
+        call: &theo_infra_llm::types::ToolCall,
+        name: &str,
+        iteration: usize,
+    ) {
+        match name {
+            "read" | "edit" | "write" | "apply_patch" => {
+                if let Ok(args) = call.parse_arguments()
+                    && let Some(path) = args
+                        .get("filePath")
+                        .or(args.get("file_path"))
+                        .and_then(|p| p.as_str())
+                {
+                    self.working_set.touch_file(path);
+                    self.context_metrics.record_artifact_fetch(path, iteration);
+                    // Feed usefulness pipeline — which files the agent
+                    // actually references vs just scans.
+                    self.context_metrics.record_tool_reference(path);
+                }
+            }
+            "grep" | "glob" | "codebase_context" => {
+                if let Ok(args) = call.parse_arguments() {
+                    let query = args
+                        .get("pattern")
+                        .or(args.get("query"))
+                        .and_then(|p| p.as_str())
+                        .unwrap_or("");
+                    self.context_metrics
+                        .record_action(&format!("{}: {}", name, query), iteration);
+                    if let Some(path) = args.get("path").and_then(|p| p.as_str()) {
+                        self.context_metrics.record_tool_reference(path);
+                    }
+                }
+            }
+            _ => {}
+        }
+        self.working_set
+            .record_event(format!("tool:{}:iter{}", name, iteration), 20);
+    }
+
+    /// Post-dispatch context-loop state update. Records reads, search
+    /// actions, and edit attempts — the last branch extracts the
+    /// edited file path from `filePath` or from a `+++ b/<file>` line
+    /// inside `patchText` (apply_patch case).
+    pub(super) fn update_context_loop_post_tool(
+        &mut self,
+        call: &theo_infra_llm::types::ToolCall,
+        name: &str,
+        success: bool,
+        output: &str,
+    ) {
+        match name {
+            "read" => {
+                if let Ok(args) = call.parse_arguments()
+                    && let Some(path) = args.get("filePath").and_then(|p| p.as_str())
+                {
+                    self.context_loop_state.record_read(path);
+                }
+            }
+            "grep" | "glob" => self.context_loop_state.record_search(),
+            "edit" | "write" | "apply_patch" => {
+                let file = call
+                    .parse_arguments()
+                    .ok()
+                    .and_then(|args| {
+                        args.get("filePath")
+                            .or(args.get("file_path"))
+                            .and_then(|p| p.as_str())
+                            .map(String::from)
+                            .or_else(|| {
+                                args.get("patchText").and_then(|p| p.as_str()).and_then(
+                                    |patch| {
+                                        patch
+                                            .lines()
+                                            .find(|l| l.starts_with("+++ "))
+                                            .and_then(|l| {
+                                                l.strip_prefix("+++ b/")
+                                                    .or(l.strip_prefix("+++ "))
+                                            })
+                                            .filter(|f| *f != "/dev/null")
+                                            .map(String::from)
+                                    },
+                                )
+                            })
+                    })
+                    .unwrap_or_default();
+                self.context_loop_state.record_edit_attempt(
+                    &file,
+                    success,
+                    if success { None } else { Some(output.to_string()) },
+                );
+            }
+            _ => {}
+        }
+    }
+
     /// Resume replay short-circuit. If the engine is in resume mode
     /// AND the tool call's `call_id` already produced a result in the
     /// original run, push the cached `Message::tool_result`, emit a

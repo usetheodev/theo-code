@@ -13,11 +13,9 @@ use std::sync::Arc;
 
 use theo_domain::agent_run::{AgentRun, RunState};
 use theo_domain::budget::Budget;
-use theo_domain::error_class::ErrorClass;
 use theo_domain::event::{DomainEvent, EventType};
 use theo_domain::identifiers::{RunId, TaskId};
 use theo_domain::session::{MessageId, SessionId};
-use theo_domain::task::TaskState;
 use theo_domain::tool::ToolContext;
 use theo_domain::tool_call::ToolCallState;
 use theo_infra_llm::LlmClient;
@@ -730,137 +728,25 @@ impl AgentRunEngine {
                     }
                 }
 
-                // Doom loop detection: check if this call repeats identically
-                if let Some(ref mut tracker) = doom_tracker {
-                    let args = call.parse_arguments().unwrap_or_default();
-                    if tracker.record(name, &args) {
-                        let warning = format!(
-                            "⚠️ DOOM LOOP DETECTED: You have called '{}' with identical arguments {} times in a row. \
-                             You are stuck in a loop. Try a DIFFERENT approach or tool.",
-                            name,
-                            self.config.doom_loop_threshold.unwrap_or(3)
-                        );
-                        self.event_bus.publish(DomainEvent::new(
-                            EventType::Error,
-                            self.run.run_id.as_str(),
-                            serde_json::json!({
-                                "type": "doom_loop",
-                                "tool_name": name,
-                                "threshold": self.config.doom_loop_threshold,
-                            }),
-                        ));
-                        messages.push(Message::user(&warning));
-
-                        // Hard abort after 2x threshold (warning wasn't enough)
-                        if tracker.should_abort() {
-                            self.transition_run(RunState::Aborted);
-                            let _ = self
-                                .task_manager
-                                .transition(&self.task_id, TaskState::Failed);
-                            self.metrics.record_run_complete(false);
-                            let summary = format!(
-                                "Doom loop abort: '{}' called identically {} times. Agent is stuck.",
-                                name,
-                                self.config.doom_loop_threshold.unwrap_or(3) * 2
-                            );
-                            return AgentResult::from_engine_state(
-                                self,
-                                false,
-                                summary,
-                                false,
-                                ErrorClass::Aborted,
-                            );
-                        }
-                    }
+                // Doom loop tracker — extracted to main_loop::update_doom_tracker.
+                if let Some(result) = self.update_doom_tracker(
+                    doom_tracker.as_mut(),
+                    call,
+                    name,
+                    &mut messages,
+                ) {
+                    return result;
                 }
 
                 let result_msg = Message::tool_result(&call.id, name, &output);
 
-                // Update working set + context metrics with tool interaction data.
-                // This feeds the usefulness pipeline (P0: feedback data).
-                match name.as_str() {
-                    "read" | "edit" | "write" | "apply_patch" => {
-                        if let Ok(args) = call.parse_arguments()
-                            && let Some(path) = args
-                                .get("filePath")
-                                .or(args.get("file_path"))
-                                .and_then(|p| p.as_str())
-                            {
-                                self.working_set.touch_file(path);
-                                self.context_metrics.record_artifact_fetch(path, iteration);
-                                // P0: Feed usefulness pipeline — record which files agent actually uses
-                                self.context_metrics.record_tool_reference(path);
-                            }
-                    }
-                    "grep" | "glob" | "codebase_context" => {
-                        if let Ok(args) = call.parse_arguments() {
-                            let query = args
-                                .get("pattern")
-                                .or(args.get("query"))
-                                .and_then(|p| p.as_str())
-                                .unwrap_or("");
-                            self.context_metrics
-                                .record_action(&format!("{}: {}", name, query), iteration);
-                            // Also record searched paths as references
-                            if let Some(path) = args.get("path").and_then(|p| p.as_str()) {
-                                self.context_metrics.record_tool_reference(path);
-                            }
-                        }
-                    }
-                    _ => {}
-                }
+                // Working set + context metrics — extracted to
+                // main_loop::update_working_set_post_tool.
+                self.update_working_set_post_tool(call, name, iteration);
 
-                // Record event in working set
-                self.working_set.record_event(
-                    format!("tool:{}:iter{}", name, iteration),
-                    20, // keep last 20 events
-                );
-
-                // Update context-loop diagnostics state
-                match name.as_str() {
-                    "read" => {
-                        if let Ok(args) = call.parse_arguments()
-                            && let Some(path) = args.get("filePath").and_then(|p| p.as_str()) {
-                                self.context_loop_state.record_read(path);
-                            }
-                    }
-                    "grep" | "glob" => self.context_loop_state.record_search(),
-                    "edit" | "write" | "apply_patch" => {
-                        let file = call
-                            .parse_arguments()
-                            .ok()
-                            .and_then(|args| {
-                                // For edit/write: filePath is a direct arg
-                                args.get("filePath")
-                                    .or(args.get("file_path"))
-                                    .and_then(|p| p.as_str())
-                                    .map(String::from)
-                                    // For apply_patch: extract from patchText
-                                    .or_else(|| {
-                                        args.get("patchText").and_then(|p| p.as_str()).and_then(
-                                            |patch| {
-                                                patch
-                                                    .lines()
-                                                    .find(|l| l.starts_with("+++ "))
-                                                    .and_then(|l| {
-                                                        l.strip_prefix("+++ b/")
-                                                            .or(l.strip_prefix("+++ "))
-                                                    })
-                                                    .filter(|f| *f != "/dev/null")
-                                                    .map(String::from)
-                                            },
-                                        )
-                                    })
-                            })
-                            .unwrap_or_default();
-                        self.context_loop_state.record_edit_attempt(
-                            &file,
-                            success,
-                            if success { None } else { Some(output.clone()) },
-                        );
-                    }
-                    _ => {}
-                }
+                // Context-loop state — extracted to
+                // main_loop::update_context_loop_post_tool.
+                self.update_context_loop_post_tool(call, name, success, &output);
 
                 // Persist tool result to state manager (crash recovery)
                 if let Some(ref mut sm) = state_manager {

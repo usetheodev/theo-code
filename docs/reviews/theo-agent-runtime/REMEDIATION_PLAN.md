@@ -1185,3 +1185,11 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 | T4.2 run_engine split — decima etapa | **DONE (parcial)** | 2 helpers em `main_loop.rs`: `try_replay_tool_call` (resume replay short-circuit, retorna `bool`), `enforce_plan_mode_guard` (think block + write-class guard, retorna `bool`). 2 blocos inline de ~70 LOC no tool-loop colapsam em `if self.try_replay_tool_call(..) { continue; }` e `if self.enforce_plan_mode_guard(..) { continue; }`. `mod.rs`: 2657 → **2600 LOC** (-57 esta iter; **-1630 desde baseline 4230, -39%**). |
 
 **Validacao:** 1132 unit + 96 integration = 1228 tests passando, 0 falhas. main_loop.rs: 557 → 646 LOC.
+
+### Iteracao 18 (2026-04-24) — Fase 4: tool-result processing extracted
+
+| Task | Status | Notas |
+|---|---|---|
+| T4.2 run_engine split — 11a etapa | **DONE (parcial)** | 3 helpers em `main_loop.rs`: `update_doom_tracker` (Option<AgentResult> para hard abort, None para soft warning), `update_working_set_post_tool` (read/edit/write/apply_patch + grep/glob/codebase_context branches), `update_context_loop_post_tool` (extracao de file path de `filePath`/`patchText`). ~170 LOC no main loop colapsam em 3 chamadas. `mod.rs`: 2600 → **2486 LOC** (-114 esta iter; **-1744 desde baseline 4230, -41%**). |
+
+**Validacao:** 1132 unit + 96 integration = 1228 tests passando, 0 falhas. main_loop.rs: 646 → 803 LOC.
