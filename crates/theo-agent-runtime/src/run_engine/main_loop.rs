@@ -112,79 +112,51 @@ impl AgentRunEngine {
 
         let llm_start = std::time::Instant::now();
 
-        // Retry loop. Streaming deltas forwarded to the bus via a
-        // cloned sender closure per attempt.
+        // Retry loop — delegated to `RetryExecutor::with_retry`. The
+        // streaming callback still forwards deltas to the bus per attempt;
+        // it's rebuilt inside each invocation so the bus/run-id captures
+        // survive the FnMut requirement of `with_retry`.
         let retry_policy = if self.config.aggressive_retry {
             theo_domain::retry_policy::RetryPolicy::benchmark()
         } else {
             theo_domain::retry_policy::RetryPolicy::default_llm()
         };
-        let max_retries = retry_policy.max_retries;
-        let mut llm_result: Option<Result<ChatResponse, LlmError>> = None;
+        let run_id_str = self.run.run_id.as_str().to_string();
+        let event_bus = self.event_bus.clone();
+        let client = &self.client;
 
-        for attempt in 0..=max_retries {
-            let eb = self.event_bus.clone();
-            let rid = self.run.run_id.as_str().to_string();
-
-            let response = self
-                .client
-                .chat_streaming(request, |delta| match delta {
-                    theo_infra_llm::stream::StreamDelta::Reasoning(text) => {
-                        eb.publish(DomainEvent::new(
-                            EventType::ReasoningDelta,
-                            &rid,
-                            serde_json::json!({ "text": text }),
-                        ));
-                    }
-                    theo_infra_llm::stream::StreamDelta::Content(text) => {
-                        eb.publish(DomainEvent::new(
-                            EventType::ContentDelta,
-                            &rid,
-                            serde_json::json!({ "text": text }),
-                        ));
-                    }
-                    _ => {}
-                })
-                .await;
-
-            match response {
-                Ok(resp) => {
-                    llm_result = Some(Ok(resp));
-                    break;
+        let resp = crate::retry::RetryExecutor::with_retry(
+            &retry_policy,
+            &run_id_str,
+            &event_bus,
+            || {
+                let eb = event_bus.clone();
+                let rid = run_id_str.clone();
+                async move {
+                    client
+                        .chat_streaming(request, |delta| match delta {
+                            theo_infra_llm::stream::StreamDelta::Reasoning(text) => {
+                                eb.publish(DomainEvent::new(
+                                    EventType::ReasoningDelta,
+                                    &rid,
+                                    serde_json::json!({ "text": text }),
+                                ));
+                            }
+                            theo_infra_llm::stream::StreamDelta::Content(text) => {
+                                eb.publish(DomainEvent::new(
+                                    EventType::ContentDelta,
+                                    &rid,
+                                    serde_json::json!({ "text": text }),
+                                ));
+                            }
+                            _ => {}
+                        })
+                        .await
                 }
-                Err(ref e) if e.is_retryable() && attempt < max_retries => {
-                    let delay = retry_policy.delay_for_attempt(attempt);
-                    self.event_bus.publish(DomainEvent::new(
-                        EventType::Error,
-                        self.run.run_id.as_str(),
-                        serde_json::json!({
-                            "type": "retry",
-                            "attempt": attempt + 1,
-                            "max_retries": max_retries,
-                            "error": e.to_string(),
-                            "delay_ms": delay.as_millis() as u64,
-                        }),
-                    ));
-                    tokio::time::sleep(delay).await;
-                    continue;
-                }
-                Err(e) => {
-                    llm_result = Some(Err(e));
-                    break;
-                }
-            }
-        }
-
-        // Defensive: the retry loop always assigns llm_result at least
-        // once, but relying on that invariant via .unwrap() would panic
-        // on any future refactor that breaks it.
-        let llm_result = llm_result.unwrap_or_else(|| {
-            Err(LlmError::Parse(
-                "LLM retry loop produced no result (invariant broken)".to_string(),
-            ))
-        });
-
-        let resp = llm_result?;
+            },
+            LlmError::is_retryable,
+        )
+        .await?;
 
         // Success path: accumulate usage + publish LlmCallEnd.
         let llm_duration = llm_start.elapsed().as_millis() as u64;
