@@ -1193,3 +1193,12 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 | T4.2 run_engine split — 11a etapa | **DONE (parcial)** | 3 helpers em `main_loop.rs`: `update_doom_tracker` (Option<AgentResult> para hard abort, None para soft warning), `update_working_set_post_tool` (read/edit/write/apply_patch + grep/glob/codebase_context branches), `update_context_loop_post_tool` (extracao de file path de `filePath`/`patchText`). ~170 LOC no main loop colapsam em 3 chamadas. `mod.rs`: 2600 → **2486 LOC** (-114 esta iter; **-1744 desde baseline 4230, -41%**). |
 
 **Validacao:** 1132 unit + 96 integration = 1228 tests passando, 0 falhas. main_loop.rs: 646 → 803 LOC.
+
+### Iteracao 19 (2026-04-24) — T4.5 start + T4.2 hook helpers
+
+| Task | Status | Notas |
+|---|---|---|
+| T4.5 subagent/mod.rs split — primeira etapa | **DONE (parcial)** | novo `subagent/manager_builders.rs` (188 LOC) com 11 `with_*` builders + 7 accessors + `set_pending_resume_context` do `SubAgentManager`. `subagent/mod.rs`: 1895 → **1737 LOC** (-158 esta iter). |
+| T4.2 run_engine split — 12a etapa | **DONE (parcial)** | 2 helpers em `main_loop.rs`: `run_pre_tool_hook` (bool = blocked), `run_post_tool_hook` (fire-and-forget). 2 blocos de ~20 LOC no tool-loop colapsam em if-await + await. `run_engine/mod.rs`: 2486 → **2465 LOC** (-21 esta iter; **-1765 desde baseline 4230, -42%**). |
+
+**Validacao:** 1132 unit + 96 integration = 1228 tests passando, 0 falhas.

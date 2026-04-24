@@ -246,6 +246,58 @@ impl AgentRunEngine {
         Ok(resp)
     }
 
+    /// Run the `tool.before` hook (if a hook runner is attached) for
+    /// the given call. Returns `true` when the hook *blocks* dispatch
+    /// (caller pushes the BLOCKED message and `continue`s). Returns
+    /// `false` otherwise — dispatch proceeds.
+    pub(super) async fn run_pre_tool_hook(
+        &self,
+        runner: Option<&crate::hooks::HookRunner>,
+        call: &theo_infra_llm::types::ToolCall,
+        messages: &mut Vec<Message>,
+    ) -> bool {
+        let Some(runner) = runner else {
+            return false;
+        };
+        let hook_args = call.parse_arguments().unwrap_or_default();
+        let event = crate::hooks::tool_hook_event(
+            "tool.before",
+            &call.function.name,
+            &hook_args,
+            &self.project_dir,
+        );
+        let hook_result = runner.run_pre_hook("tool.before", &event).await;
+        if hook_result.allowed {
+            return false;
+        }
+        messages.push(Message::tool_result(
+            &call.id,
+            &call.function.name,
+            format!("BLOCKED by hook: {}", hook_result.output.trim()),
+        ));
+        true
+    }
+
+    /// Run the `tool.after` hook (if a hook runner is attached). Purely
+    /// informational — return value is not used by the caller.
+    pub(super) async fn run_post_tool_hook(
+        &self,
+        runner: Option<&crate::hooks::HookRunner>,
+        call: &theo_infra_llm::types::ToolCall,
+    ) {
+        let Some(runner) = runner else {
+            return;
+        };
+        let hook_args = call.parse_arguments().unwrap_or_default();
+        let event = crate::hooks::tool_hook_event(
+            "tool.after",
+            &call.function.name,
+            &hook_args,
+            &self.project_dir,
+        );
+        runner.run_post_hook("tool.after", &event).await;
+    }
+
     /// Feed the doom-loop tracker with the current call and return
     /// `Some(result)` when a hard abort is warranted (2× threshold
     /// consecutive identical calls). Non-warning cases return `None`.

@@ -625,24 +625,12 @@ impl AgentRunEngine {
                     continue;
                 }
 
-                // ── PRE-HOOK: tool.before ──
-                if let Some(ref runner) = hook_runner {
-                    let hook_args = call.parse_arguments().unwrap_or_default();
-                    let event = crate::hooks::tool_hook_event(
-                        "tool.before",
-                        name,
-                        &hook_args,
-                        &self.project_dir,
-                    );
-                    let hook_result = runner.run_pre_hook("tool.before", &event).await;
-                    if !hook_result.allowed {
-                        messages.push(Message::tool_result(
-                            &call.id,
-                            name,
-                            format!("BLOCKED by hook: {}", hook_result.output.trim()),
-                        ));
-                        continue;
-                    }
+                // Pre-hook — extracted to main_loop::run_pre_tool_hook.
+                if self
+                    .run_pre_tool_hook(hook_runner.as_ref(), call, &mut messages)
+                    .await
+                {
+                    continue;
                 }
 
                 // ── PHASE 9: PRE-MUTATION CHECKPOINT ──
@@ -773,17 +761,8 @@ impl AgentRunEngine {
 
                 messages.push(result_msg);
 
-                // ── POST-HOOK: tool.after ──
-                if let Some(ref runner) = hook_runner {
-                    let hook_args = call.parse_arguments().unwrap_or_default();
-                    let event = crate::hooks::tool_hook_event(
-                        "tool.after",
-                        name,
-                        &hook_args,
-                        &self.project_dir,
-                    );
-                    runner.run_post_hook("tool.after", &event).await;
-                }
+                // Post-hook — extracted to main_loop::run_post_tool_hook.
+                self.run_post_tool_hook(hook_runner.as_ref(), call).await;
             }
 
             if let Some(result) = should_return {
