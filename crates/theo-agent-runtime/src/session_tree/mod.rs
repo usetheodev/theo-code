@@ -7,175 +7,18 @@
 //!
 //! Inspired by pi-mono's `SessionManager` (see `referencias/pi-mono/packages/coding-agent/src/core/session-manager.ts`).
 
+mod context_builder;
+mod types;
+pub use types::{EntryId, SessionEntry, SessionTreeError};
+
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use serde::{Deserialize, Serialize};
-
 /// Current session format version.
 pub const CURRENT_SESSION_VERSION: u32 = 1;
-
-// ---------------------------------------------------------------------------
-// EntryId
-// ---------------------------------------------------------------------------
-
-/// Unique ID for a session entry (8-char hex).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct EntryId(String);
-
-impl EntryId {
-    /// Generate a new random-ish 8-char hex ID.
-    ///
-    /// Uses nanosecond XOR seconds to produce a short unique value.
-    /// For stronger uniqueness in production, swap in a proper UUID crate.
-    pub fn generate() -> Self {
-        let t = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default();
-        Self(format!("{:08x}", t.subsec_nanos() ^ (t.as_secs() as u32)))
-    }
-
-    /// Generate an ID that does not collide with existing entries.
-    pub fn generate_unique(existing: &HashMap<String, usize>) -> Self {
-        for _ in 0..100 {
-            let id = Self::generate();
-            if !existing.contains_key(id.as_str()) {
-                return id;
-            }
-            // Tiny sleep to change nanos on collision — extremely unlikely path.
-            std::thread::yield_now();
-        }
-        // Fallback: append counter suffix.
-        let t = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default();
-        Self(format!("{:016x}", t.as_nanos()))
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-
-    /// Create from a raw string (useful in tests and deserialization).
-    pub fn from_raw(s: impl Into<String>) -> Self {
-        Self(s.into())
-    }
-}
-
-impl std::fmt::Display for EntryId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-// ---------------------------------------------------------------------------
-// SessionEntry
-// ---------------------------------------------------------------------------
-
-/// Type of session entry stored in the JSONL file.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-#[non_exhaustive]
-pub enum SessionEntry {
-    /// Session header — always the first line in the JSONL file.
-    Header {
-        id: EntryId,
-        version: u32,
-        timestamp: String,
-        cwd: String,
-    },
-    /// A conversation message (user, assistant, tool, system).
-    Message {
-        id: EntryId,
-        parent_id: Option<EntryId>,
-        role: String,
-        content: String,
-    },
-    /// Compaction summary replacing older messages.
-    Compaction {
-        id: EntryId,
-        parent_id: Option<EntryId>,
-        summary: String,
-        first_kept_entry_id: EntryId,
-        tokens_before: usize,
-    },
-    /// Model change event.
-    ModelChange {
-        id: EntryId,
-        parent_id: Option<EntryId>,
-        provider: String,
-        model_id: String,
-    },
-    /// Branch summary — context about an abandoned branch.
-    BranchSummary {
-        id: EntryId,
-        parent_id: Option<EntryId>,
-        summary: String,
-        from_branch_id: EntryId,
-    },
-}
-
-impl SessionEntry {
-    /// Returns the entry's unique ID.
-    pub fn id(&self) -> &EntryId {
-        match self {
-            Self::Header { id, .. }
-            | Self::Message { id, .. }
-            | Self::Compaction { id, .. }
-            | Self::ModelChange { id, .. }
-            | Self::BranchSummary { id, .. } => id,
-        }
-    }
-
-    /// Returns the parent ID (None for Header and root entries).
-    pub fn parent_id(&self) -> Option<&EntryId> {
-        match self {
-            Self::Header { .. } => None,
-            Self::Message { parent_id, .. }
-            | Self::Compaction { parent_id, .. }
-            | Self::ModelChange { parent_id, .. }
-            | Self::BranchSummary { parent_id, .. } => parent_id.as_ref(),
-        }
-    }
-
-    /// Returns `true` if this is a `Header` variant.
-    pub fn is_header(&self) -> bool {
-        matches!(self, Self::Header { .. })
-    }
-
-    /// Returns `true` if this is a `Message` variant.
-    pub fn is_message(&self) -> bool {
-        matches!(self, Self::Message { .. })
-    }
-
-    /// Returns `true` if this is a `Compaction` variant.
-    pub fn is_compaction(&self) -> bool {
-        matches!(self, Self::Compaction { .. })
-    }
-}
-
-// ---------------------------------------------------------------------------
-// SessionTreeError
-// ---------------------------------------------------------------------------
-
-/// Errors that can occur when operating on a session tree.
-#[derive(Debug, thiserror::Error)]
-pub enum SessionTreeError {
-    #[error("entry not found: {0}")]
-    EntryNotFound(String),
-
-    #[error("invalid session file: {reason}")]
-    InvalidFile { reason: String },
-
-    #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
-
-    #[error("serialization error: {0}")]
-    Serde(#[from] serde_json::Error),
-}
 
 // ---------------------------------------------------------------------------
 // SessionTree
@@ -383,88 +226,8 @@ impl SessionTree {
     /// summary replaces them).
     ///
     /// Returns entries in root-to-leaf order, excluding the `Header`.
-    pub fn build_context(&self) -> Vec<&SessionEntry> {
-        let leaf_id = match &self.leaf_id {
-            Some(id) => id,
-            None => return Vec::new(),
-        };
-
-        // Walk from leaf to root, collecting the path.
-        let path = self.walk_to_root(leaf_id);
-        if path.is_empty() {
-            return Vec::new();
-        }
-
-        // Find the latest compaction in the path.
-        let mut compaction_idx: Option<usize> = None;
-        let mut first_kept_id: Option<&str> = None;
-
-        for (i, entry) in path.iter().enumerate() {
-            if let SessionEntry::Compaction {
-                first_kept_entry_id,
-                ..
-            } = entry
-            {
-                compaction_idx = Some(i);
-                first_kept_id = Some(first_kept_entry_id.as_str());
-            }
-        }
-
-        match (compaction_idx, first_kept_id) {
-            (Some(comp_idx), Some(kept_id)) => {
-                // 1. Include the compaction entry itself.
-                // 2. Include kept entries (from first_kept_entry_id up to compaction).
-                // 3. Include everything after the compaction.
-                let mut result = Vec::new();
-
-                // Emit the compaction summary entry.
-                result.push(path[comp_idx]);
-
-                // Emit kept entries before the compaction.
-                let mut found_first_kept = false;
-                for entry in &path[..comp_idx] {
-                    if entry.id().as_str() == kept_id {
-                        found_first_kept = true;
-                    }
-                    if found_first_kept {
-                        result.push(entry);
-                    }
-                }
-
-                // Emit entries after the compaction.
-                for entry in &path[comp_idx + 1..] {
-                    result.push(entry);
-                }
-
-                result
-            }
-            _ => {
-                // No compaction — return the full path (excluding header).
-                path
-            }
-        }
-    }
-
-    /// Walk from the given entry to root and return the path in root-to-leaf
-    /// order, excluding `Header` entries.
-    fn walk_to_root(&self, from: &EntryId) -> Vec<&SessionEntry> {
-        let mut path = Vec::new();
-        let mut current_id = Some(from);
-
-        while let Some(id) = current_id {
-            if let Some(entry) = self.get(id) {
-                if !entry.is_header() {
-                    path.push(entry);
-                }
-                current_id = entry.parent_id();
-            } else {
-                break;
-            }
-        }
-
-        path.reverse();
-        path
-    }
+    // `build_context` + `walk_to_root` moved to `context_builder.rs` as
+    // `impl SessionTree` methods. See that file for docs.
 
     // -----------------------------------------------------------------------
     // Convenience helpers for appending specific entry types

@@ -19,15 +19,16 @@
 //! - LangGraph `interrupt` / human-in-the-loop pattern
 //! - Anthropic multi-agent paper §6 ("guardrails as composable validators")
 
-use std::sync::Arc;
-
 use serde::{Deserialize, Serialize};
 
 use theo_domain::agent_spec::AgentSpec;
 use theo_domain::capability::CapabilitySet;
-use theo_domain::tool::ToolCategory;
 
+mod builtins;
+mod chain;
 pub mod declarative;
+pub use builtins::{ObjectiveMustNotBeEmpty, ReadOnlyAgentMustNotMutate};
+pub use chain::GuardrailChain;
 pub use declarative::{
     parse_guardrails_toml, DeclarativeDecision, DeclarativeGuardrail,
     DeclarativeGuardrailSpec, DeclarativeGuardrailsFile, DeclarativeMatcher,
@@ -125,166 +126,10 @@ pub trait HandoffGuardrail: Send + Sync + std::fmt::Debug {
     fn evaluate(&self, ctx: &HandoffContext<'_>) -> GuardrailDecision;
 }
 
-// ---------------------------------------------------------------------------
-// GuardrailChain — composable evaluator
-// ---------------------------------------------------------------------------
-
-/// Aggregated set of guardrails. `evaluate` runs every guardrail in order
-/// and collects decisions; `is_blocked` short-circuits on the first Block.
-#[derive(Debug, Default, Clone)]
-pub struct GuardrailChain {
-    guardrails: Vec<Arc<dyn HandoffGuardrail>>,
-}
-
-impl GuardrailChain {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Build a chain seeded with built-in guardrails.
-    pub fn with_default_builtins() -> Self {
-        let mut c = Self::new();
-        c.add(Arc::new(ReadOnlyAgentMustNotMutate));
-        c.add(Arc::new(ObjectiveMustNotBeEmpty));
-        c
-    }
-
-    pub fn add(&mut self, g: Arc<dyn HandoffGuardrail>) {
-        self.guardrails.push(g);
-    }
-
-    pub fn len(&self) -> usize {
-        self.guardrails.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.guardrails.is_empty()
-    }
-
-    /// Names of every registered guardrail.
-    pub fn ids(&self) -> Vec<String> {
-        self.guardrails.iter().map(|g| g.id().to_string()).collect()
-    }
-
-    /// Run every guardrail. Returns paired (id, decision) tuples in order.
-    pub fn evaluate(&self, ctx: &HandoffContext<'_>) -> Vec<(String, GuardrailDecision)> {
-        self.guardrails
-            .iter()
-            .map(|g| (g.id().to_string(), g.evaluate(ctx)))
-            .collect()
-    }
-
-    /// Short-circuit query: returns `Some((id, reason))` of the first
-    /// blocking guardrail, else `None`.
-    pub fn first_block(&self, ctx: &HandoffContext<'_>) -> Option<(String, String)> {
-        for g in &self.guardrails {
-            if let GuardrailDecision::Block { reason } = g.evaluate(ctx) {
-                return Some((g.id().to_string(), reason));
-            }
-        }
-        None
-    }
-
-    /// Walk the chain returning the first non-`Allow` decision (Block,
-    /// Redirect, RewriteObjective, or Warn) paired with its guardrail id.
-    /// Returns `None` if every guardrail allowed.
-    ///
-    /// Phase 18: chains stop at the first opinionated decision so a custom
-    /// guardrail registered after a built-in does not silently override
-    /// the built-in's verdict.
-    pub fn first_decision(
-        &self,
-        ctx: &HandoffContext<'_>,
-    ) -> Option<(String, GuardrailDecision)> {
-        for g in &self.guardrails {
-            let decision = g.evaluate(ctx);
-            if !decision.is_allow() {
-                return Some((g.id().to_string(), decision));
-            }
-        }
-        None
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Built-in guardrails
-// ---------------------------------------------------------------------------
-
-/// Block when the target sub-agent has no write/edit capability but the
-/// objective contains explicit mutation intent. Heuristic — false positives
-/// are acceptable because the user can always re-issue with an
-/// implementation agent.
-#[derive(Debug)]
-pub struct ReadOnlyAgentMustNotMutate;
-
-impl ReadOnlyAgentMustNotMutate {
-    /// Detects mutation keywords. Word-boundary matching on lowercased
-    /// objective. Conservative: only flags clearly imperative verbs.
-    pub fn objective_implies_mutation(objective: &str) -> bool {
-        let lower = objective.to_lowercase();
-        const VERBS: &[&str] = &[
-            "implement ", "edit ", "write ",
-            "modify ", "create ", "patch ",
-            "refactor ", "fix bug", "delete ",
-            "add new ", "rewrite ", "remove ",
-        ];
-        VERBS.iter().any(|w| lower.contains(w))
-    }
-
-    /// True when a CapabilitySet permits no file mutation tools.
-    pub fn is_capability_set_read_only(caps: &CapabilitySet) -> bool {
-        // Read-only ⇔ neither edit nor write nor bash usable.
-        let can_edit = caps.can_use_tool("edit", ToolCategory::FileOps);
-        let can_write = caps.can_use_tool("write", ToolCategory::FileOps);
-        let can_bash = caps.can_use_tool("bash", ToolCategory::Execution);
-        !can_edit && !can_write && !can_bash
-    }
-}
-
-impl HandoffGuardrail for ReadOnlyAgentMustNotMutate {
-    fn id(&self) -> &str {
-        "builtin.read_only_agent_must_not_mutate"
-    }
-    fn evaluate(&self, ctx: &HandoffContext<'_>) -> GuardrailDecision {
-        if !Self::objective_implies_mutation(ctx.objective) {
-            return GuardrailDecision::Allow;
-        }
-        if Self::is_capability_set_read_only(&ctx.target_spec.capability_set) {
-            // Plan §18 default: redirect to `implementer` rather than block —
-            // the LLM rarely benefits from a refusal here; transparently
-            // upgrading the target preserves intent. The handle_delegate_task
-            // path emits a `HandoffEvaluated` audit event so the operator can
-            // see exactly which redirection happened.
-            return GuardrailDecision::Redirect {
-                new_agent_name: "implementer".to_string(),
-            };
-        }
-        GuardrailDecision::Allow
-    }
-}
-
-/// Reject empty objectives. Cheap sanity check that catches LLM hallucination
-/// of a `delegate_task` call without the required argument string.
-#[derive(Debug)]
-pub struct ObjectiveMustNotBeEmpty;
-
-impl HandoffGuardrail for ObjectiveMustNotBeEmpty {
-    fn id(&self) -> &str {
-        "builtin.objective_must_not_be_empty"
-    }
-    fn evaluate(&self, ctx: &HandoffContext<'_>) -> GuardrailDecision {
-        if ctx.objective.trim().is_empty() {
-            GuardrailDecision::Block {
-                reason: format!(
-                    "Empty objective for handoff to '{}'. Provide a concrete instruction.",
-                    ctx.target_agent
-                ),
-            }
-        } else {
-            GuardrailDecision::Allow
-        }
-    }
-}
+// `GuardrailChain` moved to `chain.rs`. Built-in guardrails
+// (`ReadOnlyAgentMustNotMutate`, `ObjectiveMustNotBeEmpty`) moved to
+// `builtins.rs`. Re-exported at module level above so every path
+// `crate::handoff_guardrail::*` stays byte-identical for callers.
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -309,6 +154,7 @@ fn truncate(s: &str, n: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
 
     fn explorer_spec() -> AgentSpec {
         crate::subagent::builtins::explorer()
