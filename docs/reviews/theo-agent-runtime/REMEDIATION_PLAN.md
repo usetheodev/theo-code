@@ -1053,3 +1053,21 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 - Os testes inline de `derive_provider_hint` dentro de `run_engine::tests` continuam no mesmo modulo mas testam o import — agora importado do helper.
 
 **Nao feito nesta iteracao (proximas):** T0.1 restante (7 cenarios LLM), T0.2 caracterizacao subagent, T1.1 bwrap completo, T3.4 retry inline, T4.2 continuar extracao (`lifecycle.rs`, `main_loop.rs`, `dispatch/*`), T4.3 Strategy pattern meta-tools, T4.4 Chain of Responsibility done gates, T4.5 split subagent/mod.rs, T5.1 RunMetadata, T6.4 batch streaming deltas, T7.* tests gap, T8.1 phase sweep restante.
+
+### Iteracao 9 (2026-04-24) — Fase 4: run_engine/ module + lifecycle extract
+
+| Task | Status | Notas |
+|---|---|---|
+| T4.2 run_engine.rs split — segunda etapa | **DONE (parcial)** | `run_engine.rs` convertido para `run_engine/mod.rs`. Dois submodulos novos acessando fields privados via parent scope: `run_engine/builders.rs` (152 LOC — 11 `with_subagent_*`, `with_graph_context`, `with_snapshot_store`, `with_message_queues`), `run_engine/lifecycle.rs` (200 LOC — `record_session_exit`, `record_session_exit_public`, `finalize_observability`). `run_engine/mod.rs`: 4029 → **3744 LOC** (−285 desde iter 7; −486 desde baseline). Caracterizacao snapshots permanecem byte-identicos. |
+
+**Baseline → atual (por metrica, desde Iteracao 0):**
+- `.expect/.unwrap/panic!`: 1071 → 1041
+- silent-swallow: 61 → 2
+- `std::env::var`: 25 → 6
+- `std::process::Command` producao: 2 → 1
+- phase tags: 310 → **186** (-124)
+- **`run_engine.rs` → `run_engine/mod.rs` LOC: 4230 → 3744 (-486)**
+
+**Validacao:** 1132 unit + 96 integration (incluindo 8 caracterizacao snapshots) = **1228 tests passando, 0 falhas.**
+
+**Nao feito nesta iteracao (proximas):** T0.1 restante (7 cenarios LLM), T0.2 caracterizacao subagent, T1.1 bwrap, T3.4 retry inline consolidado, T4.2 continuar (extrair main_loop/bootstrap/dispatch), T4.3 Strategy, T4.4 Chain of Responsibility, T4.5 split subagent/mod.rs, T5.1 RunMetadata, T6.4 batch streaming, T7.*, T8.1 phase sweep.

@@ -1,3 +1,10 @@
+// Submodules extracted from the original single-file run_engine.rs as
+// part of Fase 4 (REMEDIATION_PLAN T4.2). Each needs access to private
+// fields of `AgentRunEngine` declared in this module — that is why
+// they live as child modules rather than siblings.
+mod builders;
+mod lifecycle;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -302,120 +309,7 @@ impl AgentRunEngine {
         self.checkpoint_before_mutation(&format!("turn-{}-pre-{}", turn_id, tool_name))
     }
 
-    /// Inject the SubAgentRegistry. Used by delegate_task to look up
-    /// named agents (built-in / project / global). When `None`, a default
-    /// registry with builtins is constructed on each delegate_task call.
-    pub fn with_subagent_registry(
-        mut self,
-        registry: Arc<crate::subagent::SubAgentRegistry>,
-    ) -> Self {
-        self.subagent_registry = Some(registry);
-        self
-    }
-
-    /// Inject session persistence store. When set, sub-agent runs
-    /// are persisted in `<base>/runs/{run_id}.json`.
-    pub fn with_subagent_run_store(
-        mut self,
-        store: Arc<crate::subagent_runs::FileSubagentRunStore>,
-    ) -> Self {
-        self.subagent_run_store = Some(store);
-        self
-    }
-
-    /// Inject global hooks (per-agent hooks merged via spec.hooks).
-    pub fn with_subagent_hooks(
-        mut self,
-        hooks: Arc<crate::lifecycle_hooks::HookManager>,
-    ) -> Self {
-        self.subagent_hooks = Some(hooks);
-        self
-    }
-
-    /// Inject cancellation tree. Sub-agents register children;
-    /// root cancellation propagates.
-    pub fn with_subagent_cancellation(
-        mut self,
-        tree: Arc<crate::cancellation::CancellationTree>,
-    ) -> Self {
-        self.subagent_cancellation = Some(tree);
-        self
-    }
-
-    /// Inject checkpoint manager. Sub-agents auto-snapshot pre-run.
-    pub fn with_subagent_checkpoint(
-        mut self,
-        manager: Arc<crate::checkpoint::CheckpointManager>,
-    ) -> Self {
-        self.subagent_checkpoint = Some(manager);
-        self
-    }
-
-    /// Inject worktree provider. Sub-agents with isolation=worktree
-    /// get an isolated git worktree.
-    pub fn with_subagent_worktree(
-        mut self,
-        provider: Arc<theo_isolation::WorktreeProvider>,
-    ) -> Self {
-        self.subagent_worktree = Some(provider);
-        self
-    }
-
-    /// Inject MCP registry. Sub-agents with non-empty
-    /// `spec.mcp_servers` get a system-prompt hint listing the allowed
-    /// `mcp:server:tool` namespace.
-    pub fn with_subagent_mcp(mut self, mcp: Arc<theo_infra_mcp::McpRegistry>) -> Self {
-        self.subagent_mcp = Some(mcp);
-        self
-    }
-
-    /// Inject MCP discovery cache. When attached, sub-agents whose
-    /// `mcp_servers` allowlist matches a cached server receive a richer
-    /// system-prompt hint listing actual tool names instead of just the
-    /// `mcp:<server>:<tool>` namespace placeholder.
-    pub fn with_subagent_mcp_discovery(
-        mut self,
-        cache: Arc<theo_infra_mcp::DiscoveryCache>,
-    ) -> Self {
-        self.subagent_mcp_discovery = Some(cache);
-        self
-    }
-
-    /// Inject the handoff guardrail chain. When `None`, a default
-    /// chain (`GuardrailChain::with_default_builtins`) is constructed
-    /// per `delegate_task` call.
-    pub fn with_subagent_handoff_guardrails(
-        mut self,
-        chain: Arc<crate::handoff_guardrail::GuardrailChain>,
-    ) -> Self {
-        self.subagent_handoff_guardrails = Some(chain);
-        self
-    }
-
-    /// Enable replay-mode dispatch. When set, each tool call is
-    /// short-circuited if its `call_id` already appears in the
-    /// context's `executed_tool_calls` set; the cached
-    /// `Message::tool_result` from the event log is pushed instead of
-    /// invoking the tool.
-    pub fn with_resume_context(
-        mut self,
-        ctx: Arc<crate::subagent::resume::ResumeContext>,
-    ) -> Self {
-        self.resume_context = Some(ctx);
-        self
-    }
-
-    /// Inject a ReloadableRegistry. Takes precedence over
-    /// `with_subagent_registry`: delegate_task reads a fresh snapshot
-    /// each call, so filesystem changes (via RegistryWatcher) take
-    /// effect without needing to restart the agent.
-    pub fn with_subagent_reloadable(
-        mut self,
-        reloadable: crate::subagent::ReloadableRegistry,
-    ) -> Self {
-        self.subagent_reloadable = Some(reloadable);
-        self
-    }
+    // All `with_*` builders moved to `builders.rs` (Fase 4 — T4.2).
 
     /// Snapshot the workdir BEFORE a mutating tool fires (edit / write /
     /// apply_patch / bash). Idempotent within a turn — caller tracks
@@ -436,18 +330,6 @@ impl AgentRunEngine {
     /// Accumulated token usage (Phase 1 T1.1 AC-1.1.4, CLI display).
     pub fn session_token_usage(&self) -> &theo_domain::budget::TokenUsage {
         &self.session_token_usage
-    }
-
-    /// Sets the message queues for steering and follow-up injection.
-    pub fn with_message_queues(mut self, queues: MessageQueues) -> Self {
-        self.message_queues = queues;
-        self
-    }
-
-    /// Sets the graph context provider for code intelligence injection.
-    pub fn with_graph_context(mut self, provider: Arc<dyn theo_domain::graph_context::GraphContextProvider>) -> Self {
-        self.graph_context = Some(provider);
-        self
     }
 
     /// Returns the run_id.
@@ -475,12 +357,6 @@ impl AgentRunEngine {
         )
     }
 
-    /// Sets the snapshot store for persistence (Invariant 7).
-    pub fn with_snapshot_store(mut self, store: Arc<dyn SnapshotStore>) -> Self {
-        self.snapshot_store = Some(store);
-        self
-    }
-
     /// Execute the full agent run cycle.
     ///
     /// Flow: Initialized → Planning → Executing → Evaluating → Converged/Replanning/Aborted
@@ -491,169 +367,8 @@ impl AgentRunEngine {
         result
     }
 
-    /// AgentLoop::run_with_history adapter — shares execute()'s shutdown path.
-    pub async fn record_session_exit_public(&mut self, r: &AgentResult) { self.record_session_exit(r).await; }
-
-    /// Record session exit. Phase 0 T0.1: async tokio::fs + on_session_end hook.
-    async fn record_session_exit(&mut self, result: &AgentResult) {
-        // Save failure pattern tracker
-        self.failure_tracker.save();
-
-        // Save context metrics to .theo/metrics/{run_id}.json. Best-effort:
-        // a persistence failure is surfaced via DomainEvent::Error (fs) so
-        // the observability pipeline can alert, but the shutdown path does
-        // not abort.
-        let metrics_dir = self.project_dir.join(".theo").join("metrics");
-        match tokio::fs::create_dir_all(&metrics_dir).await {
-            Ok(()) => {
-                let report = self.context_metrics.to_report();
-                let metrics_path =
-                    metrics_dir.join(format!("{}.json", self.run.run_id.as_str()));
-                let body = serde_json::to_string_pretty(&report).unwrap_or_default();
-                if let Err(e) = tokio::fs::write(&metrics_path, body).await {
-                    crate::fs_errors::emit_fs_error(
-                        &self.event_bus,
-                        self.run.run_id.as_str(),
-                        "record_session_exit/metrics_write",
-                        &metrics_path,
-                        &e,
-                    );
-                }
-            }
-            Err(e) => {
-                crate::fs_errors::emit_fs_error(
-                    &self.event_bus,
-                    self.run.run_id.as_str(),
-                    "record_session_exit/metrics_mkdir",
-                    &metrics_dir,
-                    &e,
-                );
-            }
-        }
-
-        // Generate EpisodeSummary from run events and persist to .theo/memory/episodes/
-        // (decision: meeting 20260420-221947 #4 — episodes belong to memory namespace,
-        // not wiki; wiki is reserved for compiled content).
-        let events = self.event_bus.events();
-        if !events.is_empty() {
-            let task_objective = self
-                .task_manager
-                .get(&self.task_id)
-                .map(|t| t.objective.clone())
-                .unwrap_or_else(|| "unknown".to_string());
-            let mut summary = theo_domain::episode::EpisodeSummary::from_events(
-                self.run.run_id.as_str(), Some(self.task_id.as_str()), &task_objective, &events,
-            );
-            // Phase 1 T1.1 (usage+cost) + Phase 2 T2.1 (lesson pipeline, G5).
-            let mut usage = self.session_token_usage.clone();
-            if let Some(c) = theo_domain::budget::known_model_cost(&self.config.model) { usage.recompute_cost(&c); }
-            summary.token_usage = Some(usage);
-            // Phase 2: T2.1 (lessons G5) + T2.3 (hypotheses G6).
-            let _ = crate::lesson_pipeline::extract_and_persist_for_outcome(&self.project_dir, summary.machine_summary.outcome, &events);
-            let _ = crate::hypothesis_pipeline::persist_unresolved(&self.project_dir, &summary);
-            let episodes_dir = self
-                .project_dir
-                .join(".theo")
-                .join("memory")
-                .join("episodes");
-            match tokio::fs::create_dir_all(&episodes_dir).await {
-                Ok(()) => {
-                    let episode_path =
-                        episodes_dir.join(format!("{}.json", summary.summary_id));
-                    let body = serde_json::to_string_pretty(&summary).unwrap_or_default();
-                    if let Err(e) = tokio::fs::write(&episode_path, body).await {
-                        crate::fs_errors::emit_fs_error(
-                            &self.event_bus,
-                            self.run.run_id.as_str(),
-                            "record_session_exit/episode_write",
-                            &episode_path,
-                            &e,
-                        );
-                    }
-                }
-                Err(e) => {
-                    crate::fs_errors::emit_fs_error(
-                        &self.event_bus,
-                        self.run.run_id.as_str(),
-                        "record_session_exit/episode_mkdir",
-                        &episodes_dir,
-                        &e,
-                    );
-                }
-            }
-        }
-
-        // Phase 0 T0.1 AC-0.1.4: memory-provider session-end hook (every exit path).
-        crate::memory_lifecycle::MemoryLifecycle::on_session_end(&self.config).await;
-
-        // PLAN_AUTO_EVOLUTION_SOTA Phase 4 — index session transcript
-        // via the pluggable TranscriptIndexer trait (concrete impl
-        // lives in theo-application). Awaited inline so shutdown
-        // completes only after Tantivy has committed to disk.
-        crate::memory_lifecycle::maybe_index_transcript(
-            &self.config,
-            &self.project_dir,
-            self.run.run_id.as_str(),
-            events.clone(),
-        )
-        .await;
-
-        // Record session end for cross-session progress tracking
-        if !self.config.is_subagent {
-            let tasks = if result.success {
-                vec![crate::session_bootstrap::CompletedTask {
-                    name: result.summary.chars().take(100).collect(),
-                    status: "completed".to_string(),
-                    files_changed: result.files_edited.clone(),
-                }]
-            } else {
-                vec![crate::session_bootstrap::CompletedTask {
-                    name: result.summary.chars().take(100).collect(),
-                    status: "failed".to_string(),
-                    files_changed: result.files_edited.clone(),
-                }]
-            };
-            let last_error = if result.success {
-                None
-            } else {
-                Some(result.summary.clone())
-            };
-            crate::session_bootstrap::record_session_end(
-                &self.project_dir,
-                self.run.run_id.as_str(),
-                tasks,
-                vec![], // next_steps are determined by the LLM, not the engine
-                last_error,
-            );
-        }
-
-        // Observability: drain writer, compute RunReport, append summary line.
-        self.finalize_observability(result, !events.is_empty());
-    }
-
-    fn finalize_observability(&mut self, result: &AgentResult, had_events: bool) {
-        let Some(pipeline) = self.observability.take() else { return };
-        let file_path = pipeline.finalize();
-        self.episodes_created = if had_events { 1 } else { 0 };
-        let detected = crate::observability::finalize_run_observability(
-            &file_path,
-            self.run.run_id.as_str(),
-            result.success,
-            result.files_edited.len() as u64,
-            &self.session_token_usage,
-            self.config.max_iterations,
-            self.budget_enforcer.usage(),
-            &self.context_metrics.to_report(),
-            self.done_attempts,
-            self.episodes_injected,
-            self.episodes_created,
-            self.failure_tracker.new_fingerprint_count(),
-            self.failure_tracker.recurrent_fingerprint_count(),
-            &self.initial_context_files,
-            &self.pre_compaction_hot_files,
-        );
-        detected.publish_events(&self.event_bus, self.run.run_id.as_str());
-    }
+    // record_session_exit + record_session_exit_public +
+    // finalize_observability moved to `lifecycle.rs` (Fase 4 — T4.2).
 
     /// Execute with session history from previous REPL prompts.
     /// `history` contains messages from prior runs in this session.
