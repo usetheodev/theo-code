@@ -15,9 +15,6 @@ use theo_domain::agent_run::{AgentRun, RunState};
 use theo_domain::budget::Budget;
 use theo_domain::event::{DomainEvent, EventType};
 use theo_domain::identifiers::{RunId, TaskId};
-use theo_domain::session::{MessageId, SessionId};
-use theo_domain::tool::ToolContext;
-use theo_domain::tool_call::ToolCallState;
 use theo_infra_llm::LlmClient;
 use theo_infra_llm::types::{ChatRequest, Message};
 use theo_tooling::registry::ToolRegistry;
@@ -648,64 +645,14 @@ impl AgentRunEngine {
                     continue;
                 }
 
-                // Execute regular tool via ToolCallManager (Invariants 2, 3, 5)
-                let tool_args = match call.parse_arguments() {
-                    Ok(args) => args,
-                    Err(e) => {
-                        // Report parse error to LLM so it can fix and retry
-                        messages.push(Message::tool_result(
-                            &call.id,
-                            name,
-                            format!(
-                                "Failed to parse arguments: {e}. Please retry with valid JSON."
-                            ),
-                        ));
-                        continue;
-                    }
+                // Regular tool dispatch — extracted to
+                // main_loop::execute_regular_tool_call.
+                let Some((success, output)) = self
+                    .execute_regular_tool_call(call, iteration, &abort_rx, &mut messages)
+                    .await
+                else {
+                    continue;
                 };
-                // Apply tool's prepare_arguments hook (normalizes/migrates args
-                // before schema validation). Pi-mono ref: prepareArguments hook.
-                let tool_args = if let Some(tool) = self.registry.get(name) {
-                    tool.prepare_arguments(tool_args)
-                } else {
-                    tool_args
-                };
-                let tool_call_id =
-                    self.tool_call_manager
-                        .enqueue(self.task_id.clone(), name.clone(), tool_args);
-
-                let ctx = ToolContext {
-                    session_id: SessionId::new("agent"),
-                    message_id: MessageId::new(format!("iter_{iteration}")),
-                    call_id: call.id.clone(),
-                    agent: "main".to_string(),
-                    abort: abort_rx.clone(),
-                    project_dir: self.project_dir.clone(),
-                    graph_context: self.graph_context.clone(),
-                    stdout_tx: None,
-                };
-
-                let tool_result = self
-                    .tool_call_manager
-                    .dispatch_and_execute(&tool_call_id, &self.registry, &ctx)
-                    .await;
-
-                let (success, output) = match &tool_result {
-                    Ok(r) => (r.status == ToolCallState::Succeeded, r.output.clone()),
-                    Err(e) => (false, format!("Tool call error: {}", e)),
-                };
-
-                // Record tool call in budget and metrics
-                self.budget_enforcer.record_tool_call();
-                self.metrics.record_tool_call(name, 0, success);
-
-                // Track failure patterns for steering loop suggestions
-                if !success {
-                    let pattern = format!("{}_failure", name);
-                    if let Some(suggestion) = self.failure_tracker.record_and_check(&pattern) {
-                        messages.push(Message::user(&suggestion));
-                    }
-                }
 
                 // Doom loop tracker — extracted to main_loop::update_doom_tracker.
                 if let Some(result) = self.update_doom_tracker(
@@ -1307,6 +1254,7 @@ use theo_domain::clock::now_millis;
 mod tests {
     use super::*;
     use crate::event_bus::CapturingListener;
+    use theo_domain::session::SessionId;
     use theo_domain::task::AgentType;
 
     struct TestSetup {

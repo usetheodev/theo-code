@@ -1210,3 +1210,11 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 | T4.2 run_engine split — 13a etapa | **DONE (parcial)** | 3 helpers pequenos em `main_loop.rs`: `emit_checkpoint_event_for_tool` (pre-mutation checkpoint + RunStateChanged), `fire_sensor_for_write_tool` (sensor invocation para write-class tools), `drain_steering_queue` (user-injected mid-run messages). 3 blocos inline colapsam em 3 chamadas. `mod.rs`: 2465 → **2439 LOC** (-26 esta iter; **-1791 desde baseline 4230, -42%**). main_loop.rs: 855 → 924 LOC. |
 
 **Validacao:** 1132 unit + 96 integration = 1228 tests passando, 0 falhas.
+
+### Iteracao 21 (2026-04-24) — Fase 4: execute_regular_tool_call
+
+| Task | Status | Notas |
+|---|---|---|
+| T4.2 run_engine split — 14a etapa | **DONE (parcial)** | `execute_regular_tool_call` (~90 LOC) em `main_loop.rs`: parse args (Option early-return) + `prepare_arguments` hook + enqueue + ToolContext build + `dispatch_and_execute` + extract (success, output) + budget/metrics record + failure_tracker record. Retorna `Option<(bool, String)>`: `None` → caller `continue`s; `Some((success, output))` caso contrario. Bloco de ~60 LOC no main loop colapsa em let-else de 5 linhas. `mod.rs`: 2439 → **2387 LOC** (-52 esta iter; **-1843 desde baseline 4230, -44%**). main_loop.rs: 924 → 1010 LOC. |
+
+**Validacao:** 1132 unit + 96 integration = 1228 tests passando, 0 falhas.

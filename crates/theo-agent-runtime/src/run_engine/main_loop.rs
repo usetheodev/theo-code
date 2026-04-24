@@ -246,6 +246,92 @@ impl AgentRunEngine {
         Ok(resp)
     }
 
+    /// Execute a non-meta tool call end-to-end: parse args →
+    /// prepare_arguments → enqueue → dispatch → budget/metrics record →
+    /// failure-pattern tracker. Returns `Some((success, output))` when
+    /// the tool ran (even on tool-level failure); `None` when the
+    /// arguments failed to parse — in that case a tool_result explaining
+    /// the parse error has already been pushed and the caller should
+    /// `continue` the main loop.
+    pub(super) async fn execute_regular_tool_call(
+        &mut self,
+        call: &theo_infra_llm::types::ToolCall,
+        iteration: usize,
+        abort_rx: &tokio::sync::watch::Receiver<bool>,
+        messages: &mut Vec<Message>,
+    ) -> Option<(bool, String)> {
+        use theo_domain::session::{MessageId, SessionId};
+        use theo_domain::tool::ToolContext;
+        use theo_domain::tool_call::ToolCallState;
+
+        let name = &call.function.name;
+
+        // 1. Parse args. On failure, report to the LLM and signal
+        // caller to continue.
+        let tool_args = match call.parse_arguments() {
+            Ok(args) => args,
+            Err(e) => {
+                messages.push(Message::tool_result(
+                    &call.id,
+                    name,
+                    format!("Failed to parse arguments: {e}. Please retry with valid JSON."),
+                ));
+                return None;
+            }
+        };
+
+        // 2. Apply the tool's `prepare_arguments` hook
+        // (normalizes/migrates args before schema validation).
+        let tool_args = if let Some(tool) = self.registry.get(name) {
+            tool.prepare_arguments(tool_args)
+        } else {
+            tool_args
+        };
+
+        // 3. Enqueue in ToolCallManager (Invariants 2, 3, 5).
+        let tool_call_id =
+            self.tool_call_manager
+                .enqueue(self.task_id.clone(), name.clone(), tool_args);
+
+        // 4. Build the ToolContext for dispatch.
+        let ctx = ToolContext {
+            session_id: SessionId::new("agent"),
+            message_id: MessageId::new(format!("iter_{iteration}")),
+            call_id: call.id.clone(),
+            agent: "main".to_string(),
+            abort: abort_rx.clone(),
+            project_dir: self.project_dir.clone(),
+            graph_context: self.graph_context.clone(),
+            stdout_tx: None,
+        };
+
+        // 5. Dispatch + await completion.
+        let tool_result = self
+            .tool_call_manager
+            .dispatch_and_execute(&tool_call_id, &self.registry, &ctx)
+            .await;
+
+        let (success, output) = match &tool_result {
+            Ok(r) => (r.status == ToolCallState::Succeeded, r.output.clone()),
+            Err(e) => (false, format!("Tool call error: {}", e)),
+        };
+
+        // 6. Budget + metrics accounting.
+        self.budget_enforcer.record_tool_call();
+        self.metrics.record_tool_call(name, 0, success);
+
+        // 7. Failure-pattern tracker: on repeated failures, surface a
+        // user-directed suggestion as a steering message.
+        if !success {
+            let pattern = format!("{}_failure", name);
+            if let Some(suggestion) = self.failure_tracker.record_and_check(&pattern) {
+                messages.push(Message::user(&suggestion));
+            }
+        }
+
+        Some((success, output))
+    }
+
     /// Emit `RunStateChanged` marking a pre-mutation checkpoint snapshot.
     /// No-op when no checkpoint manager is attached (via
     /// `maybe_checkpoint_for_tool` returning None).
