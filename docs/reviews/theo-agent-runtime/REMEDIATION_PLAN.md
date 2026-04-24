@@ -1146,4 +1146,13 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 
 **Validacao:** 1132 unit + 96 integration = **1228 tests passando, 0 falhas.** Caracterizacao snapshots byte-identicos.
 
-**Nao feito nesta iteracao (proximas):** T0.1 restante (7 cenarios LLM), T0.2 caracterizacao subagent, T1.1 bwrap, T3.4 retry inline, T4.2 continuar (LLM call + retry ~90 LOC; text-only convergence + plan-mode nudge ~60 LOC; conversion of main loop body into `run_iteration` method), T4.3 Strategy pattern, T4.4 Chain of Responsibility, T4.5 split subagent/mod.rs, T5.1 RunMetadata, T6.4 batch streaming, T7.*, T8.1 phase sweep.
+**Nao feito nesta iteracao (proximas):** T0.1 restante, T0.2, T1.1 bwrap, T3.4 retry completo, T4.2 continuar, T4.3 Strategy, T4.4 Chain of Responsibility, T4.5 split subagent, T5.1 RunMetadata, T6.4 batch streaming, T7.*, T8.1 phase sweep.
+
+### Iteracao 14 (2026-04-24) — Fase 4: call_llm_with_retry
+
+| Task | Status | Notas |
+|---|---|---|
+| T4.2 run_engine split — setima etapa | **DONE (parcial)** | `call_llm_with_retry` (~170 LOC) em `main_loop.rs`: `LlmCallStart` + streaming retry loop + token accounting + `LlmCallEnd` em 1 funcao retornando `Result<ChatResponse, LlmError>`. Caller no main loop colapsa ~140 LOC em match de 10 linhas. `mod.rs`: 2986 → **2841 LOC** (-145 esta iter; **-1389 desde baseline 4230, -33%**). `main_loop.rs`: 139 → 309 LOC. |
+| T3.4 retry encapsulado | **PARCIAL (avanço)** | retry inline foi encapsulado em helper — ainda nao consolida com o `RetryExecutor` generico mas isola bem. |
+
+**Validacao:** 1132 unit + 96 integration = **1228 tests passando, 0 falhas.** Snapshots caracterizacao byte-identicos apos 7 iteracoes de Fase 4.

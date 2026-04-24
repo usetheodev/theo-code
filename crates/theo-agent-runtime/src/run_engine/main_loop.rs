@@ -14,11 +14,11 @@ use theo_domain::agent_run::RunState;
 use theo_domain::event::{DomainEvent, EventType};
 use theo_domain::task::TaskState;
 use theo_infra_llm::LlmError;
-use theo_infra_llm::types::Message;
+use theo_infra_llm::types::{ChatRequest, ChatResponse, Message};
 
 use super::AgentRunEngine;
 use crate::agent_loop::AgentResult;
-use crate::run_engine_helpers::llm_error_to_class;
+use crate::run_engine_helpers::{derive_provider_hint, llm_error_to_class};
 
 /// Routing decision: `(chosen_model, chosen_effort, routing_reason)`.
 pub(super) type RoutingDecision = (String, Option<String>, &'static str);
@@ -72,6 +72,176 @@ impl AgentRunEngine {
                 "no_router",
             ),
         }
+    }
+
+    /// Drive a full LLM call for the current turn: publish
+    /// `LlmCallStart`, run the streaming retry loop, and on success
+    /// accumulate token usage + publish `LlmCallEnd`. Streaming deltas
+    /// (`Reasoning`/`Content`) flow to the event bus as they arrive.
+    ///
+    /// Returns the raw `ChatResponse` on success. Errors (including
+    /// `LlmError::ContextOverflow`) are returned as-is — the caller
+    /// inside the main loop decides whether to recover (overflow) or
+    /// build an abort result.
+    pub(super) async fn call_llm_with_retry(
+        &mut self,
+        request: &ChatRequest,
+        chosen_model: &str,
+        iteration: usize,
+        routing_reason: &str,
+        estimated_context_tokens: usize,
+    ) -> Result<ChatResponse, LlmError> {
+        // Publish LlmCallStart (triggers "Thinking..." in CLI).
+        // OTel payload lets OtelExportingListener build a
+        // `gen_ai.*`-attributed span.
+        let provider_hint = derive_provider_hint(&self.config.base_url);
+        let llm_start_span =
+            crate::observability::otel::llm_call_span(provider_hint, chosen_model);
+        self.event_bus.publish(DomainEvent::new(
+            EventType::LlmCallStart,
+            self.run.run_id.as_str(),
+            serde_json::json!({
+                "iteration": iteration,
+                "routing_reason": routing_reason,
+                "model": chosen_model,
+                "otel": llm_start_span.to_json(),
+            }),
+        ));
+
+        let llm_start = std::time::Instant::now();
+
+        // Retry loop. Streaming deltas forwarded to the bus via a
+        // cloned sender closure per attempt.
+        let retry_policy = if self.config.aggressive_retry {
+            theo_domain::retry_policy::RetryPolicy::benchmark()
+        } else {
+            theo_domain::retry_policy::RetryPolicy::default_llm()
+        };
+        let max_retries = retry_policy.max_retries;
+        let mut llm_result: Option<Result<ChatResponse, LlmError>> = None;
+
+        for attempt in 0..=max_retries {
+            let eb = self.event_bus.clone();
+            let rid = self.run.run_id.as_str().to_string();
+
+            let response = self
+                .client
+                .chat_streaming(request, |delta| match delta {
+                    theo_infra_llm::stream::StreamDelta::Reasoning(text) => {
+                        eb.publish(DomainEvent::new(
+                            EventType::ReasoningDelta,
+                            &rid,
+                            serde_json::json!({ "text": text }),
+                        ));
+                    }
+                    theo_infra_llm::stream::StreamDelta::Content(text) => {
+                        eb.publish(DomainEvent::new(
+                            EventType::ContentDelta,
+                            &rid,
+                            serde_json::json!({ "text": text }),
+                        ));
+                    }
+                    _ => {}
+                })
+                .await;
+
+            match response {
+                Ok(resp) => {
+                    llm_result = Some(Ok(resp));
+                    break;
+                }
+                Err(ref e) if e.is_retryable() && attempt < max_retries => {
+                    let delay = retry_policy.delay_for_attempt(attempt);
+                    self.event_bus.publish(DomainEvent::new(
+                        EventType::Error,
+                        self.run.run_id.as_str(),
+                        serde_json::json!({
+                            "type": "retry",
+                            "attempt": attempt + 1,
+                            "max_retries": max_retries,
+                            "error": e.to_string(),
+                            "delay_ms": delay.as_millis() as u64,
+                        }),
+                    ));
+                    tokio::time::sleep(delay).await;
+                    continue;
+                }
+                Err(e) => {
+                    llm_result = Some(Err(e));
+                    break;
+                }
+            }
+        }
+
+        // Defensive: the retry loop always assigns llm_result at least
+        // once, but relying on that invariant via .unwrap() would panic
+        // on any future refactor that breaks it.
+        let llm_result = llm_result.unwrap_or_else(|| {
+            Err(LlmError::Parse(
+                "LLM retry loop produced no result (invariant broken)".to_string(),
+            ))
+        });
+
+        let resp = llm_result?;
+
+        // Success path: accumulate usage + publish LlmCallEnd.
+        let llm_duration = llm_start.elapsed().as_millis() as u64;
+        let input_tok = resp
+            .usage
+            .as_ref()
+            .map(|u| u.prompt_tokens as u64)
+            .unwrap_or(0);
+        let output_tok = resp
+            .usage
+            .as_ref()
+            .map(|u| u.completion_tokens as u64)
+            .unwrap_or(0);
+        let total_tok = input_tok + output_tok;
+        self.budget_enforcer.record_tokens(total_tok);
+        self.metrics
+            .record_llm_call_detailed(llm_duration, input_tok, output_tok);
+        self.session_token_usage
+            .accumulate(&theo_domain::budget::TokenUsage {
+                input_tokens: input_tok,
+                output_tokens: output_tok,
+                ..Default::default()
+            });
+
+        let mut llm_end_span = crate::observability::otel::llm_call_span(
+            derive_provider_hint(&self.config.base_url),
+            chosen_model,
+        );
+        llm_end_span.set(
+            crate::observability::otel::ATTR_USAGE_INPUT_TOKENS,
+            input_tok,
+        );
+        llm_end_span.set(
+            crate::observability::otel::ATTR_USAGE_OUTPUT_TOKENS,
+            output_tok,
+        );
+        llm_end_span.set(
+            crate::observability::otel::ATTR_USAGE_TOTAL_TOKENS,
+            total_tok,
+        );
+        llm_end_span.set(
+            crate::observability::otel::ATTR_THEO_DURATION_MS,
+            llm_duration,
+        );
+        self.event_bus.publish(DomainEvent::new(
+            EventType::LlmCallEnd,
+            self.run.run_id.as_str(),
+            serde_json::json!({
+                "iteration": iteration,
+                "duration_ms": llm_duration,
+                "input_tokens": input_tok,
+                "output_tokens": output_tok,
+                "total_tokens": total_tok,
+                "context_tokens": estimated_context_tokens,
+                "otel": llm_end_span.to_json(),
+            }),
+        ));
+
+        Ok(resp)
     }
 
     /// Build the abort `AgentResult` for a non-retryable LLM failure.
