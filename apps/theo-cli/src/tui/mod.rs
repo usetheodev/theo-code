@@ -482,6 +482,12 @@ pub async fn run(
                     tui_log("Agent task spawned");
                     let mut cfg = task_config;
                     cfg.system_prompt = system_prompt_for_mode(AgentMode::Agent);
+                    // Phase 52 (prompt-ab): allow operator to override system
+                    // prompt via THEO_SYSTEM_PROMPT_FILE for interactive runs
+                    // too. Same fallback semantics as headless.
+                    if let Some(custom) = crate::prompt_override::override_from_env() {
+                        cfg.system_prompt = custom;
+                    }
                     cfg.mode = AgentMode::Agent;
 
                     let registry = create_default_registry();

@@ -10,6 +10,13 @@
 __theo_setup() {
     set +e  # don't abort on individual errors — script must complete cleanly
 
+    # Phase 54 escape hatch: tests source setup.sh to exercise the prompt
+    # variant block without paying the 60s+ binary install retry cost.
+    if [ "${THEO_SKIP_BIN_INSTALL:-}" = "1" ]; then
+        echo "[theo-setup] THEO_SKIP_BIN_INSTALL=1 — skipping binary install"
+        return 0
+    fi
+
     THEO_VERSION="${THEO_VERSION:-latest}"
     # Default: HTTP server on the Docker host bridge (172.17.0.1:8080)
     # where the bench runner exposes /opt/theo-bin/.
@@ -73,16 +80,56 @@ __theo_setup() {
         cp /mnt/theo-bin/theo /usr/local/bin/theo
         chmod +x /usr/local/bin/theo
         echo "[theo-setup] Installed from /mnt/theo-bin"
+        # fall through to Phase 54 prompt download
+    else
+        echo "[theo-setup] ERROR: no installation method succeeded"
+        echo "[theo-setup] Set THEO_BIN_URL or mount binary at /mnt/theo-bin/theo"
+        return 1
+    fi
+}
+
+# Phase 54 (prompt-ab-testing-plan): download A/B prompt variant if requested
+# and export THEO_SYSTEM_PROMPT_FILE so theo --headless picks it up. Variant
+# names map to URLs on the same HTTP server that hosts the binary + auth.json.
+__theo_prompt_variant_setup() {
+    if [ -z "${THEO_PROMPT_VARIANT:-}" ]; then
         return 0
     fi
-
-    echo "[theo-setup] ERROR: no installation method succeeded"
-    echo "[theo-setup] Set THEO_BIN_URL or mount binary at /mnt/theo-bin/theo"
-    return 1
+    local prompt_host="${THEO_PROMPT_HOST:-http://172.17.0.1:8080}"
+    local variant_url="${prompt_host}/prompts/${THEO_PROMPT_VARIANT}.md"
+    # Container path defaults to /installed-agent; tests can override.
+    local prompt_path="${THEO_PROMPT_PATH:-/installed-agent/prompt.md}"
+    mkdir -p "$(dirname "$prompt_path")"
+    # 3 retries (network known good — binary install already completed)
+    local attempt=0
+    local backoff=1
+    while [ $attempt -lt 3 ]; do
+        attempt=$((attempt + 1))
+        if curl -fsSL --max-time 5 --connect-timeout 2 \
+               "$variant_url" -o "$prompt_path" 2>/tmp/theo-prompt-curl.log; then
+            export THEO_SYSTEM_PROMPT_FILE="$prompt_path"
+            # Persist into the agent shell environment so subsequent commands
+            # (theo --headless invoked by tb) inherit it. tb's TmuxSession
+            # spawns child processes from the parent shell, which already
+            # `source`d this script — so `export` here suffices.
+            echo "[theo-setup] prompt variant '$THEO_PROMPT_VARIANT' loaded from $variant_url"
+            return 0
+        else
+            echo "[theo-setup] prompt fetch attempt $attempt/3 failed:"
+            cat /tmp/theo-prompt-curl.log 2>/dev/null | head -3
+            sleep "$backoff"
+            backoff=$((backoff * 2))
+        fi
+    done
+    echo "[theo-setup] WARN: variant '$THEO_PROMPT_VARIANT' unavailable; falling back to default prompt"
+    unset THEO_SYSTEM_PROMPT_FILE
+    return 0
 }
 
 # Invoke. Use ||true so the wrapper's non-zero return doesn't propagate
 # `set -e` to the caller's shell (tmux will hang on tmux wait -S done
 # if the shell exits prematurely).
 __theo_setup || true
+__theo_prompt_variant_setup || true
 unset -f __theo_setup
+unset -f __theo_prompt_variant_setup

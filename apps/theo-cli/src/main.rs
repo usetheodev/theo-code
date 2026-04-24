@@ -8,6 +8,7 @@ mod json_output;
 mod memory_lint;
 mod permission;
 mod pilot;
+mod prompt_override;
 mod render;
 mod renderer;
 mod runtime_features;
@@ -720,12 +721,22 @@ fn cmd_headless(
         config.mode = agent_mode;
         config.system_prompt = theo_application::facade::agent::system_prompt_for_mode(agent_mode);
 
+        // Phase 52 (prompt-ab-testing-plan) — when THEO_SYSTEM_PROMPT_FILE is
+        // set and readable, replace the prompt verbatim and skip downstream
+        // mutations (the variant file is the single source of truth).
+        let prompt_overridden = if let Some(custom) = prompt_override::override_from_env() {
+            config.system_prompt = custom;
+            true
+        } else {
+            false
+        };
+
         let model_name = config.model.clone();
         let temperature_actual = config.temperature;
 
         // In headless mode, trim the system prompt to reduce per-call token overhead.
         // Remove verbose sections that don't help a single-shot benchmark task.
-        if config.system_prompt.contains("## Task Management") {
+        if !prompt_overridden && config.system_prompt.contains("## Task Management") {
             let lean = config.system_prompt
                 .lines()
                 .filter(|l| {
@@ -749,7 +760,9 @@ fn cmd_headless(
         //     `cargo test` for Rust tasks; for Python/bash/etc tasks
         //     theo's `done` had ZERO verification → tests_disagree=22%)
         // Opt-in via env so interactive runs are never affected.
-        if std::env::var("THEO_BENCHMARK_MODE").ok().as_deref() == Some("1") {
+        // Phase 52: also skipped when prompt_overridden — variant files own
+        // the bench-mode addendum themselves (sota.md vs sota-no-bench.md).
+        if !prompt_overridden && std::env::var("THEO_BENCHMARK_MODE").ok().as_deref() == Some("1") {
             const BENCHMARK_CONTEXT_NOTE: &str = "\n\n## Benchmark evaluation context\n\
 You are running inside an isolated Docker container as part of an \
 automated coding-benchmark evaluation (Terminal-Bench / SWE-Bench). \

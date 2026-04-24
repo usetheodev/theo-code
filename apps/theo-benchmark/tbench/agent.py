@@ -141,6 +141,10 @@ class TheoAgent(AbstractInstalledAgent):
             "THEO_FORCE_TOOL_CHOICE",  # bench: force specific tool dispatch
             "THEO_TEMPERATURE",
             "THEO_BENCHMARK_MODE",  # bug #3: relax safety for benign bench tasks
+            # Phase 54 (prompt-ab-testing-plan) — A/B variant selector. Read
+            # by setup.sh; resolves to a markdown URL on the host's HTTP
+            # server which then exports THEO_SYSTEM_PROMPT_FILE.
+            "THEO_PROMPT_VARIANT",
         ):
             val = os.environ.get(key, "")
             if val:

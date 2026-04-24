@@ -233,6 +233,22 @@ class TestEnvForwarding(unittest.TestCase):
             env = agent._env
         self.assertEqual(env.get("THEO_MODEL"), "gpt-5.4-mini")
 
+    def test_env_includes_theo_prompt_variant_when_set(self) -> None:
+        # Phase 54 (prompt-ab-testing-plan): THEO_PROMPT_VARIANT must be
+        # forwarded so setup.sh can resolve the variant URL inside the container.
+        agent = TheoAgent()
+        with patch.dict(os.environ, {"THEO_PROMPT_VARIANT": "sota-lean"}, clear=False):
+            env = agent._env
+        self.assertEqual(env.get("THEO_PROMPT_VARIANT"), "sota-lean")
+
+    def test_env_omits_theo_prompt_variant_when_unset(self) -> None:
+        # When unset, the env block must not carry an empty entry — that would
+        # collide with setup.sh's `[ -n "$VAR" ]` check.
+        agent = TheoAgent()
+        with patch.dict(os.environ, {}, clear=True):
+            env = agent._env
+        self.assertNotIn("THEO_PROMPT_VARIANT", env)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
