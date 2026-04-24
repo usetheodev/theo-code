@@ -165,20 +165,20 @@ impl AgentRunEngine {
         }
 
         // Observability: drain writer, compute RunReport, append summary line.
-        self.finalize_observability(result, !events.is_empty());
+        self.last_run_report = self.finalize_observability(result, !events.is_empty());
     }
 
     pub(super) fn finalize_observability(
         &mut self,
         result: &AgentResult,
         had_events: bool,
-    ) {
+    ) -> Option<crate::observability::report::RunReport> {
         let Some(pipeline) = self.observability.take() else {
-            return;
+            return None;
         };
         let file_path = pipeline.finalize();
         self.episodes_created = if had_events { 1 } else { 0 };
-        let detected = crate::observability::finalize_run_observability(
+        let (detected, run_report) = crate::observability::finalize_run_observability(
             &file_path,
             self.run.run_id.as_str(),
             result.success,
@@ -196,5 +196,6 @@ impl AgentRunEngine {
             &self.pre_compaction_hot_files,
         );
         detected.publish_events(&self.event_bus, self.run.run_id.as_str());
+        run_report
     }
 }
