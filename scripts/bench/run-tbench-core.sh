@@ -28,12 +28,19 @@ echo "[tbench-core] starting — n_concurrent=$N_CONCURRENT k=$K_ATTEMPTS"
 
 # tb run; the heredoc-style env passes OTLP, model, etc. into the
 # container via the TheoAgent._env property.
+DATASET="${TBENCH_DATASET:-terminal-bench-core==0.1.1}"
+N_TASKS_FLAG=""
+if [ -n "${N_TASKS:-}" ]; then
+  N_TASKS_FLAG="--n-tasks $N_TASKS"
+fi
+
 "$TB" run \
-  --dataset-name terminal-bench-core --dataset-version head \
+  --dataset "$DATASET" \
   --agent-import-path tbench.agent:TheoAgent \
   --n-concurrent "$N_CONCURRENT" \
-  -k "$K_ATTEMPTS" \
+  $N_TASKS_FLAG \
   --output-path "$BENCH_OUT/raw" \
+  --no-upload-results \
   2>&1 | tee "$BENCH_OUT/run.log"
 
 # Post-process tb output → per-task analyses
