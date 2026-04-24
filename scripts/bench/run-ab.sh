@@ -36,6 +36,13 @@ command -v theo >/dev/null || { echo "[ab] theo binary required"; exit 1; }
 source "$VENV/bin/activate"
 export PYTHONPATH="$BENCH_DIR:${PYTHONPATH:-}"
 
+# Bench-mode toggles (mirror run-all.sh). Without these the agent triggers
+# the onboarding flow (asks the user "what's your role?") and exits at
+# iter 1 instead of doing the task.
+export THEO_SKIP_ONBOARDING="${THEO_SKIP_ONBOARDING:-1}"
+export THEO_BENCHMARK_MODE="${THEO_BENCHMARK_MODE:-1}"  # bug #3 safety relax
+export THEO_MODEL="${THEO_MODEL:-gpt-5.4}"
+
 mkdir -p "$REPORT_DIR"
 echo "[ab] variants=$VARIANTS  n_tasks=$N_TASKS  n_concurrent=$N_CONCURRENT"
 echo "[ab] dataset=$DATASET  out=$REPORT_DIR"
