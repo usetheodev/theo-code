@@ -40,9 +40,17 @@ DEFAULT_BIN = ROOT / "target" / "release" / "theo"
 
 
 def load_scenarios(filter_substr: str | None) -> list[dict]:
+    """Load scenarios, optionally filtered.
+
+    `filter_substr` accepts:
+      - single substring: "01"
+      - comma-separated list of substrings: "01,02,03"
+      - any scenario whose filename contains ANY substring matches
+    """
     scenarios = []
+    filters = [s.strip() for s in (filter_substr or "").split(",") if s.strip()]
     for path in sorted(SCENARIOS_DIR.glob("*.toml")):
-        if filter_substr and filter_substr not in path.name:
+        if filters and not any(f in path.name for f in filters):
             continue
         with path.open("rb") as fp:
             data = tomllib.load(fp)
