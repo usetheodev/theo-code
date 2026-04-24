@@ -133,25 +133,44 @@ impl AgentRunEngine {
                 let eb = event_bus.clone();
                 let rid = run_id_str.clone();
                 async move {
-                    client
+                    // T6.4 — coalesce streaming chunks to reduce
+                    // publish overhead (a 5000-token response would
+                    // otherwise produce ~3000 publishes). The two
+                    // batchers are captured `&mut` by the FnMut
+                    // callback (chat_streaming takes FnMut) — no
+                    // RefCell / Mutex needed on the hot path.
+                    let mut reasoning_batcher =
+                        crate::run_engine::stream_batcher::StreamBatcher::new(
+                            EventType::ReasoningDelta,
+                            eb.clone(),
+                            rid.clone(),
+                        );
+                    let mut content_batcher =
+                        crate::run_engine::stream_batcher::StreamBatcher::new(
+                            EventType::ContentDelta,
+                            eb.clone(),
+                            rid.clone(),
+                        );
+                    let result = client
                         .chat_streaming(request, |delta| match delta {
                             theo_infra_llm::stream::StreamDelta::Reasoning(text) => {
-                                eb.publish(DomainEvent::new(
-                                    EventType::ReasoningDelta,
-                                    &rid,
-                                    serde_json::json!({ "text": text }),
-                                ));
+                                reasoning_batcher.push(text);
                             }
                             theo_infra_llm::stream::StreamDelta::Content(text) => {
-                                eb.publish(DomainEvent::new(
-                                    EventType::ContentDelta,
-                                    &rid,
-                                    serde_json::json!({ "text": text }),
-                                ));
+                                content_batcher.push(text);
+                            }
+                            theo_infra_llm::stream::StreamDelta::Done => {
+                                reasoning_batcher.flush_remainder();
+                                content_batcher.flush_remainder();
                             }
                             _ => {}
                         })
-                        .await
+                        .await;
+                    // Guarantee flush even if the stream terminated
+                    // without an explicit Done frame (error / timeout).
+                    reasoning_batcher.flush_remainder();
+                    content_batcher.flush_remainder();
+                    result
                 }
             },
             LlmError::is_retryable,
