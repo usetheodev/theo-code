@@ -10,6 +10,7 @@ mod execution;
 mod handoff;
 mod lifecycle;
 mod main_loop;
+mod stream_batcher;
 
 pub use handoff::HandoffOutcome;
 
