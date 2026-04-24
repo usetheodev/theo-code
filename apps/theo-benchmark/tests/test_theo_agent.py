@@ -29,7 +29,8 @@ _TB_STUB = type(sys)("terminal_bench")
 _TB_AGENTS = type(sys)("terminal_bench.agents")
 _TB_INSTALLED = type(sys)("terminal_bench.agents.installed_agents")
 _TB_ABSTRACT = type(sys)("terminal_bench.agents.installed_agents.abstract_installed_agent")
-_TB_MODELS = type(sys)("terminal_bench.harness_models")
+_TB_TERMINAL = type(sys)("terminal_bench.terminal")
+_TB_TMODELS = type(sys)("terminal_bench.terminal.models")
 
 
 class _StubAbstract:
@@ -45,14 +46,15 @@ class _StubTerminalCommand:
 
 
 _TB_ABSTRACT.AbstractInstalledAgent = _StubAbstract
-_TB_MODELS.TerminalCommand = _StubTerminalCommand
+_TB_TMODELS.TerminalCommand = _StubTerminalCommand
 sys.modules.setdefault("terminal_bench", _TB_STUB)
 sys.modules.setdefault("terminal_bench.agents", _TB_AGENTS)
 sys.modules.setdefault("terminal_bench.agents.installed_agents", _TB_INSTALLED)
 sys.modules.setdefault(
     "terminal_bench.agents.installed_agents.abstract_installed_agent", _TB_ABSTRACT
 )
-sys.modules.setdefault("terminal_bench.harness_models", _TB_MODELS)
+sys.modules.setdefault("terminal_bench.terminal", _TB_TERMINAL)
+sys.modules.setdefault("terminal_bench.terminal.models", _TB_TMODELS)
 
 from tbench.agent import TheoAgent, _OTLP_ENV_KEYS  # noqa: E402
 

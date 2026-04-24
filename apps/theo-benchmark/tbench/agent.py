@@ -39,7 +39,12 @@ from pathlib import Path
 from terminal_bench.agents.installed_agents.abstract_installed_agent import (  # type: ignore
     AbstractInstalledAgent,
 )
-from terminal_bench.harness_models import TerminalCommand  # type: ignore
+# TerminalCommand lives in terminal.models in tb 0.2+; older versions had
+# it under harness_models. Try the new path first, fall back to old.
+try:
+    from terminal_bench.terminal.models import TerminalCommand  # type: ignore
+except ImportError:  # pragma: no cover
+    from terminal_bench.harness_models import TerminalCommand  # type: ignore
 
 # Phase 46: compute_cost from pricing.toml. Import path resolves whether the
 # adapter runs from `apps/theo-benchmark` (dev) or installed system-wide.
