@@ -1258,3 +1258,11 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 | T4.6 tool_bridge split — primeira etapa | **DONE (parcial)** | `tool_bridge.rs` (1155 LOC) convertido para modulo `tool_bridge/` com 3 children: `meta_schemas.rs` (269 LOC) com 9 factory fns (tool_search, batch_execute, done, skill, delegate_task_{single,parallel,legacy}, batch, batch_for_subagent) eliminando ~240 LOC de schemas JSON inline em `registry_to_definitions{,_for_subagent}`, `execute_meta.rs` (144 LOC) com handlers `handle_batch_execute` + `handle_tool_search` (extrai logica do early-dispatch), `execute_regular.rs` (78 LOC) com `execute_regular_tool` + `apply_truncation` (DEFAULT_TRUNCATION_CAP const named). `execute_tool_call`: 172 LOC → 20 LOC, agora um dispatcher de 3 linhas (match name — batch_execute → meta, tool_search → meta, _ → regular). `mod.rs`: 1155 → **766 LOC** (-389 esta iter, -34% vs baseline). Codigo de producao em `mod.rs`: ~100 LOC (restante sao 24 testes). |
 
 **Validacao:** 1132 unit + 96 integration = **1228 tests passando, 0 falhas**; 24/24 tool_bridge unit tests.
+
+### Iteracao 27 (2026-04-24) — Fase 4: T4.6 memory_lifecycle split
+
+| Task | Status | Notas |
+|---|---|---|
+| T4.6 memory_lifecycle split | **DONE (parcial)** | `memory_lifecycle.rs` (1024 LOC) convertido para modulo `memory_lifecycle/` com 2 children: `run_engine_hooks.rs` (180 LOC) — o pub sub-module `pub mod run_engine_hooks` (lines 504-676 originais) com `inject_prefetch`/`pre_compress_push`/`sync_final_turn`/`inject_legacy_file_memory`/`inject_episode_history`; `wiring.rs` (164 LOC) — 5 wiring helpers invocados do `run_engine.rs`: `maybe_spawn_autodream` (PLAN_AUTO_EVOLUTION_SOTA Phase 2), `maybe_prepend_bootstrap` (Phase 5), `maybe_index_transcript` (Phase 4), `maybe_spawn_reviewers` (Phase 1/3), `spawn_memory_reviewer`. Re-exportados via `pub use wiring::*` para manter paths publicos byte-identical. `memory_lifecycle/mod.rs`: 1024 → **719 LOC** (-305, **-30% vs baseline**). |
+
+**Validacao:** 1132 unit + 96 integration = **1228 tests passando, 0 falhas**; 22/22 memory_lifecycle unit tests.
