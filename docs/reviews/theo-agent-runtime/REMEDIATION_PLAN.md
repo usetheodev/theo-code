@@ -1169,3 +1169,11 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 - main_loop.rs: 0 → 412 LOC
 
 **Validacao:** 1132 unit + 96 integration = **1228 tests passando, 0 falhas.**
+
+### Iteracao 16 (2026-04-24) — Fase 4: iteration prelude extracted
+
+| Task | Status | Notas |
+|---|---|---|
+| T4.2 run_engine split — nona etapa | **DONE (parcial)** | 3 helpers em `main_loop.rs`: `check_budget_or_exhausted` (retorna `Option<AgentResult>` para early return), `drain_sensor_messages` (sensor output → system messages + SensorExecuted event), `inject_context_loop_and_compact` (retorna `estimated_context_tokens`). ~120 LOC no main loop colapsam em 3 chamadas. `mod.rs`: 2761 → **2657 LOC** (-104 esta iter; **-1573 desde baseline 4230, -37%**). |
+
+**Validacao:** 1132 unit + 96 integration = 1228 tests passando, 0 falhas. main_loop.rs: 412 → 557 LOC.

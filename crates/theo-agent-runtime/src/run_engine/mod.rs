@@ -448,123 +448,19 @@ impl AgentRunEngine {
             // tool of THIS iteration triggers a snapshot.
             self.reset_turn_checkpoint();
 
-            // Budget check (Invariant 8) — record iteration BEFORE check
-            self.budget_enforcer.record_iteration();
-            if let Err(violation) = self.budget_enforcer.check() {
-                self.transition_run(RunState::Aborted);
-                let _ = self
-                    .task_manager
-                    .transition(&self.task_id, TaskState::Failed);
-
-                let summary = format!(
-                    "Budget exceeded: {}. Edits succeeded: {}. Files: {}",
-                    violation,
-                    self.context_loop_state.edits_succeeded,
-                    self.context_loop_state.edits_files.join(", ")
-                );
-
-                self.metrics.record_run_complete(false);
-                // Bug #1 fix (benchmark-validation): budget exceeded ALWAYS
-                // means the task did not finish. Previously `success` was
-                // derived from edits_succeeded > 0, which lied to callers.
-                return AgentResult::from_engine_state(
-                    self,
-                    false,
-                    summary,
-                    false,
-                    theo_domain::error_class::ErrorClass::Exhausted,
-                );
+            // Budget check — extracted to main_loop::check_budget_or_exhausted.
+            if let Some(result) = self.check_budget_or_exhausted() {
+                return result;
             }
 
-            // ── SENSOR DRAIN ──
-            // Drain pending sensor results and inject as system messages before LLM call.
-            // This provides the LLM with feedback from computational verification (e.g. clippy, tests).
-            if let Some(ref sensor_runner) = sensor_runner {
-                for result in sensor_runner.drain_pending() {
-                    let severity = if result.exit_code == 0 { "OK" } else { "ISSUE" };
-                    let preview = theo_domain::prompt_sanitizer::char_boundary_truncate(
-                        &result.output,
-                        crate::constants::SENSOR_OUTPUT_PREVIEW_BYTES,
-                    );
-                    messages.push(Message::system(format!(
-                        "[SENSOR {severity}] {} (via {}): {preview}",
-                        result.file_path, result.tool_name
-                    )));
+            // Sensor drain — extracted to main_loop::drain_sensor_messages.
+            self.drain_sensor_messages(sensor_runner.as_ref(), &mut messages);
 
-                    // Publish SensorExecuted event
-                    self.event_bus.publish(DomainEvent::new(
-                        EventType::SensorExecuted,
-                        self.run.run_id.as_str(),
-                        serde_json::json!({
-                            "file": result.file_path,
-                            "exit_code": result.exit_code,
-                            "output_preview": &preview[..preview.len().min(200)],
-                            "duration_ms": result.duration_ms,
-                            "tool_name": result.tool_name,
-                        }),
-                    ));
-                }
-            }
-
-            // ── PLANNING phase ──
-            // Context loop injection
-            if iteration > 1 && iteration.is_multiple_of(self.config.context_loop_interval) {
-                let task_objective = self
-                    .task_manager
-                    .get(&self.task_id)
-                    .map(|t| t.objective.clone())
-                    .unwrap_or_default();
-                let ctx_msg = self.context_loop_state.build_context_loop(
-                    iteration,
-                    self.config.max_iterations,
-                    &task_objective,
-                );
-                messages.push(Message::user(ctx_msg));
-            }
-
-            // Phase transitions (legacy, preserved for context loop diagnostics)
-            self.context_loop_state
-                .maybe_transition(iteration, self.config.max_iterations);
-
-            // Context compaction: compress history with semantic progress context.
-            let compaction_ctx = crate::compaction::CompactionContext {
-                task_objective: messages
-                    .iter()
-                    .find(|m| m.role == theo_infra_llm::types::Role::User)
-                    .and_then(|m| m.content.clone())
-                    .unwrap_or_default()
-                    .chars()
-                    .take(100)
-                    .collect(),
-                current_phase: format!("{:?}", self.run.state),
-                target_files: self.context_loop_state.edits_files.clone(),
-                recent_errors: self
-                    .context_loop_state
-                    .edit_failures
-                    .iter()
-                    .rev()
-                    .take(2)
-                    .cloned()
-                    .collect(),
-            };
-            // Phase 0 T0.1 AC-0.1.3: pre-compression memory hook (survives truncation).
-            crate::memory_lifecycle::run_engine_hooks::pre_compress_push(&self.config, &mut messages).await;
-
-            crate::compaction_stages::compact_staged_with_policy(
-                &mut messages,
-                self.config.context_window_tokens,
-                Some(&compaction_ctx),
-                &self.config.compaction_policy,
-            );
-
-            // Record context size for metrics (estimated tokens = chars/4)
-            let estimated_context_tokens: usize = messages
-                .iter()
-                .filter_map(|m| m.content.as_ref())
-                .map(|c| c.len().div_ceil(4))
-                .sum();
-            self.context_metrics
-                .record_context_size(iteration, estimated_context_tokens);
+            // Context-loop + compaction + metrics — extracted to
+            // main_loop::inject_context_loop_and_compact.
+            let estimated_context_tokens = self
+                .inject_context_loop_and_compact(iteration, &mut messages)
+                .await;
 
             // LLM call
             self.transition_run(RunState::Planning);
