@@ -1202,3 +1202,11 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 | T4.2 run_engine split — 12a etapa | **DONE (parcial)** | 2 helpers em `main_loop.rs`: `run_pre_tool_hook` (bool = blocked), `run_post_tool_hook` (fire-and-forget). 2 blocos de ~20 LOC no tool-loop colapsam em if-await + await. `run_engine/mod.rs`: 2486 → **2465 LOC** (-21 esta iter; **-1765 desde baseline 4230, -42%**). |
 
 **Validacao:** 1132 unit + 96 integration = 1228 tests passando, 0 falhas.
+
+### Iteracao 20 (2026-04-24) — Fase 4: 3 small helpers
+
+| Task | Status | Notas |
+|---|---|---|
+| T4.2 run_engine split — 13a etapa | **DONE (parcial)** | 3 helpers pequenos em `main_loop.rs`: `emit_checkpoint_event_for_tool` (pre-mutation checkpoint + RunStateChanged), `fire_sensor_for_write_tool` (sensor invocation para write-class tools), `drain_steering_queue` (user-injected mid-run messages). 3 blocos inline colapsam em 3 chamadas. `mod.rs`: 2465 → **2439 LOC** (-26 esta iter; **-1791 desde baseline 4230, -42%**). main_loop.rs: 855 → 924 LOC. |
+
+**Validacao:** 1132 unit + 96 integration = 1228 tests passando, 0 falhas.

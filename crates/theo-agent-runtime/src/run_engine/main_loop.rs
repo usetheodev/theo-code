@@ -246,6 +246,75 @@ impl AgentRunEngine {
         Ok(resp)
     }
 
+    /// Emit `RunStateChanged` marking a pre-mutation checkpoint snapshot.
+    /// No-op when no checkpoint manager is attached (via
+    /// `maybe_checkpoint_for_tool` returning None).
+    pub(super) fn emit_checkpoint_event_for_tool(
+        &self,
+        name: &str,
+        iteration: usize,
+    ) {
+        let Some(sha) = self.maybe_checkpoint_for_tool(name, iteration as u32) else {
+            return;
+        };
+        self.event_bus.publish(DomainEvent::new(
+            EventType::RunStateChanged,
+            self.run.run_id.as_str(),
+            serde_json::json!({
+                "from": "Executing",
+                "to": format!(
+                    "Checkpoint:{}:turn-{}",
+                    &sha[..sha.len().min(12)],
+                    iteration
+                ),
+            }),
+        ));
+    }
+
+    /// Fire the computational-verification sensor for a successful
+    /// write-class tool call (edit / write / apply_patch / bash).
+    /// Extracts the target `filePath` and invokes
+    /// `sensor_runner.fire(name, path, project_dir)`.
+    pub(super) fn fire_sensor_for_write_tool(
+        &self,
+        sensor_runner: Option<&crate::sensor::SensorRunner>,
+        call: &theo_infra_llm::types::ToolCall,
+        name: &str,
+        success: bool,
+    ) {
+        if !success || !crate::sensor::is_write_tool(name) {
+            return;
+        }
+        let Some(sensor_runner) = sensor_runner else {
+            return;
+        };
+        let file_path = call
+            .parse_arguments()
+            .ok()
+            .and_then(|args| {
+                args.get("filePath")
+                    .or(args.get("file_path"))
+                    .and_then(|p| p.as_str())
+                    .map(String::from)
+            })
+            .unwrap_or_default();
+        if !file_path.is_empty() {
+            sensor_runner.fire(name, &file_path, &self.project_dir);
+        }
+    }
+
+    /// Drain the steering message queue (if configured) and inject the
+    /// messages as user turns before the next LLM call.
+    pub(super) async fn drain_steering_queue(&self, messages: &mut Vec<Message>) {
+        let Some(ref steering_fn) = self.message_queues.steering else {
+            return;
+        };
+        let steering_msgs = steering_fn().await;
+        for msg in steering_msgs {
+            messages.push(msg);
+        }
+    }
+
     /// Run the `tool.before` hook (if a hook runner is attached) for
     /// the given call. Returns `true` when the hook *blocks* dispatch
     /// (caller pushes the BLOCKED message and `continue`s). Returns

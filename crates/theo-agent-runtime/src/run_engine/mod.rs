@@ -633,20 +633,11 @@ impl AgentRunEngine {
                     continue;
                 }
 
-                // ── PHASE 9: PRE-MUTATION CHECKPOINT ──
-                // Snapshot the workdir BEFORE the first mutating tool of
-                // each iteration. Idempotent within an iteration (CAS).
-                // No-op when no checkpoint manager is attached.
-                if let Some(sha) = self.maybe_checkpoint_for_tool(name, iteration as u32) {
-                    self.event_bus.publish(DomainEvent::new(
-                        EventType::RunStateChanged,
-                        self.run.run_id.as_str(),
-                        serde_json::json!({
-                            "from": "Executing",
-                            "to": format!("Checkpoint:{}:turn-{}", &sha[..sha.len().min(12)], iteration),
-                        }),
-                    ));
-                }
+                // Pre-mutation checkpoint — extracted to
+                // main_loop::emit_checkpoint_event_for_tool. Idempotent
+                // within an iteration (CAS); no-op when no checkpoint
+                // manager is attached.
+                self.emit_checkpoint_event_for_tool(name, iteration);
 
                 // ── PHASE 8: MCP DISPATCH ──
                 // If the tool name is in the `mcp:<server>:<tool>`
@@ -741,23 +732,14 @@ impl AgentRunEngine {
                     let _ = sm.append_message("tool", &output);
                 }
 
-                // ── SENSOR FIRE: trigger computational verification after successful writes ──
-                if success && crate::sensor::is_write_tool(name)
-                    && let Some(ref sensor_runner) = sensor_runner {
-                        let file_path = call
-                            .parse_arguments()
-                            .ok()
-                            .and_then(|args| {
-                                args.get("filePath")
-                                    .or(args.get("file_path"))
-                                    .and_then(|p| p.as_str())
-                                    .map(String::from)
-                            })
-                            .unwrap_or_default();
-                        if !file_path.is_empty() {
-                            sensor_runner.fire(name, &file_path, &self.project_dir);
-                        }
-                    }
+                // Sensor fire — extracted to
+                // main_loop::fire_sensor_for_write_tool.
+                self.fire_sensor_for_write_tool(
+                    sensor_runner.as_ref(),
+                    call,
+                    name,
+                    success,
+                );
 
                 messages.push(result_msg);
 
@@ -769,16 +751,8 @@ impl AgentRunEngine {
                 return result;
             }
 
-            // ── Steering queue check ──
-            // After tool execution, check if the user injected messages mid-run.
-            // These are inserted as user messages before the next LLM call.
-            // Pi-mono ref: `packages/agent/src/agent-loop.ts:216`
-            if let Some(ref steering_fn) = self.message_queues.steering {
-                let steering_msgs = steering_fn().await;
-                for msg in steering_msgs {
-                    messages.push(msg);
-                }
-            }
+            // Steering queue drain — extracted to main_loop::drain_steering_queue.
+            self.drain_steering_queue(&mut messages).await;
 
             // ── EVALUATING phase ──
             self.transition_run(RunState::Evaluating);
