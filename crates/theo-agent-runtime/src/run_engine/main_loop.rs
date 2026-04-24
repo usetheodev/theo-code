@@ -764,7 +764,7 @@ impl AgentRunEngine {
                 serde_json::json!({
                     "file": result.file_path,
                     "exit_code": result.exit_code,
-                    "output_preview": &preview[..preview.len().min(200)],
+                    "output_preview": &preview[..preview.len().min(crate::constants::TOOL_PREVIEW_BYTES)],
                     "duration_ms": result.duration_ms,
                     "tool_name": result.tool_name,
                 }),

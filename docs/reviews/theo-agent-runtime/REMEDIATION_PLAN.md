@@ -1333,3 +1333,14 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 | T3.4 retry consolidation | **DONE** | Loop inline `for attempt in 0..=max_retries` em `run_engine/main_loop.rs:125` (62 LOC) substituido por chamada a `crate::retry::RetryExecutor::with_retry`. O callback streaming e reconstruido a cada invocacao dentro do FnMut closure passado ao executor, preservando a propagacao de ReasoningDelta/ContentDelta ao event bus. Retryability delegada a `LlmError::is_retryable`. AC: `rg "for attempt in 0" crates/theo-agent-runtime/src` encontra apenas o canonico em `retry.rs:33`. DomainEvent sequence (retry + success characterization) preservada — 8/8 characterization snapshots passam byte-identical. |
 
 **Validacao:** 1132 unit + 96 integration = **1228 tests passando, 0 falhas**; 8/8 characterization snapshots byte-identical.
+
+### Iteracao 36 (2026-04-24) — T3.5/T3.6 AC check + T7.1 security tests (Fase 7 kick-off)
+
+| Task | Status | Notas |
+|---|---|---|
+| T3.5 truncate helpers DRY | **DONE (verificado)** | AC "apenas um site implementa truncate char-safe" ja estava satisfeito — `is_char_boundary` aparece apenas em `theo_domain::prompt_sanitizer::char_boundary_truncate`, usado por 6 call sites em `run_engine/*`, `tool_call_manager.rs`, `dispatch/*`. As ocorrencias remanescentes de `chars().take(N).collect()` sao semanticamente distintas (contagem de scalars, nao byte-truncate). |
+| T3.6 magic number constants | **DONE (+1 fix)** | `crates/theo-agent-runtime/src/constants.rs` ja tinha todas as constantes do plano (MAX_DONE_ATTEMPTS, MAX_BATCH_SIZE, DONE_GATE_{TEST,CHECK_FALLBACK}_TIMEOUT, TOOL_PREVIEW_BYTES, TOOL_INPUT_TRUNCATE_BYTES, EMERGENCY_COMPACT_RATIO, DONE_GATE_*_BYTES/CPU/NPROC, SENSOR_OUTPUT_PREVIEW_BYTES). 2 literais `200` inline remanescentes em `main_loop.rs` (sensor output preview) e `bootstrap.rs` (planning_query take) substituidos por `constants::TOOL_PREVIEW_BYTES`. |
+| Hygiene | **DONE** | Warning persistente `unused variable: e` em `observability/writer.rs:144` corrigido com `_e`. Lib agora compila **zero warnings**. |
+| T7.1 security tests (parcial) | **DONE (6 testes)** | novo `tests/security_t7_1.rs` cobrindo T1.2 + T1.4: `home_unset_does_not_fallback_to_tmp`, `home_set_returns_config_theo_subdir`, `git_log_injection_tokens_are_stripped`, `strip_injection_tokens_is_idempotent`, `fence_untrusted_caps_oversized_payload_at_byte_budget`, `char_boundary_truncate_never_slices_multibyte_scalars`. Testes para T1.3 (plugin ownership) vivem em `theo-tooling`; T1.1 (bwrap sandbox) vive em `theo-tooling` tambem. Hook shell-escape test deferido (requer injecao de hook em spec de teste). |
+
+**Validacao:** 1132 unit + 96 integration + **6 novos security** = **1234 tests passando, 0 falhas**. Zero warnings.

@@ -212,7 +212,7 @@ impl AgentRunEngine {
             .and_then(|m| m.content.as_deref())
             .unwrap_or("")
             .chars()
-            .take(200)
+            .take(crate::constants::TOOL_PREVIEW_BYTES)
             .collect::<String>();
 
         if planning_query.is_empty() {
