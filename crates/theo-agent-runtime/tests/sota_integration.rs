@@ -236,6 +236,7 @@ fn sota_smoke_mcp_server_config_yaml_format() {
         command: "npx".to_string(),
         args: vec!["-y".to_string(), "@modelcontextprotocol/server-github".to_string()],
         env,
+        timeout_ms: None,
     };
     let json = serde_json::to_value(&cfg).unwrap();
     assert_eq!(json["transport"], "stdio");
@@ -683,12 +684,14 @@ async fn sota_pipeline_mcp_hint_injected_when_spec_declares_servers() {
         command: "echo".to_string(),
         args: vec![],
         env: BTreeMap::new(),
+        timeout_ms: None,
     });
     mcp_reg.register(McpServerConfig::Stdio {
         name: "postgres".to_string(),
         command: "echo".to_string(),
         args: vec![],
         env: BTreeMap::new(),
+        timeout_ms: None,
     });
 
     let mgr = SubAgentManager::with_builtins(

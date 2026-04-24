@@ -15,13 +15,23 @@ pub enum McpServerConfig {
         args: Vec<String>,
         #[serde(default)]
         env: BTreeMap<String, String>,
+        /// Phase 33 (mcp-http-and-discover-flake) — per-server discover
+        /// timeout override in milliseconds. When `None`, falls back to
+        /// the global per_server_timeout passed to `discover_*`. Useful
+        /// for `npx`-based servers that need 30s+ on cold start.
+        #[serde(default)]
+        timeout_ms: Option<u64>,
     },
-    /// HTTP transport (Streamable HTTP). Requires OAuth 2.1 (future iteration).
+    /// HTTP transport (Streamable HTTP). Auth via `headers`.
     Http {
         name: String,
         url: String,
         #[serde(default)]
         headers: BTreeMap<String, String>,
+        /// Phase 33 — per-server timeout override (ms). Drives BOTH the
+        /// discover timeout AND the per-request HTTP client timeout.
+        #[serde(default)]
+        timeout_ms: Option<u64>,
     },
 }
 
@@ -30,6 +40,14 @@ impl McpServerConfig {
         match self {
             McpServerConfig::Stdio { name, .. } => name,
             McpServerConfig::Http { name, .. } => name,
+        }
+    }
+
+    /// Phase 33: per-server timeout override (ms), if any.
+    pub fn timeout_ms(&self) -> Option<u64> {
+        match self {
+            McpServerConfig::Stdio { timeout_ms, .. } => *timeout_ms,
+            McpServerConfig::Http { timeout_ms, .. } => *timeout_ms,
         }
     }
 }
@@ -53,7 +71,7 @@ env:
         let cfg: McpServerConfig = serde_yaml_from_str(yaml).unwrap();
         match cfg {
             McpServerConfig::Stdio {
-                name, command, args, env,
+                name, command, args, env, ..
             } => {
                 assert_eq!(name, "github");
                 assert_eq!(command, "npx");
@@ -75,7 +93,7 @@ headers:
 "#;
         let cfg: McpServerConfig = serde_yaml_from_str(yaml).unwrap();
         match cfg {
-            McpServerConfig::Http { name, url, headers } => {
+            McpServerConfig::Http { name, url, headers, .. } => {
                 assert_eq!(name, "postgres");
                 assert_eq!(url, "http://localhost:8080");
                 assert_eq!(headers.get("Authorization").unwrap(), "Bearer xyz");
@@ -91,14 +109,122 @@ headers:
             command: "x".into(),
             args: vec![],
             env: BTreeMap::new(),
+            timeout_ms: None,
         };
         let http = McpServerConfig::Http {
             name: "b".into(),
             url: "http://x".into(),
             headers: BTreeMap::new(),
+            timeout_ms: None,
         };
         assert_eq!(stdio.name(), "a");
         assert_eq!(http.name(), "b");
+    }
+
+    // ── Phase 33 (mcp-http-and-discover-flake) — per-server timeout ──
+
+    pub mod timeout {
+        use super::*;
+
+        #[test]
+        fn config_stdio_timeout_ms_defaults_to_none() {
+            // When the JSON omits timeout_ms, deserialization defaults to None.
+            let json = r#"{
+                "transport": "stdio",
+                "name": "x",
+                "command": "y"
+            }"#;
+            let cfg: McpServerConfig = serde_json::from_str(json).unwrap();
+            match cfg {
+                McpServerConfig::Stdio { timeout_ms, .. } => assert_eq!(timeout_ms, None),
+                _ => panic!("expected Stdio variant"),
+            }
+        }
+
+        #[test]
+        fn config_stdio_timeout_ms_round_trips_via_json() {
+            // Set, serialize, deserialize → same value preserved.
+            let original = McpServerConfig::Stdio {
+                name: "x".into(),
+                command: "y".into(),
+                args: vec![],
+                env: BTreeMap::new(),
+                timeout_ms: Some(30_000),
+            };
+            let json = serde_json::to_string(&original).unwrap();
+            let back: McpServerConfig = serde_json::from_str(&json).unwrap();
+            match back {
+                McpServerConfig::Stdio { timeout_ms, .. } => {
+                    assert_eq!(timeout_ms, Some(30_000))
+                }
+                _ => panic!("expected Stdio variant"),
+            }
+        }
+
+        #[test]
+        fn config_http_timeout_ms_defaults_to_none() {
+            let json = r#"{
+                "transport": "http",
+                "name": "x",
+                "url": "http://x"
+            }"#;
+            let cfg: McpServerConfig = serde_json::from_str(json).unwrap();
+            match cfg {
+                McpServerConfig::Http { timeout_ms, .. } => assert_eq!(timeout_ms, None),
+                _ => panic!("expected Http variant"),
+            }
+        }
+
+        #[test]
+        fn config_http_timeout_ms_round_trips_via_json() {
+            let original = McpServerConfig::Http {
+                name: "x".into(),
+                url: "http://x".into(),
+                headers: BTreeMap::new(),
+                timeout_ms: Some(2_500),
+            };
+            let json = serde_json::to_string(&original).unwrap();
+            let back: McpServerConfig = serde_json::from_str(&json).unwrap();
+            match back {
+                McpServerConfig::Http { timeout_ms, .. } => assert_eq!(timeout_ms, Some(2_500)),
+                _ => panic!("expected Http variant"),
+            }
+        }
+
+        #[test]
+        fn timeout_ms_accessor_returns_inner_value_for_stdio() {
+            let cfg = McpServerConfig::Stdio {
+                name: "x".into(),
+                command: "y".into(),
+                args: vec![],
+                env: BTreeMap::new(),
+                timeout_ms: Some(15_000),
+            };
+            assert_eq!(cfg.timeout_ms(), Some(15_000));
+        }
+
+        #[test]
+        fn timeout_ms_accessor_returns_inner_value_for_http() {
+            let cfg = McpServerConfig::Http {
+                name: "x".into(),
+                url: "http://x".into(),
+                headers: BTreeMap::new(),
+                timeout_ms: Some(7_777),
+            };
+            assert_eq!(cfg.timeout_ms(), Some(7_777));
+        }
+
+        #[test]
+        fn timeout_ms_accessor_returns_none_when_unset() {
+            let cfg = McpServerConfig::Stdio {
+                name: "x".into(),
+                command: "y".into(),
+                args: vec![],
+                env: BTreeMap::new(),
+                timeout_ms: None,
+            };
+            assert_eq!(cfg.timeout_ms(), None);
+        }
     }
 
     /// Minimal YAML helper using serde_json (which accepts JSON, a strict

@@ -85,6 +85,7 @@ mod tests {
             command: "echo".to_string(),
             args: vec![],
             env: BTreeMap::new(),
+            timeout_ms: None,
         }
     }
 

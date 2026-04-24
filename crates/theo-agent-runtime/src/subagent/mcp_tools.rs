@@ -392,6 +392,7 @@ mod tests {
             command: "/nonexistent/cmd/xyz".into(),
             args: vec![],
             env: BTreeMap::new(),
+            timeout_ms: None,
         });
         let dispatcher = Arc::new(McpDispatcher::new(Arc::new(reg)));
         let t = fake_tool("foo", serde_json::json!({}));

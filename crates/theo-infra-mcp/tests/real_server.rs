@@ -44,6 +44,7 @@ fn maybe_setup() -> Option<(McpRegistry, TempDir)> {
             tmp.path().to_string_lossy().to_string(),
         ],
         env: BTreeMap::new(),
+        timeout_ms: None,
     });
     Some((reg, tmp))
 }

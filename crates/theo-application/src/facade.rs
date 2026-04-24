@@ -71,8 +71,8 @@ pub mod tooling {
 /// timeout constant, server config).
 pub mod mcp {
     pub use theo_infra_mcp::{
-        DEFAULT_PER_SERVER_TIMEOUT, DiscoveryCache, DiscoveryReport,
-        McpRegistry, McpServerConfig, McpTool,
+        effective_default_timeout, DEFAULT_PER_SERVER_TIMEOUT, DiscoveryCache,
+        DiscoveryReport, McpRegistry, McpServerConfig, McpTool,
     };
 }
 

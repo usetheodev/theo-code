@@ -211,8 +211,10 @@ if [ "$HAS_NPX" = "true" ]; then
   timeout 60 npx -y @modelcontextprotocol/server-filesystem --help \
     > /dev/null 2>&1 || true
 
-  echo "Running \`theo mcp discover\`..."
-  DISCOVER_OUT=$("$CLI" mcp discover --repo "$WORK" 2>&1)
+  echo "Running \`theo mcp discover --timeout-secs 30\`..."
+  # Phase 34 (mcp-http-and-discover-flake): explicit 30s timeout
+  # absorbs npx cold-start latency (download + node bootstrap).
+  DISCOVER_OUT=$("$CLI" mcp discover --repo "$WORK" --timeout-secs 30 2>&1)
   DISCOVERED=$(echo "$DISCOVER_OUT" | grep -c "✓ fs" 2>/dev/null)
   DISCOVERED=${DISCOVERED:-0}
   if [ "$DISCOVERED" -ge 1 ]; then

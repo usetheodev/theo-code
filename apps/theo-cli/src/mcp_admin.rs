@@ -13,12 +13,11 @@
 
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Duration;
 
 use clap::Subcommand;
 
 use theo_application::facade::mcp::{
-    DEFAULT_PER_SERVER_TIMEOUT, DiscoveryCache, McpRegistry, McpServerConfig,
+    effective_default_timeout, DiscoveryCache, McpRegistry, McpServerConfig,
 };
 
 #[derive(Subcommand)]
@@ -27,6 +26,15 @@ pub enum McpCmd {
     Discover {
         /// Server name (omit to discover every server in the registry).
         server: Option<String>,
+        /// Phase 34 (mcp-http-and-discover-flake) — per-call override
+        /// of the discover timeout, in seconds. Hierarchy:
+        ///   CLI flag  >  THEO_MCP_DISCOVER_TIMEOUT_SECS env var
+        ///             >  per-server `timeout_ms` in mcp.toml
+        ///             >  default 5s
+        /// Useful in CI when the operator knows `npx` needs ≥30s on
+        /// a cold runner (server-filesystem download + node bootstrap).
+        #[arg(long)]
+        timeout_secs: Option<u64>,
     },
     /// Drop the cache entry for a specific server.
     Invalidate {
@@ -67,24 +75,111 @@ fn parse_registry_toml(content: &str) -> anyhow::Result<McpRegistry> {
         #[serde(default)]
         server: Vec<RawServer>,
     }
-    #[derive(Deserialize)]
-    struct RawServer {
-        name: String,
-        command: String,
-        #[serde(default)]
-        args: Vec<String>,
-        #[serde(default)]
-        env: BTreeMap<String, String>,
+    /// Phase 39 (mcp-http-and-discover-flake): tagged enum for the
+    /// `transport` discriminator. `transport = "stdio"` (default when
+    /// the field is absent) yields the legacy stdio path; `transport =
+    /// "http"` activates the HTTP/Streamable client.
+    ///
+    /// D5 backward-compat: legacy `[[server]]` entries without an
+    /// explicit `transport` field still parse as `Stdio` because we
+    /// implement a custom `Deserialize` that defaults the tag.
+    #[derive(Debug)]
+    enum RawServer {
+        Stdio {
+            name: String,
+            command: String,
+            args: Vec<String>,
+            env: BTreeMap<String, String>,
+            timeout_ms: Option<u64>,
+        },
+        Http {
+            name: String,
+            url: String,
+            headers: BTreeMap<String, String>,
+            timeout_ms: Option<u64>,
+        },
     }
+
+    impl<'de> Deserialize<'de> for RawServer {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            #[derive(Deserialize)]
+            struct All {
+                #[serde(default)]
+                transport: Option<String>,
+                name: String,
+                #[serde(default)]
+                command: Option<String>,
+                #[serde(default)]
+                args: Vec<String>,
+                #[serde(default)]
+                env: BTreeMap<String, String>,
+                #[serde(default)]
+                url: Option<String>,
+                #[serde(default)]
+                headers: BTreeMap<String, String>,
+                #[serde(default)]
+                timeout_ms: Option<u64>,
+            }
+            let all = All::deserialize(deserializer)?;
+            let kind = all.transport.as_deref().unwrap_or("stdio");
+            match kind {
+                "stdio" => {
+                    let command = all.command.ok_or_else(|| {
+                        serde::de::Error::custom(format!(
+                            "stdio server '{}' is missing required `command` field",
+                            all.name
+                        ))
+                    })?;
+                    Ok(RawServer::Stdio {
+                        name: all.name,
+                        command,
+                        args: all.args,
+                        env: all.env,
+                        timeout_ms: all.timeout_ms,
+                    })
+                }
+                "http" => {
+                    let url = all.url.ok_or_else(|| {
+                        serde::de::Error::custom(format!(
+                            "http server '{}' is missing required `url` field",
+                            all.name
+                        ))
+                    })?;
+                    Ok(RawServer::Http {
+                        name: all.name,
+                        url,
+                        headers: all.headers,
+                        timeout_ms: all.timeout_ms,
+                    })
+                }
+                other => Err(serde::de::Error::custom(format!(
+                    "unknown MCP transport '{}' for server '{}'; \
+                     supported: 'stdio' | 'http'",
+                    other, all.name
+                ))),
+            }
+        }
+    }
+
     let f: File = toml::from_str(content)?;
     let mut reg = McpRegistry::new();
     for raw in f.server {
-        reg.register(McpServerConfig::Stdio {
-            name: raw.name,
-            command: raw.command,
-            args: raw.args,
-            env: raw.env,
-        });
+        let cfg = match raw {
+            RawServer::Stdio {
+                name, command, args, env, timeout_ms,
+            } => McpServerConfig::Stdio {
+                name, command, args, env, timeout_ms,
+            },
+            RawServer::Http {
+                name, url, headers, timeout_ms,
+            } => McpServerConfig::Http {
+                name, url, headers, timeout_ms,
+            },
+        };
+        reg.register(cfg);
     }
     Ok(reg)
 }
@@ -95,7 +190,7 @@ pub async fn handle_mcp(
     cache: Arc<DiscoveryCache>,
 ) -> anyhow::Result<()> {
     match cmd {
-        McpCmd::Discover { server } => {
+        McpCmd::Discover { server, timeout_secs } => {
             let registry = load_registry_from_project(project_dir);
             if registry.is_empty() {
                 println!(
@@ -117,12 +212,14 @@ pub async fn handle_mcp(
                 }
                 None => registry.names().into_iter().map(String::from).collect(),
             };
+            // Phase 34 hierarchy: CLI flag > env > default. Per-server
+            // `timeout_ms` in mcp.toml still wins inside discover_one.
+            let global_timeout = timeout_secs
+                .filter(|n| *n > 0)
+                .map(std::time::Duration::from_secs)
+                .unwrap_or_else(effective_default_timeout);
             let report = cache
-                .discover_filtered(
-                    &registry,
-                    &allowlist,
-                    DEFAULT_PER_SERVER_TIMEOUT.max(Duration::from_secs(5)),
-                )
+                .discover_filtered(&registry, &allowlist, global_timeout)
                 .await;
             for ok in &report.successful {
                 let n = cache.get(ok).map(|t| t.len()).unwrap_or(0);
@@ -232,6 +329,192 @@ mod tests {
         assert!(reg.is_empty());
     }
 
+    // ── Phase 33 (mcp-http-and-discover-flake) — timeout_ms in TOML ──
+
+    #[test]
+    fn load_registry_reads_timeout_ms_field_from_toml() {
+        let dir = fixture_project_with_mcp_toml(
+            r#"
+            [[server]]
+            name = "fs"
+            command = "npx"
+            args = ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+            timeout_ms = 30000
+            "#,
+        );
+        let reg = load_registry_from_project(dir.path());
+        let cfg = reg.get("fs").expect("fs server must be registered");
+        assert_eq!(
+            cfg.timeout_ms(),
+            Some(30_000),
+            "TOML timeout_ms field must reach the McpServerConfig"
+        );
+    }
+
+    #[test]
+    fn load_registry_defaults_timeout_ms_to_none_when_omitted() {
+        let dir = fixture_project_with_mcp_toml(
+            r#"
+            [[server]]
+            name = "github"
+            command = "echo"
+            "#,
+        );
+        let reg = load_registry_from_project(dir.path());
+        let cfg = reg.get("github").unwrap();
+        assert_eq!(cfg.timeout_ms(), None);
+    }
+
+    // ── Phase 39 (mcp-http-and-discover-flake) — http transport in TOML ──
+
+    pub mod parse_http {
+        use super::*;
+        use theo_application::facade::mcp::McpServerConfig;
+
+        #[test]
+        fn parser_reads_http_server_with_explicit_transport() {
+            let dir = fixture_project_with_mcp_toml(
+                r#"
+                [[server]]
+                transport = "http"
+                name = "company-internal"
+                url = "https://mcp.example.com/api"
+                "#,
+            );
+            let reg = load_registry_from_project(dir.path());
+            let cfg = reg
+                .get("company-internal")
+                .expect("http server must register");
+            assert!(
+                matches!(&*cfg, McpServerConfig::Http { .. }),
+                "transport=http must yield Http variant"
+            );
+        }
+
+        #[test]
+        fn parser_reads_http_server_headers() {
+            let dir = fixture_project_with_mcp_toml(
+                r#"
+                [[server]]
+                transport = "http"
+                name = "x"
+                url = "http://x"
+                headers = { Authorization = "Bearer abc-123" }
+                "#,
+            );
+            let reg = load_registry_from_project(dir.path());
+            let cfg = reg.get("x").unwrap();
+            match &*cfg {
+                McpServerConfig::Http { headers, .. } => {
+                    assert_eq!(
+                        headers.get("Authorization").map(|s| s.as_str()),
+                        Some("Bearer abc-123")
+                    );
+                }
+                _ => panic!("expected Http"),
+            }
+        }
+
+        #[test]
+        fn parser_reads_http_server_timeout_ms() {
+            let dir = fixture_project_with_mcp_toml(
+                r#"
+                [[server]]
+                transport = "http"
+                name = "x"
+                url = "http://x"
+                timeout_ms = 8000
+                "#,
+            );
+            let reg = load_registry_from_project(dir.path());
+            assert_eq!(reg.get("x").unwrap().timeout_ms(), Some(8000));
+        }
+
+        #[test]
+        fn parser_defaults_missing_transport_to_stdio_for_backcompat() {
+            // D5: legacy mcp.toml without `transport` field still parses.
+            let dir = fixture_project_with_mcp_toml(
+                r#"
+                [[server]]
+                name = "legacy"
+                command = "echo"
+                "#,
+            );
+            let reg = load_registry_from_project(dir.path());
+            let cfg = reg.get("legacy").unwrap();
+            assert!(
+                matches!(&*cfg, McpServerConfig::Stdio { .. }),
+                "missing transport must default to Stdio (D5 backcompat)"
+            );
+        }
+
+        #[test]
+        fn parser_returns_empty_registry_on_unknown_transport() {
+            // load_registry_from_project swallows parse errors and yields
+            // an empty registry (loose contract — see existing tests).
+            // The deserializer error itself is exercised in the next test.
+            let dir = fixture_project_with_mcp_toml(
+                r#"
+                [[server]]
+                transport = "websocket"
+                name = "x"
+                url = "ws://x"
+                "#,
+            );
+            let reg = load_registry_from_project(dir.path());
+            assert!(
+                reg.is_empty(),
+                "unknown transport must surface as empty registry"
+            );
+        }
+
+        #[test]
+        fn parser_reads_mixed_stdio_and_http_servers_in_one_file() {
+            let dir = fixture_project_with_mcp_toml(
+                r#"
+                [[server]]
+                name = "github"
+                command = "npx"
+                args = ["-y", "@modelcontextprotocol/server-github"]
+
+                [[server]]
+                transport = "http"
+                name = "remote"
+                url = "https://remote.example.com"
+                "#,
+            );
+            let reg = load_registry_from_project(dir.path());
+            assert_eq!(reg.len(), 2);
+            assert!(matches!(
+                &*reg.get("github").unwrap(),
+                McpServerConfig::Stdio { .. }
+            ));
+            assert!(matches!(
+                &*reg.get("remote").unwrap(),
+                McpServerConfig::Http { .. }
+            ));
+        }
+
+        #[test]
+        fn parser_emits_parse_error_when_http_server_missing_url() {
+            // Internal: parse_registry_toml returns Err — but the public
+            // load_registry_from_project swallows it. Verify by calling
+            // the inner parser directly.
+            let res = parse_registry_toml(
+                r#"
+                [[server]]
+                transport = "http"
+                name = "no-url"
+                "#,
+            );
+            let err = res.expect_err("missing url must be a parse error");
+            assert!(
+                format!("{err}").contains("url"),
+                "error must mention `url`; got {err}"
+            );
+        }
+    }
+
     // ── handle_mcp ──
 
     #[tokio::test]
@@ -247,6 +530,7 @@ mod tests {
         let res = handle_mcp(
             McpCmd::Discover {
                 server: Some("missing".into()),
+                timeout_secs: None,
             },
             dir.path(),
             cache,
@@ -262,8 +546,12 @@ mod tests {
     async fn cmd_mcp_discover_no_config_prints_guidance() {
         let dir = TempDir::new().unwrap();
         let cache = Arc::new(DiscoveryCache::new());
-        let res = handle_mcp(McpCmd::Discover { server: None }, dir.path(), cache)
-            .await;
+        let res = handle_mcp(
+            McpCmd::Discover { server: None, timeout_secs: None },
+            dir.path(),
+            cache,
+        )
+        .await;
         assert!(res.is_ok());
     }
 
@@ -282,6 +570,7 @@ mod tests {
         let res = handle_mcp(
             McpCmd::Discover {
                 server: Some("alpha".into()),
+                timeout_secs: None,
             },
             dir.path(),
             cache.clone(),
@@ -290,6 +579,66 @@ mod tests {
         assert!(res.is_ok());
         // Unreachable → not cached, but no error returned (operator-friendly).
         assert!(cache.get("alpha").is_none());
+    }
+
+    // ── Phase 34 (mcp-http-and-discover-flake) — --timeout-secs flag ──
+
+    pub mod timeout_flag {
+        use super::*;
+        use clap::Parser;
+
+        // Wrap McpCmd in a top-level Parser shell to exercise the
+        // declarative #[arg(long)] derivation end-to-end.
+        #[derive(Parser)]
+        struct Wrap {
+            #[command(subcommand)]
+            cmd: McpCmd,
+        }
+
+        #[test]
+        fn discover_command_accepts_timeout_secs_flag_long_form() {
+            let parsed = Wrap::try_parse_from([
+                "x", "discover", "--timeout-secs", "30",
+            ]).expect("clap must accept the flag");
+            match parsed.cmd {
+                McpCmd::Discover { server, timeout_secs } => {
+                    assert_eq!(server, None);
+                    assert_eq!(timeout_secs, Some(30));
+                }
+                _ => panic!("expected Discover variant"),
+            }
+        }
+
+        #[test]
+        fn discover_command_accepts_timeout_secs_with_server_arg() {
+            let parsed = Wrap::try_parse_from([
+                "x", "discover", "fs", "--timeout-secs", "45",
+            ]).expect("clap must accept flag + positional");
+            match parsed.cmd {
+                McpCmd::Discover { server, timeout_secs } => {
+                    assert_eq!(server.as_deref(), Some("fs"));
+                    assert_eq!(timeout_secs, Some(45));
+                }
+                _ => panic!(),
+            }
+        }
+
+        #[test]
+        fn discover_command_omitted_flag_defaults_to_none() {
+            let parsed = Wrap::try_parse_from(["x", "discover"]).unwrap();
+            match parsed.cmd {
+                McpCmd::Discover { timeout_secs, .. } => assert_eq!(timeout_secs, None),
+                _ => panic!(),
+            }
+        }
+
+        #[test]
+        fn discover_command_rejects_non_numeric_timeout() {
+            let res = Wrap::try_parse_from([
+                "x", "discover", "--timeout-secs", "not-a-number",
+            ]);
+            assert!(res.is_err(), "clap must reject non-numeric u64");
+        }
     }
 
     #[tokio::test]

@@ -1389,6 +1389,7 @@ mod tests {
             command: "echo".into(),
             args: vec![],
             env: BTreeMap::new(),
+            timeout_ms: None,
         });
         let cache = DiscoveryCache::new();
         cache.put(
@@ -1485,6 +1486,7 @@ mod tests {
             command: "/nonexistent/cmd/zzz".into(),
             args: vec![],
             env: BTreeMap::new(),
+            timeout_ms: None,
         });
 
         let manager = SubAgentManager {
@@ -1547,6 +1549,7 @@ mod tests {
             command: "/nonexistent/never-spawned".into(),
             args: vec![],
             env: BTreeMap::new(),
+            timeout_ms: None,
         });
 
         let manager = SubAgentManager {
@@ -1645,6 +1648,7 @@ mod tests {
             command: "/nonexistent/zzz".into(),
             args: vec![],
             env: BTreeMap::new(),
+            timeout_ms: None,
         });
         let manager = SubAgentManager {
             config: AgentConfig::default(),
@@ -1685,6 +1689,7 @@ mod tests {
             command: "/nonexistent/zzz".into(),
             args: vec![],
             env: BTreeMap::new(),
+            timeout_ms: None,
         });
         let manager = SubAgentManager {
             config: AgentConfig::default(),

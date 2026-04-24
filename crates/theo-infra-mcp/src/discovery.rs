@@ -20,13 +20,35 @@ use std::time::Duration;
 
 use tokio::time::timeout;
 
-use crate::client::{McpClient, McpStdioClient};
+use crate::client::{McpAnyClient, McpClient};
 use crate::error::McpError;
 use crate::protocol::McpTool;
 use crate::registry::McpRegistry;
 
 /// Default per-server timeout for `tools/list`.
 pub const DEFAULT_PER_SERVER_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Phase 33 (mcp-http-and-discover-flake): operator-tunable global default.
+///
+/// Reads `THEO_MCP_DISCOVER_TIMEOUT_SECS` (a positive integer of seconds).
+/// Falls back to `DEFAULT_PER_SERVER_TIMEOUT` (5s) when:
+/// - the env var is unset,
+/// - the value cannot be parsed as `u64`,
+/// - the value is `0` (would cause instant timeout — guard against
+///   accidental self-foot-shooting).
+///
+/// Hierarchy used by `discover_one`:
+///   per-server `cfg.timeout_ms()`  →  caller's `per_server_timeout`
+/// where the caller typically passes the result of this function. CLI
+/// flag (Phase 34) and per-server config (Phase 33) override it.
+pub fn effective_default_timeout() -> Duration {
+    std::env::var("THEO_MCP_DISCOVER_TIMEOUT_SECS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|n| *n > 0)
+        .map(Duration::from_secs)
+        .unwrap_or(DEFAULT_PER_SERVER_TIMEOUT)
+}
 
 /// Outcome of a `discover_all` call.
 #[derive(Debug, Default, Clone)]
@@ -225,11 +247,21 @@ async fn discover_one(
     cfg: &crate::config::McpServerConfig,
     per_server_timeout: Duration,
 ) -> Result<Vec<McpTool>, String> {
+    // Phase 33: per-server `timeout_ms` in the config overrides the
+    // caller's default. Allows `npx`-based servers to declare 30_000
+    // (30s) without inflating the default for HTTP servers.
+    let effective = cfg
+        .timeout_ms()
+        .map(Duration::from_millis)
+        .unwrap_or(per_server_timeout);
+    // Phase 37 (mcp-http-and-discover-flake): route via McpAnyClient so
+    // both stdio and HTTP servers in the registry get discovered. The
+    // dispatcher is transport-agnostic.
     let work = async move {
-        let mut client = McpStdioClient::from_config(cfg).await?;
+        let mut client = McpAnyClient::from_config(cfg).await?;
         client.list_tools().await
     };
-    match timeout(per_server_timeout, work).await {
+    match timeout(effective, work).await {
         Ok(Ok(tools)) => Ok(tools),
         Ok(Err(McpError::InvalidConfig(msg))) => {
             Err(format!("invalid config for '{}': {}", name, msg))
@@ -238,7 +270,7 @@ async fn discover_one(
         Err(_) => Err(format!(
             "{}: timed out after {}s",
             name,
-            per_server_timeout.as_secs()
+            effective.as_secs()
         )),
     }
 }
@@ -268,6 +300,7 @@ mod tests {
             command: "/nonexistent/path/xyz123".into(),
             args: vec![],
             env: BTreeMap::new(),
+            timeout_ms: None,
         }
     }
 
@@ -662,5 +695,232 @@ mod tests {
         let c2 = c1.clone();
         c1.put("x", vec![fake_tool("t", "")]);
         assert_eq!(c2.get("x").unwrap().len(), 1, "cache shared via Arc");
+    }
+
+    // ── Phase 33 (mcp-http-and-discover-flake) — env-override default ──
+
+    pub mod effective_default_timeout {
+        use super::*;
+
+        /// Env var name. Local re-decl prevents typos diverging from prod path.
+        const ENV: &str = "THEO_MCP_DISCOVER_TIMEOUT_SECS";
+
+        /// Each test mutates a process-global env var. We serialize them via
+        /// a Mutex so they don't race when cargo test runs them in parallel.
+        fn lock() -> std::sync::MutexGuard<'static, ()> {
+            use std::sync::{Mutex, OnceLock};
+            static M: OnceLock<Mutex<()>> = OnceLock::new();
+            M.get_or_init(|| Mutex::new(()))
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+        }
+
+        #[test]
+        fn returns_default_5s_when_env_unset() {
+            let _g = lock();
+            unsafe { std::env::remove_var(ENV); }
+            assert_eq!(
+                super::super::effective_default_timeout(),
+                DEFAULT_PER_SERVER_TIMEOUT
+            );
+        }
+
+        #[test]
+        fn returns_env_value_when_set_to_valid_number() {
+            let _g = lock();
+            unsafe { std::env::set_var(ENV, "42"); }
+            let got = super::super::effective_default_timeout();
+            unsafe { std::env::remove_var(ENV); }
+            assert_eq!(got, Duration::from_secs(42));
+        }
+
+        #[test]
+        fn falls_back_to_default_when_env_unparseable() {
+            let _g = lock();
+            unsafe { std::env::set_var(ENV, "not-a-number"); }
+            let got = super::super::effective_default_timeout();
+            unsafe { std::env::remove_var(ENV); }
+            assert_eq!(got, DEFAULT_PER_SERVER_TIMEOUT);
+        }
+
+        #[test]
+        fn falls_back_to_default_when_env_is_zero() {
+            // 0s would cause instant timeout — protect operators from
+            // self-foot-shooting; treat as "use default".
+            let _g = lock();
+            unsafe { std::env::set_var(ENV, "0"); }
+            let got = super::super::effective_default_timeout();
+            unsafe { std::env::remove_var(ENV); }
+            assert_eq!(got, DEFAULT_PER_SERVER_TIMEOUT);
+        }
+    }
+
+    // ── Phase 37 — discover_one routes via McpAnyClient (HTTP support) ──
+
+    pub mod http_routing {
+        use super::*;
+        use std::sync::Arc;
+        use std::sync::Mutex;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+
+        async fn spawn_one_shot(response: &'static [u8]) -> String {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            tokio::spawn(async move {
+                let (mut sock, _) = listener.accept().await.unwrap();
+                let mut buf = [0u8; 4096];
+                let mut acc: Vec<u8> = Vec::new();
+                loop {
+                    let n = sock.read(&mut buf).await.unwrap_or(0);
+                    if n == 0 {
+                        break;
+                    }
+                    acc.extend_from_slice(&buf[..n]);
+                    if let Some(idx) = acc.windows(4).position(|w| w == b"\r\n\r\n") {
+                        // Read body per Content-Length so we don't hang.
+                        let head = std::str::from_utf8(&acc[..idx]).unwrap_or("");
+                        let len = head
+                            .lines()
+                            .find_map(|l| {
+                                l.to_ascii_lowercase()
+                                    .strip_prefix("content-length:")
+                                    .and_then(|v| v.trim().parse::<usize>().ok())
+                            })
+                            .unwrap_or(0);
+                        let body_so_far = acc.len() - (idx + 4);
+                        if body_so_far < len {
+                            let mut more = vec![0u8; len - body_so_far];
+                            sock.read_exact(&mut more).await.unwrap();
+                            let _ = Arc::new(Mutex::new(more));
+                        }
+                        break;
+                    }
+                }
+                let _ = sock.write_all(response).await;
+                let _ = sock.shutdown().await;
+            });
+            format!("http://{addr}")
+        }
+
+        // Body length: 82 bytes precisely.
+        const TOOLS_LIST_RESPONSE: &[u8] = b"HTTP/1.1 200 OK\r\n\
+            Content-Type: application/json\r\n\
+            Content-Length: 82\r\n\
+            \r\n\
+            {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"tools\":[{\"name\":\"do_thing\",\"inputSchema\":{}}]}}";
+
+        #[tokio::test]
+        async fn discover_one_routes_http_through_any_client_and_caches_tools() {
+            let url = spawn_one_shot(TOOLS_LIST_RESPONSE).await;
+            let cfg = McpServerConfig::Http {
+                name: "remote".into(),
+                url,
+                headers: std::collections::BTreeMap::new(),
+                timeout_ms: None,
+            };
+            let tools = super::super::discover_one(
+                "remote",
+                &cfg,
+                Duration::from_secs(5),
+            )
+            .await
+            .expect("HTTP discover should succeed against mock");
+            assert_eq!(tools.len(), 1);
+            assert_eq!(tools[0].name, "do_thing");
+        }
+
+        #[tokio::test]
+        async fn discover_filtered_caches_http_server_tools_after_success() {
+            let url = spawn_one_shot(TOOLS_LIST_RESPONSE).await;
+            let mut reg = McpRegistry::new();
+            reg.register(McpServerConfig::Http {
+                name: "remote".into(),
+                url,
+                headers: std::collections::BTreeMap::new(),
+                timeout_ms: None,
+            });
+            let cache = DiscoveryCache::new();
+            let report = cache
+                .discover_filtered(
+                    &reg,
+                    &["remote".to_string()],
+                    Duration::from_secs(5),
+                )
+                .await;
+            assert_eq!(report.successful, vec!["remote"]);
+            assert!(report.failed.is_empty());
+            let cached = cache.get("remote").expect("cache must populate");
+            assert_eq!(cached.len(), 1);
+            assert_eq!(cached[0].name, "do_thing");
+        }
+
+        #[tokio::test]
+        async fn discover_filtered_records_http_failure_when_endpoint_down() {
+            // No mock server bound at this address.
+            let mut reg = McpRegistry::new();
+            reg.register(McpServerConfig::Http {
+                name: "down".into(),
+                url: "http://127.0.0.1:1".into(),
+                headers: std::collections::BTreeMap::new(),
+                timeout_ms: Some(500), // fail fast
+            });
+            let cache = DiscoveryCache::new();
+            let report = cache
+                .discover_filtered(
+                    &reg,
+                    &["down".to_string()],
+                    Duration::from_secs(5),
+                )
+                .await;
+            assert_eq!(report.successful, Vec::<String>::new());
+            assert_eq!(report.failed.len(), 1);
+            assert_eq!(report.failed[0].0, "down");
+        }
+    }
+
+    // ── Phase 33 — per-server timeout overrides caller's value ──
+
+    pub mod per_server_timeout {
+        use super::*;
+
+        #[tokio::test]
+        async fn discover_one_uses_per_server_timeout_when_present() {
+            // The CFG declares a 1ms timeout — so even though the CALLER
+            // passes 30s, the per-server override wins and the spawn must
+            // time out reporting the per-server value (1s after .as_secs()).
+            let cfg = McpServerConfig::Stdio {
+                name: "slow".into(),
+                command: "sleep".into(),
+                args: vec!["10".into()],
+                env: BTreeMap::new(),
+                timeout_ms: Some(1), // 1ms — must time out instantly
+            };
+            let err = super::super::discover_one(
+                "slow",
+                &cfg,
+                Duration::from_secs(30),
+            )
+            .await
+            .unwrap_err();
+            assert!(err.contains("timed out"), "err was: {err}");
+        }
+
+        #[tokio::test]
+        async fn discover_one_uses_caller_timeout_when_per_server_none() {
+            // The CFG omits timeout — caller's 1ms should apply, time out.
+            let cfg = unreachable_cfg("u"); // timeout_ms=None
+            let err = super::super::discover_one(
+                "u",
+                &cfg,
+                Duration::from_millis(1),
+            )
+            .await
+            .unwrap_err();
+            // We can't guarantee "timed out" vs "spawn failed" because the
+            // spawn of /nonexistent/path/xyz123 fails fast; but EITHER way
+            // we should NOT panic + must surface a string.
+            assert!(!err.is_empty());
+        }
     }
 }

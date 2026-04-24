@@ -254,6 +254,7 @@ async fn phase17_discover_all_unreachable_server_records_failure_softly() {
         command: "/nonexistent/command/zzz".into(),
         args: vec![],
         env: BTreeMap::new(),
+        timeout_ms: None,
     });
     let report = cache.discover_all(&reg, Duration::from_secs(1)).await;
     assert_eq!(report.successful.len(), 0);

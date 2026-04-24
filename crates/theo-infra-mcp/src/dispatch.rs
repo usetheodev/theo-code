@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use crate::client::{parse_mcp_tool_name, McpClient, McpStdioClient};
+use crate::client::{parse_mcp_tool_name, McpAnyClient, McpClient};
 use crate::error::McpError;
 use crate::protocol::{McpContentPart, McpToolCallResult};
 use crate::registry::McpRegistry;
@@ -24,9 +24,10 @@ pub struct DispatchOutcome {
 /// Async dispatcher that resolves `mcp:<server>:<tool>` invocations
 /// against a `McpRegistry` and a (server-name → live client) cache.
 ///
-/// Currently every dispatch spawns a fresh `McpStdioClient` (transient).
-/// A connection pool can be added later — the type signature already
-/// supports it (Arc<Self>).
+/// Phase 38 (mcp-http-and-discover-flake): every dispatch spawns a
+/// transient `McpAnyClient` (transport-agnostic) — both stdio and
+/// HTTP servers in the registry are honored. A connection pool can be
+/// added later — the type signature already supports it (Arc<Self>).
 #[derive(Debug)]
 pub struct McpDispatcher {
     registry: Arc<McpRegistry>,
@@ -63,8 +64,9 @@ impl McpDispatcher {
             McpError::InvalidConfig(format!("unknown MCP server: '{}'", server_owned))
         })?;
 
-        // Spawn a transient client for this dispatch.
-        let mut client = McpStdioClient::from_config(&cfg).await?;
+        // Phase 38: transport-agnostic spawn. Routes Stdio→McpStdioClient,
+        // Http→McpHttpClient via McpAnyClient::from_config.
+        let mut client = McpAnyClient::from_config(&cfg).await?;
         let result = client.call_tool(&tool_owned, args).await?;
         Ok(format_outcome(result))
     }
@@ -139,6 +141,7 @@ mod tests {
             command: "/nonexistent/command/xyz".to_string(),
             args: vec![],
             env: BTreeMap::new(),
+            timeout_ms: None,
         });
         let d = McpDispatcher::new(Arc::new(reg));
         let err = d
@@ -190,5 +193,87 @@ mod tests {
         };
         let out = format_outcome(result);
         assert!(out.text.contains("image/png"));
+    }
+
+    // ── Phase 38 (mcp-http-and-discover-flake) — HTTP dispatch routing ──
+
+    pub mod http {
+        use super::*;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+
+        async fn spawn_one_shot(response: &'static [u8]) -> String {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+            tokio::spawn(async move {
+                let (mut sock, _) = listener.accept().await.unwrap();
+                let mut buf = [0u8; 4096];
+                let mut acc: Vec<u8> = Vec::new();
+                loop {
+                    let n = sock.read(&mut buf).await.unwrap_or(0);
+                    if n == 0 {
+                        break;
+                    }
+                    acc.extend_from_slice(&buf[..n]);
+                    if let Some(idx) = acc.windows(4).position(|w| w == b"\r\n\r\n") {
+                        let head = std::str::from_utf8(&acc[..idx]).unwrap_or("");
+                        let len = head
+                            .lines()
+                            .find_map(|l| {
+                                l.to_ascii_lowercase()
+                                    .strip_prefix("content-length:")
+                                    .and_then(|v| v.trim().parse::<usize>().ok())
+                            })
+                            .unwrap_or(0);
+                        let body_so_far = acc.len() - (idx + 4);
+                        if body_so_far < len {
+                            let mut more = vec![0u8; len - body_so_far];
+                            sock.read_exact(&mut more).await.unwrap();
+                        }
+                        break;
+                    }
+                }
+                let _ = sock.write_all(response).await;
+                let _ = sock.shutdown().await;
+            });
+            format!("http://{addr}")
+        }
+
+        // Body length: 101 bytes precisely.
+        const TOOLS_CALL_RESPONSE: &[u8] = b"HTTP/1.1 200 OK\r\n\
+            Content-Type: application/json\r\n\
+            Content-Length: 101\r\n\
+            \r\n\
+            {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"ok-from-http\"}],\"isError\":false}}";
+
+        #[tokio::test]
+        async fn dispatcher_dispatches_to_http_server_when_config_is_http() {
+            let url = spawn_one_shot(TOOLS_CALL_RESPONSE).await;
+            let mut reg = McpRegistry::new();
+            reg.register(McpServerConfig::Http {
+                name: "remote".into(),
+                url,
+                headers: BTreeMap::new(),
+                timeout_ms: None,
+            });
+            let d = McpDispatcher::new(Arc::new(reg));
+            let outcome = d
+                .dispatch("mcp:remote:do_thing", serde_json::json!({}))
+                .await
+                .expect("dispatch must reach the mock HTTP server");
+            assert!(!outcome.is_error);
+            assert!(outcome.text.contains("ok-from-http"));
+        }
+
+        #[tokio::test]
+        async fn dispatcher_returns_invalid_config_for_unknown_server() {
+            let reg = Arc::new(McpRegistry::new());
+            let d = McpDispatcher::new(reg);
+            let err = d
+                .dispatch("mcp:absent:do_thing", serde_json::json!({}))
+                .await
+                .unwrap_err();
+            assert!(matches!(err, McpError::InvalidConfig(_)));
+        }
     }
 }

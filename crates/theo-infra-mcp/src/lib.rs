@@ -30,11 +30,15 @@ pub mod dispatch;
 pub mod error;
 pub mod protocol;
 pub mod registry;
+pub mod transport_http;
 pub mod transport_stdio;
 
-pub use client::{McpClient, McpStdioClient};
+pub use client::{McpAnyClient, McpClient, McpHttpClient, McpStdioClient};
 pub use config::McpServerConfig;
-pub use discovery::{shared_cache, DiscoveryCache, DiscoveryReport, DEFAULT_PER_SERVER_TIMEOUT};
+pub use discovery::{
+    effective_default_timeout, shared_cache, DiscoveryCache, DiscoveryReport,
+    DEFAULT_PER_SERVER_TIMEOUT,
+};
 pub use dispatch::{DispatchOutcome, McpDispatcher};
 pub use error::McpError;
 pub use protocol::{McpRequest, McpResponse, McpTool};
