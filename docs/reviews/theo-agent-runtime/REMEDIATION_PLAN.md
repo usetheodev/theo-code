@@ -1274,3 +1274,11 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 | T4.6 compaction split | **DONE (parcial)** | `compaction.rs` (798 LOC) convertido para modulo `compaction/` com child `policy_engine.rs` (260 LOC). 6 helpers extraidos do monolitico `compact_with_policy` (203 LOC): `CompactionState` (struct mutavel acumuladora), `find_boundary_idx` (tail-walk para boundary index), `compact_older_messages` (loop principal de compactacao), `compact_tool_message`/`compact_assistant_tool_calls` (branches por role), `extract_file_mentions` (heuristica para file-path tokens), `remove_previous_summary`, `build_summary`/`build_progress_str`, `insert_summary_after_system`. `compact_with_policy`: 203 LOC → 50 LOC — agora um orquestrador claro com 5 chamadas nomeadas para as helpers em vez do monolitic inline loop. `compaction/mod.rs`: 798 → **647 LOC** (-151, **-19% vs baseline**). |
 
 **Validacao:** 1132 unit + 96 integration = **1228 tests passando, 0 falhas**; 18/18 compaction unit tests.
+
+### Iteracao 29 (2026-04-24) — Fase 4: T4.6 session_tree split
+
+| Task | Status | Notas |
+|---|---|---|
+| T4.6 session_tree split | **DONE (parcial)** | `session_tree.rs` (921 LOC) convertido para modulo `session_tree/` com 2 children: `types.rs` (171 LOC) com `EntryId` + `SessionEntry` + `SessionTreeError` (tipos puros, sem referencias a SessionTree); `context_builder.rs` (104 LOC) com `impl SessionTree` de `build_context` + `walk_to_root` + free fn `build_context_with_compaction` que encapsula a logica de reconstruir o slice pos-compaction. Re-exportados via `pub use types::*` para manter paths publicos byte-identical. `build_context`: 62 LOC → 39 LOC com o helper `build_context_with_compaction`. `session_tree/mod.rs`: 921 → **684 LOC** (-237, **-26% vs baseline**). |
+
+**Validacao:** 1132 unit + 96 integration = **1228 tests passando, 0 falhas**; 14/14 session_tree unit tests.
