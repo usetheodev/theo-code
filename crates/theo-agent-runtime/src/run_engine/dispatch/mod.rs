@@ -14,7 +14,10 @@
 
 use crate::agent_loop::AgentResult;
 
+pub(super) mod batch;
+pub(super) mod delegate;
 pub(super) mod done;
+pub(super) mod skill;
 
 /// Shape returned by every meta-tool handler. The main loop consumes
 /// this via `match` — no handler ever mutates `should_return` /
