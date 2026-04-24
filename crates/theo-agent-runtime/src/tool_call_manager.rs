@@ -258,10 +258,48 @@ impl ToolCallManager {
     pub fn calls_for_task(&self, task_id: &TaskId) -> Vec<ToolCallRecord> {
         self.records
             .lock()
-                        .values()
+            .values()
             .filter(|r| r.task_id == *task_id)
             .cloned()
             .collect()
+    }
+
+    /// Purge records (and their results) whose state is terminal AND
+    /// whose `completed_at` is older than `older_than_ms` milliseconds
+    /// before `now_ms`. Returns the number of entries removed.
+    ///
+    /// T6.3: prevents unbounded `HashMap` growth in long-running sessions
+    /// (e.g., a REPL that issues 10k+ tool calls). Typical call site is
+    /// `record_session_exit` or periodic maintenance in the main loop.
+    pub fn purge_completed(&self, now_ms: u64, older_than_ms: u64) -> usize {
+        let cutoff = now_ms.saturating_sub(older_than_ms);
+        let to_remove: Vec<CallId> = {
+            let records = self.records.lock();
+            records
+                .iter()
+                .filter(|(_, r)| {
+                    r.state.is_terminal()
+                        && r.completed_at.map(|ts| ts < cutoff).unwrap_or(false)
+                })
+                .map(|(id, _)| id.clone())
+                .collect()
+        };
+        if to_remove.is_empty() {
+            return 0;
+        }
+        let mut records = self.records.lock();
+        let mut results = self.results.lock();
+        let count = to_remove.len();
+        for id in &to_remove {
+            records.remove(id);
+            results.remove(id);
+        }
+        count
+    }
+
+    /// Current number of tracked records (testing / diagnostics).
+    pub fn record_count(&self) -> usize {
+        self.records.lock().len()
     }
 }
 
@@ -556,6 +594,49 @@ mod tests {
     // -----------------------------------------------------------------------
     // Thread safety
     // -----------------------------------------------------------------------
+
+    // T6.3 — purge_completed
+    #[tokio::test]
+    async fn purge_completed_removes_terminal_records_older_than_cutoff() {
+        let (manager, _, _) = setup();
+        let registry = create_default_registry();
+        // Enqueue and execute two failing calls — they land in Failed terminal state.
+        let c1 = manager.enqueue(
+            TaskId::new("t-1"),
+            "read".into(),
+            serde_json::json!({"filePath": "/nonexistent/a"}),
+        );
+        let c2 = manager.enqueue(
+            TaskId::new("t-1"),
+            "read".into(),
+            serde_json::json!({"filePath": "/nonexistent/b"}),
+        );
+        let ctx = ToolContext::test_context(std::path::PathBuf::from("/tmp"));
+        let _ = manager.dispatch_and_execute(&c1, &registry, &ctx).await;
+        let _ = manager.dispatch_and_execute(&c2, &registry, &ctx).await;
+
+        assert_eq!(manager.record_count(), 2);
+
+        // Purge everything completed more than 0 ms ago → both go.
+        let far_future = theo_domain::clock::now_millis() + 1_000_000;
+        let purged = manager.purge_completed(far_future, 0);
+        assert_eq!(purged, 2);
+        assert_eq!(manager.record_count(), 0);
+    }
+
+    #[test]
+    fn purge_completed_keeps_non_terminal_records() {
+        let (manager, _, _) = setup();
+        // Queued is non-terminal — must survive purge.
+        let _id = manager.enqueue(
+            TaskId::new("t-1"),
+            "read".into(),
+            serde_json::json!({}),
+        );
+        let purged = manager.purge_completed(u64::MAX, 0);
+        assert_eq!(purged, 0);
+        assert_eq!(manager.record_count(), 1);
+    }
 
     #[test]
     fn concurrent_enqueues_are_safe() {

@@ -176,6 +176,11 @@ pub enum ToolCategory {
     Orchestration,
     /// Utilities (todo, invalid, plan)
     Utility,
+    /// Third-party plugins loaded from `.theo/plugins/` or `~/.config/theo/plugins/`.
+    /// Always subject to the capability gate regardless of the global
+    /// `CapabilitySet::unrestricted()` default — plugins must be opted-in
+    /// via `allowed_categories` or `allowed_tools` (T1.3).
+    Plugin,
 }
 
 /// A single parameter in a tool's JSON Schema.

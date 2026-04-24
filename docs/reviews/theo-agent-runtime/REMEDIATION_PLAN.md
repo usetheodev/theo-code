@@ -941,3 +941,29 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 **Validacao:** `cargo test -p theo-domain -p theo-agent-runtime` → 440 + 1099 = **1539 unit**, 88 integration, 0 falhas. Novo modulo `fs_errors.rs` com 3 testes.
 
 **Nao feito nesta iteracao (proximas):** T0.1-T0.3 caracterizacao, T1.3 plugin hardening, T3.3 env centralization, T3.4 consolidacao completa do retry inline, T4.* split god-files, T5.*, T6.2-T6.5, T7.*, T8.1-T8.4.
+
+### Iteracao 4 (2026-04-24) — Plugin hardening + pagination + purge
+
+| Task | Status | Notas |
+|---|---|---|
+| T1.3 plugin/hook hardening | **DONE (parcial — allowlist é follow-up)** | (1) novo variant `ToolCategory::Plugin` em `theo-domain`; `can_use_tool` bloqueia Plugin mesmo em `CapabilitySet::unrestricted()` salvo opt-in explicito via `allowed_categories` ou `allowed_tools`. (2) `manifest_is_owned_by_current_user` via `libc::getuid() == metadata.uid()` em `plugin.rs`. (3) `LoadedPlugin.manifest_sha256` (SHA-256 hex do `plugin.toml`) emitido no log de loading. (4) `ShellTool::category()` agora retorna `Plugin`. 4 testes novos em `theo-domain::capability` + 3 em `plugin.rs`. Allowlist de hashes pinados em `AgentConfig` e `DomainEvent::PluginLoaded` tipado ficam como follow-up. |
+| T6.2 events_since + events_range | **DONE** | `EventBus::events_range(offset, limit)` e `EventBus::events_since(&event_id)`. 3 testes novos. `events()` marcado como "prefer events_range/events_since para logs grandes" na doc. |
+| T6.3 purge tool-call records | **DONE** | `ToolCallManager::purge_completed(now_ms, older_than_ms)` remove records terminais mais velhos que o corte (records + results em batch). `record_count()` exposto para diagnostico. 2 testes novos. |
+| T5.4 Atomic* ordering com comentario | **DONE** | `reset_turn_checkpoint` (Release), `compare_exchange` do checkpoint (AcqRel/Acquire), `skill_created_this_task` (Relaxed) — cada site agora tem comentario de uma linha justificando o ordering. |
+| T8.4 RouterHandle::Debug significativo | **DONE** | trait `ModelRouter::name()` adicionado (default `std::any::type_name::<Self>()`); `RouterHandle::fmt` delega via `self.0.name()` em vez do literal `"<dyn ModelRouter>"`. |
+
+**Baseline → atual (por metrica, desde Iteracao 0):**
+- `.expect/.unwrap/panic!`: 1071 → **1017** (-54; aumento de +13 vs Iter 3 por conta dos novos testes AAA que usam `.unwrap()` em setup; producao caiu)
+- silent-swallow: 61 → 2
+- `std::env::var`: 25 → 23
+- `std::process::Command` producao: 2 → 1
+- phase tags: 310 → 240
+
+**Validacao:** `cargo test` em todos os crates afetados — **2612 unit tests passando, 0 falhas.**
+- `theo-domain`: 444 (+4 novos testes de plugin gate)
+- `theo-tooling`: 289 (+1 ajustado para Plugin category)
+- `theo-agent-runtime`: 1108 (+9 de purge/events_since/plugin sha256)
+- `theo-application`: 124
+- outros crates: sem regressao
+
+**Nao feito nesta iteracao (proximas):** T0.1-T0.3 caracterizacao, T1.3 allowlist completa + `DomainEvent::PluginLoaded`, T3.3 env centralization, T3.4 consolidacao completa do retry, T4.* split god-files, T5.1-T5.2, T6.4-T6.5, T7.*, T8.1-T8.3.

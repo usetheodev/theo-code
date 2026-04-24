@@ -129,21 +129,40 @@ impl CapabilitySet {
     ///
     /// Rules (in order):
     /// 1. If tool_id is in denied_tools → deny
-    /// 2. If allowed_tools is `Only(set)` and tool_id is not in it → deny
-    /// 3. If allowed_categories is non-empty and category is not in it → deny
-    /// 4. Otherwise → allow
+    /// 2. If category == Plugin AND allowed_categories is empty (i.e.,
+    ///    "unrestricted") → deny. Plugins must be explicitly opted-in
+    ///    even when everything else is unrestricted. Supply-chain guard
+    ///    from REMEDIATION_PLAN T1.3.
+    /// 3. If allowed_tools is `Only(set)` and tool_id is not in it → deny
+    /// 4. If allowed_categories is non-empty and category is not in it → deny
+    /// 5. Otherwise → allow
     pub fn can_use_tool(&self, tool_id: &str, category: ToolCategory) -> bool {
         // Rule 1: denied takes precedence
         if self.denied_tools.contains(tool_id) {
             return false;
         }
 
-        // Rule 2: AllowedTools::Only restricts; AllowedTools::All passes
+        // Rule 2: Plugin tools always require explicit opt-in — they cannot
+        // ride on the default "unrestricted" capability set. A plugin is
+        // only allowed if either `allowed_categories` explicitly contains
+        // `Plugin`, or `allowed_tools` is `Only` with the specific name.
+        if category == ToolCategory::Plugin {
+            let via_category = self.allowed_categories.contains(&ToolCategory::Plugin);
+            let via_explicit = matches!(
+                &self.allowed_tools,
+                AllowedTools::Only { tools } if tools.contains(tool_id)
+            );
+            if !via_category && !via_explicit {
+                return false;
+            }
+        }
+
+        // Rule 3: AllowedTools::Only restricts; AllowedTools::All passes
         if !self.allowed_tools.contains(tool_id) {
             return false;
         }
 
-        // Rule 3: if category allowlist is set, category must be in it
+        // Rule 4: if category allowlist is set, category must be in it
         if !self.allowed_categories.is_empty() && !self.allowed_categories.contains(&category) {
             return false;
         }
@@ -263,6 +282,45 @@ impl std::error::Error for CapabilityDenied {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ---------------------------------------------------------------------
+    // T1.3 — Plugin category is gated even on "unrestricted" capability
+    // sets. Supply-chain guard: a plugin registered by an untrusted local
+    // path cannot ride on the default all-permissive policy.
+    // ---------------------------------------------------------------------
+
+    #[test]
+    fn plugin_category_blocked_on_default_unrestricted_capability_set() {
+        let caps = CapabilitySet::unrestricted();
+        assert!(
+            !caps.can_use_tool("evil_plugin", ToolCategory::Plugin),
+            "Plugin tools must NOT be allowed by the default unrestricted set"
+        );
+    }
+
+    #[test]
+    fn plugin_category_allowed_when_category_explicitly_opted_in() {
+        let mut caps = CapabilitySet::unrestricted();
+        caps.allowed_categories.insert(ToolCategory::Plugin);
+        assert!(caps.can_use_tool("p1", ToolCategory::Plugin));
+    }
+
+    #[test]
+    fn plugin_category_allowed_when_specific_tool_explicitly_allowed() {
+        let caps = CapabilitySet {
+            allowed_tools: AllowedTools::only(["p1"]),
+            ..CapabilitySet::unrestricted()
+        };
+        assert!(caps.can_use_tool("p1", ToolCategory::Plugin));
+        assert!(!caps.can_use_tool("p2", ToolCategory::Plugin));
+    }
+
+    #[test]
+    fn non_plugin_category_unaffected_by_plugin_gate() {
+        let caps = CapabilitySet::unrestricted();
+        assert!(caps.can_use_tool("read", ToolCategory::FileOps));
+        assert!(caps.can_use_tool("bash", ToolCategory::Execution));
+    }
 
     // ---------------------------------------------------------------------
     // AllowedTools enum (G3)

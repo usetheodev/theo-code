@@ -267,6 +267,9 @@ impl AgentRunEngine {
 
     /// Phase 9: at the start of a turn, reset the once-per-turn snapshot flag.
     pub fn reset_turn_checkpoint(&self) {
+        // Release: pairs with the Acquire failure-ordering in the CAS
+        // below. Ensures any subsequent reads of checkpoint-related state
+        // observe a fully-committed reset (T5.4).
         self.checkpoint_taken_this_turn
             .store(false, std::sync::atomic::Ordering::Release);
     }
@@ -280,6 +283,9 @@ impl AgentRunEngine {
             return None;
         }
         // Compare-and-swap: only snapshot if not already taken this turn.
+        // AcqRel on success publishes the flag; Acquire on failure pairs
+        // with the Release in `reset_turn_checkpoint` so the losing racer
+        // observes a fully committed reset (T5.4).
         if self
             .checkpoint_taken_this_turn
             .compare_exchange(
@@ -1401,6 +1407,10 @@ impl AgentRunEngine {
                 .await;
 
                 // PLAN_AUTO_EVOLUTION_SOTA Phase 1 + Phase 3 — reviewers nudge.
+                // Relaxed is sufficient: this flag is a pure per-task
+                // counter with no happens-before dependency on any other
+                // load; it is written and read on the same task inside
+                // the serial main loop (T5.4).
                 let tool_calls_this_task = self.metrics.snapshot().total_tool_calls as usize;
                 let skill_created = self
                     .skill_created_this_task

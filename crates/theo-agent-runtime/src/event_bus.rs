@@ -97,8 +97,42 @@ impl EventBus {
     }
 
     /// Returns a snapshot of all events in the log, in insertion order.
+    ///
+    /// **Note (T6.2):** clones the entire log. Prefer [`events_range`]
+    /// or [`events_since`] for large logs (e.g., `record_session_exit`
+    /// on a long-running run).
     pub fn events(&self) -> Vec<DomainEvent> {
         self.log.lock().iter().cloned().collect()
+    }
+
+    /// Returns a paginated window of the log starting at `offset`,
+    /// up to `limit` entries. Offset past the end returns an empty vec.
+    pub fn events_range(&self, offset: usize, limit: usize) -> Vec<DomainEvent> {
+        self.log
+            .lock()
+            .iter()
+            .skip(offset)
+            .take(limit)
+            .cloned()
+            .collect()
+    }
+
+    /// Returns every event inserted AFTER `event_id`. The starting event
+    /// is itself excluded. If `event_id` is unknown, the full log is
+    /// returned (so initial subscribers still see history).
+    ///
+    /// Designed for progressive consumers (dashboard, OTel exporter) that
+    /// poll the bus and want only the delta since their last poll.
+    pub fn events_since(
+        &self,
+        event_id: &theo_domain::identifiers::EventId,
+    ) -> Vec<DomainEvent> {
+        let log = self.log.lock();
+        // Find the index of `event_id` (if any) and take everything strictly after.
+        match log.iter().position(|e| e.event_id == *event_id) {
+            Some(idx) => log.iter().skip(idx + 1).cloned().collect(),
+            None => log.iter().cloned().collect(),
+        }
     }
 
     /// Returns events filtered by entity_id, in insertion order.
@@ -343,6 +377,57 @@ mod tests {
         fn on_event(&self, _event: &DomainEvent) {
             panic!("listener exploded!");
         }
+    }
+
+    // T6.2 — events_range pagination
+    #[test]
+    fn events_range_returns_window_within_log() {
+        let bus = EventBus::new();
+        for i in 0..5 {
+            bus.publish(make_event(EventType::TaskCreated, &format!("t-{i}")));
+        }
+        let page = bus.events_range(1, 2);
+        assert_eq!(page.len(), 2);
+        assert_eq!(page[0].entity_id, "t-1");
+        assert_eq!(page[1].entity_id, "t-2");
+    }
+
+    #[test]
+    fn events_range_empty_when_offset_past_end() {
+        let bus = EventBus::new();
+        bus.publish(make_event(EventType::TaskCreated, "t-0"));
+        assert!(bus.events_range(10, 5).is_empty());
+    }
+
+    // T6.2 — events_since delta
+    #[test]
+    fn events_since_returns_only_entries_after_given_id() {
+        use theo_domain::identifiers::EventId;
+        let bus = EventBus::new();
+        for i in 0..4 {
+            bus.publish(DomainEvent {
+                event_id: EventId::new(format!("e-{i}")),
+                event_type: EventType::TaskCreated,
+                entity_id: format!("t-{i}"),
+                timestamp: i as u64,
+                payload: serde_json::Value::Null,
+                supersedes_event_id: None,
+            });
+        }
+        let since = bus.events_since(&EventId::new("e-1"));
+        assert_eq!(since.len(), 2, "must return only e-2 and e-3");
+        assert_eq!(since[0].entity_id, "t-2");
+        assert_eq!(since[1].entity_id, "t-3");
+    }
+
+    #[test]
+    fn events_since_returns_full_log_when_id_unknown() {
+        use theo_domain::identifiers::EventId;
+        let bus = EventBus::new();
+        bus.publish(make_event(EventType::TaskCreated, "t-0"));
+        bus.publish(make_event(EventType::TaskCreated, "t-1"));
+        let since = bus.events_since(&EventId::new("nonexistent"));
+        assert_eq!(since.len(), 2);
     }
 
     #[test]

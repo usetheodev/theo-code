@@ -174,6 +174,13 @@ pub trait ModelRouter: Send + Sync {
         previous: &ModelChoice,
         hint: RoutingFailureHint,
     ) -> Option<ModelChoice>;
+
+    /// Human-readable identifier for debug/log output. Defaults to the
+    /// Rust type name; concrete routers should override when the type
+    /// name is not self-explanatory.
+    fn name(&self) -> &str {
+        std::any::type_name::<Self>()
+    }
 }
 
 /// Behaviour-preserving router: always returns its injected default and

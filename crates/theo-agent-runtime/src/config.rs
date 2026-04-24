@@ -425,7 +425,10 @@ impl RouterHandle {
 
 impl std::fmt::Debug for RouterHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("RouterHandle").field(&"<dyn ModelRouter>").finish()
+        // Delegate to the router's `name()` so Debug output is actually
+        // useful in logs (T8.4). Previously the literal string
+        // "<dyn ModelRouter>" was printed, which tells the reader nothing.
+        f.debug_tuple("RouterHandle").field(&self.0.name()).finish()
     }
 }
 

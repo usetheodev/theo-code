@@ -7062,6 +7062,7 @@ dependencies = [
  "dashmap",
  "futures",
  "indexmap 2.14.0",
+ "libc",
  "notify",
  "notify-debouncer-mini",
  "opentelemetry",
