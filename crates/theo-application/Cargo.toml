@@ -34,6 +34,8 @@ sha2 = "0.10"
 default = []
 tantivy-backend = ["theo-engine-retrieval/tantivy-backend"]
 dense-retrieval = ["tantivy-backend", "theo-engine-retrieval/dense-retrieval"]
+# Phase 40 (otlp-exporter-plan) — passthrough to theo-agent-runtime/otel.
+otel = ["theo-agent-runtime/otel"]
 
 [dev-dependencies]
 tempfile.workspace = true

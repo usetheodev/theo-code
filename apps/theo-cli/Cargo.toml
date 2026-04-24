@@ -70,3 +70,7 @@ harness = false
 default = ["tantivy-backend"]
 tantivy-backend = ["theo-application/tantivy-backend"]
 dense-retrieval = ["theo-application/dense-retrieval"]
+# Phase 40 (otlp-exporter-plan) — passthrough to theo-application/otel.
+# When active, theo-cli main() initializes the OTLP exporter at startup
+# (only if OTLP_ENDPOINT env var is set; absent → no-op).
+otel = ["theo-application/otel", "theo-agent-runtime/otel"]

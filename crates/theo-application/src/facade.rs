@@ -76,6 +76,16 @@ pub mod mcp {
     };
 }
 
+/// Phase 41 (otlp-exporter-plan) — OTLP exporter surface for the CLI.
+/// Gated by feature `otel`; default builds skip this module entirely
+/// and `theo-cli` skips wiring (no-op).
+#[cfg(feature = "otel")]
+pub mod observability {
+    pub use theo_agent_runtime::observability::otel_exporter::{
+        init_otlp_exporter, OtelInitError, OtlpExporterConfig, OtlpGuard, OtlpProtocol,
+    };
+}
+
 /// Handoff guardrail types for the apps layer (Phase 18 + 23).
 pub mod handoff_guardrail {
     pub use theo_agent_runtime::handoff_guardrail::{

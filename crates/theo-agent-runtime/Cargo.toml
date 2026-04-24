@@ -26,14 +26,28 @@ notify.workspace = true
 notify-debouncer-mini.workspace = true
 theo-isolation.workspace = true
 theo-infra-mcp.workspace = true
+# Phase 40 (otlp-exporter-plan) — OTel SDK, gated by feature `otel`.
+opentelemetry = { workspace = true, optional = true }
+opentelemetry_sdk = { workspace = true, optional = true }
+opentelemetry-otlp = { workspace = true, optional = true }
+opentelemetry-semantic-conventions = { workspace = true, optional = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
 tempfile.workspace = true
 proptest = { workspace = true }
+# Phase 42 (otlp-exporter-plan) — InMemorySpanExporter for unit tests.
+# Only loaded when --features otel is on (cfg-gated tests).
+opentelemetry_sdk = { workspace = true, features = ["testing", "rt-tokio"] }
 
 [features]
 default = []
-# Phase 12 — OpenTelemetry GenAI emission. Currently opt-in (no-op flag);
-# wires real opentelemetry crate when consumers compile with --features otel.
-otel = []
+# Phase 40 (otlp-exporter-plan) — OpenTelemetry GenAI emission via OTLP.
+# Activates `otel_exporter` and `otel_listener` modules + pulls in the
+# real opentelemetry SDK. Default builds are zero-overhead (D1).
+otel = [
+    "dep:opentelemetry",
+    "dep:opentelemetry_sdk",
+    "dep:opentelemetry-otlp",
+    "dep:opentelemetry-semantic-conventions",
+]

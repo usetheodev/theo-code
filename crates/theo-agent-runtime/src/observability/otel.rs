@@ -47,6 +47,13 @@ pub const ATTR_THEO_ITERATIONS: &str = "theo.run.iterations_used";
 pub const ATTR_THEO_LLM_CALLS: &str = "theo.run.llm_calls";
 pub const ATTR_THEO_SUCCESS: &str = "theo.run.success";
 
+// Phase 44 (otlp-exporter-plan) — Tool-call span attributes.
+pub const ATTR_THEO_TOOL_NAME: &str = "theo.tool.name";
+pub const ATTR_THEO_TOOL_CALL_ID: &str = "theo.tool.call_id";
+pub const ATTR_THEO_TOOL_DURATION_MS: &str = "theo.tool.duration_ms";
+pub const ATTR_THEO_TOOL_STATUS: &str = "theo.tool.status";
+pub const ATTR_THEO_TOOL_REPLAYED: &str = "theo.tool.replayed";
+
 // ---------------------------------------------------------------------------
 // AgentRunSpan — semantic-convention-aligned span attributes builder
 // ---------------------------------------------------------------------------
@@ -112,6 +119,16 @@ pub fn llm_call_span(provider: &str, model: &str) -> AgentRunSpan {
     s.set(ATTR_SYSTEM, provider);
     s.set(ATTR_REQUEST_MODEL, model);
     s.set(ATTR_OPERATION_NAME, "chat");
+    s
+}
+
+/// Phase 44 (otlp-exporter-plan) — helper: build attributes for a
+/// `tool.call` span. Set on `ToolCallDispatched` and re-applied with
+/// duration/status on `ToolCallCompleted`.
+pub fn tool_call_span(tool_name: &str) -> AgentRunSpan {
+    let mut s = AgentRunSpan::new();
+    s.set(ATTR_OPERATION_NAME, "tool.call");
+    s.set(ATTR_THEO_TOOL_NAME, tool_name);
     s
 }
 

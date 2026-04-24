@@ -18,6 +18,12 @@ pub mod normalizer;
 pub mod loop_detector;
 pub mod failure_sensors;
 pub mod otel;
+// Phase 41-42 (otlp-exporter-plan) — gated by feature `otel`. Default
+// builds skip these modules entirely (zero compile-time/runtime cost).
+#[cfg(feature = "otel")]
+pub mod otel_exporter;
+#[cfg(feature = "otel")]
+pub mod otel_listener;
 pub mod report;
 
 pub use envelope::{TrajectoryEnvelope, ENVELOPE_SCHEMA_VERSION};
@@ -122,6 +128,11 @@ impl ObservabilityPipeline {
 
 /// One-shot installer: subscribes both the `ObservabilityListener` and the
 /// `LoopDetectingListener` to the event bus and returns the pipeline handle.
+///
+/// Phase 42 (otlp-exporter-plan): when the `otel` feature is active AND
+/// the global TracerProvider has been installed (Phase 41 init), also
+/// subscribes an `OtelExportingListener` so DomainEvents reach the OTLP
+/// collector in addition to the local trajectory JSONL (D5).
 pub fn install_observability(
     event_bus: &EventBus,
     run_id: &str,
@@ -130,6 +141,11 @@ pub fn install_observability(
     let pipeline = ObservabilityPipeline::install(event_bus, run_id, base_path);
     let detector = Arc::new(std::sync::Mutex::new(LoopDetector::new()));
     event_bus.subscribe(Arc::new(loop_detector::LoopDetectingListener::new(detector)));
+    #[cfg(feature = "otel")]
+    {
+        let svc = std::env::var("OTLP_SERVICE_NAME").unwrap_or_else(|_| "theo".to_string());
+        event_bus.subscribe(Arc::new(otel_listener::OtelExportingListener::new(svc)));
+    }
     pipeline
 }
 

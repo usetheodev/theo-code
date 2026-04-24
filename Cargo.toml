@@ -90,3 +90,9 @@ tokio-util = { version = "0.7", features = ["rt"] }
 dashmap = "6"
 notify = "6"
 notify-debouncer-mini = "0.4"
+# Phase 40 (otlp-exporter-plan) — OpenTelemetry SDK, opt-in via feature `otel`.
+# Pin major.minor to avoid breaking changes between 0.x bumps.
+opentelemetry = "0.27"
+opentelemetry_sdk = { version = "0.27", features = ["rt-tokio"] }
+opentelemetry-otlp = { version = "0.27", features = ["grpc-tonic", "http-proto", "reqwest-client"] }
+opentelemetry-semantic-conventions = "0.27"

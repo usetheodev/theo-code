@@ -623,6 +623,10 @@ fn cmd_agent(
 
     let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
     rt.block_on(async {
+        // Phase 41 (otlp-exporter-plan): RAII guard. Same as cmd_headless.
+        #[cfg(feature = "otel")]
+        let _otlp_guard = theo_application::facade::observability::OtlpGuard::install();
+
         let (config, provider_name) =
             resolve_agent_config(provider_id.as_deref(), model.as_deref(), max_iter).await;
 
@@ -690,6 +694,12 @@ fn cmd_headless(
 
     let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
     rt.block_on(async {
+        // Phase 41 (otlp-exporter-plan): RAII guard. When OTLP_ENDPOINT
+        // is set, installs the global OTel TracerProvider and flushes
+        // pending spans on drop. No-op when env absent.
+        #[cfg(feature = "otel")]
+        let _otlp_guard = theo_application::facade::observability::OtlpGuard::install();
+
         let (mut config, provider_name) =
             resolve_agent_config(provider_id.as_deref(), model.as_deref(), max_iter).await;
 

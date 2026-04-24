@@ -115,10 +115,21 @@ impl ToolCallManager {
 
             transition_record(record, ToolCallState::Dispatched)?;
 
+            // Phase 44 (otlp-exporter-plan): payload carries an `otel`
+            // attribute map that the OtelExportingListener turns into
+            // span attributes (theo.tool.name + theo.tool.call_id).
+            let mut start_span = crate::observability::otel::tool_call_span(&record.tool_name);
+            start_span.set(
+                crate::observability::otel::ATTR_THEO_TOOL_CALL_ID,
+                call_id.as_str(),
+            );
             self.event_bus.publish(DomainEvent::new(
                 EventType::ToolCallDispatched,
                 call_id.as_str(),
-                serde_json::json!({ "tool_name": &record.tool_name }),
+                serde_json::json!({
+                    "tool_name": &record.tool_name,
+                    "otel": start_span.to_json(),
+                }),
             ));
 
             // 2. Transition Dispatched → Running
@@ -203,16 +214,32 @@ impl ToolCallManager {
             result.output.clone()
         };
 
+        // Phase 44 (otlp-exporter-plan): payload otel for span end.
+        let status_str = format!("{:?}", final_state);
+        let mut end_span = crate::observability::otel::tool_call_span(&tool_name);
+        end_span.set(
+            crate::observability::otel::ATTR_THEO_TOOL_CALL_ID,
+            call_id.as_str(),
+        );
+        end_span.set(
+            crate::observability::otel::ATTR_THEO_TOOL_DURATION_MS,
+            duration_ms,
+        );
+        end_span.set(
+            crate::observability::otel::ATTR_THEO_TOOL_STATUS,
+            status_str.clone(),
+        );
         self.event_bus.publish(DomainEvent::new(
             EventType::ToolCallCompleted,
             call_id.as_str(),
             serde_json::json!({
-                "status": format!("{:?}", final_state),
+                "status": status_str,
                 "duration_ms": duration_ms,
                 "success": success,
                 "tool_name": tool_name,
                 "input": input_args,
                 "output_preview": output_preview,
+                "otel": end_span.to_json(),
             }),
         ));
 
@@ -443,6 +470,58 @@ mod tests {
         assert_eq!(completion.event_type, EventType::ToolCallCompleted);
         assert!(completion.payload.get("status").is_some());
         assert!(completion.payload.get("duration_ms").is_some());
+    }
+
+    // ── Phase 44 (otlp-exporter-plan) — otel payload keys ──
+
+    #[tokio::test]
+    async fn dispatched_event_payload_includes_otel_attributes() {
+        let (manager, _, listener) = setup();
+        let registry = create_default_registry();
+        let call_id = manager.enqueue(
+            TaskId::new("t-1"),
+            "read".into(),
+            serde_json::json!({"filePath": "/tmp/nonexistent"}),
+        );
+        let ctx = ToolContext::test_context(std::path::PathBuf::from("/tmp"));
+        let _ = manager.dispatch_and_execute(&call_id, &registry, &ctx).await;
+
+        let events = listener.captured();
+        let dispatched = events
+            .iter()
+            .find(|e| e.event_type == EventType::ToolCallDispatched)
+            .expect("dispatched event present");
+        let otel = dispatched
+            .payload
+            .get("otel")
+            .expect("otel payload key present on ToolCallDispatched");
+        assert_eq!(otel["theo.tool.name"], serde_json::json!("read"));
+        assert_eq!(otel["theo.tool.call_id"], serde_json::json!(call_id.as_str()));
+    }
+
+    #[tokio::test]
+    async fn completed_event_payload_otel_includes_duration_and_status() {
+        let (manager, _, listener) = setup();
+        let registry = create_default_registry();
+        let call_id = manager.enqueue(
+            TaskId::new("t-1"),
+            "read".into(),
+            serde_json::json!({"filePath": "/tmp/nonexistent"}),
+        );
+        let ctx = ToolContext::test_context(std::path::PathBuf::from("/tmp"));
+        let _ = manager.dispatch_and_execute(&call_id, &registry, &ctx).await;
+
+        let events = listener.captured();
+        let completed = events
+            .iter()
+            .find(|e| e.event_type == EventType::ToolCallCompleted)
+            .expect("completed event present");
+        let otel = completed
+            .payload
+            .get("otel")
+            .expect("otel payload key present on ToolCallCompleted");
+        assert!(otel.get("theo.tool.duration_ms").is_some(), "duration_ms must be set");
+        assert!(otel.get("theo.tool.status").is_some(), "status must be set");
     }
 
     // -----------------------------------------------------------------------

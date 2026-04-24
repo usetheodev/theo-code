@@ -1081,6 +1081,12 @@ impl AgentRunEngine {
             }
 
             // Publish LLM call start (triggers "Thinking..." in CLI)
+            // Phase 43 (otlp-exporter-plan): attach an `otel` payload so
+            // OtelExportingListener can build a `gen_ai.*`-attributed span.
+            let provider_hint = derive_provider_hint(&self.config.base_url);
+            let llm_start_span = crate::observability::otel::llm_call_span(
+                provider_hint, &chosen_model,
+            );
             self.event_bus.publish(DomainEvent::new(
                 EventType::LlmCallStart,
                 self.run.run_id.as_str(),
@@ -1088,6 +1094,7 @@ impl AgentRunEngine {
                     "iteration": iteration,
                     "routing_reason": routing_reason,
                     "model": chosen_model,
+                    "otel": llm_start_span.to_json(),
                 }),
             ));
 
@@ -1191,6 +1198,27 @@ impl AgentRunEngine {
                     });
                     // Emit LlmCallEnd with full accounting so observability can
                     // plot context growth, token-per-iteration, and cache hit rate.
+                    // Phase 43 (otlp-exporter-plan): include the OTel
+                    // GenAI usage attributes for the Span end event.
+                    let mut llm_end_span = crate::observability::otel::llm_call_span(
+                        derive_provider_hint(&self.config.base_url), &chosen_model,
+                    );
+                    llm_end_span.set(
+                        crate::observability::otel::ATTR_USAGE_INPUT_TOKENS,
+                        input_tok,
+                    );
+                    llm_end_span.set(
+                        crate::observability::otel::ATTR_USAGE_OUTPUT_TOKENS,
+                        output_tok,
+                    );
+                    llm_end_span.set(
+                        crate::observability::otel::ATTR_USAGE_TOTAL_TOKENS,
+                        total_tok,
+                    );
+                    llm_end_span.set(
+                        crate::observability::otel::ATTR_THEO_DURATION_MS,
+                        llm_duration,
+                    );
                     self.event_bus.publish(DomainEvent::new(
                         EventType::LlmCallEnd,
                         self.run.run_id.as_str(),
@@ -1201,6 +1229,7 @@ impl AgentRunEngine {
                             "output_tokens": output_tok,
                             "total_tokens": total_tok,
                             "context_tokens": estimated_context_tokens,
+                            "otel": llm_end_span.to_json(),
                         }),
                     ));
                     resp
@@ -1405,6 +1434,13 @@ impl AgentRunEngine {
                     && let Some(cached) = ctx.cached_tool_result(&call.id)
                 {
                     messages.push(cached.clone());
+                    // Phase 44 (otlp-exporter-plan): replay events still
+                    // get an `otel` payload — tagged with `replayed: true`
+                    // so dashboards can filter (or count separately).
+                    let mut replay_span = crate::observability::otel::tool_call_span(name);
+                    replay_span.set(crate::observability::otel::ATTR_THEO_TOOL_CALL_ID, call.id.clone());
+                    replay_span.set(crate::observability::otel::ATTR_THEO_TOOL_STATUS, "Succeeded");
+                    replay_span.set(crate::observability::otel::ATTR_THEO_TOOL_REPLAYED, true);
                     self.event_bus.publish(DomainEvent::new(
                         EventType::ToolCallCompleted,
                         self.run.run_id.as_str(),
@@ -1413,6 +1449,7 @@ impl AgentRunEngine {
                             "call_id": &call.id,
                             "replayed": true,
                             "status": "Succeeded",
+                            "otel": replay_span.to_json(),
                         }),
                     ));
                     continue;
@@ -1934,6 +1971,11 @@ impl AgentRunEngine {
                         }
 
                         // Publish batch completion event
+                        // Phase 44 (otlp-exporter-plan): include otel payload.
+                        let mut batch_span = crate::observability::otel::tool_call_span("batch");
+                        batch_span.set(crate::observability::otel::ATTR_THEO_TOOL_CALL_ID, call.id.as_str());
+                        batch_span.set(crate::observability::otel::ATTR_THEO_TOOL_STATUS, "Succeeded");
+                        batch_span.set(crate::observability::otel::ATTR_THEO_TOOL_DURATION_MS, 0u64);
                         self.event_bus.publish(DomainEvent::new(
                             EventType::ToolCallCompleted,
                             call.id.as_str(),
@@ -1943,6 +1985,7 @@ impl AgentRunEngine {
                                 "input": { "count": total },
                                 "output_preview": format!("Batch: {total} calls executed"),
                                 "duration_ms": 0,
+                                "otel": batch_span.to_json(),
                             }),
                         ));
 
@@ -2983,6 +3026,35 @@ fn now_millis() -> u64 {
         .as_millis() as u64
 }
 
+/// Phase 43 (otlp-exporter-plan) — heuristic mapping `base_url → provider`
+/// for the OTel `gen_ai.system` attribute. Conservative: returns
+/// "openai_compatible" for unknown URLs since theo's protocol is
+/// OpenAI-compatible across providers (per the LLM crate's contract).
+pub(crate) fn derive_provider_hint(base_url: &str) -> &'static str {
+    let lower = base_url.to_ascii_lowercase();
+    if lower.contains("api.openai.com") || lower.contains("chatgpt.com") {
+        "openai"
+    } else if lower.contains("api.anthropic.com") {
+        "anthropic"
+    } else if lower.contains("googleapis.com") || lower.contains("gemini") {
+        "gemini"
+    } else if lower.contains("groq.com") {
+        "groq"
+    } else if lower.contains("mistral.ai") {
+        "mistral"
+    } else if lower.contains("deepseek") {
+        "deepseek"
+    } else if lower.contains("together.ai") {
+        "together"
+    } else if lower.contains("xai") || lower.contains("x.ai") {
+        "xai"
+    } else if lower.contains("localhost") || lower.contains("127.0.0.1") {
+        "openai_compatible_local"
+    } else {
+        "openai_compatible"
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3850,6 +3922,45 @@ mod tests {
             // Predicate: brand-new call_id is NOT skipped → dispatcher runs.
             let attached = engine.resume_context.as_ref().unwrap();
             assert!(!attached.should_skip_tool_call("brand-new-c1"));
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Phase 43 (otlp-exporter-plan) — provider-hint helper coverage
+    // -----------------------------------------------------------------------
+
+    mod provider_hint {
+        use super::*;
+
+        #[test]
+        fn derive_provider_hint_recognizes_openai() {
+            assert_eq!(derive_provider_hint("https://api.openai.com/v1"), "openai");
+        }
+
+        #[test]
+        fn derive_provider_hint_recognizes_chatgpt_oauth() {
+            assert_eq!(derive_provider_hint("https://chatgpt.com/backend-api"), "openai");
+        }
+
+        #[test]
+        fn derive_provider_hint_recognizes_anthropic() {
+            assert_eq!(derive_provider_hint("https://api.anthropic.com"), "anthropic");
+        }
+
+        #[test]
+        fn derive_provider_hint_recognizes_gemini() {
+            assert_eq!(derive_provider_hint("https://generativelanguage.googleapis.com"), "gemini");
+        }
+
+        #[test]
+        fn derive_provider_hint_falls_back_for_unknown_url() {
+            assert_eq!(derive_provider_hint("https://my-private-llm.corp"), "openai_compatible");
+        }
+
+        #[test]
+        fn derive_provider_hint_recognizes_localhost_as_local() {
+            assert_eq!(derive_provider_hint("http://localhost:8000"), "openai_compatible_local");
+            assert_eq!(derive_provider_hint("http://127.0.0.1:8080"), "openai_compatible_local");
         }
     }
 }
