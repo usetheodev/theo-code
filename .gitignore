@@ -308,3 +308,4 @@ evolution-output/
 .theo/reflections.jsonl
 # Code-wiki stays tracked (deterministic from source) — explicit allow
 !.theo/wiki/code/
+.theo/secrets/
