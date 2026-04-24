@@ -656,91 +656,11 @@ impl AgentRunEngine {
             // Pi-mono ref: `packages/agent/src/agent-loop.ts:220-228`
             if tool_calls.is_empty() {
                 let content = response.content().unwrap_or("").to_string();
-
-                // Check follow-up queue before converging
-                if let Some(ref follow_up_fn) = self.message_queues.follow_up {
-                    let follow_ups = follow_up_fn().await;
-                    if !follow_ups.is_empty() {
-                        // Inject assistant response + follow-ups, continue loop
-                        messages.push(Message::assistant(&content));
-                        for fu_msg in follow_ups {
-                            messages.push(fu_msg);
-                        }
-                        continue;
-                    }
+                // Extracted to main_loop::handle_text_only_response.
+                match self.handle_text_only_response(content, &mut messages).await {
+                    dispatch::DispatchOutcome::Continue => continue,
+                    dispatch::DispatchOutcome::Converged(result) => return result,
                 }
-
-                // Plan-mode safety net: the model is supposed to end with
-                // tool calls (write the plan file + done). If it converges with
-                // text only and no plan file was written yet, give it ONE
-                // corrective nudge to actually call the tools. Without this
-                // guard the model occasionally produces a beautiful plan as
-                // text and exits without persisting it.
-                if self.config.mode == crate::config::AgentMode::Plan
-                    && !self.plan_mode_nudged
-                    && !content.is_empty()
-                {
-                    let plans_dir = self.project_dir.join(".theo/plans");
-                    let plan_written = plans_dir
-                        .read_dir()
-                        .ok()
-                        .map(|mut it| it.next().is_some())
-                        .unwrap_or(false);
-                    if !plan_written {
-                        self.plan_mode_nudged = true;
-                        messages.push(Message::assistant(&content));
-                        messages.push(Message::user(
-                            "REMINDER: You wrote a plan as text but did not persist it. \
-                             You MUST now call the `write` tool to save the plan to \
-                             `.theo/plans/01-<slug>.md` (use a kebab-case slug derived from \
-                             the task), then call `done` with a one-line summary. Do this in \
-                             your next response. Do not write more prose — just call the tools.",
-                        ));
-                        continue;
-                    }
-                }
-
-                // Phase 0 T0.1 AC-0.1.2: persist the user→assistant exchange
-                // INLINE (not fire-and-forget) — durability > latency.
-                crate::memory_lifecycle::run_engine_hooks::sync_final_turn(
-                    &self.config,
-                    &messages,
-                    &content,
-                )
-                .await;
-
-                // PLAN_AUTO_EVOLUTION_SOTA Phase 1 + Phase 3 — reviewers nudge.
-                // Relaxed is sufficient: this flag is a pure per-task
-                // counter with no happens-before dependency on any other
-                // load; it is written and read on the same task inside
-                // the serial main loop (T5.4).
-                let tool_calls_this_task = self.metrics.snapshot().total_tool_calls as usize;
-                let skill_created = self
-                    .skill_created_this_task
-                    .load(std::sync::atomic::Ordering::Relaxed);
-                crate::memory_lifecycle::maybe_spawn_reviewers(
-                    &self.config,
-                    &self.memory_nudge_counter,
-                    &self.skill_nudge_counter,
-                    &messages,
-                    tool_calls_this_task,
-                    skill_created,
-                );
-                self.skill_created_this_task
-                    .store(false, std::sync::atomic::Ordering::Relaxed);
-
-                self.transition_run(RunState::Converged);
-                let _ = self
-                    .task_manager
-                    .transition(&self.task_id, TaskState::Completed);
-                self.metrics.record_run_complete(true);
-                return AgentResult::from_engine_state(
-                    self,
-                    true,
-                    content,
-                    true,
-                    ErrorClass::Solved,
-                );
             }
 
             // ── EXECUTING phase ──

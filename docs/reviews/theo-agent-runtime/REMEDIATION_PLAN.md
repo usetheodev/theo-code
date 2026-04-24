@@ -1156,3 +1156,16 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 | T3.4 retry encapsulado | **PARCIAL (avanço)** | retry inline foi encapsulado em helper — ainda nao consolida com o `RetryExecutor` generico mas isola bem. |
 
 **Validacao:** 1132 unit + 96 integration = **1228 tests passando, 0 falhas.** Snapshots caracterizacao byte-identicos apos 7 iteracoes de Fase 4.
+
+### Iteracao 15 (2026-04-24) — Fase 4: handle_text_only_response
+
+| Task | Status | Notas |
+|---|---|---|
+| T4.2 run_engine split — oitava etapa | **DONE (parcial)** | `handle_text_only_response` (~90 LOC) em `main_loop.rs` reutilizando `DispatchOutcome`. Encapsula 3 sub-fluxos: follow-up queue drain → Continue; plan-mode nudge → Continue; converge (sync memory + reviewers nudge + state transition) → Converged. Reutilizar `DispatchOutcome` unifica contrato entre todas as extracoes. `mod.rs`: 2841 → **2761 LOC** (-80 esta iter; **-1469 desde baseline 4230, -35%**). |
+
+**Baseline → atual (desde Iteracao 0):**
+- phase tags: 310 → 175
+- **`run_engine/mod.rs` LOC: 4230 → 2761 (-1469, -35%)**
+- main_loop.rs: 0 → 412 LOC
+
+**Validacao:** 1132 unit + 96 integration = **1228 tests passando, 0 falhas.**
