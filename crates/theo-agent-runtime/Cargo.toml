@@ -41,9 +41,15 @@ proptest = { workspace = true }
 # T0.1 — snapshot-based characterization tests for run_engine event sequences.
 insta = { workspace = true }
 parking_lot = { workspace = true }
+# T7.4 — baseline benchmarks (run with `cargo bench -p theo-agent-runtime`).
+criterion = { workspace = true }
 # Phase 42 (otlp-exporter-plan) — InMemorySpanExporter for unit tests.
 # Only loaded when --features otel is on (cfg-gated tests).
 opentelemetry_sdk = { workspace = true, features = ["testing", "rt-tokio"] }
+
+[[bench]]
+name = "run_engine_bench"
+harness = false
 
 [features]
 default = []
