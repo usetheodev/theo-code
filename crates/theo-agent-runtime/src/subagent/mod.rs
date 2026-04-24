@@ -15,6 +15,7 @@ pub mod parser;
 pub mod registry;
 pub mod reloadable;
 pub mod resume;
+mod spawn_helpers;
 pub mod watcher;
 
 pub use reloadable::ReloadableRegistry;
@@ -164,61 +165,7 @@ impl SubAgentManager {
 
         Box::pin(async move {
             // Phase 11 + Phase 31: resolve worktree honoring override.
-            // The override takes precedence over spec.isolation:
-            //   - Reuse(path) → wrap existing path (no git invocation)
-            //   - Recreate { base } → create with explicit base branch
-            //   - None → legacy behavior (create from spec.isolation_base_branch)
-            let worktree_handle = match (
-                &self.worktree_provider,
-                spec.isolation.as_deref(),
-                &worktree_override,
-            ) {
-                (_, _, WorktreeOverride::Reuse(path)) => {
-                    // Reuse: handle wraps existing path. Branch sentinel
-                    // "(reused)" marks it for cleanup-skip downstream.
-                    Some(theo_isolation::WorktreeHandle::existing(path.clone()))
-                }
-                (Some(provider), Some("worktree"), WorktreeOverride::Recreate { base_branch }) => {
-                    // Recreate: explicit base from override, ignore spec value.
-                    let result = provider.create(&spec.name, base_branch).or_else(|_| {
-                        provider.create(&spec.name, "master")
-                    });
-                    if let (Ok(handle), Some(hooks)) = (&result, &self.hook_manager) {
-                        use crate::lifecycle_hooks::{HookContext, HookEvent};
-                        let _ = hooks.dispatch(
-                            HookEvent::WorktreeCreate,
-                            &HookContext {
-                                tool_name: Some(handle.path.to_string_lossy().to_string()),
-                                ..Default::default()
-                            },
-                        );
-                    }
-                    result.ok()
-                }
-                (Some(provider), Some("worktree"), WorktreeOverride::None) => {
-                    let base = spec
-                        .isolation_base_branch
-                        .clone()
-                        .unwrap_or_else(|| "main".to_string());
-                    let result = provider.create(&spec.name, &base).or_else(|_| {
-                        // Try "master" fallback (legacy git default)
-                        provider.create(&spec.name, "master")
-                    });
-                    // Phase 5: dispatch WorktreeCreate hook (informational)
-                    if let (Ok(handle), Some(hooks)) = (&result, &self.hook_manager) {
-                        use crate::lifecycle_hooks::{HookContext, HookEvent};
-                        let _ = hooks.dispatch(
-                            HookEvent::WorktreeCreate,
-                            &HookContext {
-                                tool_name: Some(handle.path.to_string_lossy().to_string()),
-                                ..Default::default()
-                            },
-                        );
-                    }
-                    result.ok()
-                }
-                _ => None,
-            };
+            let worktree_handle = self.resolve_worktree(&spec, &worktree_override);
             // The CWD the sub-agent will use: worktree path if isolated, else parent's project_dir
             let agent_cwd: PathBuf = worktree_handle
                 .as_ref()
@@ -233,69 +180,28 @@ impl SubAgentManager {
                     cm.snapshot(&format!("pre-run:{}", spec.name)).ok()
                 });
 
-            // Phase 10: persist run start
-            let run_id = format!(
-                "subagent-{}-{}",
-                spec.name,
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_micros())
-                    .unwrap_or(0)
-            );
-            if let Some(store) = &self.run_store {
-                let run = crate::subagent_runs::SubagentRun::new_running(
-                    &run_id,
-                    None,
-                    &spec,
-                    &objective,
-                    self.project_dir.to_string_lossy(),
-                    checkpoint_before.clone(),
-                );
-                let _ = store.save(&run);
-            }
+            // Phase 10: persist run start (no-op when run_store absent)
+            let run_id = spawn_helpers::generate_run_id(&spec);
+            self.persist_run_start(&run_id, &spec, &objective, checkpoint_before.clone());
 
             // Phase 5: build effective HookManager — per-agent overrides global
             let effective_hooks = build_effective_hooks(&spec, self.hook_manager.as_deref());
 
-            // Phase 5: dispatch SubagentStart hook
-            if let Some(hooks) = &effective_hooks {
-                use crate::lifecycle_hooks::{HookContext, HookEvent, HookResponse};
-                let resp = hooks.dispatch(HookEvent::SubagentStart, &HookContext::default());
-                if let HookResponse::Block { reason } = resp {
-                    let r = AgentResult {
-                        success: false,
-                        summary: format!("Sub-agent blocked by SubagentStart hook: {}", reason),
-                        agent_name: spec.name.clone(),
-                        context_used: context_text.clone(),
-                        ..Default::default()
-                    };
-                    self.publish_completed(&spec, &r);
-                    return r;
-                }
+            // Phase 5: dispatch SubagentStart hook — short-circuit on Block
+            if let Some(r) =
+                self.dispatch_start_hook_or_block(effective_hooks.as_ref(), &spec, &context_text)
+            {
+                self.publish_completed(&spec, &r);
+                return r;
             }
 
-            // Phase 12: build OTel-compatible span attributes for the start event
-            let mut start_span =
-                crate::observability::otel::AgentRunSpan::from_spec(&spec, &run_id);
-            start_span.set("gen_ai.operation.name", "subagent.spawn");
-            start_span.set("theo.subagent.objective", objective.clone());
-            if let Some(cp) = &checkpoint_before {
-                start_span.set("theo.subagent.checkpoint_before", cp.clone());
-            }
-
-            // Emit SubagentStarted (payload includes OTel-aligned attrs)
-            self.event_bus.publish(DomainEvent::new(
-                EventType::SubagentStarted,
-                format!("subagent:{}", spec.name).as_str(),
-                serde_json::json!({
-                    "agent_name": spec.name,
-                    "agent_source": spec.source.as_str(),
-                    "objective": objective,
-                    "run_id": run_id,
-                    "checkpoint_before": checkpoint_before,
-                    "otel": start_span.to_json(),
-                }),
-            ));
+            // Phase 12: emit SubagentStarted with OTel-aligned span attrs
+            self.emit_subagent_started(
+                &spec,
+                &run_id,
+                &objective,
+                checkpoint_before.as_deref(),
+            );
 
             let start = std::time::Instant::now();
 
@@ -316,12 +222,11 @@ impl SubAgentManager {
                         worktree_path: worktree_handle.as_ref().map(|h| h.path.clone()),
                         ..Default::default()
                     };
-                    if let Some(store) = &self.run_store
-                        && let Ok(mut run) = store.load(&run_id) {
-                            run.status = crate::subagent_runs::RunStatus::Cancelled;
-                            run.summary = Some(r.summary.clone());
-                            let _ = store.save(&run);
-                        }
+                    self.persist_early_exit(
+                        &run_id,
+                        crate::subagent_runs::RunStatus::Cancelled,
+                        &r.summary,
+                    );
                     self.publish_completed(&spec, &r);
                     return r;
                 }
@@ -337,32 +242,17 @@ impl SubAgentManager {
                     duration_ms: start.elapsed().as_millis() as u64,
                     ..Default::default()
                 };
-                // Persist final state for early return path (Phase 10)
-                if let Some(store) = &self.run_store
-                    && let Ok(mut run) = store.load(&run_id) {
-                        run.status = crate::subagent_runs::RunStatus::Failed;
-                        run.finished_at = Some(
-                            std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .map(|d| d.as_secs() as i64)
-                                .unwrap_or(0),
-                        );
-                        run.summary = Some(r.summary.clone());
-                        let _ = store.save(&run);
-                    }
+                self.persist_early_exit(
+                    &run_id,
+                    crate::subagent_runs::RunStatus::Failed,
+                    &r.summary,
+                );
                 self.publish_completed(&spec, &r);
                 return r;
             }
 
-            // Build sub-agent config from spec
-            let mut sub_config = self.config.clone();
-            sub_config.system_prompt = spec.system_prompt.clone();
-            sub_config.max_iterations = spec.max_iterations;
-            sub_config.is_subagent = true;
-            sub_config.capability_set = Some(spec.capability_set.clone());
-            if let Some(m) = &spec.model_override {
-                sub_config.model = m.clone();
-            }
+            // Build sub-agent config (prompt prefix, capabilities, MCP hint, etc.)
+            let sub_config = self.build_sub_config(&spec, &agent_cwd, worktree_handle.is_some());
 
             // Create sub-agent EventBus with prefixed listener tagged by spec.name
             let sub_bus = Arc::new(crate::event_bus::EventBus::new());
@@ -372,92 +262,10 @@ impl SubAgentManager {
             });
             sub_bus.subscribe(prefixed);
 
-            // Prefix role name + project dir restriction (same format as legacy spawn)
-            // If isolated, use the worktree path AND inject Pi-Mono safety rules.
-            sub_config.system_prompt = if worktree_handle.is_some() {
-                format!(
-                    "[{}] {}\n\nIMPORTANT: You MUST only operate within the worktree directory: {}. \
-                     Do NOT search, read, or access files outside this directory.\n\n{}",
-                    spec.name,
-                    sub_config.system_prompt,
-                    agent_cwd.display(),
-                    theo_isolation::safety_rules(),
-                )
-            } else {
-                format!(
-                    "[{}] {}\n\nIMPORTANT: You MUST only operate within the project directory: {}. \
-                     Do NOT search, read, or access files outside this directory.",
-                    spec.name,
-                    sub_config.system_prompt,
-                    agent_cwd.display(),
-                )
-            };
-
-            // Phase 8 + Phase 17: MCP integration — inject a prompt hint
-            // advertising MCP tools. Preference order:
-            //   1. discovery cache (when present, has concrete tool names)
-            //   2. registry-only namespace placeholder (legacy hint)
-            if !spec.mcp_servers.is_empty() {
-                let mut hint = String::new();
-                if let Some(cache) = &self.mcp_discovery {
-                    hint = cache.render_prompt_hint(&spec.mcp_servers);
-                }
-                if hint.is_empty() {
-                    if let Some(global) = &self.mcp_registry {
-                        let filtered = global.filtered(&spec.mcp_servers);
-                        hint = filtered.render_prompt_hint();
-                    }
-                }
-                if !hint.is_empty() {
-                    sub_config.system_prompt =
-                        format!("{}\n\n{}", sub_config.system_prompt, hint);
-                }
-            }
-
             let mut registry = theo_tooling::registry::create_default_registry();
 
-            // Phase 17 + Phase 20 (sota-gaps): inject McpToolAdapter for every
-            // discovered MCP tool. Phase 20 adds AUTO-DISCOVERY on first spawn:
-            // if the cache doesn't already cover spec.mcp_servers, we kick off
-            // discover_filtered before building adapters. Result is fail-soft —
-            // servers that fail are skipped + the sub-agent continues without
-            // those tools.
-            //
-            // Disable via THEO_MCP_AUTO_DISCOVERY=0 if the latency hit on first
-            // spawn is unacceptable (operator can pre-warm via `theo mcp
-            // discover` instead).
-            if !spec.mcp_servers.is_empty()
-                && let (Some(cache), Some(global)) = (&self.mcp_discovery, &self.mcp_registry)
-            {
-                let auto_discovery_enabled =
-                    theo_domain::environment::bool_var("THEO_MCP_AUTO_DISCOVERY", true);
-                if auto_discovery_enabled && needs_discovery(cache, &spec.mcp_servers) {
-                    let _report = cache
-                        .discover_filtered(
-                            global.as_ref(),
-                            &spec.mcp_servers,
-                            theo_infra_mcp::DEFAULT_PER_SERVER_TIMEOUT,
-                        )
-                        .await;
-                }
-
-                let dispatcher = std::sync::Arc::new(
-                    theo_infra_mcp::McpDispatcher::new(global.clone()),
-                );
-                let adapters = mcp_tools::build_adapters_for_spec(
-                    cache,
-                    &spec.mcp_servers,
-                    dispatcher,
-                );
-                for adapter in adapters {
-                    if let Err(e) = registry.register(Box::new(adapter)) {
-                        eprintln!(
-                            "[subagent {}] WARNING: failed to register MCP tool: {}",
-                            spec.name, e
-                        );
-                    }
-                }
-            }
+            // Phase 17 + Phase 20: register MCP tool adapters (fail-soft).
+            self.register_mcp_tool_adapters(&spec, &mut registry).await;
 
             // Phase 30 (resume-runtime-wiring) — gap #3: consume the
             // pending resume context (set by Resumer right before this
@@ -525,67 +333,15 @@ impl SubAgentManager {
             result.worktree_path = worktree_handle.as_ref().map(|h| h.path.clone());
 
             // Phase 10: update persisted run with final status + metrics
-            if let Some(store) = &self.run_store
-                && let Ok(mut run) = store.load(&run_id) {
-                    run.status = if result.cancelled {
-                        crate::subagent_runs::RunStatus::Cancelled
-                    } else if result.success {
-                        crate::subagent_runs::RunStatus::Completed
-                    } else {
-                        crate::subagent_runs::RunStatus::Failed
-                    };
-                    run.finished_at = Some(
-                        std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .map(|d| d.as_secs() as i64)
-                            .unwrap_or(0),
-                    );
-                    run.iterations_used = result.iterations_used;
-                    run.tokens_used = result.tokens_used;
-                    run.summary = Some(result.summary.clone());
-                    let _ = store.save(&run);
-                }
+            self.finalize_persisted_run(&run_id, &result);
 
-            // Phase 7: try output format parsing
-            if let Some(schema) = &spec.output_format {
-                let strict = spec.output_format_strict.unwrap_or(false);
-                match crate::output_format::try_parse_structured(&result.summary, schema) {
-                    Ok(value) => {
-                        result.structured = Some(value.clone());
-                        // Phase 10: also persist structured_output if store attached
-                        if let Some(store) = &self.run_store
-                            && let Ok(mut run) = store.load(&run_id) {
-                                run.structured_output = Some(value);
-                                let _ = store.save(&run);
-                            }
-                    }
-                    Err(err) => {
-                        if strict {
-                            // Strict mode: fail the run, append error to summary
-                            result.success = false;
-                            result.summary = format!(
-                                "{}\n\n[output_format strict] {}",
-                                result.summary, err
-                            );
-                        }
-                        // best_effort (default): keep free-text, structured=None
-                    }
-                }
-            }
+            // Phase 7: try output format parsing (structured output)
+            self.apply_output_format(&spec, &run_id, &mut result);
 
             // Phase 5: dispatch SubagentStop hook (informational; can't cancel
             // — the run already finished). Block here is treated as marking
             // the result with a warning suffix.
-            if let Some(hooks) = &effective_hooks {
-                use crate::lifecycle_hooks::{HookContext, HookEvent, HookResponse};
-                let resp = hooks.dispatch(HookEvent::SubagentStop, &HookContext::default());
-                if let HookResponse::Block { reason } = resp {
-                    result.summary = format!(
-                        "{}\n\n[SubagentStop hook flagged] {}",
-                        result.summary, reason
-                    );
-                }
-            }
+            self.dispatch_stop_hook_annotate(effective_hooks.as_ref(), &mut result);
 
             // Phase 6: forget the cancellation token (cleanup tree)
             if let Some(tree) = &self.cancellation {
@@ -600,23 +356,7 @@ impl SubAgentManager {
             // branch sentinel "(reused)" signals that THIS manager did not
             // create the worktree. Skip auto-removal so we never destroy
             // state owned by the prior crashed run.
-            if let (Some(handle), Some(provider)) = (&worktree_handle, &self.worktree_provider)
-                && result.success
-                && handle.branch != "(reused)" {
-                    let removed = provider.remove(handle, false).is_ok();
-                    // Phase 5: WorktreeRemove hook (informational)
-                    if removed
-                        && let Some(hooks) = &self.hook_manager {
-                            use crate::lifecycle_hooks::{HookContext, HookEvent};
-                            let _ = hooks.dispatch(
-                                HookEvent::WorktreeRemove,
-                                &HookContext {
-                                    tool_name: Some(handle.path.to_string_lossy().to_string()),
-                                    ..Default::default()
-                                },
-                            );
-                        }
-                }
+            self.cleanup_worktree_if_success(worktree_handle.as_ref(), &result);
 
             self.publish_completed(&spec, &result);
             result
