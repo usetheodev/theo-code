@@ -207,38 +207,27 @@ impl AgentRunEngine {
                     continue;
                 }
 
-                // `done` meta-tool — gates Gate 0/1/2 live in
-                // `dispatch/done.rs` (Fase 4 — T4.2).
-                if name == "done" {
-                    match self.handle_done_call(call, iteration, &mut messages).await {
+                // Meta-tool routing (T4.3). A single match in
+                // `dispatch/router.rs` replaces the previous 4-way
+                // if-chain. Returns `Some(outcome)` when the call name
+                // matched a registered meta-tool; `None` falls through
+                // to regular-tool dispatch below.
+                if let Some(outcome) = self
+                    .dispatch_meta_tool(dispatch::router::MetaToolContext {
+                        call,
+                        iteration,
+                        abort_rx: &abort_rx,
+                        messages: &mut messages,
+                    })
+                    .await
+                {
+                    match outcome {
                         dispatch::DispatchOutcome::Converged(result) => {
                             should_return = Some(result);
                             break;
                         }
                         dispatch::DispatchOutcome::Continue => continue,
                     }
-                }
-
-                // `delegate_task` / `delegate_task_single` /
-                // `delegate_task_parallel` — extracted to dispatch/delegate.rs.
-                if name == "delegate_task"
-                    || name == "delegate_task_single"
-                    || name == "delegate_task_parallel"
-                {
-                    self.dispatch_delegate_task(call, &mut messages).await;
-                    continue;
-                }
-
-                // `skill` — extracted to dispatch/skill.rs.
-                if name == "skill" {
-                    self.dispatch_skill(call, &mut messages).await;
-                    continue;
-                }
-
-                // `batch` — extracted to dispatch/batch.rs.
-                if name == "batch" {
-                    self.dispatch_batch(call, &abort_rx, &mut messages).await;
-                    continue;
                 }
 
                 // Plan mode guard — extracted to
