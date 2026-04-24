@@ -50,17 +50,31 @@ def select_tasks_alphabetically(task_ids, n: int):
     return sorted_ids[:n]
 
 
+def parse_dataset_spec(dataset_spec: str) -> tuple[str, str | None]:
+    """Split `name==version` into (name, version). Returns (spec, None) when
+    no `==` is present (caller may treat it as a path or raise)."""
+    if "==" in dataset_spec:
+        name, version = dataset_spec.split("==", 1)
+        return name.strip(), version.strip()
+    return dataset_spec.strip(), None
+
+
 def list_dataset_tasks(dataset_spec: str) -> list[str]:
     """Enumerate task IDs in a tb dataset by spawning a small Python helper.
 
     Imports terminal_bench.dataset.Dataset on the droplet. Returns a sorted
-    list of task IDs. Raises RuntimeError if terminal_bench isn't importable.
+    list of task IDs. Raises RuntimeError if terminal_bench isn't importable
+    or the dataset spec cannot be resolved.
     """
+    name, version = parse_dataset_spec(dataset_spec)
+    if not version:
+        raise ValueError(
+            f"dataset spec must be 'name==version', got {dataset_spec!r}"
+        )
     helper = (
         "from terminal_bench.dataset.dataset import Dataset; "
-        f"d = Dataset.parse_dataset_path('{dataset_spec}'); "
-        "tasks = d.tasks if hasattr(d, 'tasks') else d.get_tasks(); "
-        "print('\\n'.join(sorted(t.task_id if hasattr(t, 'task_id') else t for t in tasks)))"
+        f"d = Dataset(name={name!r}, version={version!r}); "
+        "print('\\n'.join(sorted(d.task_ids)))"
     )
     try:
         out = subprocess.check_output(

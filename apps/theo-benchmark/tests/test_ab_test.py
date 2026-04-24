@@ -21,9 +21,22 @@ sys.path.insert(0, str(ROOT))
 from runner.ab_test import (  # noqa: E402
     build_tb_command,
     main,
+    parse_dataset_spec,
     select_tasks_alphabetically,
     write_manifest,
 )
+
+
+class TestParseDatasetSpec(unittest.TestCase):
+    def test_parses_name_and_version(self) -> None:
+        self.assertEqual(parse_dataset_spec("terminal-bench-core==0.1.1"),
+                         ("terminal-bench-core", "0.1.1"))
+
+    def test_returns_none_version_when_no_separator(self) -> None:
+        self.assertEqual(parse_dataset_spec("local-path"), ("local-path", None))
+
+    def test_strips_whitespace(self) -> None:
+        self.assertEqual(parse_dataset_spec(" name == 1.0 "), ("name", "1.0"))
 
 
 class TestSelectTasks(unittest.TestCase):
