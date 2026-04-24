@@ -1300,3 +1300,11 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 **Validacao:** 1132 unit + 96 integration = **1228 tests passando, 0 falhas**; 29/29 report unit tests.
 
 **Marco:** Com este split, TODOS os 9 god-files originais foram refatorados. Zero arquivos com >=800 LOC intocados na crate `theo-agent-runtime`.
+
+### Iteracao 32 (2026-04-24) — Fase 4: T4.2 retomada — handoff + delegate_handler
+
+| Task | Status | Notas |
+|---|---|---|
+| T4.2 run_engine split — 16a etapa | **DONE (parcial)** | 2 novos children em `run_engine/`: `handoff.rs` (176 LOC) com enum `HandoffOutcome` + `evaluate_handoff` + `evaluate_handoff_or_refuse` (deprecated); `delegate_handler.rs` (343 LOC) com `handle_delegate_task` split em 5 metodos privados: `build_subagent_manager` (11+ with_* chains para run_store/hooks/cancellation/checkpoint/worktree/mcp/mcp_discovery), `resolve_handoff_guardrails`, `delegate_single`, `delegate_parallel`, `apply_handoff_guardrails` (helper compartilhado entre single+parallel com enum interno `GuardrailResolution::{Block,Resolved}` substituindo match duplicado de 40+ LOC). `pub use handoff::HandoffOutcome` preserva path publico byte-identical. `run_engine/mod.rs`: 2359 → **1903 LOC** (-456 esta iter; **-2327 desde baseline 4230, -55%**). |
+
+**Validacao:** 1132 unit + 96 integration = **1228 tests passando, 0 falhas**; 62/62 run_engine + 53/53 handoff_guardrail unit tests.

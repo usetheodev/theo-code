@@ -1,0 +1,343 @@
+//! `delegate_task` meta-tool handler — builds a `SubAgentManager`, applies
+//! Phase 18 guardrails, and spawns a single sub-agent or a `parallel` fan-out.
+//!
+//! Fase 4 (REMEDIATION_PLAN T4.2). Extracted from `run_engine/mod.rs`.
+//! Behavior is byte-identical; dispatched from
+//! `run_engine/dispatch/delegate.rs` via `AgentRunEngine::handle_delegate_task`.
+
+use std::sync::Arc;
+
+use crate::run_engine::{AgentRunEngine, HandoffOutcome};
+
+impl AgentRunEngine {
+    /// Dispatch a `delegate_task` call. Args accept either
+    /// `agent`+`objective` (single) OR `parallel: [...]` (multi). Both
+    /// or neither is an error.
+    ///
+    /// Routing:
+    /// - Known agent name → `spawn_with_spec` with the registered spec.
+    /// - Unknown name → `AgentSpec::on_demand` (read-only by S1).
+    pub(super) async fn handle_delegate_task(&mut self, args: serde_json::Value) -> String {
+        let has_agent = args.get("agent").is_some();
+        let has_parallel = args.get("parallel").is_some();
+
+        if has_agent && has_parallel {
+            return "Error: delegate_task accepts EITHER `agent`+`objective` OR `parallel`, not both."
+                .to_string();
+        }
+        if !has_agent && !has_parallel {
+            return "Error: delegate_task requires either `agent`+`objective` or `parallel`."
+                .to_string();
+        }
+
+        let manager = self.build_subagent_manager();
+        let guardrails = self.resolve_handoff_guardrails();
+
+        if has_agent {
+            self.delegate_single(args, manager, guardrails).await
+        } else {
+            self.delegate_parallel(args, manager, guardrails).await
+        }
+    }
+
+    /// Build a `SubAgentManager` with every optional integration (run store,
+    /// hooks, cancellation, checkpoint, worktree, MCP registry + discovery,
+    /// metrics) chained in. Phase 13: registry is either the reloadable
+    /// snapshot, the static one, or a fresh builtins+load_all.
+    fn build_subagent_manager(&self) -> crate::subagent::SubAgentManager {
+        let registry: Arc<crate::subagent::SubAgentRegistry> = if let Some(rel) =
+            &self.subagent_reloadable
+        {
+            Arc::new(rel.snapshot())
+        } else if let Some(r) = &self.subagent_registry {
+            r.clone()
+        } else {
+            let mut reg = crate::subagent::SubAgentRegistry::with_builtins();
+            let _ = reg.load_all(
+                Some(&self.project_dir),
+                None,
+                crate::subagent::ApprovalMode::TrustAll,
+            );
+            Arc::new(reg)
+        };
+
+        let mut manager = crate::subagent::SubAgentManager::with_registry(
+            self.config.clone(),
+            self.event_bus.clone(),
+            self.project_dir.clone(),
+            registry,
+        )
+        .with_metrics(self.metrics.clone());
+
+        if let Some(store) = &self.subagent_run_store {
+            manager = manager.with_run_store(store.clone());
+        }
+        if let Some(hooks) = &self.subagent_hooks {
+            manager = manager.with_hooks(hooks.clone());
+        }
+        if let Some(tree) = &self.subagent_cancellation {
+            manager = manager.with_cancellation(tree.clone());
+        }
+        if let Some(cm) = &self.subagent_checkpoint {
+            manager = manager.with_checkpoint(cm.clone());
+        }
+        if let Some(wp) = &self.subagent_worktree {
+            manager = manager.with_worktree_provider(wp.clone());
+        }
+        if let Some(mcp) = &self.subagent_mcp {
+            manager = manager.with_mcp_registry(mcp.clone());
+        }
+        if let Some(cache) = &self.subagent_mcp_discovery {
+            manager = manager.with_mcp_discovery(cache.clone());
+        }
+        manager
+    }
+
+    /// Phase 18: resolve handoff guardrail chain — injected or default.
+    fn resolve_handoff_guardrails(&self) -> Arc<crate::handoff_guardrail::GuardrailChain> {
+        self.subagent_handoff_guardrails
+            .clone()
+            .unwrap_or_else(|| {
+                Arc::new(crate::handoff_guardrail::GuardrailChain::with_default_builtins())
+            })
+    }
+
+    /// Single-delegation path: read `agent`+`objective`+`context`, run
+    /// guardrails, spawn, aggregate tokens, return the LLM-facing formatted
+    /// message (with optional redirect-note prefix).
+    async fn delegate_single(
+        &mut self,
+        args: serde_json::Value,
+        mut manager: crate::subagent::SubAgentManager,
+        guardrails: Arc<crate::handoff_guardrail::GuardrailChain>,
+    ) -> String {
+        let agent_name = args
+            .get("agent")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let objective = args
+            .get("objective")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let context = args
+            .get("context")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        if agent_name.is_empty() {
+            return "Error: `agent` must be a non-empty string.".to_string();
+        }
+        if objective.is_empty() {
+            return "Error: `objective` is required when delegating to a single agent."
+                .to_string();
+        }
+
+        let initial_spec = manager
+            .registry()
+            .and_then(|r| r.get(&agent_name).cloned())
+            .unwrap_or_else(|| {
+                theo_domain::agent_spec::AgentSpec::on_demand(&agent_name, &objective)
+            });
+
+        let (spec, objective, redirect_note) = match self.apply_handoff_guardrails(
+            &guardrails,
+            &agent_name,
+            initial_spec,
+            objective,
+            &manager,
+        ) {
+            GuardrailResolution::Block(refusal) => return refusal,
+            GuardrailResolution::Resolved {
+                spec,
+                objective,
+                note,
+            } => (spec, objective, note),
+        };
+        // Re-borrow mutably now that we own spec/objective/note.
+        let _ = &mut manager;
+
+        let result = manager
+            .spawn_with_spec_text(&spec, &objective, context.as_deref())
+            .await;
+
+        self.budget_enforcer.record_tokens(result.tokens_used);
+        self.metrics.record_delegated_tokens(result.tokens_used);
+
+        let prefix = redirect_note
+            .map(|n| format!("{} ", n))
+            .unwrap_or_default();
+        if result.success {
+            format!(
+                "{}[{} sub-agent completed] {}",
+                prefix, spec.name, result.summary
+            )
+        } else {
+            format!(
+                "{}[{} sub-agent failed] {}",
+                prefix, spec.name, result.summary
+            )
+        }
+    }
+
+    /// Parallel fan-out: iterate the `parallel` array, run per-entry
+    /// guardrails, spawn each, aggregate a combined human-readable log
+    /// that the LLM will see in the tool-result message.
+    async fn delegate_parallel(
+        &mut self,
+        args: serde_json::Value,
+        mut manager: crate::subagent::SubAgentManager,
+        guardrails: Arc<crate::handoff_guardrail::GuardrailChain>,
+    ) -> String {
+        let arr = args
+            .get("parallel")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        if arr.is_empty() {
+            return "Error: `parallel` must be a non-empty array.".to_string();
+        }
+
+        let mut combined = String::new();
+        for (i, entry) in arr.iter().enumerate() {
+            let agent_name = entry
+                .get("agent")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let objective = entry
+                .get("objective")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let context = entry
+                .get("context")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            if agent_name.is_empty() || objective.is_empty() {
+                combined.push_str(&format!(
+                    "[Sub-agent {}] ERROR: missing agent/objective\n",
+                    i + 1
+                ));
+                continue;
+            }
+            let initial_spec = manager
+                .registry()
+                .and_then(|r| r.get(&agent_name).cloned())
+                .unwrap_or_else(|| {
+                    theo_domain::agent_spec::AgentSpec::on_demand(&agent_name, &objective)
+                });
+
+            let initial_name = initial_spec.name.clone();
+            let (spec, objective, redirect_note) = match self.apply_handoff_guardrails(
+                &guardrails,
+                &agent_name,
+                initial_spec,
+                objective,
+                &manager,
+            ) {
+                GuardrailResolution::Block(refusal) => {
+                    combined.push_str(&format!(
+                        "[Sub-agent {}] ❌ {} (handoff refused): {}\n",
+                        i + 1,
+                        initial_name,
+                        refusal,
+                    ));
+                    continue;
+                }
+                GuardrailResolution::Resolved {
+                    spec,
+                    objective,
+                    note,
+                } => (spec, objective, note),
+            };
+            let _ = &mut manager;
+
+            let result = manager
+                .spawn_with_spec_text(&spec, &objective, context.as_deref())
+                .await;
+
+            self.budget_enforcer.record_tokens(result.tokens_used);
+            self.metrics.record_delegated_tokens(result.tokens_used);
+
+            let mark = if result.success { "✅" } else { "❌" };
+            let prefix = redirect_note
+                .map(|n| format!("{} ", n))
+                .unwrap_or_default();
+            combined.push_str(&format!(
+                "[Sub-agent {}] {} {}{} ({}): {}\n",
+                i + 1,
+                mark,
+                prefix,
+                spec.name,
+                spec.source.as_str(),
+                result.summary,
+            ));
+        }
+        combined
+    }
+
+    /// Phase 18: run the handoff guardrail chain against a candidate spec
+    /// and translate the outcome back into mutated spawn args (or a
+    /// short-circuit refusal). Shared between single + parallel paths.
+    fn apply_handoff_guardrails(
+        &self,
+        guardrails: &crate::handoff_guardrail::GuardrailChain,
+        agent_name: &str,
+        initial_spec: theo_domain::agent_spec::AgentSpec,
+        objective: String,
+        manager: &crate::subagent::SubAgentManager,
+    ) -> GuardrailResolution {
+        match self.evaluate_handoff(guardrails, "main", agent_name, &initial_spec, &objective) {
+            HandoffOutcome::Block { refusal_message } => GuardrailResolution::Block(refusal_message),
+            HandoffOutcome::Allow => GuardrailResolution::Resolved {
+                spec: initial_spec,
+                objective,
+                note: None,
+            },
+            HandoffOutcome::Redirect {
+                guardrail_id,
+                new_agent_name,
+            } => {
+                let new_spec = manager
+                    .registry()
+                    .and_then(|r| r.get(&new_agent_name).cloned())
+                    .unwrap_or_else(|| {
+                        theo_domain::agent_spec::AgentSpec::on_demand(&new_agent_name, &objective)
+                    });
+                let note = format!(
+                    "[handoff redirected by {} → {}]",
+                    guardrail_id, new_agent_name
+                );
+                GuardrailResolution::Resolved {
+                    spec: new_spec,
+                    objective,
+                    note: Some(note),
+                }
+            }
+            HandoffOutcome::RewriteObjective {
+                guardrail_id,
+                new_objective,
+            } => {
+                let note = format!("[handoff objective rewritten by {}]", guardrail_id);
+                GuardrailResolution::Resolved {
+                    spec: initial_spec,
+                    objective: new_objective,
+                    note: Some(note),
+                }
+            }
+        }
+    }
+}
+
+/// Internal outcome of `apply_handoff_guardrails`: either a short-circuit
+/// refusal or the resolved (spec, objective, optional note) tuple.
+enum GuardrailResolution {
+    Block(String),
+    Resolved {
+        spec: theo_domain::agent_spec::AgentSpec,
+        objective: String,
+        note: Option<String>,
+    },
+}
