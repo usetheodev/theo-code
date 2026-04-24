@@ -1090,3 +1090,22 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 **Validacao:** 1132 unit + 96 integration (incluindo 8 caracterizacao snapshots byte-identicos) = **1228 tests passando, 0 falhas.**
 
 **Nao feito nesta iteracao (proximas):** T0.1 restante (7 cenarios LLM), T0.2 caracterizacao subagent, T1.1 bwrap, T3.4 retry inline, T4.2 continuar (main_loop, dispatch/done, dispatch/delegate, dispatch/skill, dispatch/batch), T4.3 Strategy, T4.4 Chain of Responsibility, T4.5 split subagent/mod.rs, T5.1 RunMetadata, T6.4 batch streaming, T7.*, T8.1 phase sweep.
+
+### Iteracao 11 (2026-04-24) — Fase 4: done-gate extraction + dispatch module
+
+| Task | Status | Notas |
+|---|---|---|
+| T4.2 run_engine split — quarta etapa (done handler) | **DONE (parcial)** | Novo dir `run_engine/dispatch/` com `mod.rs` (enum `DispatchOutcome`) + `done.rs` (251 LOC — `handle_done_call` + 3 sub-helpers: `maybe_emit_large_diff_hint`, `pick_done_gate_test_args`, `run_done_gate_tests`). Bloco de 207 LOC do meta-tool `done` no main loop colapsa em: `match self.handle_done_call(call, iteration, &mut messages).await { Converged(r) => {should_return=Some(r); break;} Continue => continue }`. O enum `DispatchOutcome` formaliza o contrato que o resto das extracoes (delegate/skill/batch) vao seguir. `mod.rs`: 3551 → **3354 LOC** (-197 esta iter; **-876 desde baseline 4230, -21%**). |
+
+**Baseline → atual (por metrica, desde Iteracao 0):**
+- `.expect/.unwrap/panic!`: 1071 → 1041
+- silent-swallow: 61 → 2
+- `std::env::var`: 25 → 6
+- `std::process::Command` producao: 2 → 1
+- phase tags: 310 → 186
+- **`run_engine/mod.rs` LOC: 4230 → 3354 (-876, -21%)**
+- **Modulos novos: run_engine/{builders, bootstrap, lifecycle, dispatch/mod, dispatch/done} + run_engine_{helpers, auto_init, sandbox} siblings = 8 files**
+
+**Validacao:** 1132 unit + 96 integration = **1228 tests passando, 0 falhas.** Caracterizacao snapshots byte-identicos.
+
+**Nao feito nesta iteracao (proximas):** T0.1 restante (7 cenarios LLM), T0.2 caracterizacao subagent, T1.1 bwrap, T3.4 retry inline, T4.2 continuar (main_loop, dispatch/delegate, dispatch/skill, dispatch/batch), T4.3 Strategy pattern, T4.4 Chain of Responsibility no done gates (agora viável com a extracao), T4.5 split subagent/mod.rs, T5.1 RunMetadata, T6.4 batch streaming, T7.*, T8.1 phase sweep.

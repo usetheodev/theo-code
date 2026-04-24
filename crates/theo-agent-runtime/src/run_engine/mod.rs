@@ -4,6 +4,7 @@
 // they live as child modules rather than siblings.
 mod bootstrap;
 mod builders;
+mod dispatch;
 mod lifecycle;
 
 use std::path::PathBuf;
@@ -27,8 +28,7 @@ use crate::budget_enforcer::BudgetEnforcer;
 use crate::config::{AgentConfig, MessageQueues};
 use crate::context_metrics::ContextMetrics;
 use crate::convergence::{
-    ConvergenceContext, ConvergenceEvaluator, ConvergenceMode, EditSuccessConvergence,
-    GitDiffConvergence, check_git_changes,
+    ConvergenceEvaluator, ConvergenceMode, EditSuccessConvergence, GitDiffConvergence,
 };
 use crate::event_bus::EventBus;
 use crate::loop_state::ContextLoopState;
@@ -1017,212 +1017,16 @@ impl AgentRunEngine {
                     continue;
                 }
 
-                // Handle `done` meta-tool with multi-layer verification:
-                // 1. Convergence pre-filter (git diff must show real changes)
-                // 2. Cargo test on affected crate (timeout 60s, fallback cargo check)
-                // 3. done_attempts counter (max 3 blocks before hard fail)
+                // `done` meta-tool — gates Gate 0/1/2 live in
+                // `dispatch/done.rs` (Fase 4 — T4.2).
                 if name == "done" {
-                    self.transition_run(RunState::Evaluating);
-                    self.done_attempts += 1;
-
-                    let summary = call
-                        .parse_arguments()
-                        .ok()
-                        .and_then(|args| {
-                            args.get("summary")
-                                .and_then(|s| s.as_str())
-                                .map(String::from)
-                        })
-                        .unwrap_or_else(|| "Task completed.".to_string());
-
-                    // Gate 0: done_attempts hard limit — avoid burning entire budget
-                    use crate::constants::MAX_DONE_ATTEMPTS;
-                    if self.done_attempts > MAX_DONE_ATTEMPTS {
-                        // Exceeded max attempts — accept with warning
-                        self.transition_run(RunState::Converged);
-                        let _ = self
-                            .task_manager
-                            .transition(&self.task_id, TaskState::Completed);
-                        self.metrics.record_run_complete(true);
-                        let summary = format!(
-                            "{} [accepted after {} done attempts]",
-                            summary, self.done_attempts
-                        );
-                        should_return = Some(AgentResult::from_engine_state(
-                            self,
-                            true,
-                            summary,
-                            false,
-                            ErrorClass::Solved,
-                        ));
-                        break;
-                    }
-
-                    // Gate 1: Convergence pre-filter — verify real changes exist
-                    let has_changes = check_git_changes(&self.project_dir).await;
-                    let convergence_ctx = ConvergenceContext {
-                        has_git_changes: has_changes,
-                        edits_succeeded: self.context_loop_state.edits_files.len(),
-                        done_requested: true,
-                        iteration,
-                        max_iterations: self.config.max_iterations,
-                    };
-                    if !self.convergence.evaluate(&convergence_ctx) {
-                        let pending = self.convergence.pending_criteria(&convergence_ctx);
-                        messages.push(Message::tool_result(
-                            &call.id,
-                            "done",
-                            format!(
-                                "BLOCKED: convergence criteria not met: {}. Make real changes before calling done.",
-                                pending.join(", ")
-                            ),
-                        ));
-                        self.transition_run(RunState::Replanning);
-                        continue;
-                    }
-
-                    // Review suggestion: if diff is large, suggest reviewing before accepting.
-                    // Non-blocking — just a hint to encourage careful review.
-                    if self.context_loop_state.edits_files.len() > 3 {
-                        let diff_stat = tokio::process::Command::new("git")
-                            .args(["diff", "--stat"])
-                            .current_dir(&self.project_dir)
-                            .output()
-                            .await;
-                        if let Ok(output) = diff_stat {
-                            let stat = String::from_utf8_lossy(&output.stdout);
-                            let lines_changed: usize = stat
-                                .lines()
-                                .filter_map(|l| {
-                                    // Parse "N insertions(+), M deletions(-)" from last line
-                                    if l.contains("insertion") || l.contains("deletion") {
-                                        l.split_whitespace()
-                                            .filter_map(|w| w.parse::<usize>().ok())
-                                            .sum::<usize>()
-                                            .into()
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .sum();
-                            if lines_changed > 100 {
-                                messages.push(Message::user(format!(
-                                    "Note: This change touches {} files with ~{} lines changed. \
-                                         Consider reviewing the diff carefully before finalizing.",
-                                    self.context_loop_state.edits_files.len(),
-                                    lines_changed
-                                )));
-                            }
+                    match self.handle_done_call(call, iteration, &mut messages).await {
+                        dispatch::DispatchOutcome::Converged(result) => {
+                            should_return = Some(result);
+                            break;
                         }
+                        dispatch::DispatchOutcome::Continue => continue,
                     }
-
-                    // Gate 2: Clean state sensor — verify project builds and tests pass.
-                    // Best-effort: skip if not Rust, timeout 60s, never hard-abort.
-                    if self.project_dir.join("Cargo.toml").exists() {
-                        // Determine which crate was affected for targeted test
-                        let test_args =
-                            if let Some(first_file) = self.context_loop_state.edits_files.first() {
-                                // Try to find crate name from edited file path
-                                let crate_name = std::path::Path::new(first_file)
-                                    .components()
-                                    .zip(std::path::Path::new(first_file).components().skip(1))
-                                    .find(|(a, _)| {
-                                        let s = a.as_os_str().to_string_lossy();
-                                        s == "crates" || s == "apps"
-                                    })
-                                    .map(|(_, b)| b.as_os_str().to_string_lossy().to_string());
-                                if let Some(name) = crate_name {
-                                    vec![
-                                        "test".to_string(),
-                                        "-p".to_string(),
-                                        name,
-                                        "--no-fail-fast".to_string(),
-                                    ]
-                                } else {
-                                    vec!["test".to_string(), "--no-fail-fast".to_string()]
-                                }
-                            } else {
-                                // No files edited — just cargo check as sanity
-                                vec!["check".to_string(), "--message-format=short".to_string()]
-                            };
-
-                        // T1.1: done-gate `cargo test` runs with kernel
-                        // rlimits (CPU / memory / file-size / NPROC) to
-                        // mitigate RCE via build.rs or proc-macro in code
-                        // written by the agent. Full bwrap sandbox is
-                        // still not applied here (follow-up); rlimits is
-                        // the partial mitigation from the plan.
-                        let test_result = tokio::time::timeout(
-                            crate::constants::DONE_GATE_TEST_TIMEOUT,
-                            spawn_done_gate_cargo(&self.project_dir, &test_args),
-                        )
-                        .await;
-
-                        let check_failed = match test_result {
-                            Ok(Ok(output)) if !output.status.success() => {
-                                let stderr = String::from_utf8_lossy(&output.stderr);
-                                let stdout = String::from_utf8_lossy(&output.stdout);
-                                let combined = format!("{}\n{}", stderr, stdout);
-                                Some(combined)
-                            }
-                            Ok(Ok(_)) => None,  // Tests passed
-                            Ok(Err(_)) => None, // Command not found — pass through
-                            Err(_) => {
-                                // Timeout — fallback to cargo check (also
-                                // inside the rlimits envelope).
-                                let fallback = tokio::time::timeout(
-                                    crate::constants::DONE_GATE_CHECK_FALLBACK_TIMEOUT,
-                                    spawn_done_gate_cargo(
-                                        &self.project_dir,
-                                        &[
-                                            "check".to_string(),
-                                            "--message-format=short".to_string(),
-                                        ],
-                                    ),
-                                )
-                                .await;
-                                match fallback {
-                                    Ok(Ok(output)) if !output.status.success() => {
-                                        Some(String::from_utf8_lossy(&output.stderr).to_string())
-                                    }
-                                    _ => None, // Fallback passed or timed out — accept
-                                }
-                            }
-                        };
-
-                        if let Some(errors) = check_failed {
-                            let error_preview = theo_domain::prompt_sanitizer::char_boundary_truncate(
-                                &errors,
-                                crate::constants::DONE_GATE_ERROR_PREVIEW_BYTES,
-                            );
-                            let cmd_str = test_args.join(" ");
-                            messages.push(Message::tool_result(
-                                &call.id,
-                                "done",
-                                format!(
-                                    "BLOCKED: `cargo {}` failed (attempt {}/{}). Fix the errors before calling done.\n\n{}",
-                                    cmd_str, self.done_attempts, MAX_DONE_ATTEMPTS, error_preview
-                                ),
-                            ));
-                            self.transition_run(RunState::Replanning);
-                            continue;
-                        }
-                    }
-
-                    self.transition_run(RunState::Converged);
-                    let _ = self
-                        .task_manager
-                        .transition(&self.task_id, TaskState::Completed);
-                    self.metrics.record_run_complete(true);
-
-                    should_return = Some(AgentResult::from_engine_state(
-                        self,
-                        true,
-                        summary,
-                        false,
-                        ErrorClass::Solved,
-                    ));
-                    break;
                 }
 
                 // Handle `delegate_task` meta-tool — Phase 4 unified API.
@@ -2406,7 +2210,6 @@ use crate::doom_loop::DoomLoopTracker;
 use crate::run_engine_helpers::{
     derive_provider_hint, llm_error_to_class, truncate_batch_args, truncate_handoff_objective,
 };
-use crate::run_engine_sandbox::spawn_done_gate_cargo;
 use theo_domain::clock::now_millis;
 
 // NOTE: `derive_provider_hint`, `llm_error_to_class`,
