@@ -225,11 +225,30 @@ fn test_router_invoked_exactly_once_per_turn_in_runtime() {
     // `as_router().route(` — there must be exactly one such call site
     // per turn. The R4 phase will add a second site for Compaction,
     // but R3 landed with a single site.
-    let manifest = concat!(env!("CARGO_MANIFEST_DIR"), "/src/run_engine.rs");
-    let source = std::fs::read_to_string(manifest).expect("run_engine.rs readable");
-    let matches = source.matches("as_router().route(").count();
+    //
+    // REMEDIATION_PLAN T4.2: `run_engine.rs` was split into a directory
+    // module `run_engine/` with `mod.rs` + `main_loop.rs` + helpers. The
+    // invariant still holds — we just need to scan the whole directory.
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/src/run_engine");
+    let mut matches = 0usize;
+    for entry in std::fs::read_dir(dir).expect("run_engine/ readable") {
+        let entry = entry.expect("dir entry");
+        let path = entry.path();
+        if path.is_dir() {
+            for nested in std::fs::read_dir(&path).expect("nested readable") {
+                let p = nested.expect("nested entry").path();
+                if p.extension().and_then(|e| e.to_str()) == Some("rs") {
+                    let src = std::fs::read_to_string(&p).expect("rust source readable");
+                    matches += src.matches("as_router().route(").count();
+                }
+            }
+        } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+            let src = std::fs::read_to_string(&path).expect("rust source readable");
+            matches += src.matches("as_router().route(").count();
+        }
+    }
     assert_eq!(
         matches, 1,
-        "R3 invariant: exactly one call site for router.route() in run_engine.rs (found {matches})"
+        "R3 invariant: exactly one call site for router.route() in run_engine/* (found {matches})"
     );
 }

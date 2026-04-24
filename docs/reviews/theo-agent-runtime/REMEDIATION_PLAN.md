@@ -1226,3 +1226,11 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 | T4.2 run_engine split — 15a etapa | **DONE (parcial)** | `persist_snapshot_if_configured` (~35 LOC) em `main_loop.rs`: coleta tool_calls + results + events + serializa messages + builda `RunSnapshot` + `store.save()`. Fail-soft. Bloco de ~30 LOC no final do loop colapsa em 1 chamada. `mod.rs`: 2387 → **2359 LOC** (-28 esta iter; **-1871 desde baseline 4230, -44%**). main_loop.rs: 1010 → 1046 LOC. |
 
 **Validacao:** 1132 unit + 96 integration = 1228 tests passando, 0 falhas.
+
+### Iteracao 23 (2026-04-24) — Fase 4: T4.5 spawn_with_spec — 9 helpers
+
+| Task | Status | Notas |
+|---|---|---|
+| T4.5 subagent/mod.rs split — segunda etapa | **DONE (parcial)** | novo `subagent/spawn_helpers.rs` (419 LOC) com 1 free fn (`generate_run_id`) + 11 metodos `impl SubAgentManager`: `resolve_worktree` (+ `dispatch_worktree_create_hook`), `build_sub_config` (config + prompt prefix + MCP hint), `register_mcp_tool_adapters` (auto-discovery + adapter registration, fail-soft, async), `persist_run_start`, `emit_subagent_started` (OTel span + event), `dispatch_start_hook_or_block` (Option<AgentResult>), `persist_early_exit`, `finalize_persisted_run`, `apply_output_format`, `dispatch_stop_hook_annotate`, `cleanup_worktree_if_success`. Blocos inline de ~260 LOC substituidos por chamadas a metodos privados, preservando byte-identical side-effects. `subagent/mod.rs`: 1737 → **1477 LOC** (-260 esta iter; **-418 desde baseline 1895, -22%**). |
+
+**Validacao:** 1132 unit + 96 integration = **1228 tests passando, 0 falhas**; 8/8 characterization snapshots byte-identical.
