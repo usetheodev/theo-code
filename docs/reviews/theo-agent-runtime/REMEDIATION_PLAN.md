@@ -1308,3 +1308,11 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 | T4.2 run_engine split — 16a etapa | **DONE (parcial)** | 2 novos children em `run_engine/`: `handoff.rs` (176 LOC) com enum `HandoffOutcome` + `evaluate_handoff` + `evaluate_handoff_or_refuse` (deprecated); `delegate_handler.rs` (343 LOC) com `handle_delegate_task` split em 5 metodos privados: `build_subagent_manager` (11+ with_* chains para run_store/hooks/cancellation/checkpoint/worktree/mcp/mcp_discovery), `resolve_handoff_guardrails`, `delegate_single`, `delegate_parallel`, `apply_handoff_guardrails` (helper compartilhado entre single+parallel com enum interno `GuardrailResolution::{Block,Resolved}` substituindo match duplicado de 40+ LOC). `pub use handoff::HandoffOutcome` preserva path publico byte-identical. `run_engine/mod.rs`: 2359 → **1903 LOC** (-456 esta iter; **-2327 desde baseline 4230, -55%**). |
 
 **Validacao:** 1132 unit + 96 integration = **1228 tests passando, 0 falhas**; 62/62 run_engine + 53/53 handoff_guardrail unit tests.
+
+### Iteracao 33 (2026-04-24) — Fase 4: T4.2 execute + execute_with_history
+
+| Task | Status | Notas |
+|---|---|---|
+| T4.2 run_engine split — 17a etapa | **DONE (parcial)** | novo `run_engine/execution.rs` (371 LOC) com `execute` + `execute_with_history` (o corpo async de 343 LOC — setup + main loop + tool-calls + snapshot). Free fn `forced_tool_choice(&tool_defs) -> Option<String>` extrai a logica de 23 LOC do `THEO_FORCE_TOOL_CHOICE` para um helper puro, eliminando o problema de `with_tool_choice(self)` retornando `Self` ao usar `&mut ChatRequest`. Imports nao-mais-usados removidos de `mod.rs`: `ChatRequest`, `Message`, `tool_bridge`, `DoomLoopTracker`. `AgentResult` mantido com `#[cfg(test)]` pois ainda e usado pelos testes inline. `run_engine/mod.rs`: 1903 → **1540 LOC** (-363 esta iter; **-2690 desde baseline 4230, -64%**). |
+
+**Validacao:** 1132 unit + 96 integration = **1228 tests passando, 0 falhas**; invariante arquitetural `exactly-one-as_router().route(` preservada (scan recursivo do `run_engine/` encontra exatamente 1 match em `main_loop.rs`).
