@@ -1218,22 +1218,20 @@ async fn resolve_agent_config(
     if let Some(m) = model {
         config.model = m.to_string();
     } else if oauth_applied && config.model == "default" {
-        // Empirically validated default for the agentic flow:
-        // gpt-5.3-codex is the ONLY Codex catalog model that reliably
-        // honors THEO_FORCE_TOOL_CHOICE=function:NAME for delegate_task.
-        // Tested with sota12-full-stress.sh against the OAuth Codex
-        // endpoint (chatgpt.com/backend-api/codex/responses):
+        // Default to gpt-5.4 ("current strong everyday").
         //
-        //   model           tool_choice forced   delegate_task called?
-        //   ──────────────────────────────────────────────────────────
-        //   gpt-5.3-codex   yes                  ✓ 5/5 turns
-        //   gpt-5.2-codex   yes                  ✗ 0/5 turns (text only)
-        //   gpt-5.4         yes                  ✗ 0/5 turns (text only)
+        // ChatGPT-account OAuth supports a SUBSET of the catalog
+        // (verified live against chatgpt.com/backend-api/codex/responses
+        // on 2026-04-24):
+        //   ✅ gpt-5.4, gpt-5.4-mini, gpt-5.3-codex, gpt-5.2
+        //   ❌ gpt-5.2-codex, gpt-5.1-codex-max, gpt-5.1-codex-mini
+        //      (these return: "not supported when using Codex with a
+        //       ChatGPT account" — they require API-key auth)
         //
-        // The "frontier" / "current" labels describe coding depth, not
-        // tool-call compliance under forcing. Operator can override
-        // via --model.
-        config.model = "gpt-5.3-codex".to_string();
+        // See `theo_application::use_cases::router_loader::CHATGPT_OAUTH_SUPPORTED_MODELS`
+        // for the canonical allowlist + startup warning when slots
+        // misconfigure to an unsupported model.
+        config.model = "gpt-5.4".to_string();
     }
 
     if let Some(n) = max_iter {

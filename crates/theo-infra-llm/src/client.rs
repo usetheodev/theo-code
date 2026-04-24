@@ -330,6 +330,16 @@ impl LlmClient {
 
             // Build ChatResponse from the accumulated SSE body
             if std::env::var("THEO_DEBUG_CODEX").is_ok() {
+                // Dump entire SSE body to /tmp/codex-last.sse for offline analysis
+                if let Ok(p) = std::env::var("THEO_DUMP_SSE") {
+                    // Append a counter so each call dumps to a unique file.
+                    use std::sync::atomic::{AtomicU32, Ordering};
+                    static COUNTER: AtomicU32 = AtomicU32::new(0);
+                    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+                    let path = format!("{}.{}", p, n);
+                    let _ = std::fs::write(&path, full_body.as_bytes());
+                    eprintln!("[theo:codex] dumped full SSE to {}", path);
+                }
                 let chunk_count = full_body.matches("\n\n").count();
                 let function_count = full_body.matches("\"function_call\"").count();
                 eprintln!(
@@ -356,8 +366,27 @@ impl LlmClient {
                     }
                 }
             }
-            codex::from_codex_stream(&full_body)
-                .ok_or_else(|| LlmError::Parse("failed to parse Codex stream".to_string()))
+            let parsed = codex::from_codex_stream(&full_body)
+                .ok_or_else(|| LlmError::Parse("failed to parse Codex stream".to_string()))?;
+            if std::env::var("THEO_DEBUG_CODEX").is_ok() {
+                let tc_count = parsed
+                    .choices
+                    .first()
+                    .and_then(|c| c.message.tool_calls.as_ref())
+                    .map(|v| v.len())
+                    .unwrap_or(0);
+                let content_len = parsed
+                    .choices
+                    .first()
+                    .and_then(|c| c.message.content.as_deref())
+                    .map(|s| s.len())
+                    .unwrap_or(0);
+                eprintln!(
+                    "[theo:codex] parsed: tool_calls={} content_len={}",
+                    tc_count, content_len
+                );
+            }
+            Ok(parsed)
         } else {
             // OA-compatible: use SseStream
             use futures::StreamExt;

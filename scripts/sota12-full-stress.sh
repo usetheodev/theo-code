@@ -159,22 +159,21 @@ EOF
 fi
 
 # Phase 27 (gap #4): routing slots so AutomaticModelRouter actually fires.
-# All slots map to gpt-5.3-codex empirically (the only Codex model that
-# honors forced tool_choice for delegate_task — tested against gpt-5.4
-# and gpt-5.2-codex which both ignore the forcing). The router still
-# fires (evidence: routing_reason != "no_router") and ComplexityClassifier
-# still picks tiers — they just collapse to the same model for now.
+# IMPORTANT: only models supported by ChatGPT-account OAuth (see probe
+# in scripts/sota12-full-stress.sh comments). Verified live:
+#   ✅ gpt-5.4, gpt-5.4-mini, gpt-5.3-codex, gpt-5.2
+#   ❌ gpt-5.2-codex, gpt-5.1-codex-max, gpt-5.1-codex-mini (API-key only)
 cat > .theo/config.toml <<'EOF'
 [routing]
 enabled = true
 strategy = "rules"
 
 [routing.slots.cheap]
-model = "gpt-5.3-codex"
+model = "gpt-5.4-mini"
 provider = "chatgpt-codex"
 
 [routing.slots.default]
-model = "gpt-5.3-codex"
+model = "gpt-5.4"
 provider = "chatgpt-codex"
 
 [routing.slots.strong]

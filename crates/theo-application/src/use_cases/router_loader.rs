@@ -17,6 +17,28 @@ use theo_infra_llm::routing::{
 
 const PROJECT_CONFIG_PATH: &str = ".theo/config.toml";
 
+/// Phase 29 follow-up — gap discovered during real OAuth probing.
+/// The ChatGPT-account OAuth endpoint
+/// (`chatgpt.com/backend-api/codex/responses`) only serves a subset of
+/// the catalog. API-key-only models return:
+///   `"detail":"The 'X' model is not supported when using Codex with a
+///    ChatGPT account."`
+/// This list is the empirical allowlist verified against the real
+/// endpoint on 2026-04-24. Models outside the list trigger a startup
+/// warning so operators discover the misconfiguration BEFORE the first
+/// agent run instead of mid-conversation.
+pub const CHATGPT_OAUTH_SUPPORTED_MODELS: &[&str] = &[
+    "gpt-5.4",
+    "gpt-5.4-mini",
+    "gpt-5.3-codex",
+    "gpt-5.2",
+];
+
+/// True when `model` is known to work with ChatGPT-account OAuth.
+pub fn is_chatgpt_oauth_supported(model: &str) -> bool {
+    CHATGPT_OAUTH_SUPPORTED_MODELS.contains(&model)
+}
+
 #[derive(serde::Deserialize)]
 struct Wrapper {
     #[serde(default)]
@@ -42,6 +64,21 @@ pub fn load_router(
     if !config.enabled || config.slots.is_empty() {
         return None;
     }
+    // Validate slot models against the ChatGPT-account OAuth allowlist.
+    // Print a one-time startup warning per unsupported slot so the
+    // operator notices BEFORE the first agent run blows up mid-stream.
+    for (alias, slot) in &config.slots {
+        if slot.provider == "chatgpt-codex" && !is_chatgpt_oauth_supported(&slot.model)
+        {
+            eprintln!(
+                "[theo:router] WARNING: slot '{}' uses model '{}' which is NOT supported \
+                 with ChatGPT-account OAuth. Supported: {:?}. The slot will route to a \
+                 server_error response. Switch to one of the supported models.",
+                alias, slot.model, CHATGPT_OAUTH_SUPPORTED_MODELS
+            );
+        }
+    }
+
     let inner = RuleBasedRouter::new(config.to_pricing_table());
     let mut auto = AutomaticModelRouter::new(inner, true);
     if let Some(recorder) = metrics_recorder {
@@ -120,6 +157,29 @@ mod tests {
             "#,
         );
         assert!(load_router(dir.path(), None).is_some());
+    }
+
+    #[test]
+    fn is_chatgpt_oauth_supported_matches_known_models() {
+        assert!(is_chatgpt_oauth_supported("gpt-5.4"));
+        assert!(is_chatgpt_oauth_supported("gpt-5.4-mini"));
+        assert!(is_chatgpt_oauth_supported("gpt-5.3-codex"));
+        assert!(is_chatgpt_oauth_supported("gpt-5.2"));
+    }
+
+    #[test]
+    fn is_chatgpt_oauth_supported_rejects_api_only_models() {
+        // These return "not supported when using Codex with ChatGPT account"
+        assert!(!is_chatgpt_oauth_supported("gpt-5.2-codex"));
+        assert!(!is_chatgpt_oauth_supported("gpt-5.1-codex-max"));
+        assert!(!is_chatgpt_oauth_supported("gpt-5.1-codex-mini"));
+    }
+
+    #[test]
+    fn is_chatgpt_oauth_supported_rejects_random_garbage() {
+        assert!(!is_chatgpt_oauth_supported(""));
+        assert!(!is_chatgpt_oauth_supported("gpt-99"));
+        assert!(!is_chatgpt_oauth_supported("claude-opus"));
     }
 
     #[test]

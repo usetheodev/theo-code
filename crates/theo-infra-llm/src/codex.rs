@@ -533,6 +533,53 @@ mod tests {
         assert_eq!(tc.get("name").and_then(|v| v.as_str()), Some("delegate_task"));
     }
 
+    /// Phase 29 follow-up — gap revealed during real OAuth testing:
+    /// gpt-5.4 / gpt-5.2-codex emit function_call via INCREMENTAL events
+    /// (output_item.added → function_call_arguments.delta → done) but the
+    /// final response.completed has `output: []`. gpt-5.3-codex includes
+    /// the function_call in response.completed.output.
+    /// This test simulates the gpt-5.4 pattern and verifies the fallback
+    /// delta accumulator correctly extracts the tool call.
+    #[test]
+    fn from_codex_stream_extracts_function_call_when_response_completed_output_is_empty() {
+        let sse = r#"event: response.created
+data: {"type":"response.created","response":{"id":"r1","status":"in_progress","output":[]}}
+
+event: response.in_progress
+data: {"type":"response.in_progress","response":{"id":"r1","output":[]}}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","item":{"id":"fc_1","type":"function_call","status":"in_progress","arguments":"","call_id":"call_xyz","name":"delegate_task_single"},"output_index":0,"sequence_number":2}
+
+event: response.function_call_arguments.delta
+data: {"type":"response.function_call_arguments.delta","delta":"{\"agent\":\"audit-bot\",\"objective\":\"audit\"}","item_id":"fc_1","output_index":0,"sequence_number":3}
+
+event: response.function_call_arguments.done
+data: {"type":"response.function_call_arguments.done","arguments":"{\"agent\":\"audit-bot\",\"objective\":\"audit\"}","item_id":"fc_1","output_index":0,"sequence_number":4}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","item":{"id":"fc_1","type":"function_call","status":"completed","arguments":"{\"agent\":\"audit-bot\",\"objective\":\"audit\"}","call_id":"call_xyz","name":"delegate_task_single"},"output_index":0,"sequence_number":5}
+
+event: response.completed
+data: {"type":"response.completed","response":{"id":"r1","status":"completed","output":[],"usage":{"input_tokens":50,"output_tokens":20}},"sequence_number":6}
+
+"#;
+        let resp = from_codex_stream(sse).expect("must parse non-None");
+        let choice = resp.choices.first().expect("at least one choice");
+        let tool_calls = choice
+            .message
+            .tool_calls
+            .as_ref()
+            .expect("tool_calls must be Some");
+        assert_eq!(tool_calls.len(), 1);
+        assert_eq!(tool_calls[0].function.name, "delegate_task_single");
+        assert!(
+            tool_calls[0].function.arguments.contains("audit-bot"),
+            "args must include audit-bot, got: {}",
+            tool_calls[0].function.arguments
+        );
+    }
+
     #[test]
     fn to_codex_body_falls_back_to_auto_for_malformed_json_choice() {
         use crate::types::ToolDefinition;
