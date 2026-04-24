@@ -163,12 +163,14 @@ class TheoAgent(AbstractInstalledAgent):
 
         Quote the task description with shlex.quote — handles single
         quotes, backticks, etc. in instruction text correctly.
+        Phase 47: stdout redirected to /tmp/theo-stdout.log so perform_task()
+        below can copy it out before container teardown.
         """
         max_iter = int(os.environ.get("THEO_MAX_ITER", "50"))
         quoted = shlex.quote(task_description)
         cmd = (
             f"theo --headless --max-iter {max_iter} {quoted} "
-            f"2>/tmp/theo-stderr.log"
+            f"2>/tmp/theo-stderr.log | tee /tmp/theo-stdout.log"
         )
         return [
             TerminalCommand(
@@ -177,6 +179,98 @@ class TheoAgent(AbstractInstalledAgent):
                 block=True,
             )
         ]
+
+    def perform_task(self, instruction, session, logging_dir=None):
+        """Phase 47 instrumentation override.
+
+        Wraps super().perform_task() to:
+          1. Run the agent normally (super)
+          2. Copy /tmp/theo-{stdout,stderr}.log + auth.json from container
+             to logging_dir (so they survive container teardown)
+          3. Parse the headless JSON line from stdout
+          4. Compute cost_usd via pricing.toml
+          5. Write a sidecar `theo-headless.json` with the full enriched payload
+          6. Set total_input_tokens / total_output_tokens on the AgentResult
+             so tb's own results.json carries them (no more zeros)
+
+        Errors at any post-step are LOGGED but never abort the run —
+        we want telemetry to be best-effort, never break the test.
+        """
+        # 1. Normal flow
+        result = super().perform_task(instruction, session, logging_dir=logging_dir)
+
+        # 2-6. Telemetry capture — wrapped in try so a failure here never
+        # breaks the harness's ability to record the test verdict.
+        try:
+            self._capture_telemetry(session, logging_dir, result)
+        except Exception as e:
+            # Best effort — write a marker file so the analyzer knows
+            # capture failed for this trial.
+            if logging_dir is not None:
+                try:
+                    (Path(logging_dir) / "theo-telemetry-error.txt").write_text(
+                        f"telemetry capture failed: {type(e).__name__}: {e}\n"
+                    )
+                except Exception:
+                    pass
+        return result
+
+    def _capture_telemetry(self, session, logging_dir, result) -> None:
+        """Copy theo logs out of container + parse JSON + sidecar."""
+        if logging_dir is None:
+            return
+        log_dir = Path(logging_dir)
+        log_dir.mkdir(parents=True, exist_ok=True)
+
+        # Copy stdout/stderr OUT of container before teardown.
+        # session.container is the Docker container handle (terminal-bench
+        # exposes it on TmuxSession).
+        for src, dst in [
+            ("/tmp/theo-stdout.log", "theo-stdout.log"),
+            ("/tmp/theo-stderr.log", "theo-stderr.log"),
+        ]:
+            try:
+                # Try docker SDK exec first, fall back to capture_pane
+                import subprocess as _sp
+                container_name = getattr(session.container, "name", None) or \
+                                 getattr(session.container, "id", None)
+                if container_name:
+                    out = _sp.check_output(
+                        ["docker", "exec", container_name, "cat", src],
+                        timeout=30,
+                    )
+                    (log_dir / dst).write_bytes(out)
+            except Exception:
+                pass
+
+        # Also dump the captured tmux pane as last-resort fallback for stdout
+        try:
+            pane = session.capture_pane(capture_entire=True)
+            (log_dir / "tmux-pane.log").write_text(pane)
+        except Exception:
+            pass
+
+        # Parse headless JSON from theo-stdout.log → sidecar with cost
+        stdout_path = log_dir / "theo-stdout.log"
+        if not stdout_path.exists():
+            # Fall back to tmux pane
+            stdout_path = log_dir / "tmux-pane.log"
+        if stdout_path.exists():
+            payload = self.parse_result(stdout_path.read_text(errors="replace"))
+            if payload:
+                # Add provenance
+                payload["adapter_version"] = self.version()
+                (log_dir / "theo-headless.json").write_text(
+                    json.dumps(payload, indent=2)
+                )
+                # Backfill the AgentResult so tb's results.json carries
+                # tokens (instead of always-zero).
+                tok = payload.get("tokens", {}) or {}
+                try:
+                    result.total_input_tokens = int(tok.get("input", 0) or 0)
+                    result.total_output_tokens = int(tok.get("output", 0) or 0)
+                except Exception:
+                    pass
 
     @classmethod
     def parse_result(cls, stdout: str) -> dict:
