@@ -1,0 +1,40 @@
+# Phase 47 (benchmark-validation-plan) — local OTLP collector for bench runs.
+#
+# Sobe collector OTel + Jaeger UI durante `bash scripts/bench/run-all.sh`.
+# Cada run de benchmark exporta spans para localhost:4317 (gRPC); a UI
+# fica em http://<droplet-ip>:16686 para inspeção visual.
+#
+# Usage:
+#   docker compose -f apps/theo-benchmark/otlp/docker-compose.yml up -d
+#   ... run benchmarks ...
+#   docker compose -f apps/theo-benchmark/otlp/docker-compose.yml down
+
+version: "3.8"
+
+services:
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.110.0
+    command: ["--config=/etc/otel/config.yaml"]
+    volumes:
+      - ./collector-config.yaml:/etc/otel/config.yaml:ro
+      - otel-spans:/var/log/otel
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      - "8889:8889"   # Prometheus metrics scrape
+    restart: unless-stopped
+    depends_on:
+      - jaeger
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.62
+    ports:
+      - "16686:16686" # Jaeger UI
+      - "14250:14250" # OTLP gRPC ingestor (used by collector)
+      - "14268:14268" # Jaeger HTTP receiver
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    restart: unless-stopped
+
+volumes:
+  otel-spans:
