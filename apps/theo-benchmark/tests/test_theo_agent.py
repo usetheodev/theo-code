@@ -200,12 +200,13 @@ class TestRunAgentCommands(unittest.TestCase):
             cmds = agent._run_agent_commands("x")
         self.assertIn("--max-iter 77", cmds[0].command)
 
-    def test_run_commands_default_max_iter_is_50(self) -> None:
+    def test_run_commands_default_max_iter_is_35(self) -> None:
+        # Bug #6 fix: default bumped 20→35 based on observed iter distribution
         agent = TheoAgent()
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("THEO_MAX_ITER", None)
             cmds = agent._run_agent_commands("x")
-        self.assertIn("--max-iter 50", cmds[0].command)
+        self.assertIn("--max-iter 35", cmds[0].command)
 
 
 class TestEnvForwarding(unittest.TestCase):

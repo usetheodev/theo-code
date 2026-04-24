@@ -27,9 +27,9 @@ processors:
         value: "${HOSTNAME}"
 
 exporters:
-  # Visual UI
+  # Visual UI — bug #5 fix: jaeger 2.x accepts OTLP gRPC on internal :4317
   otlp/jaeger:
-    endpoint: jaeger:14250
+    endpoint: jaeger:4317
     tls:
       insecure: true
 

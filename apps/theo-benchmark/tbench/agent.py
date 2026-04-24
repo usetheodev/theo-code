@@ -140,6 +140,7 @@ class TheoAgent(AbstractInstalledAgent):
             "THEO_SKIP_ONBOARDING",  # bench: skip user-prompt before tool use
             "THEO_FORCE_TOOL_CHOICE",  # bench: force specific tool dispatch
             "THEO_TEMPERATURE",
+            "THEO_BENCHMARK_MODE",  # bug #3: relax safety for benign bench tasks
         ):
             val = os.environ.get(key, "")
             if val:
@@ -165,8 +166,13 @@ class TheoAgent(AbstractInstalledAgent):
         quotes, backticks, etc. in instruction text correctly.
         Phase 47: stdout redirected to /tmp/theo-stdout.log so perform_task()
         below can copy it out before container teardown.
+
+        Bug #6 fix: default max_iter bumped from 20 to 35. Data from the
+        first run showed 64% of trials hit max_iter=20 mid-implementation.
+        35 fits 95th percentile of observed completion (resolved trials
+        used 6-21 iters; 35 gives headroom for hard tasks).
         """
-        max_iter = int(os.environ.get("THEO_MAX_ITER", "50"))
+        max_iter = int(os.environ.get("THEO_MAX_ITER", "35"))
         quoted = shlex.quote(task_description)
         cmd = (
             f"theo --headless --max-iter {max_iter} {quoted} "

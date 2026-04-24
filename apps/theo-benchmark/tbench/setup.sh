@@ -37,23 +37,35 @@ __theo_setup() {
     fi
 
     # Method 1: pre-built binary from URL (fastest, default)
+    # Bug #7 fix: retry with exponential backoff. 3 trials (qemu-alpine-ssh,
+    # qemu-startup, cron-broken-network) failed because the container had
+    # transient network setup delay and curl 1-shot timed out. Retry covers it.
     if [ -n "$THEO_BIN_URL" ]; then
-        echo "[theo-setup] Downloading from $THEO_BIN_URL"
-        if curl -fsSL --max-time 60 "$THEO_BIN_URL" \
-               -o /usr/local/bin/theo 2>/dev/null; then
-            chmod +x /usr/local/bin/theo
-            # Verify it runs (catches glibc mismatch)
-            if /usr/local/bin/theo --version >/dev/null 2>&1; then
-                echo "[theo-setup] Installed from URL: $(/usr/local/bin/theo --version)"
-                return 0
+        echo "[theo-setup] Downloading from $THEO_BIN_URL (with retries)"
+        local attempt=0
+        local backoff=2
+        while [ $attempt -lt 5 ]; do
+            attempt=$((attempt + 1))
+            if curl -fsSL --max-time 60 --connect-timeout 10 \
+                   "$THEO_BIN_URL" -o /usr/local/bin/theo 2>/tmp/theo-curl-err.log; then
+                chmod +x /usr/local/bin/theo
+                if /usr/local/bin/theo --version >/dev/null 2>&1; then
+                    echo "[theo-setup] Installed from URL on attempt $attempt: $(/usr/local/bin/theo --version)"
+                    return 0
+                else
+                    echo "[theo-setup] Binary downloaded (attempt $attempt) but FAILED to run — glibc mismatch:"
+                    ldd /usr/local/bin/theo 2>&1 | head -5
+                    rm -f /usr/local/bin/theo
+                    return 1   # glibc mismatch is permanent — don't retry
+                fi
             else
-                echo "[theo-setup] Binary downloaded but FAILED to run — glibc mismatch"
-                ldd /usr/local/bin/theo 2>&1 | head -5
-                rm -f /usr/local/bin/theo
+                echo "[theo-setup] curl attempt $attempt/5 failed:"
+                cat /tmp/theo-curl-err.log 2>/dev/null | head -3
+                sleep "$backoff"
+                backoff=$((backoff * 2))
             fi
-        else
-            echo "[theo-setup] HTTP download failed from $THEO_BIN_URL"
-        fi
+        done
+        echo "[theo-setup] all 5 HTTP attempts failed — falling through"
     fi
 
     # Method 2: copy from mounted volume (for local dev)

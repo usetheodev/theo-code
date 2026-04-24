@@ -9,15 +9,19 @@
 #   ... run benchmarks ...
 #   docker compose -f apps/theo-benchmark/otlp/docker-compose.yml down
 
-version: "3.8"
-
 services:
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.110.0
+    # Run as root so the file exporter can write to the bind-mounted log dir
+    # (bug #4: collector image runs as user 10001 by default — can't write
+    # /var/log/otel/spans.jsonl in a host-bind volume without matching uid).
+    user: "0:0"
     command: ["--config=/etc/otel/config.yaml"]
     volumes:
       - ./collector-config.yaml:/etc/otel/config.yaml:ro
-      - otel-spans:/var/log/otel
+      # bug #4 fix: bind-mount instead of named volume, with permissive perms
+      # set by an init step in run-all.sh (`mkdir -p /var/log/otel && chmod 777`).
+      - /var/log/otel:/var/log/otel
     ports:
       - "4317:4317"   # OTLP gRPC
       - "4318:4318"   # OTLP HTTP
@@ -28,13 +32,14 @@ services:
 
   jaeger:
     image: jaegertracing/all-in-one:latest
+    # bug #5 fix: jaeger 2.x default OTLP gRPC receiver is on 4317 inside
+    # the container. We expose only the UI port externally; the collector
+    # talks to it over the docker network on the internal port. We rename
+    # the internal target in collector-config.yaml from jaeger:14250 to
+    # jaeger:4317 (the OTLP receiver), and DON'T publish 4317 on the host
+    # to avoid colliding with the otel-collector's own 4317.
     ports:
       - "16686:16686" # Jaeger UI
-      - "14250:14250" # OTLP gRPC ingestor (used by collector)
-      - "14268:14268" # Jaeger HTTP receiver
     environment:
       - COLLECTOR_OTLP_ENABLED=true
     restart: unless-stopped
-
-volumes:
-  otel-spans:

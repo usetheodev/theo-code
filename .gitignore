@@ -309,3 +309,4 @@ evolution-output/
 # Code-wiki stays tracked (deterministic from source) — explicit allow
 !.theo/wiki/code/
 .theo/secrets/
+.theo/bench-data/
