@@ -327,6 +327,30 @@ def main() -> int:
     )
     out_path.write_text(json.dumps(report, indent=2))
 
+    # SOTA report (Phase 64) — build_report integration
+    try:
+        _bench_root = Path(__file__).resolve().parents[1]
+        if str(_bench_root) not in sys.path:
+            sys.path.insert(0, str(_bench_root))
+        from analysis.report_builder import build_report, report_to_markdown
+
+        # Extract headless dicts from results — the raw JSON parsed from
+        # theo --headless stdout, stored under the "headless" key.
+        sota_results = [
+            r["headless"] for r in results
+            if r.get("headless") is not None
+        ]
+        if sota_results:
+            sota_report = build_report(sota_results, "smoke", manifest=None)
+            sota_json_path = out_path.with_suffix(".sota.json")
+            sota_md_path = out_path.with_suffix(".sota.md")
+            sota_json_path.write_text(json.dumps(sota_report, indent=2))
+            sota_md_path.write_text(report_to_markdown(sota_report))
+            print(f"  SOTA report → {sota_json_path}")
+            print(f"  SOTA report → {sota_md_path}")
+    except Exception as _sota_err:
+        print(f"  SOTA report SKIPPED: {_sota_err}", file=sys.stderr)
+
     print_summary(report, results)
     print(f"  report → {out_path}")
 

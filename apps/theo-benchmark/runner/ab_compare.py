@@ -239,7 +239,7 @@ def compute_pair_stats(
     ]
     dur_ci = bootstrap_paired_diff_ci(dur_diffs)
 
-    return {
+    result = {
         "variant_a": variant_a,
         "variant_b": variant_b,
         "n_paired": len(common_ids),
@@ -254,6 +254,28 @@ def compute_pair_stats(
         "iter_diff": iter_ci,
         "duration_diff_ms": dur_ci,
     }
+
+    # Phase 64 — SOTA paired metrics (v4 fields)
+    try:
+        sota_paired_fields = [
+            ("context_waste_ratio", "context_waste_ratio_diff"),
+            ("convergence_rate", "convergence_rate_diff"),
+            ("doom_loop_frequency", "doom_loop_frequency_diff"),
+            ("cache_hit_rate", "cache_hit_rate_diff"),
+            ("time_to_first_tool_ms", "time_to_first_tool_ms_diff"),
+        ]
+        for field_name, result_key in sota_paired_fields:
+            diffs = [
+                float(ra.get(field_name, 0) or 0) - float(rb.get(field_name, 0) or 0)
+                for ra, rb in zip(a_recs, b_recs)
+            ]
+            # Only include if at least one non-zero value exists
+            if any(d != 0.0 for d in diffs):
+                result[result_key] = bootstrap_paired_diff_ci(diffs)
+    except Exception:
+        pass  # SOTA metrics must not break existing flow
+
+    return result
 
 
 def choose_recommendation(pair_stats: list[dict], significance: float = 0.05) -> str:
@@ -431,6 +453,32 @@ def render_comparison_md(
                 cells.append("FAIL")
         lines.append(f"| `{tid}` | " + " | ".join(cells) + " |")
     lines.append("")
+    # Phase 64 — SOTA paired metrics table (when available)
+    sota_keys = [
+        ("context_waste_ratio_diff", "Context waste ratio"),
+        ("convergence_rate_diff", "Convergence rate"),
+        ("doom_loop_frequency_diff", "Doom loop frequency"),
+        ("cache_hit_rate_diff", "Cache hit rate"),
+        ("time_to_first_tool_ms_diff", "Time to first tool (ms)"),
+    ]
+    any_sota = any(ps.get(k) for ps in pair_stats for k, _ in sota_keys)
+    if any_sota:
+        lines.append("## SOTA Paired Metrics (Bootstrap 95% CI)")
+        lines.append("")
+        lines.append("| Pair | Metric | Mean diff | 95% CI |")
+        lines.append("|---|---|---:|---|")
+        for ps in pair_stats:
+            pair_label = f"`{ps['variant_a']}` vs `{ps['variant_b']}`"
+            for key, label in sota_keys:
+                ci = ps.get(key)
+                if ci is None:
+                    continue
+                lines.append(
+                    f"| {pair_label} | {label} | "
+                    f"{ci['mean']:+.4f} | [{ci['ci_low']:+.4f}, {ci['ci_high']:+.4f}] |"
+                )
+        lines.append("")
+
     lines.append("## Recommendation")
     lines.append("")
     lines.append(choose_recommendation(pair_stats))

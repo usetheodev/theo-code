@@ -108,6 +108,30 @@ def main(argv: list[str] | None = None) -> int:
     print(f"[swebench-post] {n} instances, {resolved} resolved "
           f"({summary['resolved_rate']*100:.1f}%), ${total_cost:.2f} total cost"
           + (" (graded)" if graded else " (patches only)"))
+
+    # SOTA report (Phase 64) — build_report integration
+    try:
+        from analysis.report_builder import build_report, report_to_markdown
+
+        # Re-read all per-instance records just written to output_dir
+        sota_results = []
+        for f in args.output_dir.glob("*.json"):
+            if f.name in ("summary.json", "manifest.json"):
+                continue
+            try:
+                sota_results.append(json.loads(f.read_text()))
+            except Exception:
+                continue
+        if sota_results:
+            sota_report = build_report(sota_results, "swebench-lite", manifest=None)
+            sota_json = args.output_dir / "sota_report.json"
+            sota_md = args.output_dir / "sota_report.md"
+            sota_json.write_text(json.dumps(sota_report, indent=2))
+            sota_md.write_text(report_to_markdown(sota_report))
+            print(f"[swebench-post] SOTA report → {sota_json}")
+    except Exception as _e:
+        print(f"[swebench-post] SOTA report SKIPPED: {_e}", file=sys.stderr)
+
     return 0
 
 

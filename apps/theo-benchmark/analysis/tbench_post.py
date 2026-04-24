@@ -166,6 +166,33 @@ def main(argv: list[str] | None = None) -> int:
     summary_path.write_text(json.dumps(summary, indent=2))
     print(f"[{args.bench_name}-post] {n} tasks, {passed} passed ({summary['pass_rate']*100:.1f}%), "
           f"${total_cost:.2f} total cost")
+
+    # SOTA report (Phase 64) — build_report integration
+    try:
+        from analysis.report_builder import build_report, report_to_markdown
+
+        # Re-read all per-task records just written to output_dir
+        sota_results = []
+        for f in args.output_dir.glob("*.json"):
+            if f.name in ("summary.json", "manifest.json"):
+                continue
+            try:
+                sota_results.append(json.loads(f.read_text()))
+            except Exception:
+                continue
+        if sota_results:
+            sota_report = build_report(
+                sota_results, args.bench_name, manifest=None,
+            )
+            sota_json = args.output_dir / "sota_report.json"
+            sota_md = args.output_dir / "sota_report.md"
+            sota_json.write_text(json.dumps(sota_report, indent=2))
+            sota_md.write_text(report_to_markdown(sota_report))
+            print(f"[{args.bench_name}-post] SOTA report → {sota_json}")
+    except Exception as _e:
+        print(f"[{args.bench_name}-post] SOTA report SKIPPED: {_e}",
+              file=sys.stderr)
+
     return 0
 
 
