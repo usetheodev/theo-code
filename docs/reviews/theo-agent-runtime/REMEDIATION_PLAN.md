@@ -1242,3 +1242,11 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 | T4.5 subagent/mod.rs split — terceira etapa | **DONE (parcial)** | +6 helpers em `spawn_helpers.rs`: `run_agent_with_timeout` (free fn generica sobre Future — colapsa o branch duplicado tokio::select! vs tokio::time::timeout, ~40 LOC → 8), `register_cancellation_or_bail` (child token + pre-run cancel-check como `Result<Option<Token>, AgentResult>`), `enforce_max_depth` (`Result<(), AgentResult>`), `take_pending_resume_context` (Mutex snapshot + take), `snapshot_pre_run` (auto-snapshot do workdir), `build_prefixed_sub_bus` (sub-EventBus + PrefixedEventForwarder). `subagent/mod.rs`: 1477 → **1418 LOC** (-59 esta iter; **-477 desde baseline 1895, -25%**). |
 
 **Validacao:** 1132 unit + 96 integration = **1228 tests passando, 0 falhas**.
+
+### Iteracao 25 (2026-04-24) — Fase 4: T4.6 pilot.rs split
+
+| Task | Status | Notas |
+|---|---|---|
+| T4.6 pilot split — primeira etapa | **DONE (parcial)** | `pilot.rs` (1218 LOC) convertido para modulo `pilot/` com child `run_loop.rs`. 7 helpers extraidos: `check_core_guards` (interrupt/max_calls/rate_limit/CB — compartilhado por ambos os run-loops), `check_pre_loop_guards` (core + fix_plan), `build_iteration_bus` (EventBus + EventForwarder), `record_exchange` (session history rotation), `record_evolution_attempt` (outcome classification + strategy + reflection injection), `publish_loop_summary` (RunStateChanged event), `track_tokens_and_files` (com filtro defensivo de empty strings). `run()`: 158 LOC → 42 LOC. `run_from_roadmap()`: 100 LOC → 45 LOC. DRY: eliminada duplicacao de loop-setup entre os dois run-loops. `pilot/mod.rs`: 1218 → **1062 LOC** (-156 esta iter, -12.8% vs baseline). `pilot/run_loop.rs`: novo, 160 LOC. |
+
+**Validacao:** 1132 unit + 96 integration = **1228 tests passando, 0 falhas**; 24/24 pilot unit tests.

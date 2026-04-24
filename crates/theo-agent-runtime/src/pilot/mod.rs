@@ -6,6 +6,8 @@
 //!
 //! Pilot is a pure addition — zero changes to RunEngine or AgentLoop.
 
+mod run_loop;
+
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -334,62 +336,27 @@ impl PilotLoop {
 
     /// Run the autonomous pilot loop.
     pub async fn run(&mut self) -> PilotResult {
-        // Record initial git SHA
         self.last_git_sha = get_git_sha(&self.project_dir).await;
 
         loop {
-            // Check interrupt
-            if self.interrupted.load(std::sync::atomic::Ordering::Acquire) {
-                return self.build_result(ExitReason::UserInterrupt);
+            if let Some(reason) = self.check_pre_loop_guards() {
+                return self.build_result(reason);
             }
 
-            // Check max calls
-            if self.pilot_config.max_total_calls > 0
-                && self.loop_count >= self.pilot_config.max_total_calls
-            {
-                return self.build_result(ExitReason::MaxCallsReached);
-            }
-
-            // Check rate limit
-            if !self.check_rate_limit() {
-                return self.build_result(ExitReason::RateLimitExhausted);
-            }
-
-            // Check circuit breaker
-            if let Some(reason) = self.check_circuit_breaker() {
-                return self.build_result(ExitReason::CircuitBreakerOpen(reason));
-            }
-
-            // Check fix plan
             let (completed, total) = parse_fix_plan(&self.project_dir);
-            if total > 0 && completed == total {
-                return self.build_result(ExitReason::FixPlanComplete);
-            }
-
             self.loop_count += 1;
 
-            // Record git SHA before
             let sha_before = get_git_sha(&self.project_dir).await;
-
-            // Build the loop prompt
             let task = self.build_loop_prompt(completed, total);
 
-            // Create fresh EventBus per iteration (isolation)
-            let loop_bus = Arc::new(EventBus::new());
-            // Forward events to parent bus for rendering
-            let forwarder = Arc::new(EventForwarder {
-                target: self.parent_event_bus.clone(),
-            });
-            loop_bus.subscribe(forwarder);
-
-            // Create fresh agent per iteration with GRAPHCTX
+            // Fresh per-iteration event bus + agent (isolation).
+            let loop_bus = self.build_iteration_bus();
             let registry = create_default_registry();
             let mut agent = AgentLoop::new(self.agent_config.clone(), registry);
             if let Some(ref gc) = self.graph_context {
                 agent = agent.with_graph_context(gc.clone());
             }
 
-            // Execute
             let result = agent
                 .run_with_history(
                     &task,
@@ -399,94 +366,15 @@ impl PilotLoop {
                 )
                 .await;
 
-            // Track tokens
-            self.total_tokens += result.tokens_used;
+            self.track_tokens_and_files(&result);
+            self.record_exchange(&task, &result);
 
-            // Track files
-            for file in &result.files_edited {
-                if !self.total_files_edited.contains(file) {
-                    self.total_files_edited.push(file.clone());
-                }
-            }
-
-            // Record exchange in session (promise is System, not in rotative history)
-            self.session_messages.push(Message::user(&task));
-            self.session_messages
-                .push(Message::assistant(&result.summary));
-            if self.session_messages.len() > MAX_SESSION_MESSAGES {
-                let excess = self.session_messages.len() - MAX_SESSION_MESSAGES;
-                self.session_messages.drain(..excess);
-            }
-
-            // Detect git progress
             let progress = detect_git_progress(&self.project_dir, &sha_before).await;
             self.last_git_sha = get_git_sha(&self.project_dir).await;
-
-            // Update counters based on result
             self.update_counters(&result, &progress);
+            self.record_evolution_attempt(&result);
+            self.publish_loop_summary(&result);
 
-            // Record attempt in evolution loop and generate reflection for next iteration
-            {
-                let outcome = if result.success {
-                    theo_domain::evolution::AttemptOutcome::Success
-                } else if result.files_edited.iter().any(|f| !f.is_empty()) {
-                    theo_domain::evolution::AttemptOutcome::Partial
-                } else {
-                    theo_domain::evolution::AttemptOutcome::Failure
-                };
-
-                let strategy = if self.loop_count <= 1 {
-                    theo_domain::retry_policy::CorrectionStrategy::RetryLocal
-                } else if let Some(r) = self.evolution.reflections().last() {
-                    r.recommended_strategy
-                } else {
-                    theo_domain::retry_policy::CorrectionStrategy::RetryLocal
-                };
-
-                self.evolution.record_attempt(
-                    strategy,
-                    outcome,
-                    result.files_edited.clone(),
-                    if result.success { None } else { Some(result.summary.clone()) },
-                    result.duration_ms,
-                    result.tokens_used,
-                );
-
-                // Generate reflection after failure and inject into session
-                if !result.success
-                    && let Some(reflection) = self.evolution.reflect() {
-                        self.session_messages.push(Message::system(format!(
-                            "## Evolution Reflection (after attempt {})\n\
-                             **What failed:** {}\n\
-                             **Why:** {}\n\
-                             **Change strategy to:** {} — {}\n",
-                            reflection.prior_attempt,
-                            reflection.what_failed,
-                            reflection.why_it_failed,
-                            reflection.recommended_strategy,
-                            reflection.what_to_change,
-                        )));
-                    }
-            }
-
-            // Publish loop summary for CLI display
-            self.parent_event_bus
-                .publish(theo_domain::event::DomainEvent::new(
-                    theo_domain::event::EventType::RunStateChanged,
-                    "pilot",
-                    serde_json::json!({
-                        "from": "Executing",
-                        "to": format!(
-                            "PilotLoopComplete:{}:{}:{}:{}",
-                            self.loop_count,
-                            result.files_edited.len(),
-                            result.tokens_used,
-                            result.iterations_used
-                        ),
-                    }),
-                ));
-
-            // Evaluate exit
             if let Some(reason) = self.evaluate_exit(&result) {
                 return self.build_result(reason);
             }
@@ -510,46 +398,18 @@ impl PilotLoop {
             return self.build_result(ExitReason::FixPlanComplete);
         }
 
-        // Record initial git SHA
         self.last_git_sha = get_git_sha(&self.project_dir).await;
 
         for task in &pending {
-            // Check interrupt
-            if self.interrupted.load(std::sync::atomic::Ordering::Acquire) {
-                return self.build_result(ExitReason::UserInterrupt);
-            }
-
-            // Check max calls
-            if self.pilot_config.max_total_calls > 0
-                && self.loop_count >= self.pilot_config.max_total_calls
-            {
-                return self.build_result(ExitReason::MaxCallsReached);
-            }
-
-            // Check rate limit
-            if !self.check_rate_limit() {
-                return self.build_result(ExitReason::RateLimitExhausted);
-            }
-
-            // Check circuit breaker
-            if let Some(reason) = self.check_circuit_breaker() {
-                return self.build_result(ExitReason::CircuitBreakerOpen(reason));
+            if let Some(reason) = self.check_core_guards() {
+                return self.build_result(reason);
             }
 
             self.loop_count += 1;
             let sha_before = get_git_sha(&self.project_dir).await;
-
-            // Build task prompt from roadmap task
             let task_prompt = task.to_agent_prompt();
 
-            // Create fresh EventBus per iteration
-            let loop_bus = Arc::new(EventBus::new());
-            let forwarder = Arc::new(EventForwarder {
-                target: self.parent_event_bus.clone(),
-            });
-            loop_bus.subscribe(forwarder);
-
-            // Execute with GRAPHCTX
+            let loop_bus = self.build_iteration_bus();
             let registry = create_default_registry();
             let mut agent = AgentLoop::new(self.agent_config.clone(), registry);
             if let Some(ref gc) = self.graph_context {
@@ -565,29 +425,13 @@ impl PilotLoop {
                 )
                 .await;
 
-            // Track
-            self.total_tokens += result.tokens_used;
-            for file in &result.files_edited {
-                if !file.is_empty() && !self.total_files_edited.contains(file) {
-                    self.total_files_edited.push(file.clone());
-                }
-            }
+            self.track_tokens_and_files(&result);
+            self.record_exchange(&task_prompt, &result);
 
-            // Session history
-            self.session_messages.push(Message::user(&task_prompt));
-            self.session_messages
-                .push(Message::assistant(&result.summary));
-            if self.session_messages.len() > MAX_SESSION_MESSAGES {
-                let excess = self.session_messages.len() - MAX_SESSION_MESSAGES;
-                self.session_messages.drain(..excess);
-            }
-
-            // Git progress
             let progress = detect_git_progress(&self.project_dir, &sha_before).await;
             self.last_git_sha = get_git_sha(&self.project_dir).await;
             self.update_counters(&result, &progress);
 
-            // Mark task completed in roadmap file
             if result.success {
                 let _ = roadmap::mark_task_completed(roadmap_path, task.number);
             }
