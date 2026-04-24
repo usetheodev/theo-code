@@ -72,29 +72,29 @@ pub struct SubAgentManager {
     /// legacy role-based API (`spawn`) is used. The registry is opt-in so
     /// existing call sites don't need updating until Phase 4.
     registry: Option<Arc<SubAgentRegistry>>,
-    /// Phase 10: optional persistence store. When Some, every spawn_with_spec
+    /// Optional persistence store. When Some, every spawn_with_spec
     /// creates a SubagentRun record (started → completed/failed/cancelled)
     /// and appends iteration events. None = no persistence (legacy).
     run_store: Option<Arc<crate::subagent_runs::FileSubagentRunStore>>,
-    /// Phase 5: optional global hooks dispatched at SubagentStart/SubagentStop.
+    /// Optional global hooks dispatched at SubagentStart/SubagentStop.
     hook_manager: Option<Arc<crate::lifecycle_hooks::HookManager>>,
-    /// Phase 6: optional cancellation tree. When Some, spawn_with_spec creates
+    /// Optional cancellation tree. When Some, spawn_with_spec creates
     /// a child token and bails out early if cancelled before the LLM call.
     cancellation: Option<Arc<crate::cancellation::CancellationTree>>,
-    /// Phase 9: optional checkpoint manager. When Some, snapshot the workdir
+    /// Optional checkpoint manager. When Some, snapshot the workdir
     /// once at the start of every spawn_with_spec (pre-mutation safety).
     checkpoint_manager: Option<Arc<crate::checkpoint::CheckpointManager>>,
-    /// Phase 11: optional worktree provider. When Some AND spec.isolation=="worktree",
+    /// Optional worktree provider. When Some AND spec.isolation=="worktree",
     /// spawn_with_spec creates an isolated worktree, runs there, and cleans up.
     worktree_provider: Option<Arc<theo_isolation::WorktreeProvider>>,
-    /// Phase 12: optional metrics collector. When Some, spawn_with_spec records
+    /// Optional metrics collector. When Some, spawn_with_spec records
     /// per-agent metrics via MetricsCollector::record_subagent_run.
     metrics: Option<Arc<crate::observability::metrics::MetricsCollector>>,
-    /// Phase 8: optional MCP registry. Filtered by spec.mcp_servers (allowlist)
+    /// Optional MCP registry. Filtered by spec.mcp_servers (allowlist)
     /// and the resulting hint is injected into the sub-agent's system prompt
     /// so the LLM is aware of MCP tools.
     mcp_registry: Option<Arc<theo_infra_mcp::McpRegistry>>,
-    /// Phase 17: optional MCP discovery cache. When Some AND
+    /// Optional MCP discovery cache. When Some AND
     /// `spec.mcp_servers` is non-empty, the cache is queried for discovered
     /// tools and the resulting prompt-hint advertises *concrete* tool
     /// names (not just the `mcp:<server>:<tool>` namespace).
@@ -137,7 +137,7 @@ impl SubAgentManager {
         }
     }
 
-    /// Phase 3: convenience — builds a default registry (with the 4 builtins).
+    /// Convenience — builds a default registry (with the 4 builtins).
     /// Drop-in replacement for `new()` that unlocks the spec-based API.
     pub fn with_builtins(
         config: AgentConfig,
@@ -152,20 +152,20 @@ impl SubAgentManager {
         )
     }
 
-    /// Phase 10: attach a persistence store for sub-agent runs.
+    /// Attach a persistence store for sub-agent runs.
     /// When set, every `spawn_with_spec` persists a `SubagentRun` record.
     pub fn with_run_store(mut self, store: Arc<crate::subagent_runs::FileSubagentRunStore>) -> Self {
         self.run_store = Some(store);
         self
     }
 
-    /// Phase 5: attach a global HookManager. Hooks fire at SubagentStart/Stop.
+    /// Attach a global HookManager. Hooks fire at SubagentStart/Stop.
     pub fn with_hooks(mut self, hooks: Arc<crate::lifecycle_hooks::HookManager>) -> Self {
         self.hook_manager = Some(hooks);
         self
     }
 
-    /// Phase 6: attach a cancellation tree. spawn_with_spec checks the token
+    /// Attach a cancellation tree. spawn_with_spec checks the token
     /// at start (after Started event) and aborts cleanly if cancelled.
     pub fn with_cancellation(
         mut self,
@@ -175,7 +175,7 @@ impl SubAgentManager {
         self
     }
 
-    /// Phase 9: attach a checkpoint manager. spawn_with_spec auto-snapshots
+    /// Attach a checkpoint manager. spawn_with_spec auto-snapshots
     /// the workdir BEFORE the agent loop runs (pre-mutation safety).
     pub fn with_checkpoint(
         mut self,
@@ -185,7 +185,7 @@ impl SubAgentManager {
         self
     }
 
-    /// Phase 11: attach a worktree provider. When spec.isolation == "worktree",
+    /// Attach a worktree provider. When spec.isolation == "worktree",
     /// spawn_with_spec creates an isolated git worktree, runs the sub-agent
     /// there, and removes the worktree on completion (per CleanupPolicy).
     pub fn with_worktree_provider(
@@ -196,7 +196,7 @@ impl SubAgentManager {
         self
     }
 
-    /// Phase 12: attach a metrics collector for per-agent breakdown (A4 gap).
+    /// Attach a metrics collector for per-agent breakdown.
     pub fn with_metrics(
         mut self,
         metrics: Arc<crate::observability::metrics::MetricsCollector>,
@@ -205,7 +205,7 @@ impl SubAgentManager {
         self
     }
 
-    /// Phase 8: attach an MCP registry. When spec.mcp_servers is non-empty,
+    /// Attach an MCP registry. When spec.mcp_servers is non-empty,
     /// the registry is filtered by the allowlist and a hint section is
     /// injected into the sub-agent's system prompt advertising the available
     /// `mcp:server:tool` namespace.
@@ -214,7 +214,7 @@ impl SubAgentManager {
         self
     }
 
-    /// Phase 17: attach a pre-discovery cache. When attached together with
+    /// Attach a pre-discovery cache. When attached together with
     /// the registry, sub-agents whose `mcp_servers` allowlist matches a
     /// cached server receive a richer system-prompt hint listing actual
     /// tool names instead of the bare namespace placeholder.

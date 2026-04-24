@@ -38,6 +38,9 @@ opentelemetry-semantic-conventions = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["test-util"] }
 tempfile.workspace = true
 proptest = { workspace = true }
+# T0.1 — snapshot-based characterization tests for run_engine event sequences.
+insta = { workspace = true }
+parking_lot = { workspace = true }
 # Phase 42 (otlp-exporter-plan) — InMemorySpanExporter for unit tests.
 # Only loaded when --features otel is on (cfg-gated tests).
 opentelemetry_sdk = { workspace = true, features = ["testing", "rt-tokio"] }

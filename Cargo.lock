@@ -7062,6 +7062,7 @@ dependencies = [
  "dashmap",
  "futures",
  "indexmap 2.14.0",
+ "insta",
  "libc",
  "notify",
  "notify-debouncer-mini",

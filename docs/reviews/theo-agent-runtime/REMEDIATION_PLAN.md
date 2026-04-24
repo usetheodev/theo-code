@@ -1011,3 +1011,25 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 **Validacao:** `cargo test -p theo-domain -p theo-agent-runtime` → 452 + 1112 = **1564 unit**, 88 integration, 0 falhas.
 
 **Nao feito nesta iteracao (proximas):** T0.1-T0.3 caracterizacao, T1.1 bwrap completo, T3.4 consolidar retry inline, T4.* split god-files, T5.1 RunMetadata sub-struct, T6.4 batch streaming deltas, T7.* (security/resilience/meta-tools/bench), T8.1 completar phase sweep nos ~210 restantes.
+
+### Iteracao 7 (2026-04-24) — Characterization tests + phase sweep subagent
+
+| Task | Status | Notas |
+|---|---|---|
+| T0.1 caracterizacao | **DONE (parcial — 8/15)** | Novo `tests/run_engine_characterization.rs` com 8 cenarios snapshot via `insta`: task happy path, task failure path, invalid transition, tool call dispatch, budget exceeded, cancellation propagation, task+tool combined, event bus bounded rotation. Cada cenario snapshota a sequencia de `EventType`s em YAML inline — qualquer split estrutural que altere a ordem/tipos falha o teste. Os 7 cenarios restantes (context overflow, LLM retry, done gate Gate 1/2, delegate_task, skill, batch, resume replay) exigem HTTP mock de LLM nao disponivel no crate e ficam para iteracao dedicada com wiremock/axum. |
+| T8.1 phase sweep subagent | **DONE (parcial)** | 17 docstrings `/// Phase N:` em `subagent/mod.rs` limpos para prosa. Phase tags: 210 → 193 (-17 esta iter; -117 total). Restantes estao em blocos de implementacao + referencias a PLAN_* — cleanup direcionado via ADR e trabalho futuro. |
+
+**Baseline → atual (por metrica, desde Iteracao 0):**
+- `.expect/.unwrap/panic!`: 1071 → 1017
+- silent-swallow: 61 → 2
+- `std::env::var`: 25 → 6 (todos em bin/)
+- `std::process::Command` producao: 2 → 1
+- phase tags: 310 → **193** (-117)
+
+**Validacao:**
+- `theo-domain`: 452 passing
+- `theo-agent-runtime` lib: 1112 passing
+- `theo-agent-runtime` integration: 88 + **8 novos characterization snapshots** = 96 passing
+- **Total: 1660 tests, 0 falhas.**
+
+**Nao feito nesta iteracao (proximas):** T0.1 restante (7 cenarios LLM), T0.2 caracterizacao do subagent, T0.3 coverage baseline, T1.1 bwrap, T3.4 retry inline, T4.* split god-files, T5.1 RunMetadata, T6.4 batch streaming, T7.* security/resilience/bench tests.
