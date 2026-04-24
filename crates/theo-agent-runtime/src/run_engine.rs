@@ -1105,8 +1105,7 @@ impl AgentRunEngine {
             //   - any other value     → passed through verbatim (string)
             // Skipped silently when no tools are exposed for this turn.
             if !tool_defs.is_empty()
-                && let Ok(forced) = std::env::var("THEO_FORCE_TOOL_CHOICE")
-                && !forced.is_empty()
+                && let Some(forced) = theo_domain::environment::theo_var("THEO_FORCE_TOOL_CHOICE")
             {
                 let normalized = match forced.as_str() {
                     "any" => "required".to_string(),
@@ -1119,7 +1118,7 @@ impl AgentRunEngine {
                     }
                     other => other.to_string(),
                 };
-                if std::env::var("THEO_DEBUG_CODEX").is_ok() {
+                if theo_domain::environment::bool_var("THEO_DEBUG_CODEX", false) {
                     eprintln!(
                         "[theo] THEO_FORCE_TOOL_CHOICE active: {} → {}",
                         forced, normalized

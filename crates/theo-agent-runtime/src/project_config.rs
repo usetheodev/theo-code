@@ -175,28 +175,25 @@ impl ProjectConfig {
     /// Variables: THEO_MODEL, THEO_TEMPERATURE, THEO_MAX_ITERATIONS, THEO_MAX_TOKENS,
     /// THEO_REASONING_EFFORT, THEO_DOOM_LOOP_THRESHOLD.
     pub fn with_env_overrides(mut self) -> Self {
-        if let Ok(v) = std::env::var("THEO_MODEL") {
+        use theo_domain::environment::{parse_var, theo_var};
+        if let Some(v) = theo_var("THEO_MODEL") {
             self.model = Some(v);
         }
-        if let Ok(v) = std::env::var("THEO_TEMPERATURE")
-            && let Ok(t) = v.parse::<f32>() {
-                self.temperature = Some(t);
-            }
-        if let Ok(v) = std::env::var("THEO_MAX_ITERATIONS")
-            && let Ok(n) = v.parse::<usize>() {
-                self.max_iterations = Some(n);
-            }
-        if let Ok(v) = std::env::var("THEO_MAX_TOKENS")
-            && let Ok(n) = v.parse::<u32>() {
-                self.max_tokens = Some(n);
-            }
-        if let Ok(v) = std::env::var("THEO_REASONING_EFFORT") {
+        if let Some(t) = parse_var::<f32>("THEO_TEMPERATURE") {
+            self.temperature = Some(t);
+        }
+        if let Some(n) = parse_var::<usize>("THEO_MAX_ITERATIONS") {
+            self.max_iterations = Some(n);
+        }
+        if let Some(n) = parse_var::<u32>("THEO_MAX_TOKENS") {
+            self.max_tokens = Some(n);
+        }
+        if let Some(v) = theo_var("THEO_REASONING_EFFORT") {
             self.reasoning_effort = Some(v);
         }
-        if let Ok(v) = std::env::var("THEO_DOOM_LOOP_THRESHOLD")
-            && let Ok(n) = v.parse::<usize>() {
-                self.doom_loop_threshold = Some(n);
-            }
+        if let Some(n) = parse_var::<usize>("THEO_DOOM_LOOP_THRESHOLD") {
+            self.doom_loop_threshold = Some(n);
+        }
         self
     }
 }

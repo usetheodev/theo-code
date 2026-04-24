@@ -92,26 +92,34 @@ impl ToolCallManager {
         registry: &ToolRegistry,
         ctx: &ToolContext,
     ) -> Result<ToolResultRecord, ToolCallManagerError> {
-        // 0. Capability check (if gate is set)
-        {
-            let records = self.records.lock();
-            if let Some(record) = records.get(call_id)
-                && let Some(gate) = &self.capability_gate {
-                    // Determine category from registry, default to Utility
-                    let category = registry
-                        .get(&record.tool_name)
-                        .map(|t| t.category())
-                        .unwrap_or(ToolCategory::Utility);
-                    gate.check_tool(&record.tool_name, category)?;
-                }
-        }
+        // T6.5 — lock discipline:
+        //   Entry:  single `records` lock does capability check +
+        //           Queued→Dispatched→Running transitions + snapshot of
+        //           tool_name/input/raw_input for the duration of the
+        //           dispatch. Publishes ToolCallDispatched inside the
+        //           lock (dispatch_event does not touch `records`).
+        //   Await:  lock released; tool executes concurrent-safely.
+        //   Exit:   single `records` lock for Running→terminal +
+        //           completed_at. Single `results` insert. No re-acquire
+        //           to re-read tool_name — we cached it on entry.
+        //
+        // Previous implementation took 6 locks total; this path takes 3
+        // on the happy case (entry on records, exit on records, single
+        // insert on results).
 
-        // 1. Transition Queued → Dispatched (under lock)
-        let llm_call = {
+        let (llm_call, tool_name, raw_input) = {
             let mut records = self.records.lock();
             let record = records
                 .get_mut(call_id)
                 .ok_or_else(|| ToolCallManagerError::CallNotFound(call_id.as_str().to_string()))?;
+
+            if let Some(gate) = &self.capability_gate {
+                let category = registry
+                    .get(&record.tool_name)
+                    .map(|t| t.category())
+                    .unwrap_or(ToolCategory::Utility);
+                gate.check_tool(&record.tool_name, category)?;
+            }
 
             transition_record(record, ToolCallState::Dispatched)?;
 
@@ -132,18 +140,20 @@ impl ToolCallManager {
                 }),
             ));
 
-            // 2. Transition Dispatched → Running
             transition_record(record, ToolCallState::Running)?;
             record.started_at = Some(now_millis());
 
-            // Build the LLM ToolCall for tool_bridge
-            ToolCall::new(
-                call_id.as_str(),
-                &record.tool_name,
-                record.input.to_string(),
+            (
+                ToolCall::new(
+                    call_id.as_str(),
+                    &record.tool_name,
+                    record.input.to_string(),
+                ),
+                record.tool_name.clone(),
+                record.input.clone(),
             )
         };
-        // Lock is released here — safe to await
+        // Lock is released here — safe to await.
 
         // 3. Execute tool via tool_bridge (no lock held)
         let start = std::time::Instant::now();
@@ -160,7 +170,7 @@ impl ToolCallManager {
         let output = message.content.clone().unwrap_or_default();
         let error = if success { None } else { Some(output.clone()) };
 
-        // 5. Transition Running → final state (under lock)
+        // 5. Transition Running → final state (under lock).
         {
             let mut records = self.records.lock();
             if let Some(record) = records.get_mut(call_id) {
@@ -169,7 +179,7 @@ impl ToolCallManager {
             }
         }
 
-        // 6. Store result (Invariant 3: result references call_id)
+        // 6. Store result (Invariant 3: result references call_id).
         let result = ToolResultRecord {
             call_id: call_id.clone(),
             output,
@@ -177,29 +187,13 @@ impl ToolCallManager {
             error,
             duration_ms,
         };
-
         self.results
             .lock()
-                        .insert(call_id.clone(), result.clone());
+            .insert(call_id.clone(), result.clone());
 
-        // 7. Publish completion event (enriched with tool details)
-        let tool_name = {
-            self.records
-                .lock()
-                                .get(call_id)
-                .map(|r| r.tool_name.clone())
-                .unwrap_or_default()
-        };
-        let input_args = {
-            let raw = self
-                .records
-                .lock()
-                                .get(call_id)
-                .map(|r| r.input.clone())
-                .unwrap_or(serde_json::Value::Null);
-            // Truncate large string fields to keep event payload reasonable
-            truncate_input_for_event(raw)
-        };
+        // 7. Publish completion event using the cached snapshot —
+        // no re-acquire of `records` (T6.5).
+        let input_args = truncate_input_for_event(raw_input);
         // Truncate output preview for events (avoid huge payloads).
         let output_preview = theo_domain::prompt_sanitizer::char_boundary_truncate(
             &result.output,

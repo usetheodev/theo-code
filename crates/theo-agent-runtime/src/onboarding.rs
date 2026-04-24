@@ -73,10 +73,9 @@ pub fn user_profile_path(memory_dir: &Path) -> PathBuf {
 /// the Q&A and execute the prompt literally. This is the "headless-direct"
 /// mode the plan described.
 pub fn needs_bootstrap(memory_dir: &Path) -> bool {
-    if std::env::var("THEO_SKIP_ONBOARDING")
-        .map(|v| v != "0" && v.to_ascii_lowercase() != "false")
-        .unwrap_or(false)
-    {
+    // T3.3: env reads funnel through theo_domain::environment for
+    // uniform truthy/falsey semantics.
+    if theo_domain::environment::bool_var("THEO_SKIP_ONBOARDING", false) {
         return false;
     }
     let path = user_profile_path(memory_dir);

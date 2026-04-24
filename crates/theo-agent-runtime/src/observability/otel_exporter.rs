@@ -49,19 +49,16 @@ impl OtlpExporterConfig {
     /// `OTLP_ENDPOINT` is absent — this is the operator's opt-out path
     /// and the caller (`init_otlp_exporter`) becomes a no-op.
     pub fn from_env() -> Option<Self> {
-        let endpoint = std::env::var("OTLP_ENDPOINT").ok()?;
-        if endpoint.trim().is_empty() {
-            return None;
-        }
-        let protocol = parse_protocol(std::env::var("OTLP_PROTOCOL").ok().as_deref());
-        let timeout = parse_timeout(std::env::var("OTLP_TIMEOUT_SECS").ok().as_deref());
-        let headers = parse_headers(&std::env::var("OTLP_HEADERS").unwrap_or_default());
-        let service_name =
-            std::env::var("OTLP_SERVICE_NAME").unwrap_or_else(|_| DEFAULT_SERVICE_NAME.into());
-        let batch_size = std::env::var("OTLP_BATCH_SIZE")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(DEFAULT_BATCH_SIZE);
+        use theo_domain::environment::{parse_var, theo_var};
+        let endpoint = theo_var("OTLP_ENDPOINT")?;
+        let protocol_raw = theo_var("OTLP_PROTOCOL");
+        let protocol = parse_protocol(protocol_raw.as_deref());
+        let timeout_raw = theo_var("OTLP_TIMEOUT_SECS");
+        let timeout = parse_timeout(timeout_raw.as_deref());
+        let headers = parse_headers(theo_var("OTLP_HEADERS").as_deref().unwrap_or(""));
+        let service_name = theo_var("OTLP_SERVICE_NAME")
+            .unwrap_or_else(|| DEFAULT_SERVICE_NAME.into());
+        let batch_size = parse_var::<usize>("OTLP_BATCH_SIZE").unwrap_or(DEFAULT_BATCH_SIZE);
         Some(Self {
             endpoint,
             protocol,

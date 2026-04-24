@@ -11,6 +11,13 @@ use std::path::{Path, PathBuf};
 
 use crate::session_tree::{SessionEntry, SessionTree, SessionTreeError};
 
+/// Sunset date (YYYY-MM-DD) for the `.theo/wiki/episodes/` legacy read
+/// fallback. After this date the dual-path merge logic in
+/// [`StateManager::load_episode_summaries`] should be removed — the
+/// memory/wiki namespace split (decision: meeting 20260420-221947 #4)
+/// will have had a full year of migration runway.
+pub const WIKI_LEGACY_DEPRECATION_DATE: &str = "2026-10-20";
+
 /// Orchestrates file-backed state persistence.
 ///
 /// Wraps `SessionTree` and provides a higher-level interface for the agent
@@ -103,6 +110,13 @@ impl StateManager {
     /// Legacy fallback: `.theo/wiki/episodes/` (earlier location). Both are scanned
     /// and merged; the memory path wins on duplicate `summary_id`. Returns an
     /// empty vec if no episodes exist or on any error.
+    ///
+    /// **T8.2 — legacy wiki/ deprecation schedule:** the `.theo/wiki/episodes/`
+    /// fallback is retained for backward compatibility with workspaces that
+    /// predate the memory/wiki split. Remove the legacy read path on or
+    /// after [`WIKI_LEGACY_DEPRECATION_DATE`]. At removal time, also delete
+    /// the dual-path dedup logic below and the `test_p1_legacy_wiki_*` /
+    /// `test_p1_memory_path_wins_*` tests.
     pub fn load_episode_summaries(
         project_dir: &Path,
     ) -> Vec<theo_domain::episode::EpisodeSummary> {

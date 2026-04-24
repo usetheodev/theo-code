@@ -4,6 +4,7 @@ pub mod budget;
 pub mod capability;
 pub mod clock;
 pub mod code_intel;
+pub mod environment;
 pub mod episode;
 pub mod error;
 pub mod error_class;

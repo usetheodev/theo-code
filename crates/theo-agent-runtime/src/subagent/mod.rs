@@ -587,9 +587,8 @@ impl SubAgentManager {
             if !spec.mcp_servers.is_empty()
                 && let (Some(cache), Some(global)) = (&self.mcp_discovery, &self.mcp_registry)
             {
-                let auto_discovery_enabled = std::env::var("THEO_MCP_AUTO_DISCOVERY")
-                    .map(|v| v != "0" && v.to_ascii_lowercase() != "false")
-                    .unwrap_or(true);
+                let auto_discovery_enabled =
+                    theo_domain::environment::bool_var("THEO_MCP_AUTO_DISCOVERY", true);
                 if auto_discovery_enabled && needs_discovery(cache, &spec.mcp_servers) {
                     let _report = cache
                         .discover_filtered(

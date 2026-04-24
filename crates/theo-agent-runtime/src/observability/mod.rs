@@ -143,7 +143,8 @@ pub fn install_observability(
     event_bus.subscribe(Arc::new(loop_detector::LoopDetectingListener::new(detector)));
     #[cfg(feature = "otel")]
     {
-        let svc = std::env::var("OTLP_SERVICE_NAME").unwrap_or_else(|_| "theo".to_string());
+        let svc = theo_domain::environment::theo_var("OTLP_SERVICE_NAME")
+            .unwrap_or_else(|| "theo".to_string());
         event_bus.subscribe(Arc::new(otel_listener::OtelExportingListener::new(svc)));
     }
     pipeline

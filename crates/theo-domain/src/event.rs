@@ -114,6 +114,16 @@ pub enum EventType {
     ///   "blocked_by": Option<String>,     // first blocker id (if any)
     /// }
     HandoffEvaluated,
+
+    /// T1.3 supply-chain audit: emitted when a plugin directory is loaded.
+    /// Payload: {
+    ///   "name": String,           // manifest.name
+    ///   "dir": String,             // plugin directory (display-only)
+    ///   "manifest_sha256": String, // sha256 hex of plugin.toml
+    ///   "tool_count": u64,
+    ///   "hook_count": u64,
+    /// }
+    PluginLoaded,
 }
 
 /// Scope of a learned constraint.
@@ -273,6 +283,8 @@ impl EventType {
             EventType::SubagentCompleted => EventKind::Lifecycle,
             // Phase 18 (sota-gaps): handoff guardrail audit trail
             EventType::HandoffEvaluated => EventKind::Lifecycle,
+            // T1.3 supply-chain audit: plugin load with sha256 hash
+            EventType::PluginLoaded => EventKind::Lifecycle,
         }
     }
 }
@@ -305,12 +317,13 @@ impl std::fmt::Display for EventType {
             EventType::SubagentStarted => write!(f, "SubagentStarted"),
             EventType::SubagentCompleted => write!(f, "SubagentCompleted"),
             EventType::HandoffEvaluated => write!(f, "HandoffEvaluated"),
+            EventType::PluginLoaded => write!(f, "PluginLoaded"),
         }
     }
 }
 
 /// All EventType variants for iteration in tests.
-pub const ALL_EVENT_TYPES: [EventType; 25] = [
+pub const ALL_EVENT_TYPES: [EventType; 26] = [
     EventType::TaskCreated,
     EventType::TaskStateChanged,
     EventType::ToolCallQueued,
@@ -336,6 +349,7 @@ pub const ALL_EVENT_TYPES: [EventType; 25] = [
     EventType::SubagentStarted,
     EventType::SubagentCompleted,
     EventType::HandoffEvaluated,
+    EventType::PluginLoaded,
 ];
 
 /// A domain event representing a significant occurrence in the system.
@@ -668,8 +682,10 @@ mod tests {
         assert!(ALL_EVENT_TYPES.contains(&EventType::ConstraintLearned));
         // Track A — Phase 3 added SubagentStarted + SubagentCompleted (was 22).
         // sota-gaps Phase 18 added HandoffEvaluated → 25.
-        assert_eq!(ALL_EVENT_TYPES.len(), 25);
+        // T1.3 added PluginLoaded → 26.
+        assert_eq!(ALL_EVENT_TYPES.len(), 26);
         assert!(ALL_EVENT_TYPES.contains(&EventType::HandoffEvaluated));
+        assert!(ALL_EVENT_TYPES.contains(&EventType::PluginLoaded));
     }
 
     // --- P-1 BF2: Contextual validation tests ---

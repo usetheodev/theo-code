@@ -967,3 +967,28 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 - outros crates: sem regressao
 
 **Nao feito nesta iteracao (proximas):** T0.1-T0.3 caracterizacao, T1.3 allowlist completa + `DomainEvent::PluginLoaded`, T3.3 env centralization, T3.4 consolidacao completa do retry, T4.* split god-files, T5.1-T5.2, T6.4-T6.5, T7.*, T8.1-T8.3.
+
+### Iteracao 5 (2026-04-24) — Env centralization + T1.3 finish + locks
+
+| Task | Status | Notas |
+|---|---|---|
+| T3.3 env centralization | **DONE** | novo `theo_domain::environment` com funcoes `theo_var`, `bool_var`, `parse_var`, `home_dir` + trait `Environment` + `SystemEnvironment` default + `MapEnvironment` test double. 5 sites migrados em `project_config.rs` (THEO_MODEL/TEMP/MAX_ITER/MAX_TOKENS/REASONING/DOOM_LOOP), 1 em `onboarding.rs` (THEO_SKIP_ONBOARDING), 2 em `run_engine.rs` (THEO_FORCE_TOOL_CHOICE, THEO_DEBUG_CODEX), 1 em `subagent/mod.rs` (THEO_MCP_AUTO_DISCOVERY), 6 em `observability/otel_exporter.rs` (OTLP_*), 1 em `observability/mod.rs`. **std::env::var production sites: 23 → 6 (todos em `bin/theo-agent.rs`).** |
+| T1.3 completion | **DONE** | novo variant `DomainEvent::PluginLoaded` com payload `{name, dir, manifest_sha256, tool_count, hook_count}` em theo-domain; `ALL_EVENT_TYPES.len() == 26`, `EventKind::Lifecycle`. Allowlist em `AgentConfig` fica como follow-up — consumers ja podem gatear via `ToolCategory::Plugin` no capability set. |
+| T8.2 legacy wiki timeline | **DONE** | `WIKI_LEGACY_DEPRECATION_DATE = "2026-10-20"` em `state_manager.rs`; doc explicita o caminho de remocao (delete dual-path + testes legacy). |
+| T8.3 DLQ thread-safe documentado | **DONE** | `DeadLetterQueue` documentado como "single-threaded — wrap em `Arc<Mutex<_>>` para compartilhar"; teste `dead_letter_queue_is_send_sync_under_mutex` bloqueia compile-time que ele compoe com parking_lot::Mutex. |
+| T6.5 reduzir locks em dispatch | **DONE** | `dispatch_and_execute` agora toma 3 locks (entrada: records, saida: records + results) em vez de 6 (antes re-adquiria para ler tool_name e input duas vezes apos a execucao). tool_name e input sao snapshotados no primeiro lock e usados depois do await. |
+
+**Baseline → atual (por metrica, desde Iteracao 0):**
+- `.expect/.unwrap/panic!`: 1071 → 1017 (-54; estavel esta iteracao)
+- silent-swallow: 61 → 2
+- `std::env::var`: 25 → **6** (-19; todos os 6 restantes em `bin/theo-agent.rs` — CLI layer, aceitavel)
+- `std::process::Command` producao: 2 → 1
+- phase tags: 310 → 240
+
+**Validacao:**
+- `theo-domain`: 452 passing (+8 novos testes: environment + PluginLoaded)
+- `theo-tooling`: 289 passing (inalterado)
+- `theo-agent-runtime`: 1109 passing (+1 novo teste DLQ send/sync)
+- **88 integration tests passando, 0 falhas.**
+
+**Nao feito nesta iteracao (proximas):** T0.1-T0.3 caracterizacao, T1.1 bwrap completo no done-gate, T1.3 AgentConfig allowlist, T3.4 consolidar retry inline, T4.* split god-files, T5.1-T5.2, T6.4 batch streaming deltas, T7.*, T8.1 phase tags migration.
