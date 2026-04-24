@@ -7,6 +7,8 @@
 //! - Tool call/result pairs as atomic units
 //! - A summary of compacted content
 
+mod policy_engine;
+
 use crate::config::CompactionPolicy;
 use crate::sanitizer::sanitize_tool_pairs;
 use theo_infra_llm::types::{Message, Role};
@@ -26,7 +28,7 @@ pub struct CompactionContext {
 }
 
 /// Prefix for compaction summary messages (used for idempotence detection).
-const COMPACTED_PREFIX: &str = "[COMPACTED] ";
+pub(super) const COMPACTED_PREFIX: &str = "[COMPACTED] ";
 
 // ---------------------------------------------------------------------------
 // Token estimation
@@ -61,7 +63,7 @@ pub fn estimate_total_tokens(messages: &[Message]) -> usize {
 // ---------------------------------------------------------------------------
 
 /// Truncate string to at most `max_chars` characters, UTF-8 safe.
-fn truncate_utf8(s: &str, max_chars: usize) -> String {
+pub(super) fn truncate_utf8(s: &str, max_chars: usize) -> String {
     if s.chars().count() <= max_chars {
         return s.to_string();
     }
@@ -121,193 +123,40 @@ pub fn compact_with_policy(
     enforce_per_message_cap(messages, context_window_tokens / 4);
 
     let threshold = (context_window_tokens as f64 * policy.compact_threshold) as usize;
-    let total = estimate_total_tokens(messages);
-
-    if total <= threshold {
+    if estimate_total_tokens(messages) <= threshold {
         return;
     }
 
-    // Identify boundary: everything before this index is a candidate for compaction.
-    // We preserve: all system messages (any position) + last preserve_tail non-system messages.
     let non_system_count = messages.iter().filter(|m| m.role != Role::System).count();
-
     if non_system_count <= policy.preserve_tail {
         // Not enough messages to compact — everything is in the "preserve" zone.
         return;
     }
 
-    // Find the index that separates compactable from preserved.
-    // Count non-system messages from the end to find the preserve_tail boundary.
-    let mut tail_count = 0;
-    let mut boundary_idx = messages.len();
-    for (i, m) in messages.iter().enumerate().rev() {
-        if m.role != Role::System {
-            tail_count += 1;
-            if tail_count == policy.preserve_tail {
-                boundary_idx = i;
-                break;
-            }
-        }
-    }
+    let boundary_idx = policy_engine::find_boundary_idx(messages, policy.preserve_tail);
+    let mut state = policy_engine::CompactionState::new();
+    policy_engine::compact_older_messages(
+        messages,
+        boundary_idx,
+        policy.truncate_tool_result_chars,
+        &mut state,
+    );
 
-    let truncate_chars = policy.truncate_tool_result_chars;
-
-    // Collect info for summary before modifying.
-    let mut tools_used: Vec<String> = Vec::new();
-    let mut files_mentioned: Vec<String> = Vec::new();
-    let mut compacted_turns = 0;
-
-    // Process messages before the boundary — compact them.
-    let mut compacted = false;
-    // Index-based loop needed: we read and mutate messages[i] across branches.
-    #[allow(clippy::needless_range_loop)]
-    for i in 0..boundary_idx {
-        let m = &messages[i];
-
-        // System messages: never touch.
-        if m.role == Role::System {
-            continue;
-        }
-
-        // Skip already-compacted summaries.
-        if m.role == Role::User
-            && let Some(ref c) = m.content
-                && c.starts_with(COMPACTED_PREFIX) {
-                    continue;
-                }
-
-        // Tool results: truncate content.
-        if m.role == Role::Tool {
-            if let Some(ref name) = messages[i].name
-                && !tools_used.contains(name) {
-                    tools_used.push(name.clone());
-                }
-            if let Some(ref content) = messages[i].content
-                && content.len() > truncate_chars * 4 {
-                    // Extract file mentions before truncating.
-                    for word in content.split_whitespace() {
-                        if (word.contains('/') || word.contains('.'))
-                            && word.len() < 100
-                            && (word.ends_with(".rs")
-                                || word.ends_with(".ts")
-                                || word.ends_with(".py")
-                                || word.ends_with(".js")
-                                || word.ends_with(".go"))
-                        {
-                            let clean = word.trim_matches(|c: char| {
-                                !c.is_alphanumeric() && c != '/' && c != '.' && c != '_' && c != '-'
-                            });
-                            if !files_mentioned.contains(&clean.to_string()) {
-                                files_mentioned.push(clean.to_string());
-                            }
-                        }
-                    }
-                    messages[i].content = Some(truncate_utf8(content, truncate_chars));
-                    compacted = true;
-                }
-            compacted_turns += 1;
-            continue;
-        }
-
-        // Assistant with tool calls: keep the tool call names, truncate arguments.
-        if m.role == Role::Assistant {
-            if let Some(ref tcs) = messages[i].tool_calls {
-                for tc in tcs {
-                    if !tools_used.contains(&tc.function.name) {
-                        tools_used.push(tc.function.name.clone());
-                    }
-                }
-                // Truncate long arguments in tool calls.
-                if let Some(ref mut tcs) = messages[i].tool_calls {
-                    for tc in tcs.iter_mut() {
-                        if tc.function.arguments.len() > truncate_chars * 4 {
-                            tc.function.arguments =
-                                truncate_utf8(&tc.function.arguments, truncate_chars);
-                            compacted = true;
-                        }
-                    }
-                }
-            }
-            compacted_turns += 1;
-        }
-    }
-
-    if !compacted {
+    if !state.compacted {
         return; // Nothing was actually truncated.
     }
 
-    // Remove any previous compaction summary (idempotence).
-    messages.retain(|m| {
-        !(m.role == Role::User
-            && m.content
-                .as_deref()
-                .is_some_and(|c| c.starts_with(COMPACTED_PREFIX)))
-    });
-
-    // Build and insert summary.
-    let files_str = if files_mentioned.is_empty() {
-        String::new()
-    } else {
-        files_mentioned.truncate(20); // Cap to avoid huge summary.
-        format!(" Files involved: {}.", files_mentioned.join(", "))
-    };
-
-    let tools_str = if tools_used.is_empty() {
-        String::new()
-    } else {
-        tools_used.sort();
-        tools_used.dedup();
-        format!(" Tools used: {}.", tools_used.join(", "))
-    };
-
-    // Build semantic summary with optional progress context.
-    let progress_str = if let Some(ctx) = context {
-        let mut parts = Vec::new();
-        if !ctx.task_objective.is_empty() {
-            let obj = truncate_utf8(&ctx.task_objective, 100);
-            parts.push(format!(" Task: {obj}."));
-        }
-        if !ctx.current_phase.is_empty() {
-            parts.push(format!(" Phase: {}.", ctx.current_phase));
-        }
-        if !ctx.target_files.is_empty() {
-            let targets: Vec<&str> = ctx
-                .target_files
-                .iter()
-                .take(5)
-                .map(|s| s.as_str())
-                .collect();
-            parts.push(format!(" Targets: {}.", targets.join(", ")));
-        }
-        if !ctx.recent_errors.is_empty() {
-            let errs: Vec<String> = ctx
-                .recent_errors
-                .iter()
-                .take(2)
-                .map(|e| truncate_utf8(e, 80))
-                .collect();
-            parts.push(format!(" Errors: {}.", errs.join("; ")));
-        }
-        parts.join("")
-    } else {
-        String::new()
-    };
-
-    let summary = format!(
-        "{COMPACTED_PREFIX}Conversation history was compressed ({compacted_turns} older messages truncated).{progress_str}{tools_str}{files_str} Recent messages are preserved in full."
+    policy_engine::remove_previous_summary(messages);
+    let summary = policy_engine::build_summary(
+        state.compacted_turns,
+        state.tools_used,
+        state.files_mentioned,
+        context,
     );
+    policy_engine::insert_summary_after_system(messages, summary);
 
-    // Insert after the last system message, before the preserved tail.
-    let insert_pos = messages
-        .iter()
-        .rposition(|m| m.role == Role::System)
-        .map(|i| i + 1)
-        .unwrap_or(0);
-
-    messages.insert(insert_pos, Message::user(summary));
-
-    // Post-compaction integrity: repair any orphaned tool pairs
-    // introduced by truncation/drop operations above.
+    // Post-compaction integrity: repair any orphaned tool pairs introduced
+    // by truncation/drop operations above.
     sanitize_tool_pairs(messages);
 }
 
