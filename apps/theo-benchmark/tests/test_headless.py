@@ -15,6 +15,7 @@ from _headless import (
     _parse_json_line,
     _std,
     _wilson_ci,
+    _surrogate_value,
     estimate_cost,
 )
 
@@ -291,3 +292,296 @@ class TestTemperaturePropagation:
         assert result.model == "qwen3-30B"
         # Environment block is in raw_json
         assert result.raw_json["environment"]["temperature_actual"] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# V4 RunReport parsing
+# ---------------------------------------------------------------------------
+
+
+def _base_v3_json(**overrides) -> dict:
+    """Minimal v3 JSON fixture — no report field."""
+    data = {
+        "success": True,
+        "summary": "Resolved the issue",
+        "iterations": 4,
+        "duration_ms": 8000,
+        "tokens": {"input": 2000, "output": 400, "total": 2400},
+        "tools": {"total": 7, "success": 6},
+        "llm": {"calls": 4, "retries": 0},
+        "model": "qwen3-30B",
+        "mode": "agent",
+        "provider": "local",
+        "files_edited": ["src/lib.rs"],
+    }
+    data.update(overrides)
+    return data
+
+
+class TestV4ReportParsing:
+    """Tests for v4 RunReport parsing in HeadlessResult.from_json."""
+
+    def test_v3_json_without_report_uses_defaults(self):
+        data = _base_v3_json()
+        result = HeadlessResult.from_json(data)
+
+        # Extended token metrics default to 0
+        assert result.cache_read_tokens == 0
+        assert result.reasoning_tokens == 0
+        assert result.cache_hit_rate == 0.0
+        assert result.tokens_per_successful_edit == 0.0
+
+        # Loop metrics default
+        assert result.convergence_rate == 0.0
+        assert result.budget_utilization_iterations_pct == 0.0
+        assert result.phase_distribution == {}
+        assert result.evolution_attempts == 0
+
+        # Tool breakdown default
+        assert result.tool_breakdown == []
+
+        # Context health default
+        assert result.context_avg_size_tokens == 0.0
+        assert result.context_max_size_tokens == 0
+
+        # Memory metrics default
+        assert result.memory_episodes_injected == 0
+        assert result.memory_hypotheses_formed == 0
+
+        # Subagent metrics default
+        assert result.subagent_spawned == 0
+        assert result.subagent_success_rate == 0.0
+
+        # Error taxonomy default
+        assert result.error_total == 0
+
+        # Surrogate metrics default
+        assert result.doom_loop_frequency == 0.0
+        assert result.llm_efficiency == 0.0
+
+        # Integrity defaults
+        assert result.trajectory_complete is True
+        assert result.trajectory_confidence == 1.0
+
+        # Error class default
+        assert result.error_class == ""
+
+    def test_v4_parses_token_metrics(self):
+        data = _base_v3_json(report={
+            "token_metrics": {
+                "cache_read_tokens": 1500,
+                "cache_write_tokens": 300,
+                "reasoning_tokens": 200,
+                "cache_hit_rate": 0.75,
+                "tokens_per_successful_edit": 1200.5,
+            }
+        })
+        result = HeadlessResult.from_json(data)
+
+        assert result.cache_read_tokens == 1500
+        assert result.cache_write_tokens == 300
+        assert result.reasoning_tokens == 200
+        assert result.cache_hit_rate == 0.75
+        assert result.tokens_per_successful_edit == 1200.5
+
+    def test_v4_parses_loop_metrics(self):
+        data = _base_v3_json(report={
+            "loop_metrics": {
+                "convergence_rate": 0.85,
+                "budget_utilization": {
+                    "iterations_pct": 0.6,
+                    "tokens_pct": 0.4,
+                    "time_pct": 0.3,
+                },
+                "phase_distribution": {"Planning": 2, "Executing": 5, "Evaluating": 1},
+                "evolution_attempts": 3,
+                "evolution_success": True,
+                "done_blocked_count": 1,
+            }
+        })
+        result = HeadlessResult.from_json(data)
+
+        assert result.convergence_rate == 0.85
+        assert result.budget_utilization_iterations_pct == 0.6
+        assert result.budget_utilization_tokens_pct == 0.4
+        assert result.budget_utilization_time_pct == 0.3
+        assert result.phase_distribution == {"Planning": 2, "Executing": 5, "Evaluating": 1}
+        assert result.evolution_attempts == 3
+        assert result.evolution_success is True
+        assert result.done_blocked_count == 1
+
+    def test_v4_parses_tool_breakdown(self):
+        breakdown = [
+            {"tool_name": "read_file", "call_count": 5, "success_count": 5, "avg_duration_ms": 12.0},
+            {"tool_name": "edit_file", "call_count": 3, "success_count": 2, "avg_duration_ms": 45.0},
+        ]
+        data = _base_v3_json(report={"tool_breakdown": breakdown})
+        result = HeadlessResult.from_json(data)
+
+        assert len(result.tool_breakdown) == 2
+        assert result.tool_breakdown[0]["tool_name"] == "read_file"
+        assert result.tool_breakdown[0]["call_count"] == 5
+        assert result.tool_breakdown[1]["tool_name"] == "edit_file"
+        assert result.tool_breakdown[1]["success_count"] == 2
+
+    def test_v4_parses_context_health(self):
+        data = _base_v3_json(report={
+            "context_health": {
+                "avg_context_size_tokens": 3500.0,
+                "max_context_size_tokens": 8000,
+                "context_growth_rate": 1.2,
+                "compaction_count": 2,
+                "compaction_savings_ratio": 0.35,
+                "refetch_rate": 0.1,
+                "action_repetition_rate": 0.05,
+                "usefulness_avg": 0.82,
+            }
+        })
+        result = HeadlessResult.from_json(data)
+
+        assert result.context_avg_size_tokens == 3500.0
+        assert result.context_max_size_tokens == 8000
+        assert result.context_growth_rate == 1.2
+        assert result.context_compaction_count == 2
+        assert result.context_compaction_savings_ratio == 0.35
+        assert result.context_refetch_rate == 0.1
+        assert result.context_action_repetition_rate == 0.05
+        assert result.context_usefulness_avg == 0.82
+
+    def test_v4_parses_memory_metrics(self):
+        data = _base_v3_json(report={
+            "memory_metrics": {
+                "episodes_injected": 3,
+                "episodes_created": 2,
+                "hypotheses_formed": 5,
+                "hypotheses_invalidated": 1,
+                "hypotheses_active": 4,
+                "constraints_learned": 7,
+                "failure_fingerprints_new": 2,
+                "failure_fingerprints_recurrent": 1,
+            }
+        })
+        result = HeadlessResult.from_json(data)
+
+        assert result.memory_episodes_injected == 3
+        assert result.memory_episodes_created == 2
+        assert result.memory_hypotheses_formed == 5
+        assert result.memory_hypotheses_invalidated == 1
+        assert result.memory_hypotheses_active == 4
+        assert result.memory_constraints_learned == 7
+        assert result.memory_failure_fingerprints_new == 2
+        assert result.memory_failure_fingerprints_recurrent == 1
+
+    def test_v4_parses_subagent_metrics(self):
+        data = _base_v3_json(report={
+            "subagent_metrics": {
+                "spawned": 4,
+                "succeeded": 3,
+                "failed": 1,
+                "avg_duration_ms": 2500.0,
+                "success_rate": 0.75,
+            }
+        })
+        result = HeadlessResult.from_json(data)
+
+        assert result.subagent_spawned == 4
+        assert result.subagent_succeeded == 3
+        assert result.subagent_failed == 1
+        assert result.subagent_avg_duration_ms == 2500.0
+        assert result.subagent_success_rate == 0.75
+
+    def test_v4_parses_error_taxonomy(self):
+        data = _base_v3_json(report={
+            "error_taxonomy": {
+                "total_errors": 6,
+                "network_errors": 1,
+                "llm_errors": 2,
+                "tool_errors": 1,
+                "sandbox_errors": 0,
+                "budget_errors": 1,
+                "validation_errors": 1,
+            }
+        })
+        result = HeadlessResult.from_json(data)
+
+        assert result.error_total == 6
+        assert result.error_network == 1
+        assert result.error_llm == 2
+        assert result.error_tool == 1
+        assert result.error_sandbox == 0
+        assert result.error_budget == 1
+        assert result.error_validation == 1
+
+    def test_v4_parses_surrogate_metrics(self):
+        data = _base_v3_json(report={
+            "surrogate_metrics": {
+                "doom_loop_frequency": {"value": 0.1, "confidence": 0.9, "method": "heuristic"},
+                "llm_efficiency": {"value": 0.85, "confidence": 1.0, "method": "ratio"},
+                "context_waste_ratio": {"value": 0.05, "confidence": 0.8, "method": "measured"},
+                "hypothesis_churn_rate": {"value": 0.2, "confidence": 0.7, "method": "count"},
+                "time_to_first_tool_ms": {"value": 450.0, "confidence": 1.0, "method": "timer"},
+            }
+        })
+        result = HeadlessResult.from_json(data)
+
+        assert result.doom_loop_frequency == 0.1
+        assert result.llm_efficiency == 0.85
+        assert result.context_waste_ratio == 0.05
+        assert result.hypothesis_churn_rate == 0.2
+        assert result.time_to_first_tool_ms == 450.0
+
+    def test_v4_parses_integrity(self):
+        data = _base_v3_json(report={
+            "integrity": {
+                "complete": False,
+                "confidence": 0.6,
+            }
+        })
+        result = HeadlessResult.from_json(data)
+
+        assert result.trajectory_complete is False
+        assert result.trajectory_confidence == 0.6
+
+    def test_v4_partial_report_uses_defaults(self):
+        """A report with only token_metrics should leave other sections at defaults."""
+        data = _base_v3_json(report={
+            "token_metrics": {
+                "cache_read_tokens": 500,
+                "reasoning_tokens": 100,
+            }
+        })
+        result = HeadlessResult.from_json(data)
+
+        # Provided section is parsed
+        assert result.cache_read_tokens == 500
+        assert result.reasoning_tokens == 100
+
+        # Missing sections use defaults
+        assert result.convergence_rate == 0.0
+        assert result.phase_distribution == {}
+        assert result.tool_breakdown == []
+        assert result.context_avg_size_tokens == 0.0
+        assert result.memory_episodes_injected == 0
+        assert result.subagent_spawned == 0
+        assert result.error_total == 0
+        assert result.doom_loop_frequency == 0.0
+        assert result.trajectory_complete is True
+        assert result.trajectory_confidence == 1.0
+
+    def test_v4_parses_error_class(self):
+        data = _base_v3_json(success=False, error_class="timeout")
+        result = HeadlessResult.from_json(data)
+
+        assert result.error_class == "timeout"
+
+    def test_surrogate_value_extracts_value(self):
+        parent = {"metric_a": {"value": 0.5, "confidence": 1.0, "method": "direct"}}
+        assert _surrogate_value(parent, "metric_a") == 0.5
+
+    def test_surrogate_value_missing_key(self):
+        parent = {"metric_a": {"value": 0.5}}
+        assert _surrogate_value(parent, "nonexistent") == 0.0
+
+    def test_surrogate_value_non_dict(self):
+        parent = {"metric_a": 42}
+        assert _surrogate_value(parent, "metric_a") == 0.0
