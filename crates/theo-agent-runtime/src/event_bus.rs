@@ -1,5 +1,7 @@
-use std::sync::{Arc, Mutex};
+use std::collections::VecDeque;
+use std::sync::Arc;
 
+use parking_lot::Mutex;
 use theo_domain::event::DomainEvent;
 use theo_domain::graph_context::EventSink;
 
@@ -25,7 +27,9 @@ const DEFAULT_MAX_EVENTS: usize = 10_000;
 /// and logged — the bus continues dispatching to remaining listeners.
 pub struct EventBus {
     listeners: Mutex<Vec<Arc<dyn EventListener>>>,
-    log: Mutex<Vec<DomainEvent>>,
+    // VecDeque gives O(1) pop_front when evicting oldest events under
+    // `max_events` pressure. Vec::remove(0) was O(n) (T6.1).
+    log: Mutex<VecDeque<DomainEvent>>,
     max_events: usize,
 }
 
@@ -33,7 +37,7 @@ impl EventBus {
     pub fn new() -> Self {
         Self {
             listeners: Mutex::new(Vec::new()),
-            log: Mutex::new(Vec::new()),
+            log: Mutex::new(VecDeque::new()),
             max_events: DEFAULT_MAX_EVENTS,
         }
     }
@@ -41,7 +45,7 @@ impl EventBus {
     pub fn with_max_events(max_events: usize) -> Self {
         Self {
             listeners: Mutex::new(Vec::new()),
-            log: Mutex::new(Vec::new()),
+            log: Mutex::new(VecDeque::new()),
             max_events,
         }
     }
@@ -49,7 +53,6 @@ impl EventBus {
     pub fn subscribe(&self, listener: Arc<dyn EventListener>) {
         self.listeners
             .lock()
-            .expect("listeners lock poisoned")
             .push(listener);
     }
 
@@ -62,18 +65,17 @@ impl EventBus {
     pub fn publish(&self, event: DomainEvent) {
         // Append to log (bounded)
         {
-            let mut log = self.log.lock().expect("log lock poisoned");
+            let mut log = self.log.lock();
             if log.len() >= self.max_events {
-                log.remove(0);
+                log.pop_front();
             }
-            log.push(event.clone());
+            log.push_back(event.clone());
         }
 
         // Notify listeners (with panic protection)
         let listeners = self
             .listeners
             .lock()
-            .expect("listeners lock poisoned")
             .clone();
         for listener in &listeners {
             let listener = Arc::clone(listener);
@@ -82,9 +84,13 @@ impl EventBus {
                 listener.on_event(event_ref);
             }));
             if let Err(_panic) = result {
+                // Do not log the entity_id: it may be a session_id or
+                // call_id that leaks PII into stderr-captured logs. Event
+                // type alone is enough for operators to correlate with
+                // the structured log stream.
                 eprintln!(
-                    "[EventBus] listener panicked on event {:?} for entity {}",
-                    event.event_type, event.entity_id
+                    "[EventBus] listener panicked on event {:?} (entity redacted)",
+                    event.event_type
                 );
             }
         }
@@ -92,14 +98,13 @@ impl EventBus {
 
     /// Returns a snapshot of all events in the log, in insertion order.
     pub fn events(&self) -> Vec<DomainEvent> {
-        self.log.lock().expect("log lock poisoned").clone()
+        self.log.lock().iter().cloned().collect()
     }
 
     /// Returns events filtered by entity_id, in insertion order.
     pub fn events_for(&self, entity_id: &str) -> Vec<DomainEvent> {
         self.log
             .lock()
-            .expect("log lock poisoned")
             .iter()
             .filter(|e| e.entity_id == entity_id)
             .cloned()
@@ -108,7 +113,7 @@ impl EventBus {
 
     /// Returns the number of events in the log.
     pub fn len(&self) -> usize {
-        self.log.lock().expect("log lock poisoned").len()
+        self.log.lock().len()
     }
 
     /// Returns true if the log is empty.
@@ -214,14 +219,14 @@ impl CapturingListener {
     }
 
     pub fn captured(&self) -> Vec<DomainEvent> {
-        self.events.lock().unwrap().clone()
+        self.events.lock().clone()
     }
 }
 
 #[cfg(test)]
 impl EventListener for CapturingListener {
     fn on_event(&self, event: &DomainEvent) {
-        self.events.lock().unwrap().push(event.clone());
+        self.events.lock().push(event.clone());
     }
 }
 
@@ -354,6 +359,32 @@ mod tests {
         assert_eq!(capturing.captured().len(), 1);
         // Event still logged
         assert_eq!(bus.len(), 1);
+    }
+
+    // T2.1 AC: parking_lot::Mutex never poisons, so a listener panic does
+    // not prevent subsequent publishes from acquiring the log/listeners
+    // locks. Under std::sync::Mutex this regressed silently when the panic
+    // poisoned the mutex.
+    #[test]
+    fn listener_panic_does_not_poison_bus_for_subsequent_publish() {
+        let bus = EventBus::new();
+        let capturing = Arc::new(CapturingListener::new());
+        bus.subscribe(Arc::new(PanickingListener));
+        bus.subscribe(capturing.clone());
+
+        // First publish — panics internally, caught.
+        bus.publish(make_event(EventType::TaskCreated, "t-1"));
+        // Second publish — must succeed, not panic on "lock poisoned".
+        bus.publish(make_event(EventType::TaskStateChanged, "t-1"));
+        // Third publish on a different entity — still fine.
+        bus.publish(make_event(EventType::RunInitialized, "r-1"));
+
+        assert_eq!(bus.len(), 3, "all three events must be logged");
+        assert_eq!(
+            capturing.captured().len(),
+            3,
+            "non-panicking listener must keep receiving events"
+        );
     }
 
     // -----------------------------------------------------------------------

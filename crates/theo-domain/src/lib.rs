@@ -14,6 +14,7 @@ pub mod identifiers;
 pub mod memory;
 pub mod permission;
 pub mod priority;
+pub mod prompt_sanitizer;
 pub mod retry_policy;
 pub mod routing;
 pub mod safe_json;
@@ -26,6 +27,7 @@ pub mod tokens;
 pub mod tool;
 pub mod tool_call;
 pub mod truncate;
+pub mod user_paths;
 pub mod wiki_backend;
 pub mod working_set;
 

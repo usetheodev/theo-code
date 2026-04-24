@@ -6,7 +6,9 @@
 //! registry compartilhado em background.
 
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+
+use parking_lot::RwLock;
 
 use super::approval::ApprovalMode;
 use super::registry::SubAgentRegistry;
@@ -51,30 +53,25 @@ impl ReloadableRegistry {
 
     /// Snapshot read-only do registry atual.
     pub fn snapshot(&self) -> SubAgentRegistry {
-        self.inner.read().expect("registry rwlock poisoned").clone()
+        self.inner.read().clone()
     }
 
     /// Register a callback to fire after every successful `reload()`.
     /// Multiple callbacks can be registered; they are called in order.
     pub fn on_reload(&self, callback: ReloadCallback) {
-        if let Ok(mut cbs) = self.on_reload.write() {
-            cbs.push(callback);
-        }
+        self.on_reload.write().push(callback);
     }
 
     /// Re-load do registry: reconstroi com builtins + load_all do project/global.
     /// Idempotente. Atomic swap.
     pub fn reload(&self) {
         // Capture mcp_servers from BEFORE swap so callbacks see what changed.
-        let old_servers: std::collections::BTreeSet<String> = self
-            .inner
-            .read()
-            .map(|r| {
-                r.iter()
-                    .flat_map(|s| s.mcp_servers.iter().cloned())
-                    .collect()
-            })
-            .unwrap_or_default();
+        let old_servers: std::collections::BTreeSet<String> = {
+            let r = self.inner.read();
+            r.iter()
+                .flat_map(|s| s.mcp_servers.iter().cloned())
+                .collect()
+        };
 
         let mut new_reg = SubAgentRegistry::with_builtins();
         let _ = new_reg.load_all(
@@ -86,7 +83,7 @@ impl ReloadableRegistry {
             .iter()
             .flat_map(|s| s.mcp_servers.iter().cloned())
             .collect();
-        let mut guard = self.inner.write().expect("registry rwlock poisoned");
+        let mut guard = self.inner.write();
         *guard = new_reg;
         drop(guard);
 
@@ -97,9 +94,8 @@ impl ReloadableRegistry {
             .symmetric_difference(&new_servers)
             .cloned()
             .collect();
-        if !changed.is_empty()
-            && let Ok(cbs) = self.on_reload.read()
-        {
+        if !changed.is_empty() {
+            let cbs = self.on_reload.read();
             for cb in cbs.iter() {
                 cb(&changed);
             }

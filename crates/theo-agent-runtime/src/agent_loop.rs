@@ -73,6 +73,43 @@ pub struct AgentResult {
     pub error_class: Option<theo_domain::error_class::ErrorClass>,
 }
 
+impl AgentResult {
+    /// Build an `AgentResult` from an engine's current metrics snapshot.
+    ///
+    /// Replaces ~5 duplicated inline-struct literals that scattered the
+    /// 12 metric fields across `run_engine.rs` return paths (REVIEW §2 /
+    /// T3.1). Callers still set `success`, `summary`, `was_streamed`,
+    /// `error_class`, and `iterations_used` — everything else comes from
+    /// the engine state.
+    pub fn from_engine_state(
+        engine: &crate::run_engine::AgentRunEngine,
+        success: bool,
+        summary: String,
+        was_streamed: bool,
+        error_class: theo_domain::error_class::ErrorClass,
+    ) -> Self {
+        let m = engine.metrics();
+        let (files_edited, iteration) = engine.run_result_context();
+        Self {
+            success,
+            summary,
+            was_streamed,
+            files_edited,
+            iterations_used: iteration,
+            tokens_used: m.total_tokens_used,
+            input_tokens: m.total_input_tokens,
+            output_tokens: m.total_output_tokens,
+            tool_calls_total: m.total_tool_calls,
+            tool_calls_success: m.successful_tool_calls,
+            llm_calls: m.total_llm_calls,
+            retries: m.total_retries,
+            duration_ms: 0,
+            error_class: Some(error_class),
+            ..Default::default()
+        }
+    }
+}
+
 /// The main agent loop that orchestrates LLM ↔ tool execution.
 ///
 /// This is now a thin facade over `AgentRunEngine`. All execution logic

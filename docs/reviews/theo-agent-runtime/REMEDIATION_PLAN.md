@@ -894,3 +894,29 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 **Validacao:** `cargo test -p theo-domain -p theo-agent-runtime` → 1608 passed, 0 failed.
 
 **Nao feito nesta iteracao (proximas):** T0.1-T0.3 (caracterizacao), T1.1-T1.4, T1.6, T2.1, T2.3, T2.4, T3.1-T3.6, T4.*, T5.1-T5.4, T6.*, T7.*, T8.1-T8.4.
+
+### Iteracao 2 (2026-04-24) — Security + Panics + DRY
+
+| Task | Status | Notas |
+|---|---|---|
+| T1.2 sanitizar git log | **DONE** | `theo_domain::prompt_sanitizer::{fence_untrusted, char_boundary_truncate, strip_injection_tokens}` — 17 tokens de 5 familias de providers (OpenAI, Llama, Mistral, etc.) neutralizados. Git log no system prompt passa por `fence_untrusted_default` (4KB hard cap, XML-tagged). 10 testes unit + 1 regression test para o cenario do REVIEW §5. |
+| T1.4 HOME fallback explicito | **DONE** | `theo_domain::user_paths::{home_dir, theo_config_dir, theo_config_subdir}` centralizado. 4 sites migrados: `run_engine.rs`, `memory_lifecycle.rs`, `hooks.rs`, `plugin.rs`. Nenhum fallback para `/tmp` no crate. |
+| T1.6 entity_id nao vazar | **DONE** | `event_bus.rs`: listener panic agora loga apenas `event_type` (entity_id redacted). |
+| T2.1 parking_lot::Mutex | **DONE** | workspace dep adicionada. Trocado em `event_bus.rs` (`Mutex<Vec>` → `Mutex<VecDeque>` tambem atende T6.1), `task_manager.rs`, `tool_call_manager.rs`, `subagent/reloadable.rs` (`RwLock`), `observability/metrics.rs` (`RwLock`). 30+ `.expect("lock poisoned")` removidos. Teste `listener_panic_does_not_poison_bus_for_subsequent_publish` adicionado. |
+| T3.1 AgentResult::from_engine_state | **DONE** | helper em `agent_loop.rs`; 5 sites em `run_engine.rs` migrados (budget exhaustion, LLM error, text-only converge, done gate force-accept, done gate success, doom-loop abort). `run_result_context()` exposto no engine para encapsular acesso privado. |
+| T3.5 truncate helpers centralizado | **DONE** | `char_boundary_truncate` de `prompt_sanitizer` usado em 3 sites (`tool_call_manager`, `run_engine` sensor drain, `run_engine` batch preview, `run_engine` done gate error preview). Duplicacao eliminada. |
+| T3.6 constantes nomeadas | **DONE** | `crate::constants` com `MAX_DONE_ATTEMPTS`, `MAX_BATCH_SIZE`, `DONE_GATE_TEST_TIMEOUT`, `DONE_GATE_CHECK_FALLBACK_TIMEOUT`, `TOOL_PREVIEW_BYTES`, `TOOL_INPUT_TRUNCATE_BYTES`, `DONE_GATE_ERROR_PREVIEW_BYTES`, `SENSOR_OUTPUT_PREVIEW_BYTES`, `EMERGENCY_COMPACT_RATIO`. 7 magic numbers removidos. |
+| T6.1 `VecDeque` event log | **DONE** (com T2.1) | `EventBus::log` passou de `Mutex<Vec>` para `Mutex<VecDeque>`; `remove(0)` O(n) → `pop_front()` O(1). |
+
+**Baseline → atual (por metrica, desde Iteracao 0):**
+- `.expect/.unwrap/panic!`: 1071 → **1004** (-67)
+- silent-swallow: 61 → 13
+- `std::env::var`: 25 → **23** (-2; HOME removido de 4 sites, restante e em producao)
+- `std::process::Command` producao: 2 → 1
+- phase tags: 310 → 241 (queda vem da Iteracao 1; Iteracao 2 manteve estavel)
+
+**Validacao:** `cargo test -p theo-domain -p theo-agent-runtime` → 440 + 1096 = 1536 unit tests passed, 88 integration tests passed, 0 failed. Nenhuma regressao.
+
+**Quebra de API introduzida:** `EventBus::events()` e `events_for()` agora retornam via iteradores clonados (antes um `.clone()` direto do Vec). API externa preserva assinatura `Vec<DomainEvent>`.
+
+**Nao feito nesta iteracao (proximas):** T0.1-T0.3 (caracterizacao), T1.1 sandbox do cargo test, T1.3 plugin hardening, T2.3 typed fs errors, T2.4 silent-swallow sweep restante, T3.2 unify run/run_with_history, T3.3 env centralization, T3.4 consolidate retry, T4.* split god-files, T5.*, T6.2-T6.5, T7.*, T8.1-T8.4.

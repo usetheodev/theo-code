@@ -82,15 +82,11 @@ pub fn load_plugins(project_dir: &Path) -> Vec<LoadedPlugin> {
         load_plugins_from_dir(&project_plugins, &mut plugins);
     }
 
-    // Global plugins
-    if let Ok(home) = std::env::var("HOME") {
-        let global_plugins = PathBuf::from(home)
-            .join(".config")
-            .join("theo")
-            .join("plugins");
-        if global_plugins.exists() {
-            load_plugins_from_dir(&global_plugins, &mut plugins);
-        }
+    // Global plugins — only when HOME is set (avoid /tmp fallback).
+    if let Some(global_plugins) = theo_domain::user_paths::theo_config_subdir("plugins")
+        && global_plugins.exists()
+    {
+        load_plugins_from_dir(&global_plugins, &mut plugins);
     }
 
     plugins

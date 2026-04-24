@@ -1,6 +1,7 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
+use parking_lot::Mutex;
 use theo_domain::error::TransitionError;
 use theo_domain::event::{DomainEvent, EventType};
 use theo_domain::identifiers::TaskId;
@@ -55,7 +56,6 @@ impl TaskManager {
 
         self.tasks
             .lock()
-            .expect("tasks lock poisoned")
             .insert(task_id.clone(), task);
 
         // Invariant 5: publish TaskCreated event
@@ -75,7 +75,7 @@ impl TaskManager {
     /// - Invariant 4: Terminal states reject all transitions (enforced by TaskState).
     /// - Invariant 5: Publishes `DomainEvent::TaskStateChanged` with from/to payload.
     pub fn transition(&self, task_id: &TaskId, target: TaskState) -> Result<(), TaskManagerError> {
-        let mut tasks = self.tasks.lock().expect("tasks lock poisoned");
+        let mut tasks = self.tasks.lock();
         let task = tasks
             .get_mut(task_id)
             .ok_or_else(|| TaskManagerError::TaskNotFound(task_id.as_str().to_string()))?;
@@ -100,7 +100,6 @@ impl TaskManager {
     pub fn get(&self, task_id: &TaskId) -> Option<Task> {
         self.tasks
             .lock()
-            .expect("tasks lock poisoned")
             .get(task_id)
             .cloned()
     }
@@ -109,7 +108,6 @@ impl TaskManager {
     pub fn tasks_by_session(&self, session_id: &SessionId) -> Vec<Task> {
         self.tasks
             .lock()
-            .expect("tasks lock poisoned")
             .values()
             .filter(|t| t.session_id == *session_id)
             .cloned()
@@ -120,7 +118,6 @@ impl TaskManager {
     pub fn active_tasks(&self) -> Vec<Task> {
         self.tasks
             .lock()
-            .expect("tasks lock poisoned")
             .values()
             .filter(|t| !t.state.is_terminal())
             .cloned()
@@ -133,7 +130,7 @@ impl TaskManager {
         task_id: &TaskId,
         artifact: Artifact,
     ) -> Result<(), TaskManagerError> {
-        let mut tasks = self.tasks.lock().expect("tasks lock poisoned");
+        let mut tasks = self.tasks.lock();
         let task = tasks
             .get_mut(task_id)
             .ok_or_else(|| TaskManagerError::TaskNotFound(task_id.as_str().to_string()))?;

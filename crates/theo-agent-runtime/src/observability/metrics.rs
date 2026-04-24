@@ -1,4 +1,6 @@
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+
+use parking_lot::RwLock;
 
 /// Aggregated runtime metrics for observability.
 #[derive(Debug, Clone, Default)]
@@ -120,18 +122,16 @@ impl MetricsCollector {
         tier: &str,
         model_id: &str,
     ) {
-        if let Ok(mut g) = self.routing.write() {
-            g.record(&RoutingDecisionMetric {
-                task_type: task_type.to_string(),
-                tier: tier.to_string(),
-                model_id: model_id.to_string(),
-            });
-        }
+        self.routing.write().record(&RoutingDecisionMetric {
+            task_type: task_type.to_string(),
+            tier: tier.to_string(),
+            model_id: model_id.to_string(),
+        });
     }
 
     /// Phase 27: snapshot of the routing histogram (cloned for safe reading).
     pub fn routing_snapshot(&self) -> RoutingHistogram {
-        self.routing.read().map(|g| g.clone()).unwrap_or_default()
+        self.routing.read().clone()
     }
 
     /// Phase 12: record per-agent run completion (called from spawn_with_spec
@@ -142,7 +142,7 @@ impl MetricsCollector {
         success: bool,
         payload: crate::observability::otel::SubagentRunMetrics,
     ) {
-        let mut m = self.by_agent.write().expect("by_agent write lock poisoned");
+        let mut m = self.by_agent.write();
         m.record(agent_name, success, payload);
     }
 
@@ -150,12 +150,11 @@ impl MetricsCollector {
     pub fn by_agent_snapshot(&self) -> crate::observability::otel::MetricsByAgent {
         self.by_agent
             .read()
-            .expect("by_agent read lock poisoned")
-            .clone()
+                        .clone()
     }
 
     pub fn record_llm_call(&self, duration_ms: u64, tokens: u64) {
-        let mut m = self.metrics.write().expect("metrics write lock poisoned");
+        let mut m = self.metrics.write();
         m.total_llm_calls += 1;
         m.total_tokens_used += tokens;
         m.total_llm_call_ms += duration_ms;
@@ -170,7 +169,7 @@ impl MetricsCollector {
         output_tokens: u64,
     ) {
         let total = input_tokens + output_tokens;
-        let mut m = self.metrics.write().expect("metrics write lock poisoned");
+        let mut m = self.metrics.write();
         m.total_llm_calls += 1;
         m.total_tokens_used += total;
         m.total_input_tokens += input_tokens;
@@ -183,12 +182,12 @@ impl MetricsCollector {
     /// Acumulates tokens WITHOUT incrementing total_llm_calls
     /// (sub-agent calls are not LLM calls of the parent).
     pub fn record_delegated_tokens(&self, tokens: u64) {
-        let mut m = self.metrics.write().expect("metrics write lock poisoned");
+        let mut m = self.metrics.write();
         m.total_tokens_used += tokens;
     }
 
     pub fn record_tool_call(&self, _tool_name: &str, duration_ms: u64, success: bool) {
-        let mut m = self.metrics.write().expect("metrics write lock poisoned");
+        let mut m = self.metrics.write();
         m.total_tool_calls += 1;
         if success {
             m.successful_tool_calls += 1;
@@ -198,17 +197,17 @@ impl MetricsCollector {
     }
 
     pub fn record_retry(&self) {
-        let mut m = self.metrics.write().expect("metrics write lock poisoned");
+        let mut m = self.metrics.write();
         m.total_retries += 1;
     }
 
     pub fn record_dlq_entry(&self) {
-        let mut m = self.metrics.write().expect("metrics write lock poisoned");
+        let mut m = self.metrics.write();
         m.total_dlq_entries += 1;
     }
 
     pub fn record_run_complete(&self, converged: bool) {
-        let mut m = self.metrics.write().expect("metrics write lock poisoned");
+        let mut m = self.metrics.write();
         m.total_runs += 1;
         if converged {
             m.converged_runs += 1;
@@ -217,12 +216,12 @@ impl MetricsCollector {
 
     /// Accumulate dollar cost from an LLM call.
     pub fn record_cost(&self, cost_usd: f64) {
-        let mut m = self.metrics.write().expect("metrics write lock poisoned");
+        let mut m = self.metrics.write();
         m.total_cost_usd += cost_usd;
     }
 
     pub fn record_iteration(&self, duration_ms: u64) {
-        let mut m = self.metrics.write().expect("metrics write lock poisoned");
+        let mut m = self.metrics.write();
         m.total_iteration_ms += duration_ms;
         m.iteration_count += 1;
     }
@@ -231,8 +230,7 @@ impl MetricsCollector {
     pub fn snapshot(&self) -> RuntimeMetrics {
         self.metrics
             .read()
-            .expect("metrics read lock poisoned")
-            .clone()
+                        .clone()
     }
 }
 

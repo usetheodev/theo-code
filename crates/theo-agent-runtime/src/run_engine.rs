@@ -460,6 +460,15 @@ impl AgentRunEngine {
         self.metrics.snapshot()
     }
 
+    /// Exposes the pair `(files_edited, current_iteration)` for
+    /// `AgentResult::from_engine_state`. Keeps internal fields private.
+    pub fn run_result_context(&self) -> (Vec<String>, usize) {
+        (
+            self.context_loop_state.edits_files.clone(),
+            self.run.iteration,
+        )
+    }
+
     /// Sets the snapshot store for persistence (Invariant 7).
     pub fn with_snapshot_store(mut self, store: Arc<dyn SnapshotStore>) -> Self {
         self.snapshot_store = Some(store);
@@ -701,7 +710,9 @@ impl AgentRunEngine {
 
             // Recent git activity (max 20 commits, best-effort).
             // Uses tokio::process to avoid blocking the async worker on a
-            // slow/locked git repo.
+            // slow/locked git repo. Commit messages are user-controlled so
+            // they go through fence_untrusted to neutralize provider
+            // control tokens (prompt-injection countermeasure, T1.2).
             if let Ok(output) = tokio::process::Command::new("git")
                 .args(["log", "--oneline", "-20"])
                 .current_dir(&self.project_dir)
@@ -711,7 +722,10 @@ impl AgentRunEngine {
                     let log = String::from_utf8_lossy(&output.stdout);
                     let log = log.trim();
                     if !log.is_empty() {
-                        boot_parts.push(format!("Recent git commits:\n{log}"));
+                        let fenced = theo_domain::prompt_sanitizer::fence_untrusted_default(
+                            log, "git-log",
+                        );
+                        boot_parts.push(format!("Recent git commits:\n{fenced}"));
                     }
                 }
 
@@ -777,13 +791,11 @@ impl AgentRunEngine {
             if project_skills.exists() {
                 skill_registry.load_from_dir(&project_skills);
             }
-            let user_skills = std::env::var("HOME")
-                .map(std::path::PathBuf::from)
-                .unwrap_or_else(|_| std::path::PathBuf::from("/tmp"))
-                .join(".config")
-                .join("theo")
-                .join("skills");
-            if user_skills.exists() {
+            // Load global skills only when HOME is set. Previously fell
+            // back to /tmp/.config/theo/skills — shared/untrusted path.
+            if let Some(user_skills) = theo_domain::user_paths::theo_config_subdir("skills")
+                && user_skills.exists()
+            {
                 skill_registry.load_from_dir(&user_skills);
             }
             let skills_summary = skill_registry.triggers_summary();
@@ -886,30 +898,16 @@ impl AgentRunEngine {
                 );
 
                 self.metrics.record_run_complete(false);
-                return AgentResult {
-                    // Bug #1 fix (benchmark-validation): budget exceeded
-                    // ALWAYS means the task did not finish. Previously
-                    // we set `success = edits_succeeded > 0` which lied
-                    // to callers — they saw success=true even when theo
-                    // ran out of iterations mid-implementation. Tests
-                    // (run_engine::tests::success_semantics) lock this.
-                    success: false,
+                // Bug #1 fix (benchmark-validation): budget exceeded ALWAYS
+                // means the task did not finish. Previously `success` was
+                // derived from edits_succeeded > 0, which lied to callers.
+                return AgentResult::from_engine_state(
+                    self,
+                    false,
                     summary,
-                    files_edited: self.context_loop_state.edits_files.clone(),
-                    iterations_used: iteration,
-                    was_streamed: false,
-                    tokens_used: self.metrics.snapshot().total_tokens_used,
-                    input_tokens: self.metrics.snapshot().total_input_tokens,
-                    output_tokens: self.metrics.snapshot().total_output_tokens,
-                    tool_calls_total: self.metrics.snapshot().total_tool_calls,
-                    tool_calls_success: self.metrics.snapshot().successful_tool_calls,
-                    llm_calls: self.metrics.snapshot().total_llm_calls,
-                    retries: self.metrics.snapshot().total_retries,
-                    duration_ms: 0,
-                    // Phase 59: budget exhaustion = Exhausted
-                    error_class: Some(theo_domain::error_class::ErrorClass::Exhausted),
-                    ..Default::default()
-                };
+                    false,
+                    theo_domain::error_class::ErrorClass::Exhausted,
+                );
             }
 
             // ── SENSOR DRAIN ──
@@ -918,18 +916,10 @@ impl AgentRunEngine {
             if let Some(ref sensor_runner) = sensor_runner {
                 for result in sensor_runner.drain_pending() {
                     let severity = if result.exit_code == 0 { "OK" } else { "ISSUE" };
-                    let preview = if result.output.len() > 1000 {
-                        format!(
-                            "{}...\n[truncated]",
-                            &result.output[..result.output
-                                .char_indices()
-                                .nth(1000)
-                                .map(|(i, _)| i)
-                                .unwrap_or(result.output.len())]
-                        )
-                    } else {
-                        result.output.clone()
-                    };
+                    let preview = theo_domain::prompt_sanitizer::char_boundary_truncate(
+                        &result.output,
+                        crate::constants::SENSOR_OUTPUT_PREVIEW_BYTES,
+                    );
                     messages.push(Message::system(format!(
                         "[SENSOR {severity}] {} (via {}): {preview}",
                         result.file_path, result.tool_name
@@ -1266,9 +1256,11 @@ impl AgentRunEngine {
                         }),
                     ));
 
-                    // Emergency compaction: keep only 50% of context
+                    // Emergency compaction: keep only a bounded fraction of context.
                     let model_ctx = self.config.context_window_tokens;
-                    let target = model_ctx / 2;
+                    let target = (model_ctx as f64
+                        * crate::constants::EMERGENCY_COMPACT_RATIO)
+                        as usize;
                     let before_len = messages.len();
                     crate::compaction::compact_messages_to_target(
                         &mut messages,
@@ -1296,23 +1288,13 @@ impl AgentRunEngine {
                     // consumers (ab_compare) can separate infra failures
                     // (rate-limit, auth, overflow) from real outcomes.
                     let class = llm_error_to_class(&e);
-                    return AgentResult {
-                        success: false,
-                        summary: format!("LLM error: {e}"),
-                        files_edited: self.context_loop_state.edits_files.clone(),
-                        iterations_used: iteration,
-                        was_streamed: false,
-                        tokens_used: self.metrics.snapshot().total_tokens_used,
-                    input_tokens: self.metrics.snapshot().total_input_tokens,
-                    output_tokens: self.metrics.snapshot().total_output_tokens,
-                    tool_calls_total: self.metrics.snapshot().total_tool_calls,
-                    tool_calls_success: self.metrics.snapshot().successful_tool_calls,
-                    llm_calls: self.metrics.snapshot().total_llm_calls,
-                    retries: self.metrics.snapshot().total_retries,
-                    duration_ms: 0,
-                    error_class: Some(class),
-                    ..Default::default()
-                    };
+                    return AgentResult::from_engine_state(
+                        self,
+                        false,
+                        format!("LLM error: {e}"),
+                        false,
+                        class,
+                    );
                 }
             };
 
@@ -1402,23 +1384,13 @@ impl AgentRunEngine {
                     .task_manager
                     .transition(&self.task_id, TaskState::Completed);
                 self.metrics.record_run_complete(true);
-                return AgentResult {
-                    success: true,
-                    summary: content,
-                    files_edited: self.context_loop_state.edits_files.clone(),
-                    iterations_used: iteration,
-                    was_streamed: true,
-                    tokens_used: self.metrics.snapshot().total_tokens_used,
-                    input_tokens: self.metrics.snapshot().total_input_tokens,
-                    output_tokens: self.metrics.snapshot().total_output_tokens,
-                    tool_calls_total: self.metrics.snapshot().total_tool_calls,
-                    tool_calls_success: self.metrics.snapshot().successful_tool_calls,
-                    llm_calls: self.metrics.snapshot().total_llm_calls,
-                    retries: self.metrics.snapshot().total_retries,
-                    duration_ms: 0,
-                    error_class: Some(ErrorClass::Solved),
-                    ..Default::default()
-                };
+                return AgentResult::from_engine_state(
+                    self,
+                    true,
+                    content,
+                    true,
+                    ErrorClass::Solved,
+                );
             }
 
             // ── EXECUTING phase ──
@@ -1495,7 +1467,7 @@ impl AgentRunEngine {
                         .unwrap_or_else(|| "Task completed.".to_string());
 
                     // Gate 0: done_attempts hard limit — avoid burning entire budget
-                    const MAX_DONE_ATTEMPTS: u32 = 3;
+                    use crate::constants::MAX_DONE_ATTEMPTS;
                     if self.done_attempts > MAX_DONE_ATTEMPTS {
                         // Exceeded max attempts — accept with warning
                         self.transition_run(RunState::Converged);
@@ -1503,26 +1475,17 @@ impl AgentRunEngine {
                             .task_manager
                             .transition(&self.task_id, TaskState::Completed);
                         self.metrics.record_run_complete(true);
-                        should_return = Some(AgentResult {
-                            success: true,
-                            summary: format!(
-                                "{} [accepted after {} done attempts]",
-                                summary, self.done_attempts
-                            ),
-                            files_edited: self.context_loop_state.edits_files.clone(),
-                            iterations_used: iteration,
-                            was_streamed: false,
-                            tokens_used: self.metrics.snapshot().total_tokens_used,
-                    input_tokens: self.metrics.snapshot().total_input_tokens,
-                    output_tokens: self.metrics.snapshot().total_output_tokens,
-                    tool_calls_total: self.metrics.snapshot().total_tool_calls,
-                    tool_calls_success: self.metrics.snapshot().successful_tool_calls,
-                    llm_calls: self.metrics.snapshot().total_llm_calls,
-                    retries: self.metrics.snapshot().total_retries,
-                    duration_ms: 0,
-                    error_class: Some(ErrorClass::Solved),
-                    ..Default::default()
-                        });
+                        let summary = format!(
+                            "{} [accepted after {} done attempts]",
+                            summary, self.done_attempts
+                        );
+                        should_return = Some(AgentResult::from_engine_state(
+                            self,
+                            true,
+                            summary,
+                            false,
+                            ErrorClass::Solved,
+                        ));
                         break;
                     }
 
@@ -1615,7 +1578,7 @@ impl AgentRunEngine {
                             };
 
                         let test_result = tokio::time::timeout(
-                            std::time::Duration::from_secs(60),
+                            crate::constants::DONE_GATE_TEST_TIMEOUT,
                             tokio::process::Command::new("cargo")
                                 .args(&test_args)
                                 .current_dir(&self.project_dir)
@@ -1635,7 +1598,7 @@ impl AgentRunEngine {
                             Err(_) => {
                                 // Timeout — fallback to cargo check with 30s
                                 let fallback = tokio::time::timeout(
-                                    std::time::Duration::from_secs(30),
+                                    crate::constants::DONE_GATE_CHECK_FALLBACK_TIMEOUT,
                                     tokio::process::Command::new("cargo")
                                         .args(["check", "--message-format=short"])
                                         .current_dir(&self.project_dir)
@@ -1652,18 +1615,10 @@ impl AgentRunEngine {
                         };
 
                         if let Some(errors) = check_failed {
-                            let error_preview = if errors.len() > 2000 {
-                                format!(
-                                    "{}...\n[truncated]",
-                                    &errors[..errors
-                                        .char_indices()
-                                        .nth(2000)
-                                        .map(|(i, _)| i)
-                                        .unwrap_or(errors.len())]
-                                )
-                            } else {
-                                errors
-                            };
+                            let error_preview = theo_domain::prompt_sanitizer::char_boundary_truncate(
+                                &errors,
+                                crate::constants::DONE_GATE_ERROR_PREVIEW_BYTES,
+                            );
                             let cmd_str = test_args.join(" ");
                             messages.push(Message::tool_result(
                                 &call.id,
@@ -1684,23 +1639,13 @@ impl AgentRunEngine {
                         .transition(&self.task_id, TaskState::Completed);
                     self.metrics.record_run_complete(true);
 
-                    should_return = Some(AgentResult {
-                        success: true,
+                    should_return = Some(AgentResult::from_engine_state(
+                        self,
+                        true,
                         summary,
-                        files_edited: self.context_loop_state.edits_files.clone(),
-                        iterations_used: iteration,
-                        was_streamed: false,
-                        tokens_used: self.metrics.snapshot().total_tokens_used,
-                    input_tokens: self.metrics.snapshot().total_input_tokens,
-                    output_tokens: self.metrics.snapshot().total_output_tokens,
-                    tool_calls_total: self.metrics.snapshot().total_tool_calls,
-                    tool_calls_success: self.metrics.snapshot().successful_tool_calls,
-                    llm_calls: self.metrics.snapshot().total_llm_calls,
-                    retries: self.metrics.snapshot().total_retries,
-                    duration_ms: 0,
-                    error_class: Some(ErrorClass::Solved),
-                    ..Default::default()
-                    });
+                        false,
+                        ErrorClass::Solved,
+                    ));
                     break;
                 }
 
@@ -1855,7 +1800,7 @@ impl AgentRunEngine {
                     let calls_array = args.get("calls").and_then(|v| v.as_array());
 
                     if let Some(calls) = calls_array {
-                        const MAX_BATCH: usize = 25;
+                        use crate::constants::MAX_BATCH_SIZE as MAX_BATCH;
                         const BLOCKED: &[&str] =
                             &["batch", "done", "subagent", "subagent_parallel", "skill"];
 
@@ -1936,15 +1881,10 @@ impl AgentRunEngine {
                         for (i, tool_name, tool_args, msg, success) in results {
                             let output = msg.content.unwrap_or_default();
                             let status = if success { "ok" } else { "error" };
-                            let preview = if output.len() > 200 {
-                                let mut end = 200;
-                                while end > 0 && !output.is_char_boundary(end) {
-                                    end -= 1;
-                                }
-                                format!("{}...", &output[..end])
-                            } else {
-                                output.clone()
-                            };
+                            let preview = theo_domain::prompt_sanitizer::char_boundary_truncate(
+                                &output,
+                                crate::constants::TOOL_PREVIEW_BYTES,
+                            );
 
                             all_results.push((
                                 i,
@@ -2190,27 +2130,18 @@ impl AgentRunEngine {
                                 .task_manager
                                 .transition(&self.task_id, TaskState::Failed);
                             self.metrics.record_run_complete(false);
-                            return AgentResult {
-                                success: false,
-                                summary: format!(
-                                    "Doom loop abort: '{}' called identically {} times. Agent is stuck.",
-                                    name,
-                                    self.config.doom_loop_threshold.unwrap_or(3) * 2
-                                ),
-                                files_edited: self.context_loop_state.edits_files.clone(),
-                                iterations_used: iteration,
-                                was_streamed: false,
-                                tokens_used: self.metrics.snapshot().total_tokens_used,
-                    input_tokens: self.metrics.snapshot().total_input_tokens,
-                    output_tokens: self.metrics.snapshot().total_output_tokens,
-                    tool_calls_total: self.metrics.snapshot().total_tool_calls,
-                    tool_calls_success: self.metrics.snapshot().successful_tool_calls,
-                    llm_calls: self.metrics.snapshot().total_llm_calls,
-                    retries: self.metrics.snapshot().total_retries,
-                    duration_ms: 0,
-                    error_class: Some(ErrorClass::Aborted),
-                    ..Default::default()
-                            };
+                            let summary = format!(
+                                "Doom loop abort: '{}' called identically {} times. Agent is stuck.",
+                                name,
+                                self.config.doom_loop_threshold.unwrap_or(3) * 2
+                            );
+                            return AgentResult::from_engine_state(
+                                self,
+                                false,
+                                summary,
+                                false,
+                                ErrorClass::Aborted,
+                            );
                         }
                     }
                 }

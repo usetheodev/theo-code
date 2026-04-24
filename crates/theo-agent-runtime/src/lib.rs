@@ -8,6 +8,7 @@ pub mod compaction;
 pub mod compaction_stages;
 pub mod compaction_summary;
 pub mod config;
+pub mod constants;
 pub mod convergence;
 pub mod dlq;
 pub mod event_bus;

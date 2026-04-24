@@ -92,15 +92,11 @@ impl HookRunner {
             }
         }
 
-        // Global hooks
-        if let Ok(home) = std::env::var("HOME") {
-            let global_hooks = PathBuf::from(home)
-                .join(".config")
-                .join("theo")
-                .join("hooks");
-            if global_hooks.exists() {
-                hooks_dirs.push(global_hooks);
-            }
+        // Global hooks — only when HOME is set (avoid /tmp fallback).
+        if let Some(global_hooks) = theo_domain::user_paths::theo_config_subdir("hooks")
+            && global_hooks.exists()
+        {
+            hooks_dirs.push(global_hooks);
         }
 
         Self { hooks_dirs, config }

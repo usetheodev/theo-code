@@ -1,6 +1,7 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
+use parking_lot::Mutex;
 use theo_domain::capability::CapabilityDenied;
 use theo_domain::error::TransitionError;
 use theo_domain::event::{DomainEvent, EventType};
@@ -66,8 +67,7 @@ impl ToolCallManager {
 
         self.records
             .lock()
-            .expect("records lock poisoned")
-            .insert(call_id.clone(), record);
+                        .insert(call_id.clone(), record);
 
         self.event_bus.publish(DomainEvent::new(
             EventType::ToolCallQueued,
@@ -94,7 +94,7 @@ impl ToolCallManager {
     ) -> Result<ToolResultRecord, ToolCallManagerError> {
         // 0. Capability check (if gate is set)
         {
-            let records = self.records.lock().expect("records lock poisoned");
+            let records = self.records.lock();
             if let Some(record) = records.get(call_id)
                 && let Some(gate) = &self.capability_gate {
                     // Determine category from registry, default to Utility
@@ -108,7 +108,7 @@ impl ToolCallManager {
 
         // 1. Transition Queued → Dispatched (under lock)
         let llm_call = {
-            let mut records = self.records.lock().expect("records lock poisoned");
+            let mut records = self.records.lock();
             let record = records
                 .get_mut(call_id)
                 .ok_or_else(|| ToolCallManagerError::CallNotFound(call_id.as_str().to_string()))?;
@@ -162,7 +162,7 @@ impl ToolCallManager {
 
         // 5. Transition Running → final state (under lock)
         {
-            let mut records = self.records.lock().expect("records lock poisoned");
+            let mut records = self.records.lock();
             if let Some(record) = records.get_mut(call_id) {
                 let _ = transition_record(record, final_state);
                 record.completed_at = Some(now_millis());
@@ -180,15 +180,13 @@ impl ToolCallManager {
 
         self.results
             .lock()
-            .expect("results lock poisoned")
-            .insert(call_id.clone(), result.clone());
+                        .insert(call_id.clone(), result.clone());
 
         // 7. Publish completion event (enriched with tool details)
         let tool_name = {
             self.records
                 .lock()
-                .expect("records lock poisoned")
-                .get(call_id)
+                                .get(call_id)
                 .map(|r| r.tool_name.clone())
                 .unwrap_or_default()
         };
@@ -196,23 +194,17 @@ impl ToolCallManager {
             let raw = self
                 .records
                 .lock()
-                .expect("records lock poisoned")
-                .get(call_id)
+                                .get(call_id)
                 .map(|r| r.input.clone())
                 .unwrap_or(serde_json::Value::Null);
             // Truncate large string fields to keep event payload reasonable
             truncate_input_for_event(raw)
         };
-        // Truncate output preview for events (avoid huge payloads)
-        let output_preview = if result.output.len() > 200 {
-            let mut end = 200;
-            while end > 0 && !result.output.is_char_boundary(end) {
-                end -= 1;
-            }
-            format!("{}...", &result.output[..end])
-        } else {
-            result.output.clone()
-        };
+        // Truncate output preview for events (avoid huge payloads).
+        let output_preview = theo_domain::prompt_sanitizer::char_boundary_truncate(
+            &result.output,
+            crate::constants::TOOL_PREVIEW_BYTES,
+        );
 
         // Phase 44 (otlp-exporter-plan): payload otel for span end.
         let status_str = format!("{:?}", final_state);
@@ -250,8 +242,7 @@ impl ToolCallManager {
     pub fn get_record(&self, call_id: &CallId) -> Option<ToolCallRecord> {
         self.records
             .lock()
-            .expect("records lock poisoned")
-            .get(call_id)
+                        .get(call_id)
             .cloned()
     }
 
@@ -259,8 +250,7 @@ impl ToolCallManager {
     pub fn get_result(&self, call_id: &CallId) -> Option<ToolResultRecord> {
         self.results
             .lock()
-            .expect("results lock poisoned")
-            .get(call_id)
+                        .get(call_id)
             .cloned()
     }
 
@@ -268,8 +258,7 @@ impl ToolCallManager {
     pub fn calls_for_task(&self, task_id: &TaskId) -> Vec<ToolCallRecord> {
         self.records
             .lock()
-            .expect("records lock poisoned")
-            .values()
+                        .values()
             .filter(|r| r.task_id == *task_id)
             .cloned()
             .collect()
@@ -285,20 +274,20 @@ fn transition_record(
 }
 
 /// Truncate large string fields in tool input for event payload.
-/// Keeps first ~500 chars of each string field to prevent huge events.
-/// Uses char boundary safe truncation to avoid panics on multi-byte UTF-8.
+/// Uses `theo_domain::prompt_sanitizer::char_boundary_truncate` for UTF-8
+/// safety. Cap lives in `crate::constants::TOOL_INPUT_TRUNCATE_BYTES`.
 fn truncate_input_for_event(mut input: serde_json::Value) -> serde_json::Value {
     if let Some(obj) = input.as_object_mut() {
         for (_key, value) in obj.iter_mut() {
             if let Some(s) = value.as_str()
-                && s.len() > 500 {
-                    // Find the nearest char boundary at or before 500
-                    let mut end = 500;
-                    while end > 0 && !s.is_char_boundary(end) {
-                        end -= 1;
-                    }
-                    *value = serde_json::Value::String(format!("{}...", &s[..end]));
-                }
+                && s.len() > crate::constants::TOOL_INPUT_TRUNCATE_BYTES
+            {
+                let truncated = theo_domain::prompt_sanitizer::char_boundary_truncate(
+                    s,
+                    crate::constants::TOOL_INPUT_TRUNCATE_BYTES,
+                );
+                *value = serde_json::Value::String(truncated);
+            }
         }
     }
     input

@@ -569,12 +569,11 @@ pub mod run_engine_hooks {
         project_dir: &std::path::Path,
         messages: &mut Vec<Message>,
     ) {
-        let memory_root = std::env::var("HOME")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|_| std::path::PathBuf::from("/tmp"))
-            .join(".config")
-            .join("theo")
-            .join("memory");
+        // Skip legacy file-memory when HOME is missing (container / CI
+        // without a proper user env) — do not fall back to /tmp.
+        let Some(memory_root) = theo_domain::user_paths::theo_config_subdir("memory") else {
+            return;
+        };
         let memory_store =
             theo_tooling::memory::FileMemoryStore::for_project(&memory_root, project_dir);
         if let Ok(memories) = memory_store.list().await
