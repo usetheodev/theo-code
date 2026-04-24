@@ -1234,3 +1234,11 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 | T4.5 subagent/mod.rs split — segunda etapa | **DONE (parcial)** | novo `subagent/spawn_helpers.rs` (419 LOC) com 1 free fn (`generate_run_id`) + 11 metodos `impl SubAgentManager`: `resolve_worktree` (+ `dispatch_worktree_create_hook`), `build_sub_config` (config + prompt prefix + MCP hint), `register_mcp_tool_adapters` (auto-discovery + adapter registration, fail-soft, async), `persist_run_start`, `emit_subagent_started` (OTel span + event), `dispatch_start_hook_or_block` (Option<AgentResult>), `persist_early_exit`, `finalize_persisted_run`, `apply_output_format`, `dispatch_stop_hook_annotate`, `cleanup_worktree_if_success`. Blocos inline de ~260 LOC substituidos por chamadas a metodos privados, preservando byte-identical side-effects. `subagent/mod.rs`: 1737 → **1477 LOC** (-260 esta iter; **-418 desde baseline 1895, -22%**). |
 
 **Validacao:** 1132 unit + 96 integration = **1228 tests passando, 0 falhas**; 8/8 characterization snapshots byte-identical.
+
+### Iteracao 24 (2026-04-24) — Fase 4: T4.5 — 6 helpers adicionais
+
+| Task | Status | Notas |
+|---|---|---|
+| T4.5 subagent/mod.rs split — terceira etapa | **DONE (parcial)** | +6 helpers em `spawn_helpers.rs`: `run_agent_with_timeout` (free fn generica sobre Future — colapsa o branch duplicado tokio::select! vs tokio::time::timeout, ~40 LOC → 8), `register_cancellation_or_bail` (child token + pre-run cancel-check como `Result<Option<Token>, AgentResult>`), `enforce_max_depth` (`Result<(), AgentResult>`), `take_pending_resume_context` (Mutex snapshot + take), `snapshot_pre_run` (auto-snapshot do workdir), `build_prefixed_sub_bus` (sub-EventBus + PrefixedEventForwarder). `subagent/mod.rs`: 1477 → **1418 LOC** (-59 esta iter; **-477 desde baseline 1895, -25%**). |
+
+**Validacao:** 1132 unit + 96 integration = **1228 tests passando, 0 falhas**.
