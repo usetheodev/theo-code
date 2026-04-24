@@ -192,6 +192,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--tb-bin", default="tb")
     parser.add_argument("--n-concurrent", type=int, default=4)
+    parser.add_argument("--inter-variant-cooldown-s", type=int, default=0,
+                        help="seconds to sleep between variants (lets API "
+                             "rate-limit windows refill); default 0")
     parser.add_argument("--task-ids-file", type=Path,
                         help="optional: read task IDs from file (one per line) "
                              "instead of enumerating dataset")
@@ -238,8 +241,13 @@ def main(argv: list[str] | None = None) -> int:
             print(f"[dry-run] {v}: {' '.join(cmd)}")
         return 0
 
+    import time
     rc_total = 0
-    for v in variants:
+    for i, v in enumerate(variants):
+        if i > 0 and args.inter_variant_cooldown_s > 0:
+            print(f"[ab_test] cooldown {args.inter_variant_cooldown_s}s before variant '{v}' "
+                  f"(rate-limit window)", flush=True)
+            time.sleep(args.inter_variant_cooldown_s)
         rc = run_variant(
             v, selected, args.output_dir,
             tb_bin=args.tb_bin,

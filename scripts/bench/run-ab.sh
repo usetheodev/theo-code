@@ -22,7 +22,14 @@ DATE="$(date -u +%Y-%m-%d)"
 REPORT_DIR="${REPORT_DIR:-$REPO_ROOT/.theo/bench-data/$DATE/reports/ab}"
 VARIANTS="${VARIANTS:-sota,sota-lean,sota-no-bench}"
 N_TASKS="${N_TASKS:-20}"
-N_CONCURRENT="${N_CONCURRENT:-4}"
+# OAuth Codex has ~150k TPM. With ~80k tokens/trial, N_CONCURRENT=2 is the
+# safe ceiling — anything higher trips rate limits and burns the whole next
+# variant (smoke3 had sota fine, sota-lean immediately rate-limited at
+# call 0/0 because previous variant exhausted the TPM window).
+N_CONCURRENT="${N_CONCURRENT:-2}"
+# Inter-variant cooldown: lets OAuth TPM bucket refill so the next variant
+# starts from a clean rate-limit window.
+INTER_VARIANT_COOLDOWN_S="${INTER_VARIANT_COOLDOWN_S:-90}"
 DATASET="${DATASET:-terminal-bench-core==0.1.1}"
 
 VENV=/opt/theo-bench-venv
@@ -51,6 +58,7 @@ python3 "$BENCH_DIR/runner/ab_test.py" \
   --variants "$VARIANTS" \
   --n-tasks "$N_TASKS" \
   --n-concurrent "$N_CONCURRENT" \
+  --inter-variant-cooldown-s "$INTER_VARIANT_COOLDOWN_S" \
   --dataset "$DATASET" \
   --tb-bin "$TB" \
   --output-dir "$REPORT_DIR" \
