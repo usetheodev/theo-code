@@ -178,7 +178,7 @@ pub fn finalize_run_observability(
     fp_recurrent: u32,
     initial_context_files: &std::collections::HashSet<String>,
     pre_compaction_hot_files: &std::collections::HashSet<String>,
-) -> DetectedFailureModes {
+) -> (DetectedFailureModes, Option<report::RunReport>) {
     let budget = theo_domain::budget::Budget {
         max_iterations,
         ..theo_domain::budget::Budget::default()
@@ -264,10 +264,10 @@ pub struct FinalizeInputs<'a> {
 pub fn finalize_trajectory_summary(
     file_path: &std::path::Path,
     inputs: &FinalizeInputs<'_>,
-) -> DetectedFailureModes {
+) -> (DetectedFailureModes, Option<report::RunReport>) {
     let (envelopes, integrity) = match reader::read_trajectory(file_path) {
         Ok(v) => v,
-        Err(_) => return DetectedFailureModes::default(),
+        Err(_) => return (DetectedFailureModes::default(), None),
     };
     let projection = projection::project(inputs.run_id, envelopes, integrity.clone());
 
@@ -347,7 +347,7 @@ pub fn finalize_trajectory_summary(
         summary_seq,
         serde_json::to_value(&report_payload).unwrap_or_default(),
     );
-    detected
+    (detected, Some(report_payload))
 }
 
 /// Event listener that writes structured JSON lines to a writer.

@@ -126,6 +126,9 @@ pub struct AgentRunEngine {
     /// Reset at the start of every turn; set to `true` on first
     /// mutating-tool dispatch. One snapshot per turn max.
     checkpoint_taken_this_turn: std::sync::atomic::AtomicBool,
+    /// Phase 64 (benchmark-sota-metrics-plan): RunReport captured after
+    /// finalize_observability. The caller reads this to embed in AgentResult.
+    last_run_report: Option<crate::observability::report::RunReport>,
 }
 
 impl AgentRunEngine {
@@ -231,6 +234,7 @@ impl AgentRunEngine {
             subagent_reloadable: None,
             resume_context: None,
             checkpoint_taken_this_turn: std::sync::atomic::AtomicBool::new(false),
+            last_run_report: None,
         }
     }
 
@@ -357,13 +361,19 @@ impl AgentRunEngine {
         )
     }
 
+    /// Takes the RunReport captured by the last finalize_observability call.
+    pub fn take_run_report(&mut self) -> Option<crate::observability::report::RunReport> {
+        self.last_run_report.take()
+    }
+
     /// Execute the full agent run cycle.
     ///
     /// Flow: Initialized → Planning → Executing → Evaluating → Converged/Replanning/Aborted
     /// Execute with fresh messages (no session history).
     pub async fn execute(&mut self) -> AgentResult {
-        let result = self.execute_with_history(Vec::new()).await;
+        let mut result = self.execute_with_history(Vec::new()).await;
         self.record_session_exit(&result).await;
+        result.run_report = self.last_run_report.take();
         result
     }
 

@@ -838,7 +838,7 @@ tool, time pressure), say so honestly — don't claim success.\n";
         // v3 + emit error_class. Field is omitted (not null) when None
         // so v2 consumers ignore it without surprise.
         let mut json = serde_json::json!({
-            "schema": "theo.headless.v3",
+            "schema": "theo.headless.v4",
             "success": result.success,
             "summary": result.summary,
             "iterations": result.iterations_used,
@@ -867,6 +867,11 @@ tool, time pressure), say so honestly — don't claim success.\n";
         });
         if let Some(ec) = result.error_class {
             json["error_class"] = serde_json::Value::String(ec.to_string());
+        }
+        // Phase 64 (benchmark-sota-metrics-plan): embed full RunReport for
+        // benchmark extraction. Backward compat: v3 parsers ignore unknown fields.
+        if let Some(report) = &result.run_report {
+            json["report"] = serde_json::to_value(report).unwrap_or_default();
         }
         println!("{}", serde_json::to_string(&json).unwrap_or_default());
 

@@ -71,6 +71,12 @@ pub struct AgentResult {
     /// Invariant (validated by tests): `success == true ⇔ class ==
     /// Some(ErrorClass::Solved)`.
     pub error_class: Option<theo_domain::error_class::ErrorClass>,
+    /// Phase 64 (benchmark-sota-metrics-plan): full RunReport computed
+    /// from the trajectory. Contains all observability metrics: tokens,
+    /// loop, tool breakdown, context health, memory, subagent, error
+    /// taxonomy, derived/surrogate metrics, and integrity report.
+    /// `None` when observability pipeline was not attached.
+    pub run_report: Option<crate::observability::report::RunReport>,
 }
 
 impl AgentResult {
@@ -490,8 +496,9 @@ impl AgentLoop {
         mut engine: AgentRunEngine,
         history: Vec<theo_infra_llm::types::Message>,
     ) -> AgentResult {
-        let result = engine.execute_with_history(history).await;
+        let mut result = engine.execute_with_history(history).await;
         engine.record_session_exit_public(&result).await;
+        result.run_report = engine.take_run_report();
         result
     }
 
