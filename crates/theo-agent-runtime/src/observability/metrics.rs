@@ -54,7 +54,7 @@ impl RuntimeMetrics {
     }
 }
 
-/// Phase 27 (sota-gaps-followup): single routing decision recorded for
+/// Single routing decision recorded for
 /// post-mortem analysis. Aggregated in `RuntimeMetrics::routing_decisions`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct RoutingDecisionMetric {
@@ -97,9 +97,9 @@ impl RoutingHistogram {
 /// Uses RwLock to allow concurrent reads (snapshot) and exclusive writes (record).
 pub struct MetricsCollector {
     metrics: Arc<RwLock<RuntimeMetrics>>,
-    /// Phase 12: per-agent metrics breakdown for the dashboard (A4 gap).
+    /// Per-agent metrics breakdown for the dashboard.
     by_agent: Arc<RwLock<crate::observability::otel::MetricsByAgent>>,
-    /// Phase 27 (sota-gaps-followup): routing decisions histogram.
+    /// Routing decisions histogram.
     routing: Arc<RwLock<RoutingHistogram>>,
 }
 
@@ -114,7 +114,7 @@ impl MetricsCollector {
         }
     }
 
-    /// Phase 27: record a single routing decision. Aggregated into the
+    /// Record a single routing decision. Aggregated into the
     /// `RoutingHistogram` for post-mortem analysis.
     pub fn record_routing_decision(
         &self,
@@ -129,12 +129,12 @@ impl MetricsCollector {
         });
     }
 
-    /// Phase 27: snapshot of the routing histogram (cloned for safe reading).
+    /// Snapshot of the routing histogram (cloned for safe reading).
     pub fn routing_snapshot(&self) -> RoutingHistogram {
         self.routing.read().clone()
     }
 
-    /// Phase 12: record per-agent run completion (called from spawn_with_spec
+    /// Record per-agent run completion (called from spawn_with_spec
     /// after final result is known).
     pub fn record_subagent_run(
         &self,
@@ -443,7 +443,7 @@ mod tests {
         );
     }
 
-    // ── Phase 27 (sota-gaps-followup): routing telemetry ──
+    // ── Routing telemetry ──
 
     pub mod routing {
         use super::*;

@@ -115,7 +115,7 @@ pub fn compact_with_policy(
         return;
     }
 
-    // Phase 1 T1.3 AC-1.3.5: per-message oversize cap of context_window/4.
+    // T1.3 AC-1.3.5: per-message oversize cap of context_window/4.
     // Runs BEFORE the threshold check so a single pathological message
     // cannot keep the total above the threshold forever (OOM loop — the
     // scenario validator flagged in meeting 20260420-221947). The cap is
@@ -209,7 +209,7 @@ pub fn compact_messages_to_target(
     sanitize_tool_pairs(messages);
 }
 
-/// Phase 1 T1.3 AC-1.3.5: cap any single message content at
+/// T1.3 AC-1.3.5: cap any single message content at
 /// `max_chars_per_message` chars. The cap is expressed in chars because
 /// token estimation uses chars/4 and the limit we enforce is
 /// `context_window/4` tokens — so chars ≈ `context_window` bytes per
@@ -580,7 +580,7 @@ mod tests {
         );
     }
 
-    // ── Phase 1 T1.3 — Oversized-message protection ──────────────
+    // ── T1.3 — Oversized-message protection ──────────────
     #[test]
     fn test_t1_3_ac_6_single_oversized_message_does_not_cause_oom_loop() {
         // Scenario from validator (meeting 20260420-221947 #concern):

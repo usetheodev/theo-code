@@ -17,7 +17,7 @@ use super::registry::SubAgentRegistry;
 /// of mcp_servers that appeared in ANY spec (old or new) — consumers
 /// can use this to invalidate caches keyed by server name.
 ///
-/// Phase 21 (sota-gaps-followup) gap #9: when a spec is hot-reloaded
+/// gap #9: when a spec is hot-reloaded
 /// and its `mcp_servers` list changed, the discovery cache must drop
 /// stale entries so the next spawn re-fetches `tools/list`.
 pub type ReloadCallback =
@@ -205,7 +205,7 @@ mod tests {
         assert!(Arc::ptr_eq(&r.shared(), &r2.shared()));
     }
 
-    // ── Phase 21 (sota-gaps-followup): mcp_servers change → callback ──
+    // ── mcp_servers change → callback ──
 
     fn write_spec_with_mcp(dir: &Path, name: &str, mcp_servers: &[&str]) {
         let agents = dir.join(".theo").join("agents");

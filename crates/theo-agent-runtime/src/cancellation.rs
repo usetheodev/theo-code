@@ -1,6 +1,6 @@
 //! Cooperative cancellation tree — parent → child token propagation.
 //!
-//! Track B — Phase 6.
+//! Track B — 
 //!
 //! When the parent agent cancels (Ctrl+C, timeout, programmatic abort),
 //! all child sub-agents cancel cooperatively. Cancellation is non-blocking:

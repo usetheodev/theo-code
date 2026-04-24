@@ -43,7 +43,6 @@ use theo_infra_llm::types::Message;
 /// Maximum sub-agent nesting depth. Sub-agents CANNOT spawn sub-agents.
 const MAX_DEPTH: usize = 1;
 
-/// Phase 31 (resume-runtime-wiring) — gap #10.
 /// Override that the Resumer passes to `spawn_with_spec_with_override`
 /// to control worktree behavior on resume.
 ///
@@ -70,9 +69,9 @@ pub struct SubAgentManager {
     event_bus: Arc<EventBus>,
     project_dir: PathBuf,
     depth: usize,
-    /// Optional registry for spec-based spawning (Phase 3). If `None`, the
-    /// legacy role-based API (`spawn`) is used. The registry is opt-in so
-    /// existing call sites don't need updating until Phase 4.
+    /// Optional registry for spec-based spawning. If `None`, the legacy
+    /// role-based API (`spawn`) is used. The registry is opt-in so
+    /// existing call sites don't need updating.
     registry: Option<Arc<SubAgentRegistry>>,
     /// Optional persistence store. When Some, every spawn_with_spec
     /// creates a SubagentRun record (started → completed/failed/cancelled)
@@ -101,8 +100,8 @@ pub struct SubAgentManager {
     /// tools and the resulting prompt-hint advertises *concrete* tool
     /// names (not just the `mcp:<server>:<tool>` namespace).
     mcp_discovery: Option<Arc<theo_infra_mcp::DiscoveryCache>>,
-    /// Phase 30 (resume-runtime-wiring) — gap #3: pending resume context
-    /// set by `Resumer::resume_with_objective` right before calling
+    /// Pending resume context set by `Resumer::resume_with_objective`
+    /// right before calling
     /// `spawn_with_spec`. The first spawn TAKES the value (consume-once)
     /// and forwards it to the inner `AgentLoop::with_resume_context`.
     /// Wrapped in `Mutex` to allow `Resumer` to set without owning
@@ -140,12 +139,10 @@ impl SubAgentManager {
         objective: &str,
         context: Option<Vec<Message>>,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = AgentResult> + Send + '_>> {
-        // Phase 31 (resume-runtime-wiring) — gap #10: wrapper over the
-        // _with_override variant for backward compat (D5 invariant).
+        // Wrapper over the _with_override variant for backward compat.
         self.spawn_with_spec_with_override(spec, objective, context, WorktreeOverride::None)
     }
 
-    /// Phase 31 (resume-runtime-wiring) — gap #10.
     /// Variant of `spawn_with_spec` that respects an explicit worktree
     /// decision via `WorktreeOverride`. The legacy `spawn_with_spec` is
     /// now a thin wrapper that delegates here with `WorktreeOverride::None`.
@@ -164,7 +161,7 @@ impl SubAgentManager {
         });
 
         Box::pin(async move {
-            // Phase 11 + Phase 31: resolve worktree honoring override.
+            // Resolve worktree honoring override.
             let worktree_handle = self.resolve_worktree(&spec, &worktree_override);
             // The CWD the sub-agent will use: worktree path if isolated, else parent's project_dir
             let agent_cwd: PathBuf = worktree_handle
@@ -172,17 +169,17 @@ impl SubAgentManager {
                 .map(|h| h.path.clone())
                 .unwrap_or_else(|| self.project_dir.clone());
 
-            // Phase 9: auto-snapshot the workdir BEFORE the run (pre-mutation safety)
+            // Auto-snapshot the workdir BEFORE the run (pre-mutation safety).
             let checkpoint_before: Option<String> = self.snapshot_pre_run(&spec);
 
-            // Phase 10: persist run start (no-op when run_store absent)
+            // Persist run start (no-op when run_store absent).
             let run_id = spawn_helpers::generate_run_id(&spec);
             self.persist_run_start(&run_id, &spec, &objective, checkpoint_before.clone());
 
-            // Phase 5: build effective HookManager — per-agent overrides global
+            // Build effective HookManager — per-agent overrides global.
             let effective_hooks = build_effective_hooks(&spec, self.hook_manager.as_deref());
 
-            // Phase 5: dispatch SubagentStart hook — short-circuit on Block
+            // Dispatch SubagentStart hook — short-circuit on Block.
             if let Some(r) =
                 self.dispatch_start_hook_or_block(effective_hooks.as_ref(), &spec, &context_text)
             {
@@ -190,7 +187,7 @@ impl SubAgentManager {
                 return r;
             }
 
-            // Phase 12: emit SubagentStarted with OTel-aligned span attrs
+            // Emit SubagentStarted with OTel-aligned span attrs.
             self.emit_subagent_started(
                 &spec,
                 &run_id,
@@ -200,7 +197,7 @@ impl SubAgentManager {
 
             let start = std::time::Instant::now();
 
-            // Phase 6: register child cancellation token (early-bail if root already cancelled)
+            // Register child cancellation token (early-bail if root already cancelled).
             let cancellation_token = match self.register_cancellation_or_bail(
                 &run_id,
                 &spec,
@@ -239,11 +236,11 @@ impl SubAgentManager {
 
             let mut registry = theo_tooling::registry::create_default_registry();
 
-            // Phase 17 + Phase 20: register MCP tool adapters (fail-soft).
+            // Register MCP tool adapters (fail-soft).
             self.register_mcp_tool_adapters(&spec, &mut registry).await;
 
-            // Phase 30 (resume-runtime-wiring) — gap #3: consume pending
-            // resume context so the spawned AgentLoop runs in replay-mode.
+            // Consume pending resume context so the spawned AgentLoop
+            // runs in replay-mode.
             let pending_resume = self.take_pending_resume_context();
 
             let mut agent = AgentLoop::new(sub_config, registry);
@@ -255,7 +252,7 @@ impl SubAgentManager {
             let timeout = std::time::Duration::from_secs(spec.timeout_secs);
 
             // Race the agent run against (timeout || cancellation). The
-            // agent uses the worktree path when isolated (Phase 11).
+            // agent uses the worktree path when isolated.
             let agent_run = agent.run_with_history(&objective, &agent_cwd, history, Some(sub_bus));
             let mut result = spawn_helpers::run_agent_with_timeout(
                 agent_run,
@@ -273,30 +270,30 @@ impl SubAgentManager {
             result.duration_ms = start.elapsed().as_millis() as u64;
             result.worktree_path = worktree_handle.as_ref().map(|h| h.path.clone());
 
-            // Phase 10: update persisted run with final status + metrics
+            // Update persisted run with final status + metrics.
             self.finalize_persisted_run(&run_id, &result);
 
-            // Phase 7: try output format parsing (structured output)
+            // Try output format parsing (structured output).
             self.apply_output_format(&spec, &run_id, &mut result);
 
-            // Phase 5: dispatch SubagentStop hook (informational; can't cancel
+            // Dispatch SubagentStop hook (informational; can't cancel
             // — the run already finished). Block here is treated as marking
             // the result with a warning suffix.
             self.dispatch_stop_hook_annotate(effective_hooks.as_ref(), &mut result);
 
-            // Phase 6: forget the cancellation token (cleanup tree)
+            // Forget the cancellation token (cleanup tree).
             if let Some(tree) = &self.cancellation {
                 tree.forget(&run_id);
             }
 
-            // Phase 11: cleanup worktree on success (default policy: OnSuccess).
+            // Cleanup worktree on success (default policy: OnSuccess).
             // Failures preserve the worktree for inspection.
             //
-            // Phase 31 (resume-runtime-wiring) — gap #10: when the handle was
-            // built via WorktreeHandle::existing (Reuse path), the synthetic
-            // branch sentinel "(reused)" signals that THIS manager did not
-            // create the worktree. Skip auto-removal so we never destroy
-            // state owned by the prior crashed run.
+            // When the handle was built via `WorktreeHandle::existing`
+            // (Reuse path), the synthetic branch sentinel "(reused)"
+            // signals that THIS manager did not create the worktree. Skip
+            // auto-removal so we never destroy state owned by the prior
+            // crashed run.
             self.cleanup_worktree_if_success(worktree_handle.as_ref(), &result);
 
             self.publish_completed(&spec, &result);
@@ -316,7 +313,7 @@ impl SubAgentManager {
     }
 
     fn publish_completed(&self, spec: &AgentSpec, result: &AgentResult) {
-        // Phase 12: OTel-aligned attributes for the completion event.
+        // OTel-aligned attributes for the completion event.
         let mut span =
             crate::observability::otel::AgentRunSpan::from_spec(spec, &result.agent_name);
         span.set(
@@ -367,7 +364,7 @@ impl SubAgentManager {
                 "otel": span.to_json(),
             }),
         ));
-        // Phase 12: per-agent metrics aggregation
+        // Per-agent metrics aggregation.
         if let Some(metrics) = &self.metrics {
             metrics.record_subagent_run(
                 &spec.name,
@@ -386,7 +383,7 @@ impl SubAgentManager {
 }
 
 // ---------------------------------------------------------------------------
-// needs_discovery — Phase 20 (sota-gaps): true when at least one server in
+// needs_discovery — true when at least one server in
 // `mcp_servers` has no cached tools yet.
 // ---------------------------------------------------------------------------
 
@@ -403,7 +400,7 @@ fn needs_discovery(
 }
 
 // ---------------------------------------------------------------------------
-// build_effective_hooks — Phase 5: per-agent hooks override globals
+// build_effective_hooks — per-agent hooks override globals
 // ---------------------------------------------------------------------------
 
 /// Merge per-agent hooks (from `spec.hooks`) with global `manager`.
@@ -547,7 +544,7 @@ mod tests {
         assert!(result.summary.contains("depth limit"));
     }
 
-    // ── Phase 3: spec-based spawn + events ───────────────────────────────
+    // ── Spec-based spawn + events ────────────────────────────────────────
 
     use crate::event_bus::EventListener;
     use std::sync::Mutex;
@@ -879,7 +876,7 @@ mod tests {
         assert!(manager.run_store().is_some());
     }
 
-    // ── Phase 17: MCP discovery cache integration ──
+    // ── MCP discovery cache integration ──
 
     #[test]
     fn with_mcp_discovery_builder_stores_reference() {
@@ -953,7 +950,7 @@ mod tests {
         assert!(hint.contains("pre-discovered"));
     }
 
-    // ── Phase 20 (sota-gaps): MCP auto-discovery on first spawn ──
+    // ── MCP auto-discovery on first spawn ──
 
     #[test]
     fn needs_discovery_true_when_cache_empty_and_servers_requested() {
@@ -1265,7 +1262,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Phase 31 (resume-runtime-wiring) — gap #10: WorktreeOverride
+    // WorktreeOverride — resume-runtime-wiring
     // -----------------------------------------------------------------------
 
     mod worktree_override {

@@ -1,5 +1,5 @@
 //! `HandoffGuardrail` — 3-tier validation pipeline executed by
-//! `delegate_task` BEFORE spawning a sub-agent. Phase 18 — sota-gaps-plan.
+//! `delegate_task` BEFORE spawning a sub-agent. — sota-gaps-plan.
 //!
 //! Tiers:
 //! 1. **Built-in guardrails** — always active. Prevent obvious violations

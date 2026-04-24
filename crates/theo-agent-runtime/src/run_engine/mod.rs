@@ -73,19 +73,19 @@ pub struct AgentRunEngine {
     message_queues: MessageQueues,
     /// Accumulated token usage across LLM calls in this session.
     session_token_usage: theo_domain::budget::TokenUsage,
-    /// PLAN_AUTO_EVOLUTION_SOTA Phase 1: turns since the last memory
+    /// PLAN_AUTO_EVOLUTION_SOTA: turns since the last memory
     /// reviewer spawn. `AtomicUsize` lets the counter survive fork
     /// boundaries (eliminates Hermes Issue #8506).
     memory_nudge_counter: Arc<crate::memory_lifecycle::MemoryNudgeCounter>,
-    /// PLAN_AUTO_EVOLUTION_SOTA Phase 3: tool iterations since the
+    /// PLAN_AUTO_EVOLUTION_SOTA: tool iterations since the
     /// last skill reviewer spawn. Persists across task boundaries so
     /// short tasks don't reset accumulation mid-stream.
     skill_nudge_counter: Arc<crate::skill_reviewer::SkillNudgeCounter>,
-    /// PLAN_AUTO_EVOLUTION_SOTA Phase 3: flipped to `true` whenever
+    /// PLAN_AUTO_EVOLUTION_SOTA: flipped to `true` whenever
     /// `skill_manage.create` / `edit` / `patch` succeeds in the
     /// current task, suppressing the reviewer for that task.
     skill_created_this_task: std::sync::atomic::AtomicBool,
-    /// PLAN_AUTO_EVOLUTION_SOTA Phase 2: flipped once autodream has
+    /// PLAN_AUTO_EVOLUTION_SOTA: flipped once autodream has
     /// been attempted for this session so we don't retry on every
     /// message in long-running sessions.
     autodream_attempted: std::sync::atomic::AtomicBool,
@@ -326,7 +326,7 @@ impl AgentRunEngine {
         matches!(tool_name, "edit" | "write" | "apply_patch" | "bash")
     }
 
-    /// Accumulated token usage (Phase 1 T1.1 AC-1.1.4, CLI display).
+    /// Accumulated token usage (for CLI display).
     pub fn session_token_usage(&self) -> &theo_domain::budget::TokenUsage {
         &self.session_token_usage
     }
@@ -387,7 +387,7 @@ impl AgentRunEngine {
     // `run_engine/handoff.rs`. See those files for docs.
 }
 
-/// Phase 59 (headless-error-classification-plan): map an LLM error to its
+/// Map an LLM error to its
 /// canonical `ErrorClass`. Used at every site in `execute_with_history`
 /// that returns `AgentResult` from a failed LLM call so headless v3
 /// consumers can distinguish infra failures (rate-limit, quota, auth)
@@ -641,7 +641,7 @@ mod tests {
 
     #[test]
     fn agent_result_default_has_no_error_class() {
-        // Phase 59 backcompat — legacy tests that build AgentResult via
+        // Backcompat — legacy tests that build AgentResult via
         // ..Default::default() must keep working even if they don't set
         // error_class. Default is None.
         let r = AgentResult::default();
@@ -732,7 +732,7 @@ mod tests {
 
         #[test]
         fn llm_error_to_class_maps_quota_exceeded() {
-            // Phase 61: distinct from RateLimited so ab_compare can
+            // Distinct from RateLimited so ab_compare can
             // separate "agent retry exhausted" from "account hit billing
             // ceiling — bench is unusable until reset."
             let class = crate::run_engine_helpers::llm_error_to_class(&LlmError::QuotaExceeded {
@@ -769,7 +769,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Phase 4: delegate_task validation tests
+    // delegate_task validation tests
     // -----------------------------------------------------------------------
 
     #[tokio::test]
@@ -860,7 +860,7 @@ mod tests {
         );
     }
 
-    // ── Phase 29 follow-up: split tool variants ──
+    // ── Split tool variants ──
 
     #[test]
     fn delegate_task_single_tool_def_is_registered() {
@@ -899,7 +899,7 @@ mod tests {
         assert_eq!(runs.len(), 1, "registry-resolved spawn must persist");
     }
 
-    // ── Phase 18: handoff guardrails integration ──
+    // ── Handoff guardrails integration ──
 
     #[test]
     fn engine_with_subagent_handoff_guardrails_stores_reference() {
@@ -1271,7 +1271,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Phase 30 (resume-runtime-wiring) — gap #3 dispatch wiring
+    // Resume-runtime-wiring dispatch wiring
     // -----------------------------------------------------------------------
 
     mod dispatch_replays {
@@ -1381,7 +1381,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // Phase 43 (otlp-exporter-plan) — provider-hint helper coverage
+    // provider-hint helper coverage (otlp-exporter)
     // -----------------------------------------------------------------------
 
     mod provider_hint {
@@ -1473,7 +1473,7 @@ mod tests {
             assert!(r.summary.contains("[accepted after"));
         }
 
-        // Phase 59 (headless-error-classification-plan) — error_class
+        // error_class
         // population on the canonical helpers.
 
         #[test]

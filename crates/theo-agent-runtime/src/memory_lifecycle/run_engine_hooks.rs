@@ -1,4 +1,4 @@
-//! Run-engine helpers (Phase 0 T0.1). Extracted here so `run_engine.rs`
+//! Run-engine helpers . Extracted here so `run_engine.rs`
 //! stays under the 2500-line structural-hygiene cap while still hooking
 //! every lifecycle point the plan requires.
 //!
@@ -94,7 +94,7 @@ pub async fn inject_legacy_file_memory(
     }
 }
 
-/// Phase 0 T0.3: feed eligible episode summaries back into the session
+/// T0.3: feed eligible episode summaries back into the session
 /// context.
 ///
 /// Filtering (AC-0.3.1..0.3.6):

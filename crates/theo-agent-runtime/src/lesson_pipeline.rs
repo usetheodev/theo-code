@@ -1,4 +1,4 @@
-//! Lesson extraction and persistence (Phase 2 T2.1, G5).
+//! Lesson extraction and persistence .
 //!
 //! Plan: `docs/plans/PLAN_MEMORY_SUPERIORITY.md` §Task 2.1.
 //!

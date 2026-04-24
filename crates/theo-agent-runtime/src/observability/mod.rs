@@ -18,7 +18,7 @@ pub mod normalizer;
 pub mod loop_detector;
 pub mod failure_sensors;
 pub mod otel;
-// Phase 41-42 (otlp-exporter-plan) — gated by feature `otel`. Default
+// -42 (otlp-exporter-plan) — gated by feature `otel`. Default
 // builds skip these modules entirely (zero compile-time/runtime cost).
 #[cfg(feature = "otel")]
 pub mod otel_exporter;
@@ -129,8 +129,8 @@ impl ObservabilityPipeline {
 /// One-shot installer: subscribes both the `ObservabilityListener` and the
 /// `LoopDetectingListener` to the event bus and returns the pipeline handle.
 ///
-/// Phase 42 (otlp-exporter-plan): when the `otel` feature is active AND
-/// the global TracerProvider has been installed (Phase 41 init), also
+/// when the `otel` feature is active AND
+/// the global TracerProvider has been installed , also
 /// subscribes an `OtelExportingListener` so DomainEvents reach the OTLP
 /// collector in addition to the local trajectory JSONL (D5).
 pub fn install_observability(

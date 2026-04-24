@@ -1,4 +1,4 @@
-//! Onboarding / bootstrap — Phase 5 of `PLAN_AUTO_EVOLUTION_SOTA`.
+//! Onboarding / bootstrap — part of `PLAN_AUTO_EVOLUTION_SOTA`.
 //!
 //! Pattern ported from OpenClaw's `BOOTSTRAP.md` workflow (docs.openclaw.ai).
 //! On first session with a new user we:
@@ -68,7 +68,7 @@ pub fn user_profile_path(memory_dir: &Path) -> PathBuf {
 /// Returns `false` otherwise so the prompt is injected only once per
 /// user profile lifetime.
 ///
-/// Phase 29 (sota-gaps-followup): `THEO_SKIP_ONBOARDING=1` env var
+/// `THEO_SKIP_ONBOARDING=1` env var
 /// short-circuits to `false` so headless / CI / E2E benchmarks bypass
 /// the Q&A and execute the prompt literally. This is the "headless-direct"
 /// mode the plan described.
@@ -343,7 +343,7 @@ mod tests {
         assert!(!needs_bootstrap(tmp.path()));
     }
 
-    // ── Phase 29 (sota-gaps-followup): THEO_SKIP_ONBOARDING bypass ──
+    // ── THEO_SKIP_ONBOARDING bypass ──
     #[test]
     fn needs_bootstrap_returns_false_when_skip_env_set() {
         let tmp = tempfile::tempdir().expect("tmp");

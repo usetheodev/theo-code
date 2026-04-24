@@ -1316,3 +1316,11 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 | T4.2 run_engine split — 17a etapa | **DONE (parcial)** | novo `run_engine/execution.rs` (371 LOC) com `execute` + `execute_with_history` (o corpo async de 343 LOC — setup + main loop + tool-calls + snapshot). Free fn `forced_tool_choice(&tool_defs) -> Option<String>` extrai a logica de 23 LOC do `THEO_FORCE_TOOL_CHOICE` para um helper puro, eliminando o problema de `with_tool_choice(self)` retornando `Self` ao usar `&mut ChatRequest`. Imports nao-mais-usados removidos de `mod.rs`: `ChatRequest`, `Message`, `tool_bridge`, `DoomLoopTracker`. `AgentResult` mantido com `#[cfg(test)]` pois ainda e usado pelos testes inline. `run_engine/mod.rs`: 1903 → **1540 LOC** (-363 esta iter; **-2690 desde baseline 4230, -64%**). |
 
 **Validacao:** 1132 unit + 96 integration = **1228 tests passando, 0 falhas**; invariante arquitetural `exactly-one-as_router().route(` preservada (scan recursivo do `run_engine/` encontra exatamente 1 match em `main_loop.rs`).
+
+### Iteracao 34 (2026-04-24) — T8.1 Phase tag sweep completo
+
+| Task | Status | Notas |
+|---|---|---|
+| T8.1 phase tags cleanup | **DONE** | Limpeza sistematica de tags historicas `Phase N` dos comentarios + docstrings. Estrategia: preservar a semantica da frase eliminando prefixos/parenteticos que so referenciam fases internas sem valor durable. Primeiro ~50 edits manuais nos arquivos maiores (`subagent/mod.rs`, `spawn_helpers.rs`, `resume.rs`, `run_engine/mod.rs`, `config.rs`, `observability/metrics.rs`, `agent_loop.rs`, `lifecycle_hooks.rs`, `memory_lifecycle/*.rs`, `run_engine/{handoff,execution,delegate_handler}.rs`, `onboarding.rs`, `subagent_runs.rs`, etc). Depois script sed em 5 padroes para varrer os ~130 restantes. Artefatos de sed (dangling em-dashes, duplicatas) corrigidos em 6 sites. Tambem remove `(sota-gaps-followup)` / `(sota-gaps-plan)` parenteticos genericos. **176 → 0 tags** (-100%). Unico match remanescente e referencia real a `sota-gaps-plan.md §18 RED list` com valor documental concreto. |
+
+**Validacao:** 1132 unit + 96 integration = **1228 tests passando, 0 falhas**. Byte-identical semantics preservada (tests passam).

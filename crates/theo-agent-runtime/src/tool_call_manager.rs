@@ -123,7 +123,7 @@ impl ToolCallManager {
 
             transition_record(record, ToolCallState::Dispatched)?;
 
-            // Phase 44 (otlp-exporter-plan): payload carries an `otel`
+            // payload carries an `otel`
             // attribute map that the OtelExportingListener turns into
             // span attributes (theo.tool.name + theo.tool.call_id).
             let mut start_span = crate::observability::otel::tool_call_span(&record.tool_name);
@@ -200,7 +200,7 @@ impl ToolCallManager {
             crate::constants::TOOL_PREVIEW_BYTES,
         );
 
-        // Phase 44 (otlp-exporter-plan): payload otel for span end.
+        // payload otel for span end.
         let status_str = format!("{:?}", final_state);
         let mut end_span = crate::observability::otel::tool_call_span(&tool_name);
         end_span.set(
@@ -488,7 +488,7 @@ mod tests {
         assert!(completion.payload.get("duration_ms").is_some());
     }
 
-    // ── Phase 44 (otlp-exporter-plan) — otel payload keys ──
+    // ── — otel payload keys ──
 
     #[tokio::test]
     async fn dispatched_event_payload_includes_otel_attributes() {

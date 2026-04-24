@@ -17,7 +17,7 @@
 //!
 //! Numeric fields (A1): `u32` on the wire, cast to `usize`/`u64` in the struct.
 //!
-//! Track A — Phase 2.
+//! Track A — spec parser.
 
 use std::collections::BTreeSet;
 
@@ -61,16 +61,16 @@ struct RawFrontmatter {
     /// Optional explicit network access toggle (default: false for safety).
     #[serde(default)]
     network_access: Option<bool>,
-    /// Phase 7: optional structured-output JSON Schema.
+    /// Optional structured-output JSON Schema.
     #[serde(default)]
     output_format: Option<RawOutputFormat>,
-    /// Phase 8: MCP servers allowlist for this agent.
+    /// MCP servers allowlist for this agent.
     #[serde(default)]
     mcp_servers: Option<Vec<String>>,
-    /// Phase 11: isolation mode ("shared" default, "worktree" opt-in).
+    /// Isolation mode ("shared" default, "worktree" opt-in).
     #[serde(default)]
     isolation: Option<RawIsolation>,
-    /// Phase 5: per-agent hooks (HookManager-compatible JSON).
+    /// Per-agent hooks (HookManager-compatible JSON).
     #[serde(default)]
     hooks: Option<serde_json::Value>,
 }

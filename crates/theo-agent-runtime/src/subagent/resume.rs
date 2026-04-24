@@ -1,6 +1,6 @@
 //! `Resumer` — retoma um sub-agent run não-terminal a partir do event log.
 //!
-//! Phase 16 — Resume Resilience. Sub-agent crashado (Running) ou cancelado
+//! Resume Resilience. Sub-agent crashado (Running) ou cancelado
 //! (Cancelled) pode ser retomado via `theo subagent resume <id>`.
 //!
 //! Idempotente (D3): runs em status terminal (Completed/Failed/Cancelled/
@@ -29,24 +29,24 @@ pub struct ResumeContext {
     pub history: Vec<Message>,
     pub prior_tokens_used: u64,
     pub checkpoint_before: Option<String>,
-    /// Phase 25 (sota-gaps-followup): set of `call_id`s that have already
+    /// Set of `call_id`s that have already
     /// been executed in the original run. The resumed AgentLoop consults
     /// this set before invoking a tool — if the call_id is present, the
     /// tool is skipped (replay mode) and the cached result from the event
     /// log is reused. Prevents double-write side effects (gap #3).
     pub executed_tool_calls: std::collections::BTreeSet<String>,
-    /// Phase 30 (resume-runtime-wiring): map call_id → reconstructed
+    /// Map call_id → reconstructed
     /// `Message::tool_result` for every tool that already completed in
     /// the original run. AgentLoop dispatch consults this BEFORE
     /// invoking a tool — when a hit is found, the cached message is
     /// pushed in lieu of dispatch. Closes gap #3.
     pub executed_tool_results: std::collections::BTreeMap<String, Message>,
-    /// Phase 26 (sota-gaps-followup): how the resumer should treat the
+    /// How the resumer should treat the
     /// worktree. Computed from `spec.isolation` + filesystem inspection.
     pub worktree_strategy: WorktreeStrategy,
 }
 
-/// Phase 26 (sota-gaps-followup) — closes gap #10. Decides what the resumer
+/// Decides what the resumer
 /// does about the original worktree:
 /// - `None` — spec was not isolated; nothing to do.
 /// - `Reuse(path)` — original worktree path still exists and is reused.
@@ -91,7 +91,7 @@ impl ResumeContext {
         self.executed_tool_calls.contains(call_id)
     }
 
-    /// Phase 30: returns the cached `Message::tool_result` for a previously
+    /// Returns the cached `Message::tool_result` for a previously
     /// completed tool call. AgentLoop pushes this to the message history
     /// instead of re-dispatching the tool, closing gap #3.
     pub fn cached_tool_result(&self, call_id: &str) -> Option<&Message> {
@@ -165,7 +165,7 @@ impl<'a> Resumer<'a> {
 
     /// Resume com objective opcional (override do original).
     ///
-    /// Phase 30 (resume-runtime-wiring) — gap #3: stages the
+    /// Stages the
     /// reconstructed `ResumeContext` on the manager so the spawned
     /// AgentLoop runs in replay-mode. Tool calls whose `call_id` already
     /// completed in the original run replay from `executed_tool_results`
@@ -184,7 +184,7 @@ impl<'a> Resumer<'a> {
                 ctx.start_iteration, spec.description
             )
         });
-        // Phase 31 (resume-runtime-wiring) — gap #10: convert the
+        // Convert the
         // reconstructed WorktreeStrategy into the Override that
         // spawn_with_spec_with_override understands.
         let wt_override = match &ctx.worktree_strategy {
@@ -236,7 +236,7 @@ pub fn reconstruct_history(events: &[SubagentEvent]) -> Vec<Message> {
         .collect()
 }
 
-/// Phase 30 (resume-runtime-wiring): scan the event log for every
+/// Scan the event log for every
 /// completed tool call and reconstruct a `Message::tool_result` keyed by
 /// `call_id`. AgentLoop dispatch replays from this map to avoid
 /// re-executing tools whose side-effects already happened (gap #3).
@@ -273,7 +273,7 @@ pub fn reconstruct_executed_tool_results(
     out
 }
 
-/// Phase 25 (sota-gaps-followup): scan the event log for every tool call
+/// Scan the event log for every tool call
 /// that already produced a result. The returned set lets the resumed
 /// AgentLoop short-circuit re-execution of those tools (idempotency).
 ///
@@ -611,7 +611,7 @@ mod tests {
         let _ = result;
     }
 
-    // ── Phase 26 (sota-gaps-followup): worktree restore ──
+    // ── Worktree restore ──
 
     pub mod worktree {
         use super::*;
@@ -708,7 +708,7 @@ mod tests {
         }
 
         // ─────────────────────────────────────────────────────────────────
-        // Phase 31 (resume-runtime-wiring) — Resumer → Override propagation
+        // Resumer → Override propagation
         // ─────────────────────────────────────────────────────────────────
 
         #[test]
@@ -811,12 +811,12 @@ mod tests {
         }
     }
 
-    // ── Phase 25 (sota-gaps-followup): tool_call replay ──
+    // ── tool_call replay ──
 
     pub mod idempotency {
         use super::*;
 
-        // ── Phase 30 (resume-runtime-wiring): tool result map ──
+        // ── tool result map ──
 
         #[test]
         fn reconstruct_executed_tool_results_returns_map_of_call_id_to_message() {

@@ -1,5 +1,5 @@
 //! `delegate_task` meta-tool handler — builds a `SubAgentManager`, applies
-//! Phase 18 guardrails, and spawns a single sub-agent or a `parallel` fan-out.
+//! Handoff guardrails, and spawns a single sub-agent or a `parallel` fan-out.
 //!
 //! Fase 4 (REMEDIATION_PLAN T4.2). Extracted from `run_engine/mod.rs`.
 //! Behavior is byte-identical; dispatched from
@@ -42,7 +42,7 @@ impl AgentRunEngine {
 
     /// Build a `SubAgentManager` with every optional integration (run store,
     /// hooks, cancellation, checkpoint, worktree, MCP registry + discovery,
-    /// metrics) chained in. Phase 13: registry is either the reloadable
+    /// metrics) chained in. Registry is either the reloadable
     /// snapshot, the static one, or a fresh builtins+load_all.
     fn build_subagent_manager(&self) -> crate::subagent::SubAgentManager {
         let registry: Arc<crate::subagent::SubAgentRegistry> = if let Some(rel) =
@@ -93,7 +93,7 @@ impl AgentRunEngine {
         manager
     }
 
-    /// Phase 18: resolve handoff guardrail chain — injected or default.
+    /// Resolve handoff guardrail chain — injected or default.
     fn resolve_handoff_guardrails(&self) -> Arc<crate::handoff_guardrail::GuardrailChain> {
         self.subagent_handoff_guardrails
             .clone()
@@ -278,7 +278,7 @@ impl AgentRunEngine {
         combined
     }
 
-    /// Phase 18: run the handoff guardrail chain against a candidate spec
+    /// Run the handoff guardrail chain against a candidate spec
     /// and translate the outcome back into mutated spawn args (or a
     /// short-circuit refusal). Shared between single + parallel paths.
     fn apply_handoff_guardrails(

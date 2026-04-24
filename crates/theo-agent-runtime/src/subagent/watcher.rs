@@ -1,4 +1,4 @@
-//! Hot-reload watcher for `.theo/agents/` — Track D / Phase 13.
+//! Hot-reload watcher for `.theo/agents/` — Track D / 
 //!
 //! Uses `notify-debouncer-mini` to coalesce rapid filesystem events (typical
 //! during editor saves). When a `.md` file changes in any watched directory,

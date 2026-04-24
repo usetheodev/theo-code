@@ -6,7 +6,7 @@
 //! Uses `IndexMap` to preserve insertion order — guarantees deterministic
 //! ordering in `build_tool_description()` regardless of insertion ordering.
 //!
-//! Track A — Phase 1 + Phase 2.
+//! Track A — + 
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -493,7 +493,7 @@ mod tests {
         assert_eq!(names, vec!["explorer", "implementer", "verifier", "reviewer"]);
     }
 
-    // ── Phase 2: load_from_dir ─────────────────────────────────────────
+    // ── load_from_dir ─────────────────────────────────────────
 
     fn make_dir_with_files(files: &[(&str, &str)]) -> TempDir {
         let dir = TempDir::new().unwrap();

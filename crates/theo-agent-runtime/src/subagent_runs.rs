@@ -1,4 +1,4 @@
-//! Sub-agent run persistence — Track C / Phase 10.
+//! Sub-agent run persistence — Track C.
 //!
 //! Persiste cada execucao de sub-agent (started → completed | failed |
 //! cancelled | abandoned) com todos os eventos para suportar `theo run resume`.
@@ -69,7 +69,7 @@ pub struct SubagentRun {
     pub iterations_used: usize,
     pub tokens_used: u64,
     pub summary: Option<String>,
-    /// JSON output if `output_format` (Phase 7) was used.
+    /// JSON output if `output_format` was used.
     pub structured_output: Option<serde_json::Value>,
     pub cwd: String,
     pub checkpoint_before: Option<String>,

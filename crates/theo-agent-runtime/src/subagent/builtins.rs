@@ -3,7 +3,7 @@
 //! These specs replace the hardcoded `SubAgentRole` enum's match arms.
 //! Each spec carries its own system prompt, capability set, max iterations, and timeout.
 //!
-//! Track A — Phase 1.
+//! Track A — built-in specs.
 
 use std::collections::BTreeSet;
 

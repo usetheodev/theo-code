@@ -1,6 +1,6 @@
 //! Checkpoint Manager — shadow git repos for transparent rollback.
 //!
-//! Track C — Phase 9.
+//! Track C — checkpoint/snapshot.
 //!
 //! Snapshot automatico do CWD antes de mutacoes (write/edit/patch).
 //! Permite rollback de qualquer ponto da sessao via `theo checkpoints restore`.

@@ -1,4 +1,4 @@
-//! OTel exporting listener — Phase 42 (otlp-exporter-plan).
+//! OTel exporting listener — 
 //!
 //! Bridges the runtime's `DomainEvent` stream to OpenTelemetry spans
 //! and metrics. Subscribed alongside `ObservabilityListener` (the local
@@ -34,7 +34,7 @@ use theo_domain::event::{DomainEvent, EventType};
 
 use crate::event_bus::EventListener;
 
-/// Phase 42 — bridges `DomainEvent` stream to OTel Spans + Metrics.
+/// Bridges `DomainEvent` stream to OTel Spans + Metrics.
 ///
 /// Failure-soft (D3): a poisoned mutex or missing parent span never
 /// panics — we drop the event silently and let trajectory JSONL be the

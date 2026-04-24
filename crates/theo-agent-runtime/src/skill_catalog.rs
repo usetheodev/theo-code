@@ -162,7 +162,7 @@ fn collect_linked_files(skill_dir: &Path) -> Vec<PathBuf> {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 3 (PLAN_AUTO_EVOLUTION_SOTA) — CRUD operations + origin tracking.
+// — CRUD operations + origin tracking.
 // ---------------------------------------------------------------------------
 
 /// Constants lifted from Hermes's skill_manager_tool.py:83-104.
@@ -487,7 +487,7 @@ mod tests {
         assert_eq!(skills[0].category, "general");
     }
 
-    // ── Phase 3: CRUD operations ────────────────────────────────────
+    // ── CRUD operations ────────────────────────────────────
 
     fn fm(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
         pairs

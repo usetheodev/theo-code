@@ -1,4 +1,4 @@
-//! Hypothesis persistence + feedback loop (Phase 2 T2.3, G6).
+//! Hypothesis persistence + feedback loop .
 //!
 //! Plan: `docs/plans/PLAN_MEMORY_SUPERIORITY.md` §Task 2.3.
 //! Absorbed reference: CodeTracer (arxiv:2604.11641).

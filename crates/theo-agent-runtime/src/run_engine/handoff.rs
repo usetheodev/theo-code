@@ -8,7 +8,7 @@
 use crate::run_engine::AgentRunEngine;
 use crate::run_engine_helpers::truncate_handoff_objective;
 
-/// Outcome of `AgentRunEngine::evaluate_handoff`. Phase 18 (sota-gaps).
+/// Outcome of `AgentRunEngine::evaluate_handoff`.
 #[derive(Debug, Clone)]
 pub enum HandoffOutcome {
     /// Proceed with the spawn unchanged.
@@ -75,10 +75,10 @@ impl AgentRunEngine {
             _ => None,
         });
 
-        // Phase 18 + 24: PreHandoff hook only fires when no chain block —
-        // chain wins first. Hooks may also Block, becoming the final blocker.
-        // Phase 24 (sota-gaps-followup): populates HookContext.target_agent
-        // + target_objective so YAML matchers can regex-match against them.
+        // PreHandoff hook only fires when no chain block — chain wins
+        // first. Hooks may also Block, becoming the final blocker.
+        // HookContext.target_agent + target_objective are populated so
+        // YAML matchers can regex-match against them.
         let hook_block = if blocked_by.is_none() {
             self.subagent_hooks.as_ref().and_then(|hooks| {
                 use crate::lifecycle_hooks::{HookContext, HookEvent, HookResponse};

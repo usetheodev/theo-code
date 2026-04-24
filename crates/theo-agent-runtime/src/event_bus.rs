@@ -630,8 +630,8 @@ mod tests {
     }
 
     // ────────────────────────────────────────────────────────────────
-    // Phase 4 — EventBusSink adapter bridges theo-application's
-    // EventSink trait to this concrete bus (PLAN_CONTEXT_WIRING)
+    // EventBusSink adapter bridges theo-application's EventSink trait
+    // to this concrete bus (PLAN_CONTEXT_WIRING).
     // ────────────────────────────────────────────────────────────────
 
     #[test]
