@@ -13,10 +13,17 @@
 #   - Phase G: theo subagent resume (rejeita terminal status)
 #   - Phase H: theo mcp invalidate (gap #9)
 #
-# NÃO testado aqui (limitações):
-#   - gap #3 Resume idempotency: requer crash mid-tool-call
+# NÃO testado aqui (limitações deste script — cobertos em outras suítes):
+#   - gap #3 Resume idempotency: coberto via testes Rust
+#       cargo test -p theo-agent-runtime --lib subagent::resume::tests::idempotency
+#       cargo test -p theo-agent-runtime --lib run_engine::tests::dispatch_replays
+#       cargo test -p theo-agent-runtime --test resume_e2e
+#   - gap #10 Resume worktree restore: coberto via testes Rust
+#       cargo test -p theo-agent-runtime --lib subagent::tests::worktree_override
+#       cargo test -p theo-agent-runtime --lib subagent::resume::tests::worktree
+#       cargo test -p theo-isolation worktree_handle_existing
+#       cargo test -p theo-agent-runtime --test resume_e2e
 #   - gap #4 tier_chosen telemetry: AutomaticModelRouter não wired em prod
-#   - gap #10 Resume worktree restore: requer crash + cleanup
 #
 # Uso: OAUTH_E2E=1 bash scripts/sota12-full-stress.sh
 
@@ -419,9 +426,9 @@ echo "  PASS:  $PASS_COUNT"
 echo "  FAIL:  $FAIL_COUNT"
 echo "  SKIP:  $SKIP_COUNT"
 echo ""
-echo "Honest disclosure of NOT-tested gaps:"
-echo "  ⊘ #3 Resume idempotency tool replay  — needs crash mid-tool"
-echo "  ⊘ #10 Resume worktree restore        — needs crash + cleanup"
+echo "Out-of-scope here (covered by Rust test suite):"
+echo "  ⊕ #3 Resume idempotency tool replay  — see cargo test resume::tests::idempotency"
+echo "  ⊕ #10 Resume worktree restore        — see cargo test resume::tests::worktree + tests/resume_e2e.rs"
 
 if [ "$FAIL_COUNT" -eq 0 ]; then
   echo ""

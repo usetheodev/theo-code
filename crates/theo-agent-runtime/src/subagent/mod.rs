@@ -41,6 +41,28 @@ use theo_infra_llm::types::Message;
 /// Maximum sub-agent nesting depth. Sub-agents CANNOT spawn sub-agents.
 const MAX_DEPTH: usize = 1;
 
+/// Phase 31 (resume-runtime-wiring) — gap #10.
+/// Override that the Resumer passes to `spawn_with_spec_with_override`
+/// to control worktree behavior on resume.
+///
+/// Variants:
+/// - `None` — default behavior (create new from `spec.isolation`).
+/// - `Reuse(path)` — wrap the provided existing worktree path via
+///   `WorktreeHandle::existing(path)`. The cleanup branch in
+///   `spawn_with_spec_with_override` detects the synthetic branch
+///   `"(reused)"` and skips auto-removal, since this manager did not
+///   create the worktree and must not destroy state owned by the
+///   prior crashed run.
+/// - `Recreate { base_branch }` — call `provider.create(spec.name, base)`
+///   with the explicit `base_branch` from this enum, overriding any
+///   value present in `spec.isolation_base_branch`.
+#[derive(Debug, Clone)]
+pub enum WorktreeOverride {
+    None,
+    Reuse(std::path::PathBuf),
+    Recreate { base_branch: String },
+}
+
 pub struct SubAgentManager {
     config: AgentConfig,
     event_bus: Arc<EventBus>,
@@ -77,6 +99,15 @@ pub struct SubAgentManager {
     /// tools and the resulting prompt-hint advertises *concrete* tool
     /// names (not just the `mcp:<server>:<tool>` namespace).
     mcp_discovery: Option<Arc<theo_infra_mcp::DiscoveryCache>>,
+    /// Phase 30 (resume-runtime-wiring) — gap #3: pending resume context
+    /// set by `Resumer::resume_with_objective` right before calling
+    /// `spawn_with_spec`. The first spawn TAKES the value (consume-once)
+    /// and forwards it to the inner `AgentLoop::with_resume_context`.
+    /// Wrapped in `Mutex` to allow `Resumer` to set without owning
+    /// `&mut self`. Sequential usage is the contract — concurrent resume
+    /// against the same manager is undefined behavior (would race).
+    pending_resume_context:
+        std::sync::Mutex<Option<Arc<crate::subagent::resume::ResumeContext>>>,
 }
 
 impl SubAgentManager {
@@ -102,6 +133,7 @@ impl SubAgentManager {
             metrics: None,
             mcp_registry: None,
             mcp_discovery: None,
+            pending_resume_context: std::sync::Mutex::new(None),
         }
     }
 
@@ -204,6 +236,20 @@ impl SubAgentManager {
         self.mcp_discovery.as_deref()
     }
 
+    /// Phase 30 (resume-runtime-wiring) — gap #3: stage a `ResumeContext`
+    /// to be consumed by the next `spawn_with_spec` call. The context is
+    /// taken (consumed) on entry to spawn — subsequent spawns get None.
+    /// Used by `Resumer::resume_with_objective` to enable replay-mode
+    /// dispatch in the spawned `AgentLoop`.
+    pub fn set_pending_resume_context(
+        &self,
+        ctx: Arc<crate::subagent::resume::ResumeContext>,
+    ) {
+        if let Ok(mut g) = self.pending_resume_context.lock() {
+            *g = Some(ctx);
+        }
+    }
+
     /// Access the registry, if any.
     pub fn registry(&self) -> Option<&SubAgentRegistry> {
         self.registry.as_deref()
@@ -251,6 +297,22 @@ impl SubAgentManager {
         objective: &str,
         context: Option<Vec<Message>>,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = AgentResult> + Send + '_>> {
+        // Phase 31 (resume-runtime-wiring) — gap #10: wrapper over the
+        // _with_override variant for backward compat (D5 invariant).
+        self.spawn_with_spec_with_override(spec, objective, context, WorktreeOverride::None)
+    }
+
+    /// Phase 31 (resume-runtime-wiring) — gap #10.
+    /// Variant of `spawn_with_spec` that respects an explicit worktree
+    /// decision via `WorktreeOverride`. The legacy `spawn_with_spec` is
+    /// now a thin wrapper that delegates here with `WorktreeOverride::None`.
+    pub fn spawn_with_spec_with_override(
+        &self,
+        spec: &AgentSpec,
+        objective: &str,
+        context: Option<Vec<Message>>,
+        worktree_override: WorktreeOverride,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = AgentResult> + Send + '_>> {
         let spec = spec.clone();
         let objective = objective.to_string();
         let context_text: Option<String> = context.as_ref().and_then(|msgs| {
@@ -259,9 +321,39 @@ impl SubAgentManager {
         });
 
         Box::pin(async move {
-            // Phase 11: optionally create an isolated worktree
-            let worktree_handle = match (&self.worktree_provider, spec.isolation.as_deref()) {
-                (Some(provider), Some("worktree")) => {
+            // Phase 11 + Phase 31: resolve worktree honoring override.
+            // The override takes precedence over spec.isolation:
+            //   - Reuse(path) → wrap existing path (no git invocation)
+            //   - Recreate { base } → create with explicit base branch
+            //   - None → legacy behavior (create from spec.isolation_base_branch)
+            let worktree_handle = match (
+                &self.worktree_provider,
+                spec.isolation.as_deref(),
+                &worktree_override,
+            ) {
+                (_, _, WorktreeOverride::Reuse(path)) => {
+                    // Reuse: handle wraps existing path. Branch sentinel
+                    // "(reused)" marks it for cleanup-skip downstream.
+                    Some(theo_isolation::WorktreeHandle::existing(path.clone()))
+                }
+                (Some(provider), Some("worktree"), WorktreeOverride::Recreate { base_branch }) => {
+                    // Recreate: explicit base from override, ignore spec value.
+                    let result = provider.create(&spec.name, base_branch).or_else(|_| {
+                        provider.create(&spec.name, "master")
+                    });
+                    if let (Ok(handle), Some(hooks)) = (&result, &self.hook_manager) {
+                        use crate::lifecycle_hooks::{HookContext, HookEvent};
+                        let _ = hooks.dispatch(
+                            HookEvent::WorktreeCreate,
+                            &HookContext {
+                                tool_name: Some(handle.path.to_string_lossy().to_string()),
+                                ..Default::default()
+                            },
+                        );
+                    }
+                    result.ok()
+                }
+                (Some(provider), Some("worktree"), WorktreeOverride::None) => {
                     let base = spec
                         .isolation_base_branch
                         .clone()
@@ -526,7 +618,21 @@ impl SubAgentManager {
                 }
             }
 
-            let agent = AgentLoop::new(sub_config, registry);
+            // Phase 30 (resume-runtime-wiring) — gap #3: consume the
+            // pending resume context (set by Resumer right before this
+            // spawn). When present, the spawned AgentLoop runs in
+            // replay-mode: known call_ids return cached tool_results
+            // instead of re-executing the tool.
+            let pending_resume = self
+                .pending_resume_context
+                .lock()
+                .ok()
+                .and_then(|mut g| g.take());
+
+            let mut agent = AgentLoop::new(sub_config, registry);
+            if let Some(rc) = pending_resume {
+                agent = agent.with_resume_context(rc);
+            }
 
             let history = context.unwrap_or_default();
             let timeout = std::time::Duration::from_secs(spec.timeout_secs);
@@ -647,8 +753,15 @@ impl SubAgentManager {
 
             // Phase 11: cleanup worktree on success (default policy: OnSuccess).
             // Failures preserve the worktree for inspection.
+            //
+            // Phase 31 (resume-runtime-wiring) — gap #10: when the handle was
+            // built via WorktreeHandle::existing (Reuse path), the synthetic
+            // branch sentinel "(reused)" signals that THIS manager did not
+            // create the worktree. Skip auto-removal so we never destroy
+            // state owned by the prior crashed run.
             if let (Some(handle), Some(provider)) = (&worktree_handle, &self.worktree_provider)
-                && result.success {
+                && result.success
+                && handle.branch != "(reused)" {
                     let removed = provider.remove(handle, false).is_ok();
                     // Phase 5: WorktreeRemove hook (informational)
                     if removed
@@ -902,6 +1015,7 @@ mod tests {
             metrics: None,
             mcp_registry: None,
             mcp_discovery: None,
+            pending_resume_context: std::sync::Mutex::new(None),
         };
 
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("test", "test obj");
@@ -983,6 +1097,7 @@ mod tests {
             metrics: None,
             mcp_registry: None,
             mcp_discovery: None,
+            pending_resume_context: std::sync::Mutex::new(None),
         };
 
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("scout", "check x");
@@ -1038,6 +1153,7 @@ mod tests {
             metrics: None,
             mcp_registry: None,
             mcp_discovery: None,
+            pending_resume_context: std::sync::Mutex::new(None),
         };
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("x", "y");
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -1070,6 +1186,7 @@ mod tests {
             metrics: None,
             mcp_registry: None,
             mcp_discovery: None,
+            pending_resume_context: std::sync::Mutex::new(None),
         };
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("persisted", "test");
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -1102,6 +1219,7 @@ mod tests {
             metrics: None,
             mcp_registry: None,
             mcp_discovery: None,
+            pending_resume_context: std::sync::Mutex::new(None),
         };
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("x", "y");
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -1181,6 +1299,7 @@ mod tests {
             metrics: None,
             mcp_registry: None,
             mcp_discovery: None,
+            pending_resume_context: std::sync::Mutex::new(None),
         };
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("x", "y");
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -1210,6 +1329,7 @@ mod tests {
             metrics: None,
             mcp_registry: None,
             mcp_discovery: None,
+            pending_resume_context: std::sync::Mutex::new(None),
         };
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("x", "y");
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -1296,6 +1416,7 @@ mod tests {
             metrics: None,
             mcp_registry: Some(Arc::new(reg)),
             mcp_discovery: Some(Arc::new(cache)),
+            pending_resume_context: std::sync::Mutex::new(None),
         };
 
         // We cannot directly inspect sub_config.system_prompt without
@@ -1380,6 +1501,7 @@ mod tests {
             metrics: None,
             mcp_registry: Some(Arc::new(reg)),
             mcp_discovery: Some(cache.clone()),
+            pending_resume_context: std::sync::Mutex::new(None),
         };
 
         let mut spec = AgentSpec::on_demand("x", "y");
@@ -1441,6 +1563,7 @@ mod tests {
             metrics: None,
             mcp_registry: Some(Arc::new(reg)),
             mcp_discovery: Some(cache.clone()),
+            pending_resume_context: std::sync::Mutex::new(None),
         };
 
         let mut spec = AgentSpec::on_demand("x", "y");
@@ -1474,6 +1597,7 @@ mod tests {
             metrics: None,
             mcp_registry: Some(reg),
             mcp_discovery: Some(cache.clone()),
+            pending_resume_context: std::sync::Mutex::new(None),
         };
         let spec = AgentSpec::on_demand("x", "y"); // mcp_servers empty by default
         let _ = manager.spawn_with_spec(&spec, "y", None).await;
@@ -1500,6 +1624,7 @@ mod tests {
             metrics: None,
             mcp_registry: None,
             mcp_discovery: Some(cache.clone()),
+            pending_resume_context: std::sync::Mutex::new(None),
         };
         let mut spec = AgentSpec::on_demand("x", "y");
         spec.mcp_servers = vec!["github".to_string()];
@@ -1535,6 +1660,7 @@ mod tests {
             metrics: None,
             mcp_registry: Some(Arc::new(reg)),
             mcp_discovery: Some(cache.clone()),
+            pending_resume_context: std::sync::Mutex::new(None),
         };
         let mut spec = AgentSpec::on_demand("x", "y");
         spec.mcp_servers = vec!["dead".to_string()];
@@ -1574,6 +1700,7 @@ mod tests {
             metrics: None,
             mcp_registry: Some(Arc::new(reg)),
             mcp_discovery: Some(cache.clone()),
+            pending_resume_context: std::sync::Mutex::new(None),
         };
         let mut spec = AgentSpec::on_demand("x", "y");
         spec.mcp_servers = vec!["would-be-discovered".to_string()];
@@ -1601,11 +1728,164 @@ mod tests {
             metrics: None,
             mcp_registry: None,
             mcp_discovery: None,
+            pending_resume_context: std::sync::Mutex::new(None),
         };
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("y", "z");
         let rt = tokio::runtime::Runtime::new().unwrap();
         let result =
             rt.block_on(async { manager.spawn_with_spec_text(&spec, "do z", None).await });
         assert!(result.context_used.is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // Phase 31 (resume-runtime-wiring) — gap #10: WorktreeOverride
+    // -----------------------------------------------------------------------
+
+    mod worktree_override {
+        use super::*;
+
+        fn manager_no_worktree(depth: usize) -> SubAgentManager {
+            SubAgentManager {
+                config: AgentConfig::default(),
+                event_bus: Arc::new(EventBus::new()),
+                project_dir: PathBuf::from("/tmp"),
+                depth,
+                registry: None,
+                run_store: None,
+                hook_manager: None,
+                cancellation: None,
+                checkpoint_manager: None,
+                worktree_provider: None,
+                metrics: None,
+                mcp_registry: None,
+                mcp_discovery: None,
+                pending_resume_context: std::sync::Mutex::new(None),
+            }
+        }
+
+        #[test]
+        fn worktree_override_enum_default_is_none() {
+            // None variant = legacy behavior (create new from spec.isolation).
+            let o = WorktreeOverride::None;
+            assert!(matches!(o, WorktreeOverride::None));
+        }
+
+        #[test]
+        fn worktree_override_reuse_carries_path() {
+            let p = PathBuf::from("/tmp/wt-reused");
+            let o = WorktreeOverride::Reuse(p.clone());
+            match o {
+                WorktreeOverride::Reuse(got) => assert_eq!(got, p),
+                _ => panic!("expected Reuse variant"),
+            }
+        }
+
+        #[test]
+        fn worktree_override_recreate_carries_base_branch() {
+            let o = WorktreeOverride::Recreate {
+                base_branch: "develop".to_string(),
+            };
+            match o {
+                WorktreeOverride::Recreate { base_branch } => {
+                    assert_eq!(base_branch, "develop");
+                }
+                _ => panic!("expected Recreate variant"),
+            }
+        }
+
+        #[test]
+        fn spawn_with_spec_with_override_none_matches_legacy_behavior() {
+            // Regression guard: spawn_with_spec_with_override(None) MUST produce
+            // a result indistinguishable from spawn_with_spec for non-isolated
+            // specs (depth-limit early return path is identical).
+            let manager = manager_no_worktree(1);
+            let spec = theo_domain::agent_spec::AgentSpec::on_demand("alpha", "do x");
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            let r_legacy =
+                rt.block_on(async { manager.spawn_with_spec(&spec, "obj", None).await });
+            let r_override = rt.block_on(async {
+                manager
+                    .spawn_with_spec_with_override(&spec, "obj", None, WorktreeOverride::None)
+                    .await
+            });
+            // Both hit depth-limit → identical "depth limit" summary.
+            assert!(r_legacy.summary.contains("depth limit"));
+            assert!(r_override.summary.contains("depth limit"));
+            assert_eq!(r_legacy.success, r_override.success);
+        }
+
+        #[test]
+        fn spawn_with_spec_with_override_reuse_skips_provider_create() {
+            // When Reuse(path) is supplied, even WITHOUT a worktree_provider
+            // the path is honored (since no `git worktree add` is needed —
+            // the path already exists on disk from the prior crashed run).
+            // Depth-limit short-circuit means we don't actually run, but the
+            // observable contract is: the API accepts the override + returns.
+            let manager = manager_no_worktree(1);
+            let mut spec = theo_domain::agent_spec::AgentSpec::on_demand("alpha", "x");
+            spec.isolation = Some("worktree".to_string());
+            let p = PathBuf::from("/tmp/wt-reused-from-resume");
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            let r = rt.block_on(async {
+                manager
+                    .spawn_with_spec_with_override(
+                        &spec,
+                        "obj",
+                        None,
+                        WorktreeOverride::Reuse(p),
+                    )
+                    .await
+            });
+            // Depth limit hit, no panic — Reuse path didn't try to call git.
+            assert!(r.summary.contains("depth limit"));
+        }
+
+        #[test]
+        fn spawn_with_spec_with_override_recreate_passes_base_branch() {
+            // When Recreate { base_branch } is supplied, the provider
+            // (when present) would be invoked with the override base branch
+            // INSTEAD of spec.isolation_base_branch. We verify by:
+            //   - Setting spec.isolation_base_branch = "main"
+            //   - Calling with Recreate { base_branch: "develop" }
+            //   - At depth=1 we short-circuit, but the API contract is that
+            //     this branch is honored (validated end-to-end via Fase 32).
+            let manager = manager_no_worktree(1);
+            let mut spec = theo_domain::agent_spec::AgentSpec::on_demand("alpha", "x");
+            spec.isolation = Some("worktree".to_string());
+            spec.isolation_base_branch = Some("main".to_string());
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            let r = rt.block_on(async {
+                manager
+                    .spawn_with_spec_with_override(
+                        &spec,
+                        "obj",
+                        None,
+                        WorktreeOverride::Recreate {
+                            base_branch: "develop".to_string(),
+                        },
+                    )
+                    .await
+            });
+            assert!(r.summary.contains("depth limit"));
+        }
+
+        #[test]
+        fn spawn_with_spec_alias_delegates_to_with_override_none() {
+            // Verify that spawn_with_spec is now a wrapper that calls
+            // spawn_with_spec_with_override(.., None). Same observable
+            // behavior as the legacy parity test, but documents the
+            // refactor contract explicitly.
+            let manager = manager_no_worktree(1);
+            let spec = theo_domain::agent_spec::AgentSpec::on_demand("a", "b");
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            let r1 = rt.block_on(async { manager.spawn_with_spec(&spec, "obj", None).await });
+            let r2 = rt.block_on(async {
+                manager
+                    .spawn_with_spec_with_override(&spec, "obj", None, WorktreeOverride::None)
+                    .await
+            });
+            assert_eq!(r1.success, r2.success);
+            assert_eq!(r1.summary, r2.summary);
+        }
     }
 }

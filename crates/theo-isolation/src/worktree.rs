@@ -48,6 +48,24 @@ pub struct WorktreeHandle {
     pub branch: String,
 }
 
+impl WorktreeHandle {
+    /// Phase 31 (resume-runtime-wiring) — gap #10.
+    /// Wrap an EXISTING worktree path (typically the one a previously
+    /// crashed sub-agent was using) into a handle so that
+    /// `spawn_with_spec_with_override(Reuse(path))` can treat it
+    /// uniformly with freshly-created handles. The branch field is set
+    /// to the synthetic marker `"(reused)"` so observability/OTel can
+    /// distinguish reused from freshly-created worktrees, and so the
+    /// cleanup branch in `spawn_with_spec` can detect "this is not
+    /// ours" and skip auto-removal.
+    pub fn existing(path: PathBuf) -> Self {
+        Self {
+            path,
+            branch: "(reused)".to_string(),
+        }
+    }
+}
+
 /// Worktree provider — manages git worktrees rooted at a base repo.
 #[derive(Debug, Clone)]
 pub struct WorktreeProvider {
@@ -189,6 +207,7 @@ impl WorktreeProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
     use tempfile::TempDir;
 
     fn git_available() -> bool {
@@ -318,5 +337,31 @@ mod tests {
     #[test]
     fn cleanup_policy_default_is_on_success() {
         assert_eq!(CleanupPolicy::default(), CleanupPolicy::OnSuccess);
+    }
+
+    // -----------------------------------------------------------------------
+    // Phase 31 (resume-runtime-wiring) — gap #10: existing worktree handle
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn worktree_handle_existing_points_to_provided_path() {
+        // The Resumer needs a way to wrap a path that ALREADY exists on disk
+        // (from a prior crashed run) into a WorktreeHandle so the rest of
+        // spawn_with_spec_with_override can treat it uniformly. The synthetic
+        // branch name ("(reused)") is a sentinel — the Resumer never re-creates
+        // the branch, just reuses the checkout.
+        let p = PathBuf::from("/tmp/wt-reused-from-resume");
+        let handle = WorktreeHandle::existing(p.clone());
+        assert_eq!(handle.path, p);
+        assert_eq!(handle.branch, "(reused)");
+    }
+
+    #[test]
+    fn worktree_handle_existing_branch_marker_is_stable_for_observability() {
+        // Tests that consume captured events / OTel spans rely on the branch
+        // value to detect "this run reused a worktree" vs "this run created
+        // one". Lock the literal as part of the public contract.
+        let h = WorktreeHandle::existing(PathBuf::from("/x"));
+        assert_eq!(h.branch, "(reused)");
     }
 }

@@ -93,6 +93,12 @@ pub struct AgentLoop {
     subagent_handoff_guardrails:
         Option<Arc<crate::handoff_guardrail::GuardrailChain>>,
     subagent_reloadable: Option<crate::subagent::ReloadableRegistry>,
+    /// Phase 30 (resume-runtime-wiring) — gap #3: when present, dispatch
+    /// consults the context BEFORE invoking each tool. Already-completed
+    /// call_ids replay their cached `Message::tool_result` instead of
+    /// re-executing the tool. `None` means default dispatch (zero impact
+    /// on existing tests — backward compat absoluta per D5).
+    resume_context: Option<Arc<crate::subagent::resume::ResumeContext>>,
 }
 
 impl AgentLoop {
@@ -121,6 +127,7 @@ impl AgentLoop {
             subagent_mcp_discovery: None,
             subagent_handoff_guardrails: None,
             subagent_reloadable: None,
+            resume_context: None,
         }
     }
 
@@ -211,6 +218,20 @@ impl AgentLoop {
         self
     }
 
+    /// Phase 30 (resume-runtime-wiring) — gap #3: enable replay-mode
+    /// dispatch. When set, each tool call is consulted against the
+    /// context's `executed_tool_calls` set BEFORE dispatching. Hits get
+    /// the cached `Message::tool_result` from the event log. Misses
+    /// dispatch normally. The Resumer constructs the context and
+    /// invokes this builder per resume.
+    pub fn with_resume_context(
+        mut self,
+        ctx: Arc<crate::subagent::resume::ResumeContext>,
+    ) -> Self {
+        self.resume_context = Some(ctx);
+        self
+    }
+
     /// Forward all subagent integrations to a freshly-built AgentRunEngine.
     fn forward_subagent_integrations(&self, mut engine: AgentRunEngine) -> AgentRunEngine {
         if let Some(r) = &self.subagent_registry {
@@ -242,6 +263,9 @@ impl AgentLoop {
         }
         if let Some(r) = &self.subagent_reloadable {
             engine = engine.with_subagent_reloadable(r.clone());
+        }
+        if let Some(rc) = &self.resume_context {
+            engine = engine.with_resume_context(rc.clone());
         }
         engine
     }
@@ -498,5 +522,92 @@ mod tests {
         let loop_ = AgentLoop::new(config, registry)
             .with_event_listener(Arc::new(crate::event_bus::NullEventListener));
         assert_eq!(loop_.listeners.len(), 1);
+    }
+
+    // -----------------------------------------------------------------------
+    // Phase 30 (resume-runtime-wiring) — gap #3 builder forwarding
+    // -----------------------------------------------------------------------
+
+    mod with_resume_context {
+        use super::*;
+        use crate::subagent::resume::{ResumeContext, WorktreeStrategy};
+        use std::collections::{BTreeMap, BTreeSet};
+        use theo_domain::agent_spec::AgentSpec;
+
+        fn dummy_ctx() -> Arc<ResumeContext> {
+            let mut executed = BTreeSet::new();
+            executed.insert("c-known".to_string());
+            let mut cached = BTreeMap::new();
+            cached.insert(
+                "c-known".to_string(),
+                theo_infra_llm::types::Message::tool_result("c-known", "write_file", "ok"),
+            );
+            Arc::new(ResumeContext {
+                spec: AgentSpec::on_demand("a", "b"),
+                start_iteration: 1,
+                history: vec![],
+                prior_tokens_used: 0,
+                checkpoint_before: None,
+                executed_tool_calls: executed,
+                executed_tool_results: cached,
+                worktree_strategy: WorktreeStrategy::None,
+            })
+        }
+
+        #[test]
+        fn agent_loop_without_resume_context_dispatches_normally() {
+            // D5 backward compat — default AgentLoop has resume_context = None.
+            // Existing 1000+ tests expect this default path to be untouched.
+            let config = AgentConfig::default();
+            let registry = theo_tooling::registry::create_default_registry();
+            let agent = AgentLoop::new(config, registry);
+            assert!(
+                agent.resume_context.is_none(),
+                "default AgentLoop must NOT have resume_context attached"
+            );
+        }
+
+        #[test]
+        fn agent_loop_with_resume_context_attaches_via_builder() {
+            let config = AgentConfig::default();
+            let registry = theo_tooling::registry::create_default_registry();
+            let ctx = dummy_ctx();
+            let agent = AgentLoop::new(config, registry).with_resume_context(ctx.clone());
+
+            let attached = agent
+                .resume_context
+                .as_ref()
+                .expect("resume_context must be attached");
+            assert!(attached.should_skip_tool_call("c-known"));
+        }
+
+        #[test]
+        fn agent_loop_with_resume_context_skips_replayed_call_id() {
+            // Predicate parity: AgentLoop's stored ResumeContext must answer
+            // identically to the contract used inside RunEngine dispatch.
+            let config = AgentConfig::default();
+            let registry = theo_tooling::registry::create_default_registry();
+            let ctx = dummy_ctx();
+            let agent = AgentLoop::new(config, registry).with_resume_context(ctx);
+
+            let rc = agent.resume_context.as_ref().unwrap();
+            // Replayed call_id → both legs of the dispatch guard fire
+            assert!(rc.should_skip_tool_call("c-known"));
+            assert!(rc.cached_tool_result("c-known").is_some());
+        }
+
+        #[test]
+        fn agent_loop_with_resume_context_dispatches_unknown_call_id() {
+            // Predicate parity for the "new tool call after resume" path.
+            let config = AgentConfig::default();
+            let registry = theo_tooling::registry::create_default_registry();
+            let ctx = dummy_ctx();
+            let agent = AgentLoop::new(config, registry).with_resume_context(ctx);
+
+            let rc = agent.resume_context.as_ref().unwrap();
+            // Unknown call_id → no replay, dispatcher must run normally.
+            assert!(!rc.should_skip_tool_call("brand-new-call"));
+            assert!(rc.cached_tool_result("brand-new-call").is_none());
+        }
     }
 }

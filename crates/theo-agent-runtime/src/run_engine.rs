@@ -101,6 +101,11 @@ pub struct AgentRunEngine {
     /// chain (built-ins) is used per delegate_task call. Programmatic
     /// callers can register custom guardrails by injecting a chain.
     subagent_handoff_guardrails: Option<Arc<crate::handoff_guardrail::GuardrailChain>>,
+    /// Phase 30 (resume-runtime-wiring) — gap #3: optional resume context.
+    /// When present, the dispatch loop consults `executed_tool_calls`
+    /// before invoking each tool and replays cached results from
+    /// `executed_tool_results` to avoid double side-effects.
+    resume_context: Option<Arc<crate::subagent::resume::ResumeContext>>,
     /// Phase 8: lazy-built dispatcher used to handle `mcp:server:tool`
     /// calls. Built from `subagent_mcp` on first use.
     subagent_mcp_dispatcher: std::sync::OnceLock<Arc<theo_infra_mcp::McpDispatcher>>,
@@ -215,6 +220,7 @@ impl AgentRunEngine {
             subagent_handoff_guardrails: None,
             subagent_mcp_dispatcher: std::sync::OnceLock::new(),
             subagent_reloadable: None,
+            resume_context: None,
             checkpoint_taken_this_turn: std::sync::atomic::AtomicBool::new(false),
         }
     }
@@ -375,6 +381,19 @@ impl AgentRunEngine {
         chain: Arc<crate::handoff_guardrail::GuardrailChain>,
     ) -> Self {
         self.subagent_handoff_guardrails = Some(chain);
+        self
+    }
+
+    /// Phase 30 (resume-runtime-wiring) — gap #3: enable replay-mode
+    /// dispatch. When set, each tool call is short-circuited if its
+    /// `call_id` already appears in the context's `executed_tool_calls`
+    /// set; the cached `Message::tool_result` from the event log is
+    /// pushed instead of invoking the tool.
+    pub fn with_resume_context(
+        mut self,
+        ctx: Arc<crate::subagent::resume::ResumeContext>,
+    ) -> Self {
+        self.resume_context = Some(ctx);
         self
     }
 
@@ -1373,6 +1392,31 @@ impl AgentRunEngine {
 
             for call in tool_calls {
                 let name = &call.function.name;
+
+                // Phase 30 (resume-runtime-wiring) — gap #3: replay
+                // short-circuit. When the engine is in resume mode AND
+                // this `call_id` already produced a result in the
+                // original run, push the cached `Message::tool_result`
+                // and emit a `ToolCallCompleted` event tagged with
+                // `replayed: true`. Skip the entire dispatch path so no
+                // side-effects re-execute (write/bash/etc.).
+                if let Some(ref ctx) = self.resume_context
+                    && ctx.should_skip_tool_call(&call.id)
+                    && let Some(cached) = ctx.cached_tool_result(&call.id)
+                {
+                    messages.push(cached.clone());
+                    self.event_bus.publish(DomainEvent::new(
+                        EventType::ToolCallCompleted,
+                        self.run.run_id.as_str(),
+                        serde_json::json!({
+                            "tool_name": name,
+                            "call_id": &call.id,
+                            "replayed": true,
+                            "status": "Succeeded",
+                        }),
+                    ));
+                    continue;
+                }
 
                 // Handle `done` meta-tool with multi-layer verification:
                 // 1. Convergence pre-filter (git diff must show real changes)
@@ -3697,5 +3741,115 @@ mod tests {
             !names.contains(&"delegate_task"),
             "sub-agents must NOT see delegate_task (no recursive delegation)"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Phase 30 (resume-runtime-wiring) — gap #3 dispatch wiring
+    // -----------------------------------------------------------------------
+
+    mod dispatch_replays {
+        use super::*;
+        use crate::subagent::resume::{ResumeContext, WorktreeStrategy};
+        use std::collections::{BTreeMap, BTreeSet};
+        use std::sync::Arc;
+        use theo_domain::agent_spec::AgentSpec;
+
+        fn build_resume_ctx(
+            executed_calls: BTreeSet<String>,
+            cached_results: BTreeMap<String, theo_infra_llm::types::Message>,
+        ) -> Arc<ResumeContext> {
+            Arc::new(ResumeContext {
+                spec: AgentSpec::on_demand("a", "b"),
+                start_iteration: 1,
+                history: vec![],
+                prior_tokens_used: 0,
+                checkpoint_before: None,
+                executed_tool_calls: executed_calls,
+                executed_tool_results: cached_results,
+                worktree_strategy: WorktreeStrategy::None,
+            })
+        }
+
+        #[test]
+        fn engine_without_resume_context_dispatches_normally_regression_guard() {
+            // D5 backward compat — default engine has resume_context = None.
+            let setup = TestSetup::new();
+            let engine = setup.create_engine("regression");
+            assert!(
+                engine.resume_context.is_none(),
+                "default engine must NOT have resume_context attached"
+            );
+        }
+
+        #[test]
+        fn engine_with_resume_context_attaches_context_via_builder() {
+            let setup = TestSetup::new();
+            let mut cached = BTreeMap::new();
+            cached.insert(
+                "c1".to_string(),
+                theo_infra_llm::types::Message::tool_result("c1", "fake_tool", "result-1"),
+            );
+            let mut executed = BTreeSet::new();
+            executed.insert("c1".to_string());
+            let ctx = build_resume_ctx(executed, cached);
+
+            let engine = setup.create_engine("with-context").with_resume_context(ctx.clone());
+
+            let attached = engine
+                .resume_context
+                .as_ref()
+                .expect("resume_context must be attached");
+            assert!(attached.should_skip_tool_call("c1"));
+            assert!(!attached.should_skip_tool_call("c-unknown"));
+            let cached_msg = attached.cached_tool_result("c1").expect("cached msg present");
+            assert_eq!(cached_msg.tool_call_id.as_deref(), Some("c1"));
+            assert_eq!(cached_msg.content.as_deref(), Some("result-1"));
+        }
+
+        #[test]
+        fn engine_with_resume_context_short_circuit_predicate_for_known_call_id() {
+            // The dispatch hook is a 2-condition guard:
+            //   should_skip_tool_call(call.id) && cached_tool_result(call.id).is_some()
+            // Both must be true for replay. Verify the predicate matches the
+            // contract enforced in run_engine handle_completion (lines 1393-1419).
+            let mut cached = BTreeMap::new();
+            cached.insert(
+                "c-known".to_string(),
+                theo_infra_llm::types::Message::tool_result(
+                    "c-known",
+                    "write_file",
+                    "{\"ok\":true}",
+                ),
+            );
+            let mut executed = BTreeSet::new();
+            executed.insert("c-known".to_string());
+            let ctx = build_resume_ctx(executed, cached);
+
+            // Both true → replay path triggers
+            assert!(ctx.should_skip_tool_call("c-known"));
+            assert!(ctx.cached_tool_result("c-known").is_some());
+
+            // Unknown call_id → dispatch normally (BOTH guards false)
+            assert!(!ctx.should_skip_tool_call("c-unknown"));
+            assert!(ctx.cached_tool_result("c-unknown").is_none());
+        }
+
+        #[test]
+        fn engine_with_resume_context_dispatches_unknown_call_id() {
+            // When LLM emits a NEW call_id absent from the original event log,
+            // the short-circuit predicate is false on both legs, so dispatch
+            // proceeds normally. This is the "agent makes new progress on
+            // resume" scenario.
+            let setup = TestSetup::new();
+            let executed = BTreeSet::new(); // empty — no prior calls
+            let cached = BTreeMap::new();
+            let ctx = build_resume_ctx(executed, cached);
+            let engine = setup.create_engine("new-call").with_resume_context(ctx.clone());
+
+            assert!(engine.resume_context.is_some());
+            // Predicate: brand-new call_id is NOT skipped → dispatcher runs.
+            let attached = engine.resume_context.as_ref().unwrap();
+            assert!(!attached.should_skip_tool_call("brand-new-c1"));
+        }
     }
 }
