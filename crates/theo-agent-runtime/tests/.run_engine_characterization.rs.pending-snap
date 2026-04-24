@@ -1,0 +1,22 @@
+{"run_id":"1777074220-730098263","line":387,"new":{"module_name":"run_engine_characterization","snapshot_name":"scenario_tool_call_manager_purges_terminal_records_after_replay","metadata":{"source":"crates/theo-agent-runtime/tests/run_engine_characterization.rs","assertion_line":387,"expression":"format!(\"purged={purged} remaining={}\", manager.record_count())"},"snapshot":"purged=3 remaining=0"},"old":{"module_name":"run_engine_characterization","metadata":{},"snapshot":"\"purged=3 remaining=0\""}}
+{"run_id":"1777074224-957907895","line":387,"new":{"module_name":"run_engine_characterization","snapshot_name":"scenario_tool_call_manager_purges_terminal_records_after_replay","metadata":{"source":"crates/theo-agent-runtime/tests/run_engine_characterization.rs","assertion_line":387,"expression":"format!(\"purged={purged} remaining={}\", manager.record_count())"},"snapshot":"purged=3 remaining=0"},"old":{"module_name":"run_engine_characterization","metadata":{},"snapshot":"\"purged=3 remaining=0\""}}
+{"run_id":"1777074236-100591912","line":347,"new":null,"old":null}
+{"run_id":"1777074236-100591912","line":141,"new":null,"old":null}
+{"run_id":"1777074236-100591912","line":199,"new":null,"old":null}
+{"run_id":"1777074236-100591912","line":419,"new":null,"old":null}
+{"run_id":"1777074236-100591912","line":99,"new":null,"old":null}
+{"run_id":"1777074236-100591912","line":120,"new":null,"old":null}
+{"run_id":"1777074236-100591912","line":292,"new":null,"old":null}
+{"run_id":"1777074236-100591912","line":174,"new":null,"old":null}
+{"run_id":"1777074236-100591912","line":264,"new":null,"old":null}
+{"run_id":"1777074236-100591912","line":387,"new":null,"old":null}
+{"run_id":"1777074253-47728094","line":199,"new":null,"old":null}
+{"run_id":"1777074253-47728094","line":419,"new":null,"old":null}
+{"run_id":"1777074253-47728094","line":347,"new":null,"old":null}
+{"run_id":"1777074253-47728094","line":120,"new":null,"old":null}
+{"run_id":"1777074253-47728094","line":99,"new":null,"old":null}
+{"run_id":"1777074253-47728094","line":141,"new":null,"old":null}
+{"run_id":"1777074253-47728094","line":292,"new":null,"old":null}
+{"run_id":"1777074253-47728094","line":387,"new":null,"old":null}
+{"run_id":"1777074253-47728094","line":264,"new":null,"old":null}
+{"run_id":"1777074253-47728094","line":174,"new":null,"old":null}

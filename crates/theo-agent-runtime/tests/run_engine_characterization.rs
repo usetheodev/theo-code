@@ -273,7 +273,125 @@ async fn scenario_task_plus_tool_lifecycle_combined_sequence() {
 }
 
 // --------------------------------------------------------------------------
-// Scenario 8 — EventBus preserves insertion order under bounded-log
+// Scenario 8a — Task waiting-tool cycle: Pending → Ready → Running →
+// WaitingTool → Running → Completed. Pins the recommended convergence
+// path used by the agent loop when a tool call is in flight.
+// --------------------------------------------------------------------------
+#[test]
+fn scenario_task_waiting_tool_cycle_emits_full_lifecycle_sequence() {
+    let (bus, listener) = setup_bus();
+    let tm = TaskManager::new(bus.clone());
+
+    let id = tm.create_task(SessionId::new("s-wt"), AgentType::Coder, "loop".into());
+    tm.transition(&id, TaskState::Ready).unwrap();
+    tm.transition(&id, TaskState::Running).unwrap();
+    tm.transition(&id, TaskState::WaitingTool).unwrap();
+    tm.transition(&id, TaskState::Running).unwrap();
+    tm.transition(&id, TaskState::Completed).unwrap();
+
+    insta::assert_yaml_snapshot!(event_type_sequence(&listener), @r"
+    - TaskCreated
+    - TaskStateChanged
+    - TaskStateChanged
+    - TaskStateChanged
+    - TaskStateChanged
+    - TaskStateChanged
+    ");
+}
+
+// --------------------------------------------------------------------------
+// Scenario 8b — Cancellation tree nested-child propagation. A cancel
+// of the root token must propagate to a manually-derived grandchild,
+// not just direct children. Pins the inheritance contract.
+// --------------------------------------------------------------------------
+#[tokio::test]
+async fn scenario_cancellation_tree_nested_child_inherits_root_cancel() {
+    use std::time::Duration;
+
+    let tree = Arc::new(CancellationTree::new());
+    // Root → child → grandchild via tokio_util::sync::CancellationToken.
+    let parent = tree.child("subagent-parent");
+    let grandchild = parent.child_token();
+
+    // Independent watcher tasks for each level.
+    let parent_watch = tokio::spawn({
+        let p = parent.clone();
+        async move {
+            p.cancelled().await;
+            "parent_cancelled"
+        }
+    });
+    let grand_watch = tokio::spawn({
+        let g = grandchild.clone();
+        async move {
+            g.cancelled().await;
+            "grandchild_cancelled"
+        }
+    });
+
+    // Cancel from the root — both watchers must fire within a
+    // short deadline (the inheritance is synchronous in tokio_util).
+    tree.cancel_all();
+
+    let parent_outcome =
+        tokio::time::timeout(Duration::from_secs(1), parent_watch)
+            .await
+            .expect("parent cancel deadline")
+            .expect("task ok");
+    let grand_outcome =
+        tokio::time::timeout(Duration::from_secs(1), grand_watch)
+            .await
+            .expect("grandchild cancel deadline")
+            .expect("task ok");
+
+    insta::assert_yaml_snapshot!(
+        vec![parent_outcome, grand_outcome],
+        @r"
+    - parent_cancelled
+    - grandchild_cancelled
+    "
+    );
+}
+
+// --------------------------------------------------------------------------
+// Scenario 8c — ToolCallManager terminal-state purge after replay.
+// 3 enqueues → 3 dispatches → all terminate → purge with cutoff in the
+// far future removes exactly 3, leaving record_count=0. Pins the
+// purge_completed contract used by record_session_exit.
+// --------------------------------------------------------------------------
+#[tokio::test]
+async fn scenario_tool_call_manager_purges_terminal_records_after_replay() {
+    let (bus, _listener) = setup_bus();
+    let manager = ToolCallManager::new(bus);
+    let registry = create_default_registry();
+    let ctx = ToolContext::test_context(PathBuf::from("/tmp"));
+    let _ = MessageId::new("ignored"); // reused import, silence linter
+
+    let mut ids = Vec::new();
+    for i in 0..3 {
+        let id = manager.enqueue(
+            theo_domain::identifiers::TaskId::new(format!("t-{i}")),
+            "read".into(),
+            serde_json::json!({"filePath": format!("/nonexistent/{i}")}),
+        );
+        ids.push(id);
+    }
+    for id in &ids {
+        let _ = manager.dispatch_and_execute(id, &registry, &ctx).await;
+    }
+    assert_eq!(manager.record_count(), 3, "all 3 dispatched");
+
+    let far_future = theo_domain::clock::now_millis() + 1_000_000;
+    let purged = manager.purge_completed(far_future, 0);
+
+    insta::assert_yaml_snapshot!(
+        format!("purged={purged} remaining={}", manager.record_count()),
+        @"purged=3 remaining=0"
+    );
+}
+
+// --------------------------------------------------------------------------
+// Scenario 9 — EventBus preserves insertion order under bounded-log
 // rotation. This pins the FIFO contract the observability pipeline
 // assumes.
 // --------------------------------------------------------------------------
