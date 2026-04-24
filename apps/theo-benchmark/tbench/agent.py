@@ -128,14 +128,18 @@ class TheoAgent(AbstractInstalledAgent):
         inside the container.
         """
         env: dict[str, str] = {}
-        # API keys
+        # API keys + theo runtime config
         for key in (
             "OPENAI_API_KEY",
             "ANTHROPIC_API_KEY",
             "THEO_BIN_URL",
+            "THEO_AUTH_URL",
             "THEO_MODEL",
             "THEO_PROVIDER",
             "THEO_MAX_ITER",
+            "THEO_SKIP_ONBOARDING",  # bench: skip user-prompt before tool use
+            "THEO_FORCE_TOOL_CHOICE",  # bench: force specific tool dispatch
+            "THEO_TEMPERATURE",
         ):
             val = os.environ.get(key, "")
             if val:
