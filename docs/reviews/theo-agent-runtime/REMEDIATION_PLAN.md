@@ -992,3 +992,22 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 - **88 integration tests passando, 0 falhas.**
 
 **Nao feito nesta iteracao (proximas):** T0.1-T0.3 caracterizacao, T1.1 bwrap completo no done-gate, T1.3 AgentConfig allowlist, T3.4 consolidar retry inline, T4.* split god-files, T5.1-T5.2, T6.4 batch streaming deltas, T7.*, T8.1 phase tags migration.
+
+### Iteracao 6 (2026-04-24) — Plugin allowlist + SubAgentIntegrations + phase sweep
+
+| Task | Status | Notas |
+|---|---|---|
+| T1.3 completion | **DONE** | `AgentConfig.plugin_allowlist: Option<BTreeSet<String>>` — quando `Some`, `load_plugins_with_policy` so aceita plugins cujo `manifest_sha256` esta no set. `load_plugin_tools` em `agent_loop.rs` propaga `&self.config.plugin_allowlist` + `event_bus`. Eventos `DomainEvent::PluginLoaded` (sucesso) e `DomainEvent::Error{type:plugin_rejected, reason:ownership_mismatch|allowlist_miss}` emitidos. 3 testes novos: hash match aceita, hash miss rejeita, bus captura evento. |
+| T5.2 SubAgentIntegrations | **DONE (compat-preserving)** | novo struct `SubAgentIntegrations` com 11 campos `Option<Arc<_>>` + `Default`/`Clone`; `AgentLoop::with_subagent_integrations(bundle)` seta tudo em 1 chamada. Os 11 `with_subagent_*` individuais foram mantidos (docs atualizadas apontando a API nova) para nao quebrar `theo-application`/`theo-cli`. |
+| T8.1 phase tags sweep (parcial) | **DONE (parcial)** | 22 `/// Phase N:` doc-comments em `agent_loop.rs` e `run_engine.rs` limpos para prosa neutra. Phase tags: 310 → 210 (-100 desde baseline; -30 vs iter 5). Os restantes estao dentro de blocos de implementacao que carregam referencia historica (`PLAN_AUTO_EVOLUTION_SOTA Phase 4 — index ...`) — esses ficam ate o proximo ADR referencia-los. |
+
+**Baseline → atual (por metrica, desde Iteracao 0):**
+- `.expect/.unwrap/panic!`: 1071 → 1017 (-54; estavel)
+- silent-swallow: 61 → 2
+- `std::env::var`: 25 → 6 (todos em `bin/`)
+- `std::process::Command` producao: 2 → 1
+- phase tags: 310 → **210** (-100)
+
+**Validacao:** `cargo test -p theo-domain -p theo-agent-runtime` → 452 + 1112 = **1564 unit**, 88 integration, 0 falhas.
+
+**Nao feito nesta iteracao (proximas):** T0.1-T0.3 caracterizacao, T1.1 bwrap completo, T3.4 consolidar retry inline, T4.* split god-files, T5.1 RunMetadata sub-struct, T6.4 batch streaming deltas, T7.* (security/resilience/meta-tools/bench), T8.1 completar phase sweep nos ~210 restantes.

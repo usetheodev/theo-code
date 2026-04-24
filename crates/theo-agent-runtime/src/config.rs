@@ -382,6 +382,16 @@ pub struct AgentConfig {
     /// concrete Tantivy-backed impl lives in `theo-application` to
     /// keep bounded contexts intact.
     pub transcript_indexer: Option<crate::transcript_indexer::TranscriptIndexerHandle>,
+    /// T1.3 supply-chain: optional pinned set of plugin manifest
+    /// SHA-256 hashes. When `Some`, a plugin is only loaded if its
+    /// computed `manifest_sha256` is in the set — a typo in one
+    /// plugin.toml byte fails the load. When `None`, every ownership-
+    /// verified plugin is accepted (backward-compatible default).
+    ///
+    /// Stored as `BTreeSet<String>` rather than `HashSet` so
+    /// serialization and diffing remain deterministic across
+    /// reproducibility audits.
+    pub plugin_allowlist: Option<std::collections::BTreeSet<String>>,
 }
 
 /// Debug-friendly wrapper around `Arc<dyn MemoryProvider>` so `AgentConfig`
@@ -465,6 +475,7 @@ impl Default for AgentConfig {
             skill_review_nudge_interval: 10,
             skill_reviewer: None,
             transcript_indexer: None,
+            plugin_allowlist: None,
         }
     }
 }

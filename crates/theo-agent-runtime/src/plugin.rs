@@ -86,26 +86,51 @@ pub struct LoadedPlugin {
 // ---------------------------------------------------------------------------
 
 /// Discover and load all plugins from project and global dirs.
+///
+/// No allowlist enforcement — every ownership-verified plugin is
+/// accepted. Use [`load_plugins_with_policy`] to pin a hash allowlist.
 pub fn load_plugins(project_dir: &Path) -> Vec<LoadedPlugin> {
+    load_plugins_with_policy(project_dir, None, None)
+}
+
+/// T1.3: discover plugins with optional hash allowlist + optional
+/// [`crate::event_bus::EventBus`] for typed `DomainEvent::PluginLoaded`
+/// emission.
+///
+/// - `allowlist = None` → accept every ownership-verified plugin.
+/// - `allowlist = Some(set)` → only accept plugins whose
+///   `manifest_sha256` is present. Rejections are logged on stderr AND
+///   (when `bus` is provided) emitted as `DomainEvent::Error` with
+///   `payload.type = "plugin_rejected"`.
+pub fn load_plugins_with_policy(
+    project_dir: &Path,
+    allowlist: Option<&std::collections::BTreeSet<String>>,
+    bus: Option<&std::sync::Arc<crate::event_bus::EventBus>>,
+) -> Vec<LoadedPlugin> {
     let mut plugins = Vec::new();
 
     // Project plugins
     let project_plugins = project_dir.join(".theo").join("plugins");
     if project_plugins.exists() {
-        load_plugins_from_dir(&project_plugins, &mut plugins);
+        load_plugins_from_dir(&project_plugins, &mut plugins, allowlist, bus);
     }
 
     // Global plugins — only when HOME is set (avoid /tmp fallback).
     if let Some(global_plugins) = theo_domain::user_paths::theo_config_subdir("plugins")
         && global_plugins.exists()
     {
-        load_plugins_from_dir(&global_plugins, &mut plugins);
+        load_plugins_from_dir(&global_plugins, &mut plugins, allowlist, bus);
     }
 
     plugins
 }
 
-fn load_plugins_from_dir(plugins_dir: &Path, plugins: &mut Vec<LoadedPlugin>) {
+fn load_plugins_from_dir(
+    plugins_dir: &Path,
+    plugins: &mut Vec<LoadedPlugin>,
+    allowlist: Option<&std::collections::BTreeSet<String>>,
+    bus: Option<&std::sync::Arc<crate::event_bus::EventBus>>,
+) {
     let entries = match std::fs::read_dir(plugins_dir) {
         Ok(e) => e,
         Err(_) => return,
@@ -130,17 +155,66 @@ fn load_plugins_from_dir(plugins_dir: &Path, plugins: &mut Vec<LoadedPlugin>) {
                 "[theo] Plugin REJECTED (ownership mismatch): {} — manifest not owned by current user",
                 path.display()
             );
+            if let Some(bus) = bus {
+                bus.publish(theo_domain::event::DomainEvent::new(
+                    theo_domain::event::EventType::Error,
+                    "plugin_loader",
+                    serde_json::json!({
+                        "type": "plugin_rejected",
+                        "reason": "ownership_mismatch",
+                        "path": path.display().to_string(),
+                    }),
+                ));
+            }
             continue;
         }
 
         match load_single_plugin(&path) {
             Ok(plugin) => {
+                // T1.3: if the operator pinned a hash allowlist, reject
+                // plugins whose sha256 is not in it.
+                if let Some(set) = allowlist
+                    && !set.contains(&plugin.manifest_sha256)
+                {
+                    eprintln!(
+                        "[theo] Plugin REJECTED (sha256 not in allowlist): {} sha256={}",
+                        path.display(),
+                        &plugin.manifest_sha256[..16]
+                    );
+                    if let Some(bus) = bus {
+                        bus.publish(theo_domain::event::DomainEvent::new(
+                            theo_domain::event::EventType::Error,
+                            "plugin_loader",
+                            serde_json::json!({
+                                "type": "plugin_rejected",
+                                "reason": "allowlist_miss",
+                                "path": path.display().to_string(),
+                                "manifest_sha256": plugin.manifest_sha256,
+                            }),
+                        ));
+                    }
+                    continue;
+                }
+
                 eprintln!(
                     "[theo] Plugin loaded: {} ({}) sha256={}",
                     plugin.manifest.name,
                     path.display(),
                     &plugin.manifest_sha256[..16]
                 );
+                if let Some(bus) = bus {
+                    bus.publish(theo_domain::event::DomainEvent::new(
+                        theo_domain::event::EventType::PluginLoaded,
+                        &plugin.manifest.name,
+                        serde_json::json!({
+                            "name": plugin.manifest.name,
+                            "dir": path.display().to_string(),
+                            "manifest_sha256": plugin.manifest_sha256,
+                            "tool_count": plugin.tool_scripts.len() as u64,
+                            "hook_count": plugin.hook_scripts.len() as u64,
+                        }),
+                    ));
+                }
                 plugins.push(plugin);
             }
             Err(e) => {
@@ -382,5 +456,88 @@ description = "Demo plugin"
         let plugins = load_plugins(dir.path());
         assert_eq!(plugins.len(), 1);
         assert_eq!(plugins[0].manifest.name, "mine");
+    }
+
+    // -----------------------------------------------------------------------
+    // T1.3 completion — Allowlist pinning by manifest SHA-256.
+    // -----------------------------------------------------------------------
+
+    #[cfg(unix)]
+    #[test]
+    fn plugin_allowed_when_sha256_matches_allowlist() {
+        use std::collections::BTreeSet;
+        let dir = tempfile::tempdir().unwrap();
+        let plugins_dir = dir.path().join(".theo/plugins/a");
+        std::fs::create_dir_all(&plugins_dir).unwrap();
+        std::fs::write(plugins_dir.join("plugin.toml"), "name = \"a\"\n").unwrap();
+
+        // First pass: load without allowlist to observe the expected hash.
+        let observed = load_plugins(dir.path());
+        assert_eq!(observed.len(), 1);
+        let sha = observed[0].manifest_sha256.clone();
+
+        // Second pass: pin the hash — should still load.
+        let allowlist: BTreeSet<String> = [sha].into_iter().collect();
+        let loaded = load_plugins_with_policy(dir.path(), Some(&allowlist), None);
+        assert_eq!(loaded.len(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn plugin_rejected_when_sha256_missing_from_allowlist() {
+        use std::collections::BTreeSet;
+        let dir = tempfile::tempdir().unwrap();
+        let plugins_dir = dir.path().join(".theo/plugins/evil");
+        std::fs::create_dir_all(&plugins_dir).unwrap();
+        std::fs::write(plugins_dir.join("plugin.toml"), "name = \"evil\"\n").unwrap();
+
+        // Allowlist contains a different hash — plugin must be rejected.
+        let wrong: BTreeSet<String> = [
+            "0000000000000000000000000000000000000000000000000000000000000000".to_string(),
+        ]
+        .into_iter()
+        .collect();
+        let loaded = load_plugins_with_policy(dir.path(), Some(&wrong), None);
+        assert!(loaded.is_empty(), "plugin with non-allowlisted hash must be rejected");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn plugin_load_emits_plugin_loaded_event_when_bus_attached() {
+        use crate::event_bus::{CapturingListener, EventBus};
+        use std::sync::Arc;
+        use theo_domain::event::EventType;
+
+        let dir = tempfile::tempdir().unwrap();
+        let plugins_dir = dir.path().join(".theo/plugins/loaded");
+        std::fs::create_dir_all(&plugins_dir).unwrap();
+        std::fs::write(
+            plugins_dir.join("plugin.toml"),
+            "name = \"loaded\"\n",
+        )
+        .unwrap();
+
+        let bus = Arc::new(EventBus::new());
+        let listener = Arc::new(CapturingListener::new());
+        bus.subscribe(listener.clone());
+
+        let loaded = load_plugins_with_policy(dir.path(), None, Some(&bus));
+        assert_eq!(loaded.len(), 1);
+
+        let evts: Vec<_> = listener
+            .captured()
+            .into_iter()
+            .filter(|e| e.event_type == EventType::PluginLoaded)
+            .collect();
+        assert_eq!(evts.len(), 1);
+        assert_eq!(evts[0].entity_id, "loaded");
+        assert_eq!(evts[0].payload["name"], "loaded");
+        assert!(
+            evts[0].payload["manifest_sha256"]
+                .as_str()
+                .unwrap()
+                .len()
+                == 64
+        );
     }
 }

@@ -110,6 +110,29 @@ impl AgentResult {
     }
 }
 
+/// T5.2 — bundle of 11 sub-agent integrations previously exposed as 11
+/// separate `with_subagent_*` builders on `AgentLoop`.
+///
+/// Callers can populate this once and pass via
+/// [`AgentLoop::with_subagent_integrations`] instead of chaining N
+/// builder calls. The individual `with_subagent_*` methods remain for
+/// backward compatibility but are documented as deprecated — new code
+/// should use this struct.
+#[derive(Default, Clone)]
+pub struct SubAgentIntegrations {
+    pub registry: Option<Arc<crate::subagent::SubAgentRegistry>>,
+    pub run_store: Option<Arc<crate::subagent_runs::FileSubagentRunStore>>,
+    pub hooks: Option<Arc<crate::lifecycle_hooks::HookManager>>,
+    pub cancellation: Option<Arc<crate::cancellation::CancellationTree>>,
+    pub checkpoint: Option<Arc<crate::checkpoint::CheckpointManager>>,
+    pub worktree: Option<Arc<theo_isolation::WorktreeProvider>>,
+    pub mcp: Option<Arc<theo_infra_mcp::McpRegistry>>,
+    pub mcp_discovery: Option<Arc<theo_infra_mcp::DiscoveryCache>>,
+    pub handoff_guardrails: Option<Arc<crate::handoff_guardrail::GuardrailChain>>,
+    pub reloadable: Option<crate::subagent::ReloadableRegistry>,
+    pub resume_context: Option<Arc<crate::subagent::resume::ResumeContext>>,
+}
+
 /// The main agent loop that orchestrates LLM ↔ tool execution.
 ///
 /// This is now a thin facade over `AgentRunEngine`. All execution logic
@@ -125,7 +148,10 @@ pub struct AgentLoop {
     config: AgentConfig,
     listeners: Vec<Arc<dyn EventListener>>,
     graph_context: Option<Arc<dyn theo_domain::graph_context::GraphContextProvider>>,
-    // Phase 1-13 sub-agent integrations forwarded to AgentRunEngine.
+    // Sub-agent integrations forwarded to AgentRunEngine. Prefer
+    // `with_subagent_integrations(SubAgentIntegrations)` to set these
+    // in bulk — the per-field builders below remain for backward
+    // compatibility.
     subagent_registry: Option<Arc<crate::subagent::SubAgentRegistry>>,
     subagent_run_store: Option<Arc<crate::subagent_runs::FileSubagentRunStore>>,
     subagent_hooks: Option<Arc<crate::lifecycle_hooks::HookManager>>,
@@ -133,17 +159,16 @@ pub struct AgentLoop {
     subagent_checkpoint: Option<Arc<crate::checkpoint::CheckpointManager>>,
     subagent_worktree: Option<Arc<theo_isolation::WorktreeProvider>>,
     subagent_mcp: Option<Arc<theo_infra_mcp::McpRegistry>>,
-    /// Phase 17 (sota-gaps): MCP discovery cache forwarded to AgentRunEngine.
+    /// MCP discovery cache forwarded to AgentRunEngine.
     subagent_mcp_discovery: Option<Arc<theo_infra_mcp::DiscoveryCache>>,
-    /// Phase 18 (sota-gaps): handoff guardrail chain forwarded to AgentRunEngine.
+    /// Handoff guardrail chain forwarded to AgentRunEngine.
     subagent_handoff_guardrails:
         Option<Arc<crate::handoff_guardrail::GuardrailChain>>,
     subagent_reloadable: Option<crate::subagent::ReloadableRegistry>,
-    /// Phase 30 (resume-runtime-wiring) — gap #3: when present, dispatch
-    /// consults the context BEFORE invoking each tool. Already-completed
-    /// call_ids replay their cached `Message::tool_result` instead of
-    /// re-executing the tool. `None` means default dispatch (zero impact
-    /// on existing tests — backward compat absoluta per D5).
+    /// Resume replay context: when present, dispatch consults the
+    /// context BEFORE invoking each tool. Already-completed call_ids
+    /// replay their cached `Message::tool_result` instead of
+    /// re-executing the tool. `None` means default dispatch.
     resume_context: Option<Arc<crate::subagent::resume::ResumeContext>>,
 }
 
@@ -238,7 +263,7 @@ impl AgentLoop {
         self
     }
 
-    /// Phase 17 (sota-gaps): inject the MCP discovery cache.
+    /// Inject the MCP discovery cache.
     pub fn with_subagent_mcp_discovery(
         mut self,
         cache: Arc<theo_infra_mcp::DiscoveryCache>,
@@ -247,7 +272,7 @@ impl AgentLoop {
         self
     }
 
-    /// Phase 18 (sota-gaps): inject the handoff guardrail chain.
+    /// Inject the handoff guardrail chain.
     pub fn with_subagent_handoff_guardrails(
         mut self,
         chain: Arc<crate::handoff_guardrail::GuardrailChain>,
@@ -264,17 +289,57 @@ impl AgentLoop {
         self
     }
 
-    /// Phase 30 (resume-runtime-wiring) — gap #3: enable replay-mode
-    /// dispatch. When set, each tool call is consulted against the
-    /// context's `executed_tool_calls` set BEFORE dispatching. Hits get
-    /// the cached `Message::tool_result` from the event log. Misses
-    /// dispatch normally. The Resumer constructs the context and
-    /// invokes this builder per resume.
+    /// Enable replay-mode dispatch. When set, each tool call is
+    /// consulted against the context's `executed_tool_calls` set
+    /// BEFORE dispatching. Hits get the cached `Message::tool_result`
+    /// from the event log. Misses dispatch normally. The Resumer
+    /// constructs the context and invokes this builder per resume.
     pub fn with_resume_context(
         mut self,
         ctx: Arc<crate::subagent::resume::ResumeContext>,
     ) -> Self {
         self.resume_context = Some(ctx);
+        self
+    }
+
+    /// T5.2 — apply an entire bundle of sub-agent integrations in one
+    /// call instead of chaining 11 individual `with_subagent_*` builders.
+    /// Any field left `None` leaves the existing state untouched.
+    #[must_use]
+    pub fn with_subagent_integrations(mut self, integrations: SubAgentIntegrations) -> Self {
+        if let Some(v) = integrations.registry {
+            self.subagent_registry = Some(v);
+        }
+        if let Some(v) = integrations.run_store {
+            self.subagent_run_store = Some(v);
+        }
+        if let Some(v) = integrations.hooks {
+            self.subagent_hooks = Some(v);
+        }
+        if let Some(v) = integrations.cancellation {
+            self.subagent_cancellation = Some(v);
+        }
+        if let Some(v) = integrations.checkpoint {
+            self.subagent_checkpoint = Some(v);
+        }
+        if let Some(v) = integrations.worktree {
+            self.subagent_worktree = Some(v);
+        }
+        if let Some(v) = integrations.mcp {
+            self.subagent_mcp = Some(v);
+        }
+        if let Some(v) = integrations.mcp_discovery {
+            self.subagent_mcp_discovery = Some(v);
+        }
+        if let Some(v) = integrations.handoff_guardrails {
+            self.subagent_handoff_guardrails = Some(v);
+        }
+        if let Some(v) = integrations.reloadable {
+            self.subagent_reloadable = Some(v);
+        }
+        if let Some(v) = integrations.resume_context {
+            self.resume_context = Some(v);
+        }
         self
     }
 
@@ -369,7 +434,7 @@ impl AgentLoop {
         );
 
         let client = self.build_llm_client();
-        let registry = Arc::new(self.build_registry(project_dir));
+        let registry = Arc::new(self.build_registry(project_dir, Some(&event_bus)));
 
         let mut engine = AgentRunEngine::new(
             task_id,
@@ -402,9 +467,18 @@ impl AgentLoop {
         client
     }
 
-    fn build_registry(&self, project_dir: &Path) -> theo_tooling::registry::ToolRegistry {
+    fn build_registry(
+        &self,
+        project_dir: &Path,
+        event_bus: Option<&Arc<EventBus>>,
+    ) -> theo_tooling::registry::ToolRegistry {
         let mut registry = theo_tooling::registry::create_default_registry();
-        load_plugin_tools(&mut registry, project_dir);
+        load_plugin_tools(
+            &mut registry,
+            project_dir,
+            self.config.plugin_allowlist.as_ref(),
+            event_bus,
+        );
         registry
     }
 
@@ -428,11 +502,16 @@ impl AgentLoop {
     }
 }
 
-/// Check if the project has real uncommitted changes via git diff.
-/// Kept as free function for backward compatibility with existing tests.
 /// Load plugin tools from .theo/plugins/ into the registry.
-fn load_plugin_tools(registry: &mut theo_tooling::registry::ToolRegistry, project_dir: &Path) {
-    let plugins = crate::plugin::load_plugins(project_dir);
+/// Honors the optional hash allowlist and emits `PluginLoaded` events
+/// when a bus is attached (T1.3).
+fn load_plugin_tools(
+    registry: &mut theo_tooling::registry::ToolRegistry,
+    project_dir: &Path,
+    allowlist: Option<&std::collections::BTreeSet<String>>,
+    event_bus: Option<&Arc<EventBus>>,
+) {
+    let plugins = crate::plugin::load_plugins_with_policy(project_dir, allowlist, event_bus);
     let mut tool_specs = Vec::new();
     for plugin in &plugins {
         for (spec, script_path) in &plugin.tool_scripts {

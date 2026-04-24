@@ -65,7 +65,7 @@ pub struct AgentRunEngine {
     /// Steering and follow-up message queues for mid-run injection.
     /// Pi-mono ref: `packages/agent/src/agent-loop.ts:165-229`
     message_queues: MessageQueues,
-    /// Phase 1 T1.1: accumulated token usage across LLM calls.
+    /// Accumulated token usage across LLM calls in this session.
     session_token_usage: theo_domain::budget::TokenUsage,
     /// PLAN_AUTO_EVOLUTION_SOTA Phase 1: turns since the last memory
     /// reviewer spawn. `AtomicUsize` lets the counter survive fork
@@ -87,8 +87,8 @@ pub struct AgentRunEngine {
     episodes_injected: u32, episodes_created: u32,
     initial_context_files: std::collections::HashSet<String>,
     pre_compaction_hot_files: std::collections::HashSet<String>,
-    /// Phase 1-13 integrations: when present, propagated to spawn_with_spec.
-    /// Optional so backward-compat is preserved (legacy callers don't need to inject).
+    /// Sub-agent integrations — when present, propagated to spawn_with_spec.
+    /// Optional so backward-compat is preserved.
     subagent_registry: Option<Arc<crate::subagent::SubAgentRegistry>>,
     subagent_run_store: Option<Arc<crate::subagent_runs::FileSubagentRunStore>>,
     subagent_hooks: Option<Arc<crate::lifecycle_hooks::HookManager>>,
@@ -96,27 +96,28 @@ pub struct AgentRunEngine {
     subagent_checkpoint: Option<Arc<crate::checkpoint::CheckpointManager>>,
     subagent_worktree: Option<Arc<theo_isolation::WorktreeProvider>>,
     subagent_mcp: Option<Arc<theo_infra_mcp::McpRegistry>>,
-    /// Phase 17: optional MCP discovery cache propagated to spawn_with_spec.
+    /// Optional MCP discovery cache propagated to spawn_with_spec.
     subagent_mcp_discovery: Option<Arc<theo_infra_mcp::DiscoveryCache>>,
-    /// Phase 18: optional handoff guardrail chain. When `None`, a default
-    /// chain (built-ins) is used per delegate_task call. Programmatic
-    /// callers can register custom guardrails by injecting a chain.
+    /// Optional handoff guardrail chain. When `None`, a default chain
+    /// (built-ins) is used per delegate_task call. Programmatic callers
+    /// can register custom guardrails by injecting a chain.
     subagent_handoff_guardrails: Option<Arc<crate::handoff_guardrail::GuardrailChain>>,
-    /// Phase 30 (resume-runtime-wiring) — gap #3: optional resume context.
-    /// When present, the dispatch loop consults `executed_tool_calls`
-    /// before invoking each tool and replays cached results from
-    /// `executed_tool_results` to avoid double side-effects.
+    /// Optional resume context. When present, the dispatch loop
+    /// consults `executed_tool_calls` before invoking each tool and
+    /// replays cached results from `executed_tool_results` to avoid
+    /// double side-effects.
     resume_context: Option<Arc<crate::subagent::resume::ResumeContext>>,
-    /// Phase 8: lazy-built dispatcher used to handle `mcp:server:tool`
-    /// calls. Built from `subagent_mcp` on first use.
+    /// Lazy-built dispatcher for `mcp:server:tool` calls. Built from
+    /// `subagent_mcp` on first use.
     subagent_mcp_dispatcher: std::sync::OnceLock<Arc<theo_infra_mcp::McpDispatcher>>,
-    /// Phase 13: optional ReloadableRegistry. When Some, takes precedence
-    /// over `subagent_registry`: each delegate_task call reads
-    /// `reloadable.snapshot()` so changes from the watcher take effect
-    /// immediately without restart.
+    /// Optional ReloadableRegistry. When Some, takes precedence over
+    /// `subagent_registry`: each delegate_task call reads
+    /// `reloadable.snapshot()` so watcher changes take effect immediately
+    /// without restart.
     subagent_reloadable: Option<crate::subagent::ReloadableRegistry>,
-    /// Phase 9: turns since the last checkpoint (one snapshot per turn,
-    /// only when a mutating tool first fires within that turn).
+    /// Whether a checkpoint snapshot has already been taken this turn.
+    /// Reset at the start of every turn; set to `true` on first
+    /// mutating-tool dispatch. One snapshot per turn max.
     checkpoint_taken_this_turn: std::sync::atomic::AtomicBool,
 }
 
@@ -237,7 +238,7 @@ impl AgentRunEngine {
         )
     }
 
-    /// Phase 8: dispatch a tool call to MCP if its name is in the
+    /// Dispatch a tool call to MCP if its name is in the
     /// `mcp:<server>:<tool>` namespace. Returns `Some(message)` on
     /// dispatch (success or RPC failure → error message). Returns `None`
     /// when the tool is not MCP — the caller falls back to normal dispatch.
@@ -265,7 +266,7 @@ impl AgentRunEngine {
         ))
     }
 
-    /// Phase 9: at the start of a turn, reset the once-per-turn snapshot flag.
+    /// At the start of a turn, reset the once-per-turn snapshot flag.
     pub fn reset_turn_checkpoint(&self) {
         // Release: pairs with the Acquire failure-ordering in the CAS
         // below. Ensures any subsequent reads of checkpoint-related state
@@ -274,10 +275,10 @@ impl AgentRunEngine {
             .store(false, std::sync::atomic::Ordering::Release);
     }
 
-    /// Phase 9: take a snapshot if (a) a checkpoint manager is attached AND
-    /// (b) the tool is mutating AND (c) no snapshot was taken this turn yet.
-    /// Idempotent within a turn. Returns the SHA on a fresh snapshot, None
-    /// otherwise.
+    /// Take a snapshot if (a) a checkpoint manager is attached AND
+    /// (b) the tool is mutating AND (c) no snapshot was taken this turn.
+    /// Idempotent within a turn. Returns the SHA on a fresh snapshot,
+    /// None otherwise.
     pub fn maybe_checkpoint_for_tool(&self, tool_name: &str, turn_id: u32) -> Option<String> {
         if !Self::is_mutating_tool(tool_name) {
             return None;
@@ -301,8 +302,8 @@ impl AgentRunEngine {
         self.checkpoint_before_mutation(&format!("turn-{}-pre-{}", turn_id, tool_name))
     }
 
-    /// Phase 1-13: inject the SubAgentRegistry. Used by delegate_task to look
-    /// up named agents (built-in / project / global). When `None`, a default
+    /// Inject the SubAgentRegistry. Used by delegate_task to look up
+    /// named agents (built-in / project / global). When `None`, a default
     /// registry with builtins is constructed on each delegate_task call.
     pub fn with_subagent_registry(
         mut self,
@@ -312,7 +313,7 @@ impl AgentRunEngine {
         self
     }
 
-    /// Phase 10: inject session persistence store. When set, sub-agent runs
+    /// Inject session persistence store. When set, sub-agent runs
     /// are persisted in `<base>/runs/{run_id}.json`.
     pub fn with_subagent_run_store(
         mut self,
@@ -322,7 +323,7 @@ impl AgentRunEngine {
         self
     }
 
-    /// Phase 5: inject global hooks (per-agent hooks merged via spec.hooks).
+    /// Inject global hooks (per-agent hooks merged via spec.hooks).
     pub fn with_subagent_hooks(
         mut self,
         hooks: Arc<crate::lifecycle_hooks::HookManager>,
@@ -331,7 +332,7 @@ impl AgentRunEngine {
         self
     }
 
-    /// Phase 6: inject cancellation tree. Sub-agents register children;
+    /// Inject cancellation tree. Sub-agents register children;
     /// root cancellation propagates.
     pub fn with_subagent_cancellation(
         mut self,
@@ -341,7 +342,7 @@ impl AgentRunEngine {
         self
     }
 
-    /// Phase 9: inject checkpoint manager. Sub-agents auto-snapshot pre-run.
+    /// Inject checkpoint manager. Sub-agents auto-snapshot pre-run.
     pub fn with_subagent_checkpoint(
         mut self,
         manager: Arc<crate::checkpoint::CheckpointManager>,
@@ -350,7 +351,7 @@ impl AgentRunEngine {
         self
     }
 
-    /// Phase 11: inject worktree provider. Sub-agents with isolation=worktree
+    /// Inject worktree provider. Sub-agents with isolation=worktree
     /// get an isolated git worktree.
     pub fn with_subagent_worktree(
         mut self,
@@ -360,7 +361,7 @@ impl AgentRunEngine {
         self
     }
 
-    /// Phase 8: inject MCP registry. Sub-agents with non-empty
+    /// Inject MCP registry. Sub-agents with non-empty
     /// `spec.mcp_servers` get a system-prompt hint listing the allowed
     /// `mcp:server:tool` namespace.
     pub fn with_subagent_mcp(mut self, mcp: Arc<theo_infra_mcp::McpRegistry>) -> Self {
@@ -368,7 +369,7 @@ impl AgentRunEngine {
         self
     }
 
-    /// Phase 17: inject MCP discovery cache. When attached, sub-agents whose
+    /// Inject MCP discovery cache. When attached, sub-agents whose
     /// `mcp_servers` allowlist matches a cached server receive a richer
     /// system-prompt hint listing actual tool names instead of just the
     /// `mcp:<server>:<tool>` namespace placeholder.
@@ -380,9 +381,9 @@ impl AgentRunEngine {
         self
     }
 
-    /// Phase 18: inject the handoff guardrail chain. When `None`, a default
-    /// chain (`GuardrailChain::with_default_builtins`) is constructed per
-    /// `delegate_task` call.
+    /// Inject the handoff guardrail chain. When `None`, a default
+    /// chain (`GuardrailChain::with_default_builtins`) is constructed
+    /// per `delegate_task` call.
     pub fn with_subagent_handoff_guardrails(
         mut self,
         chain: Arc<crate::handoff_guardrail::GuardrailChain>,
@@ -391,11 +392,11 @@ impl AgentRunEngine {
         self
     }
 
-    /// Phase 30 (resume-runtime-wiring) — gap #3: enable replay-mode
-    /// dispatch. When set, each tool call is short-circuited if its
-    /// `call_id` already appears in the context's `executed_tool_calls`
-    /// set; the cached `Message::tool_result` from the event log is
-    /// pushed instead of invoking the tool.
+    /// Enable replay-mode dispatch. When set, each tool call is
+    /// short-circuited if its `call_id` already appears in the
+    /// context's `executed_tool_calls` set; the cached
+    /// `Message::tool_result` from the event log is pushed instead of
+    /// invoking the tool.
     pub fn with_resume_context(
         mut self,
         ctx: Arc<crate::subagent::resume::ResumeContext>,
@@ -404,10 +405,10 @@ impl AgentRunEngine {
         self
     }
 
-    /// Phase 13: inject a ReloadableRegistry. Takes precedence over
+    /// Inject a ReloadableRegistry. Takes precedence over
     /// `with_subagent_registry`: delegate_task reads a fresh snapshot
-    /// each call, so filesystem changes (via RegistryWatcher) take effect
-    /// without needing to restart the agent.
+    /// each call, so filesystem changes (via RegistryWatcher) take
+    /// effect without needing to restart the agent.
     pub fn with_subagent_reloadable(
         mut self,
         reloadable: crate::subagent::ReloadableRegistry,
@@ -416,11 +417,10 @@ impl AgentRunEngine {
         self
     }
 
-    /// Phase 9: snapshot the workdir BEFORE a mutating tool fires (edit /
-    /// write / apply_patch / bash). Idempotent within a turn — caller is
-    /// expected to track once-per-turn state.
-    /// Returns the commit SHA on success, None if no checkpoint manager
-    /// is attached or snapshot fails (fail-soft).
+    /// Snapshot the workdir BEFORE a mutating tool fires (edit / write /
+    /// apply_patch / bash). Idempotent within a turn — caller tracks
+    /// the once-per-turn state. Returns the commit SHA on success, None
+    /// if no checkpoint manager is attached or snapshot fails (fail-soft).
     pub fn checkpoint_before_mutation(&self, label: &str) -> Option<String> {
         self.subagent_checkpoint
             .as_ref()
