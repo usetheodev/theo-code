@@ -1266,3 +1266,11 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 | T4.6 memory_lifecycle split | **DONE (parcial)** | `memory_lifecycle.rs` (1024 LOC) convertido para modulo `memory_lifecycle/` com 2 children: `run_engine_hooks.rs` (180 LOC) — o pub sub-module `pub mod run_engine_hooks` (lines 504-676 originais) com `inject_prefetch`/`pre_compress_push`/`sync_final_turn`/`inject_legacy_file_memory`/`inject_episode_history`; `wiring.rs` (164 LOC) — 5 wiring helpers invocados do `run_engine.rs`: `maybe_spawn_autodream` (PLAN_AUTO_EVOLUTION_SOTA Phase 2), `maybe_prepend_bootstrap` (Phase 5), `maybe_index_transcript` (Phase 4), `maybe_spawn_reviewers` (Phase 1/3), `spawn_memory_reviewer`. Re-exportados via `pub use wiring::*` para manter paths publicos byte-identical. `memory_lifecycle/mod.rs`: 1024 → **719 LOC** (-305, **-30% vs baseline**). |
 
 **Validacao:** 1132 unit + 96 integration = **1228 tests passando, 0 falhas**; 22/22 memory_lifecycle unit tests.
+
+### Iteracao 28 (2026-04-24) — Fase 4: T4.6 compaction split
+
+| Task | Status | Notas |
+|---|---|---|
+| T4.6 compaction split | **DONE (parcial)** | `compaction.rs` (798 LOC) convertido para modulo `compaction/` com child `policy_engine.rs` (260 LOC). 6 helpers extraidos do monolitico `compact_with_policy` (203 LOC): `CompactionState` (struct mutavel acumuladora), `find_boundary_idx` (tail-walk para boundary index), `compact_older_messages` (loop principal de compactacao), `compact_tool_message`/`compact_assistant_tool_calls` (branches por role), `extract_file_mentions` (heuristica para file-path tokens), `remove_previous_summary`, `build_summary`/`build_progress_str`, `insert_summary_after_system`. `compact_with_policy`: 203 LOC → 50 LOC — agora um orquestrador claro com 5 chamadas nomeadas para as helpers em vez do monolitic inline loop. `compaction/mod.rs`: 798 → **647 LOC** (-151, **-19% vs baseline**). |
+
+**Validacao:** 1132 unit + 96 integration = **1228 tests passando, 0 falhas**; 18/18 compaction unit tests.
