@@ -2,7 +2,9 @@
 // part of Fase 4 (REMEDIATION_PLAN T4.2). Each needs access to private
 // fields of `AgentRunEngine` declared in this module — that is why
 // they live as child modules rather than siblings.
+mod bootstrap;
 mod builders;
+mod dispatch;
 mod lifecycle;
 
 use std::path::PathBuf;
@@ -26,14 +28,12 @@ use crate::budget_enforcer::BudgetEnforcer;
 use crate::config::{AgentConfig, MessageQueues};
 use crate::context_metrics::ContextMetrics;
 use crate::convergence::{
-    ConvergenceContext, ConvergenceEvaluator, ConvergenceMode, EditSuccessConvergence,
-    GitDiffConvergence, check_git_changes,
+    ConvergenceEvaluator, ConvergenceMode, EditSuccessConvergence, GitDiffConvergence,
 };
 use crate::event_bus::EventBus;
 use crate::loop_state::ContextLoopState;
 use crate::metrics::{MetricsCollector, RuntimeMetrics};
 use crate::persistence::SnapshotStore;
-use crate::skill::SkillRegistry;
 use crate::snapshot::RunSnapshot;
 use crate::task_manager::TaskManager;
 use crate::tool_bridge;
@@ -384,205 +384,12 @@ impl AgentRunEngine {
     /// `history` contains messages from prior runs in this session.
     /// The current task objective is appended as the last user message.
     pub async fn execute_with_history(&mut self, history: Vec<Message>) -> AgentResult {
-        // Transition to Planning
-        self.transition_run(RunState::Planning);
-
-        // Transition task to Running
-        let _ = self
-            .task_manager
-            .transition(&self.task_id, TaskState::Ready);
-        let _ = self
-            .task_manager
-            .transition(&self.task_id, TaskState::Running);
-
-        // Auto-init: create .theo/theo.md if it doesn't exist (main agent only).
-        // Uses static template — instantaneous, no LLM cost. The agent can enrich later.
-        // Best-effort: if write fails, continue without project context.
-        if !self.config.is_subagent {
-            auto_init_project_context(&self.project_dir);
-        }
-
-        // PLAN_AUTO_EVOLUTION_SOTA Phase 2 — autodream at session start.
-        if !self.config.is_subagent {
-            crate::memory_lifecycle::maybe_spawn_autodream(
-                &self.config,
-                &self.autodream_attempted,
-                &self.project_dir,
-                self.run.run_id.as_str(),
-            );
-        }
-
-        // System prompt: .theo/system-prompt.md replaces default, or use config default.
-        // Phase 5 bootstrap prompt prepended when USER.md is missing/empty.
-        let base_prompt = if !self.config.is_subagent {
-            crate::project_config::load_system_prompt(&self.project_dir)
-                .unwrap_or_else(|| self.config.system_prompt.clone())
-        } else {
-            self.config.system_prompt.clone()
-        };
-        let system_prompt =
-            crate::memory_lifecycle::maybe_prepend_bootstrap(&self.config, &self.project_dir, base_prompt);
-
-        let mut messages: Vec<Message> = vec![Message::system(&system_prompt)];
-
-        // Project context: .theo/theo.md prepended as separate system message
-        if !self.config.is_subagent
-            && let Some(context) = crate::project_config::load_project_context(&self.project_dir) {
-                messages.push(Message::system(format!("## Project Context\n{context}")));
-            }
-
-        // GRAPHCTX is available as the `codebase_context` tool — the LLM calls it on-demand.
-        // No automatic injection: the LLM decides when it needs code structure context.
-        // The graph_context provider is passed to tools via ToolContext.graph_context.
-
-        // Memory injection (Phase 0 T0.1): prefetch when enabled (sole
-        // source), else legacy FileMemoryStore fallback. Dual-injection
-        // is prevented by this explicit branch (evolution-agent concern).
-        if self.config.memory_enabled {
-            let query = self
-                .task_manager
-                .get(&self.task_id)
-                .map(|t| t.objective.clone())
-                .unwrap_or_else(|| "session".into());
-            let _ = crate::memory_lifecycle::run_engine_hooks::inject_prefetch(
-                &self.config, &mut messages, &query,
-            )
-            .await;
-        } else {
-            crate::memory_lifecycle::run_engine_hooks::inject_legacy_file_memory(
-                &self.project_dir, &mut messages,
-            )
-            .await;
-        }
-
-        // Phase 0 T0.3: feed eligible episode summaries back into context
-        // (lifecycle != Archived, TTL not expired, 5% token budget).
-        if !self.config.is_subagent {
-            let injected = crate::memory_lifecycle::run_engine_hooks::inject_episode_history(
-                &self.project_dir,
-                self.config.context_window_tokens,
-                &mut messages,
-            );
-            self.episodes_injected = self.episodes_injected.saturating_add(injected as u32);
-        }
-
-        // Boot sequence: inject progress from previous sessions + recent git activity.
-        // Inserted after memories, before skills — so the agent knows where it left off.
-        if !self.config.is_subagent {
-            let mut boot_parts: Vec<String> = Vec::new();
-
-            // Previous session progress
-            if let Some(progress_msg) = crate::session_bootstrap::boot_message(&self.project_dir) {
-                boot_parts.push(progress_msg);
-            }
-
-            // Recent git activity (max 20 commits, best-effort).
-            // Uses tokio::process to avoid blocking the async worker on a
-            // slow/locked git repo. Commit messages are user-controlled so
-            // they go through fence_untrusted to neutralize provider
-            // control tokens (prompt-injection countermeasure, T1.2).
-            if let Ok(output) = tokio::process::Command::new("git")
-                .args(["log", "--oneline", "-20"])
-                .current_dir(&self.project_dir)
-                .output()
-                .await
-                && output.status.success() {
-                    let log = String::from_utf8_lossy(&output.stdout);
-                    let log = log.trim();
-                    if !log.is_empty() {
-                        let fenced = theo_domain::prompt_sanitizer::fence_untrusted_default(
-                            log, "git-log",
-                        );
-                        boot_parts.push(format!("Recent git commits:\n{fenced}"));
-                    }
-                }
-
-            if !boot_parts.is_empty() {
-                messages.push(Message::system(format!(
-                    "## Session Boot Context\n{}",
-                    boot_parts.join("\n\n")
-                )));
-            }
-        }
-
-        // Planning injection: if GRAPHCTX is Ready, inject top-5 relevant files
-        // as system message so the LLM starts with structural orientation.
-        // Skip if Building (don't use stale for planning), only use fresh Ready state.
-        if !self.config.is_subagent
-            && let Some(ref provider) = self.graph_context
-                && provider.is_ready() {
-                    // Use the task objective (first user message) as query
-                    let planning_query = messages
-                        .iter()
-                        .rev()
-                        .find(|m| m.role == theo_infra_llm::types::Role::User)
-                        .and_then(|m| m.content.as_deref())
-                        .unwrap_or("")
-                        .chars()
-                        .take(200)
-                        .collect::<String>();
-
-                    if !planning_query.is_empty()
-                        && let Ok(ctx) = provider.query_context(&planning_query, 1000).await
-                            && !ctx.blocks.is_empty() {
-                                // T5.5 FM-5: record initial context files for
-                                // the task-derailment sensor.
-                                for b in ctx.blocks.iter().take(5) {
-                                    self.initial_context_files.insert(b.source_id.clone());
-                                }
-                                let file_hints: Vec<String> = ctx
-                                    .blocks
-                                    .iter()
-                                    .take(5)
-                                    .map(|b| {
-                                        format!(
-                                            "- {} (relevance: {:.0}%)",
-                                            b.source_id,
-                                            b.score * 100.0
-                                        )
-                                    })
-                                    .collect();
-                                messages.push(Message::system(format!(
-                                    "## Suggested Starting Files\nBased on code graph analysis, these areas are most relevant to your task:\n{}\n\nStart here, but verify with read/grep.",
-                                    file_hints.join("\n")
-                                )));
-                            }
-                }
-
-        // Inject available skills into system context (main agent only).
-        // Sub-agents do NOT receive skills — they execute their direct objective.
-        // This is Layer 2 of recursive spawning prevention (prompt isolation).
-        if !self.config.is_subagent {
-            let mut skill_registry = SkillRegistry::new();
-            skill_registry.load_bundled();
-            let project_skills = self.project_dir.join(".theo").join("skills");
-            if project_skills.exists() {
-                skill_registry.load_from_dir(&project_skills);
-            }
-            // Load global skills only when HOME is set. Previously fell
-            // back to /tmp/.config/theo/skills — shared/untrusted path.
-            if let Some(user_skills) = theo_domain::user_paths::theo_config_subdir("skills")
-                && user_skills.exists()
-            {
-                skill_registry.load_from_dir(&user_skills);
-            }
-            let skills_summary = skill_registry.triggers_summary();
-            if !skills_summary.is_empty() {
-                messages.push(Message::system(format!(
-                    "## Skills\nYou have specialized skills that you SHOULD invoke when the task matches:\n{skills_summary}\n\nWhen the user's request matches a skill trigger, use the `skill` tool to invoke it."
-                )));
-            }
-        }
-
-        // Inject session history (previous REPL prompts + responses)
-        if !history.is_empty() {
-            messages.extend(history);
-        }
-
-        // Add the task objective as user message
-        if let Some(task) = self.task_manager.get(&self.task_id) {
-            messages.push(Message::user(&task.objective));
-        }
+        // Fase 4 (T4.2): the 200-LOC setup phase — state-machine
+        // transitions, auto-init, autodream spawn, system prompt,
+        // memory prefetch, episode replay, git boot context, GRAPHCTX
+        // planning hints, skills summary, history merge, task
+        // objective — lives in `bootstrap.rs`.
+        let mut messages = self.assemble_initial_messages(history).await;
 
         // Initialize state manager for file-backed persistence (crash recovery).
         // Best-effort: if creation fails, continue without persistence.
@@ -1219,526 +1026,38 @@ impl AgentRunEngine {
                     continue;
                 }
 
-                // Handle `done` meta-tool with multi-layer verification:
-                // 1. Convergence pre-filter (git diff must show real changes)
-                // 2. Cargo test on affected crate (timeout 60s, fallback cargo check)
-                // 3. done_attempts counter (max 3 blocks before hard fail)
+                // `done` meta-tool — gates Gate 0/1/2 live in
+                // `dispatch/done.rs` (Fase 4 — T4.2).
                 if name == "done" {
-                    self.transition_run(RunState::Evaluating);
-                    self.done_attempts += 1;
-
-                    let summary = call
-                        .parse_arguments()
-                        .ok()
-                        .and_then(|args| {
-                            args.get("summary")
-                                .and_then(|s| s.as_str())
-                                .map(String::from)
-                        })
-                        .unwrap_or_else(|| "Task completed.".to_string());
-
-                    // Gate 0: done_attempts hard limit — avoid burning entire budget
-                    use crate::constants::MAX_DONE_ATTEMPTS;
-                    if self.done_attempts > MAX_DONE_ATTEMPTS {
-                        // Exceeded max attempts — accept with warning
-                        self.transition_run(RunState::Converged);
-                        let _ = self
-                            .task_manager
-                            .transition(&self.task_id, TaskState::Completed);
-                        self.metrics.record_run_complete(true);
-                        let summary = format!(
-                            "{} [accepted after {} done attempts]",
-                            summary, self.done_attempts
-                        );
-                        should_return = Some(AgentResult::from_engine_state(
-                            self,
-                            true,
-                            summary,
-                            false,
-                            ErrorClass::Solved,
-                        ));
-                        break;
-                    }
-
-                    // Gate 1: Convergence pre-filter — verify real changes exist
-                    let has_changes = check_git_changes(&self.project_dir).await;
-                    let convergence_ctx = ConvergenceContext {
-                        has_git_changes: has_changes,
-                        edits_succeeded: self.context_loop_state.edits_files.len(),
-                        done_requested: true,
-                        iteration,
-                        max_iterations: self.config.max_iterations,
-                    };
-                    if !self.convergence.evaluate(&convergence_ctx) {
-                        let pending = self.convergence.pending_criteria(&convergence_ctx);
-                        messages.push(Message::tool_result(
-                            &call.id,
-                            "done",
-                            format!(
-                                "BLOCKED: convergence criteria not met: {}. Make real changes before calling done.",
-                                pending.join(", ")
-                            ),
-                        ));
-                        self.transition_run(RunState::Replanning);
-                        continue;
-                    }
-
-                    // Review suggestion: if diff is large, suggest reviewing before accepting.
-                    // Non-blocking — just a hint to encourage careful review.
-                    if self.context_loop_state.edits_files.len() > 3 {
-                        let diff_stat = tokio::process::Command::new("git")
-                            .args(["diff", "--stat"])
-                            .current_dir(&self.project_dir)
-                            .output()
-                            .await;
-                        if let Ok(output) = diff_stat {
-                            let stat = String::from_utf8_lossy(&output.stdout);
-                            let lines_changed: usize = stat
-                                .lines()
-                                .filter_map(|l| {
-                                    // Parse "N insertions(+), M deletions(-)" from last line
-                                    if l.contains("insertion") || l.contains("deletion") {
-                                        l.split_whitespace()
-                                            .filter_map(|w| w.parse::<usize>().ok())
-                                            .sum::<usize>()
-                                            .into()
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .sum();
-                            if lines_changed > 100 {
-                                messages.push(Message::user(format!(
-                                    "Note: This change touches {} files with ~{} lines changed. \
-                                         Consider reviewing the diff carefully before finalizing.",
-                                    self.context_loop_state.edits_files.len(),
-                                    lines_changed
-                                )));
-                            }
+                    match self.handle_done_call(call, iteration, &mut messages).await {
+                        dispatch::DispatchOutcome::Converged(result) => {
+                            should_return = Some(result);
+                            break;
                         }
+                        dispatch::DispatchOutcome::Continue => continue,
                     }
-
-                    // Gate 2: Clean state sensor — verify project builds and tests pass.
-                    // Best-effort: skip if not Rust, timeout 60s, never hard-abort.
-                    if self.project_dir.join("Cargo.toml").exists() {
-                        // Determine which crate was affected for targeted test
-                        let test_args =
-                            if let Some(first_file) = self.context_loop_state.edits_files.first() {
-                                // Try to find crate name from edited file path
-                                let crate_name = std::path::Path::new(first_file)
-                                    .components()
-                                    .zip(std::path::Path::new(first_file).components().skip(1))
-                                    .find(|(a, _)| {
-                                        let s = a.as_os_str().to_string_lossy();
-                                        s == "crates" || s == "apps"
-                                    })
-                                    .map(|(_, b)| b.as_os_str().to_string_lossy().to_string());
-                                if let Some(name) = crate_name {
-                                    vec![
-                                        "test".to_string(),
-                                        "-p".to_string(),
-                                        name,
-                                        "--no-fail-fast".to_string(),
-                                    ]
-                                } else {
-                                    vec!["test".to_string(), "--no-fail-fast".to_string()]
-                                }
-                            } else {
-                                // No files edited — just cargo check as sanity
-                                vec!["check".to_string(), "--message-format=short".to_string()]
-                            };
-
-                        // T1.1: done-gate `cargo test` runs with kernel
-                        // rlimits (CPU / memory / file-size / NPROC) to
-                        // mitigate RCE via build.rs or proc-macro in code
-                        // written by the agent. Full bwrap sandbox is
-                        // still not applied here (follow-up); rlimits is
-                        // the partial mitigation from the plan.
-                        let test_result = tokio::time::timeout(
-                            crate::constants::DONE_GATE_TEST_TIMEOUT,
-                            spawn_done_gate_cargo(&self.project_dir, &test_args),
-                        )
-                        .await;
-
-                        let check_failed = match test_result {
-                            Ok(Ok(output)) if !output.status.success() => {
-                                let stderr = String::from_utf8_lossy(&output.stderr);
-                                let stdout = String::from_utf8_lossy(&output.stdout);
-                                let combined = format!("{}\n{}", stderr, stdout);
-                                Some(combined)
-                            }
-                            Ok(Ok(_)) => None,  // Tests passed
-                            Ok(Err(_)) => None, // Command not found — pass through
-                            Err(_) => {
-                                // Timeout — fallback to cargo check (also
-                                // inside the rlimits envelope).
-                                let fallback = tokio::time::timeout(
-                                    crate::constants::DONE_GATE_CHECK_FALLBACK_TIMEOUT,
-                                    spawn_done_gate_cargo(
-                                        &self.project_dir,
-                                        &[
-                                            "check".to_string(),
-                                            "--message-format=short".to_string(),
-                                        ],
-                                    ),
-                                )
-                                .await;
-                                match fallback {
-                                    Ok(Ok(output)) if !output.status.success() => {
-                                        Some(String::from_utf8_lossy(&output.stderr).to_string())
-                                    }
-                                    _ => None, // Fallback passed or timed out — accept
-                                }
-                            }
-                        };
-
-                        if let Some(errors) = check_failed {
-                            let error_preview = theo_domain::prompt_sanitizer::char_boundary_truncate(
-                                &errors,
-                                crate::constants::DONE_GATE_ERROR_PREVIEW_BYTES,
-                            );
-                            let cmd_str = test_args.join(" ");
-                            messages.push(Message::tool_result(
-                                &call.id,
-                                "done",
-                                format!(
-                                    "BLOCKED: `cargo {}` failed (attempt {}/{}). Fix the errors before calling done.\n\n{}",
-                                    cmd_str, self.done_attempts, MAX_DONE_ATTEMPTS, error_preview
-                                ),
-                            ));
-                            self.transition_run(RunState::Replanning);
-                            continue;
-                        }
-                    }
-
-                    self.transition_run(RunState::Converged);
-                    let _ = self
-                        .task_manager
-                        .transition(&self.task_id, TaskState::Completed);
-                    self.metrics.record_run_complete(true);
-
-                    should_return = Some(AgentResult::from_engine_state(
-                        self,
-                        true,
-                        summary,
-                        false,
-                        ErrorClass::Solved,
-                    ));
-                    break;
                 }
 
-                // Handle `delegate_task` meta-tool — Phase 4 unified API.
-                // Validates schema and routes to single or parallel mode.
-                // Phase 29 follow-up: also accept the split single/parallel
-                // variants (delegate_task_single / delegate_task_parallel)
-                // which weaker tool-callers like Codex handle correctly
-                // because each has a fixed `required` field set.
+                // `delegate_task` / `delegate_task_single` /
+                // `delegate_task_parallel` — extracted to dispatch/delegate.rs.
                 if name == "delegate_task"
                     || name == "delegate_task_single"
                     || name == "delegate_task_parallel"
                 {
-                    let raw_args = call.parse_arguments().unwrap_or_default();
-                    // Normalize the split variants to the unified shape
-                    // expected by handle_delegate_task.
-                    let args = match name.as_str() {
-                        "delegate_task_single" => {
-                            // {agent, objective, context} → unified shape unchanged
-                            raw_args
-                        }
-                        "delegate_task_parallel" => {
-                            // {tasks: [...]} → {parallel: [...]}
-                            let tasks = raw_args
-                                .get("tasks")
-                                .cloned()
-                                .unwrap_or(serde_json::Value::Null);
-                            serde_json::json!({"parallel": tasks})
-                        }
-                        _ => raw_args,
-                    };
-                    let result_msg = self.handle_delegate_task(args).await;
-                    messages.push(Message::tool_result(&call.id, name, &result_msg));
+                    self.dispatch_delegate_task(call, &mut messages).await;
                     continue;
                 }
 
-                // Handle `skill` meta-tool — invoke a packaged skill
+                // `skill` — extracted to dispatch/skill.rs.
                 if name == "skill" {
-                    let args = call.parse_arguments().unwrap_or_default();
-                    let skill_name = args.get("name").and_then(|v| v.as_str()).unwrap_or("");
-
-                    // Build a temporary registry to look up the skill
-                    let mut skill_registry = SkillRegistry::new();
-                    skill_registry.load_bundled();
-                    let project_skills = self.project_dir.join(".theo").join("skills");
-                    if project_skills.exists() {
-                        skill_registry.load_from_dir(&project_skills);
-                    }
-
-                    if let Some(skill) = skill_registry.get(skill_name) {
-                        match &skill.mode {
-                            crate::skill::SkillMode::InContext => {
-                                // Inject skill instructions into conversation
-                                messages.push(Message::system(&skill.instructions));
-                                messages.push(Message::tool_result(
-                                    &call.id,
-                                    "skill",
-                                    format!(
-                                        "Skill '{}' loaded. Follow the instructions above.",
-                                        skill_name
-                                    ),
-                                ));
-                            }
-                            crate::skill::SkillMode::SubAgent { agent_name } => {
-                                // Spawn sub-agent with skill instructions as prompt.
-                                // Resolve agent_name via the registry (or build a default).
-                                self.event_bus.publish(DomainEvent::new(
-                                    EventType::RunStateChanged,
-                                    self.run.run_id.as_str(),
-                                    serde_json::json!({
-                                        "from": "Executing",
-                                        "to": format!("Skill:{}:{}", skill_name, agent_name),
-                                    }),
-                                ));
-
-                                let registry: Arc<crate::subagent::SubAgentRegistry> = match &self.subagent_registry {
-                                    Some(r) => r.clone(),
-                                    None => Arc::new(crate::subagent::SubAgentRegistry::with_builtins()),
-                                };
-
-                                let spec = registry
-                                    .get(agent_name)
-                                    .cloned()
-                                    .unwrap_or_else(|| {
-                                        theo_domain::agent_spec::AgentSpec::on_demand(
-                                            agent_name,
-                                            &skill.instructions,
-                                        )
-                                    });
-
-                                let manager = crate::subagent::SubAgentManager::with_registry(
-                                    self.config.clone(),
-                                    self.event_bus.clone(),
-                                    self.project_dir.clone(),
-                                    registry,
-                                )
-                                .with_metrics(self.metrics.clone());
-
-                                let sub_result = manager
-                                    .spawn_with_spec_text(&spec, &skill.instructions, None)
-                                    .await;
-
-                                let result_msg = if sub_result.success {
-                                    format!(
-                                        "[Skill '{}' completed] {}",
-                                        skill_name, sub_result.summary
-                                    )
-                                } else {
-                                    format!(
-                                        "[Skill '{}' failed] {}",
-                                        skill_name, sub_result.summary
-                                    )
-                                };
-
-                                for file in &sub_result.files_edited {
-                                    if !file.is_empty() {
-                                        self.context_loop_state
-                                            .record_edit_attempt(file, true, None);
-                                    }
-                                }
-
-                                self.budget_enforcer.record_tokens(sub_result.tokens_used);
-                                self.metrics.record_delegated_tokens(sub_result.tokens_used);
-
-                                messages.push(Message::tool_result(&call.id, "skill", &result_msg));
-                            }
-                        }
-                    } else {
-                        let available: Vec<String> = {
-                            skill_registry
-                                .list()
-                                .iter()
-                                .map(|s| s.name.clone())
-                                .collect()
-                        };
-                        messages.push(Message::tool_result(
-                            &call.id,
-                            "skill",
-                            format!(
-                                "Unknown skill: '{}'. Available skills: {}",
-                                skill_name,
-                                available.join(", ")
-                            ),
-                        ));
-                    }
+                    self.dispatch_skill(call, &mut messages).await;
                     continue;
                 }
 
-                // Handle `batch` meta-tool — execute N calls in 1 turn
+                // `batch` — extracted to dispatch/batch.rs.
                 if name == "batch" {
-                    let args = call.parse_arguments().unwrap_or_default();
-                    let calls_array = args.get("calls").and_then(|v| v.as_array());
-
-                    if let Some(calls) = calls_array {
-                        use crate::constants::MAX_BATCH_SIZE as MAX_BATCH;
-                        const BLOCKED: &[&str] =
-                            &["batch", "done", "subagent", "subagent_parallel", "skill"];
-
-                        let total = calls.len().min(MAX_BATCH);
-
-                        // Build futures for parallel execution via join_all
-                        // Blocked tools get immediate error results
-                        let registry = self.registry.clone(); // Arc::clone — cheap
-                        let mut futures = Vec::new();
-                        let mut blocked_results: Vec<(usize, String, String)> = Vec::new(); // (index, name, error)
-
-                        for (i, batch_call) in calls.iter().take(MAX_BATCH).enumerate() {
-                            let tool_name = batch_call
-                                .get("tool")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("?")
-                                .to_string();
-                            let tool_args = batch_call
-                                .get("args")
-                                .cloned()
-                                .unwrap_or(serde_json::json!({}));
-
-                            if BLOCKED.contains(&tool_name.as_str()) {
-                                blocked_results.push((
-                                    i,
-                                    tool_name.clone(),
-                                    format!("cannot use '{}' inside batch", tool_name),
-                                ));
-                                continue;
-                            }
-
-                            // Plan mode guard inside batch: block write tools
-                            if self.config.mode == crate::config::AgentMode::Plan
-                                && matches!(tool_name.as_str(), "edit" | "write" | "apply_patch")
-                            {
-                                blocked_results.push((i, tool_name.clone(), "BLOCKED by Plan mode guard — no source edits in batch during planning".to_string()));
-                                continue;
-                            }
-
-                            let reg = registry.clone();
-                            let batch_tool_call = theo_infra_llm::types::ToolCall::new(
-                                format!("batch_{}_{}", call.id, i),
-                                &tool_name,
-                                tool_args.to_string(),
-                            );
-                            let batch_ctx = ToolContext {
-                                session_id: SessionId::new("batch"),
-                                message_id: MessageId::new(format!("batch_{}", i)),
-                                call_id: batch_tool_call.id.clone(),
-                                agent: "main".to_string(),
-                                abort: abort_rx.clone(),
-                                project_dir: self.project_dir.clone(),
-                                graph_context: self.graph_context.clone(),
-                                stdout_tx: None,
-                            };
-
-                            futures.push(async move {
-                                let (msg, success) = tool_bridge::execute_tool_call(
-                                    &reg,
-                                    &batch_tool_call,
-                                    &batch_ctx,
-                                )
-                                .await;
-                                (i, tool_name, tool_args, msg, success)
-                            });
-                        }
-
-                        // Execute all non-blocked calls in parallel (join_all preserves order)
-                        let results = futures::future::join_all(futures).await;
-
-                        // Combine blocked + executed results, sorted by index
-                        let mut all_results: Vec<(usize, String, String, bool)> = Vec::new();
-
-                        for (i, name, err) in blocked_results {
-                            all_results.push((i, name, format!("error — {}", err), false));
-                        }
-
-                        for (i, tool_name, tool_args, msg, success) in results {
-                            let output = msg.content.unwrap_or_default();
-                            let status = if success { "ok" } else { "error" };
-                            let preview = theo_domain::prompt_sanitizer::char_boundary_truncate(
-                                &output,
-                                crate::constants::TOOL_PREVIEW_BYTES,
-                            );
-
-                            all_results.push((
-                                i,
-                                tool_name.clone(),
-                                format!(
-                                    "{}({}): {} — {}",
-                                    tool_name,
-                                    truncate_batch_args(&tool_args),
-                                    status,
-                                    preview
-                                ),
-                                success,
-                            ));
-
-                            // Track in budget/metrics
-                            self.budget_enforcer.record_tool_call();
-                            self.metrics.record_tool_call(&tool_name, 0, success);
-
-                            // Track edits
-                            if success
-                                && matches!(tool_name.as_str(), "edit" | "write" | "apply_patch")
-                            {
-                                let file = tool_args
-                                    .get("filePath")
-                                    .and_then(|p| p.as_str())
-                                    .unwrap_or("");
-                                if !file.is_empty() {
-                                    self.context_loop_state
-                                        .record_edit_attempt(file, true, None);
-                                }
-                            }
-                        }
-
-                        // Sort by original index for deterministic output
-                        all_results.sort_by_key(|(i, _, _, _)| *i);
-
-                        let mut batch_output = String::new();
-                        for (i, _name, display, _success) in &all_results {
-                            batch_output.push_str(&format!("[{}/{}] {}\n", i + 1, total, display));
-                        }
-
-                        if calls.len() > MAX_BATCH {
-                            batch_output.push_str(&format!(
-                                "\n⚠ {} calls exceeded max batch size of {}. Only first {} executed.\n",
-                                calls.len(), MAX_BATCH, MAX_BATCH
-                            ));
-                        }
-
-                        // Publish batch completion event
-                        // Phase 44 (otlp-exporter-plan): include otel payload.
-                        let mut batch_span = crate::observability::otel::tool_call_span("batch");
-                        batch_span.set(crate::observability::otel::ATTR_THEO_TOOL_CALL_ID, call.id.as_str());
-                        batch_span.set(crate::observability::otel::ATTR_THEO_TOOL_STATUS, "Succeeded");
-                        batch_span.set(crate::observability::otel::ATTR_THEO_TOOL_DURATION_MS, 0u64);
-                        self.event_bus.publish(DomainEvent::new(
-                            EventType::ToolCallCompleted,
-                            call.id.as_str(),
-                            serde_json::json!({
-                                "tool_name": "batch",
-                                "success": true,
-                                "input": { "count": total },
-                                "output_preview": format!("Batch: {total} calls executed"),
-                                "duration_ms": 0,
-                                "otel": batch_span.to_json(),
-                            }),
-                        ));
-
-                        messages.push(Message::tool_result(&call.id, "batch", &batch_output));
-                        continue;
-                    } else {
-                        messages.push(Message::tool_result(
-                            &call.id, "batch",
-                            "Error: 'calls' array is required. Example: batch(calls: [{tool: \"read\", args: {filePath: \"a.rs\"}}])",
-                        ));
-                        continue;
-                    }
+                    self.dispatch_batch(call, &abort_rx, &mut messages).await;
+                    continue;
                 }
 
                 // ── PLAN MODE GUARD ──
@@ -2605,11 +1924,9 @@ pub enum HandoffOutcome {
 // ---------------------------------------------------------------------------
 
 use crate::doom_loop::DoomLoopTracker;
-use crate::run_engine_auto_init::auto_init_project_context;
 use crate::run_engine_helpers::{
-    derive_provider_hint, llm_error_to_class, truncate_batch_args, truncate_handoff_objective,
+    derive_provider_hint, llm_error_to_class, truncate_handoff_objective,
 };
-use crate::run_engine_sandbox::spawn_done_gate_cargo;
 use theo_domain::clock::now_millis;
 
 // NOTE: `derive_provider_hint`, `llm_error_to_class`,

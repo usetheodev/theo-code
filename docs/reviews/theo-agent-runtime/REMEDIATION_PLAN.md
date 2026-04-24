@@ -1071,3 +1071,60 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 **Validacao:** 1132 unit + 96 integration (incluindo 8 caracterizacao snapshots) = **1228 tests passando, 0 falhas.**
 
 **Nao feito nesta iteracao (proximas):** T0.1 restante (7 cenarios LLM), T0.2 caracterizacao subagent, T1.1 bwrap, T3.4 retry inline consolidado, T4.2 continuar (extrair main_loop/bootstrap/dispatch), T4.3 Strategy, T4.4 Chain of Responsibility, T4.5 split subagent/mod.rs, T5.1 RunMetadata, T6.4 batch streaming, T7.*, T8.1 phase sweep.
+
+### Iteracao 10 (2026-04-24) — Fase 4: bootstrap extraction
+
+| Task | Status | Notas |
+|---|---|---|
+| T4.2 run_engine split — terceira etapa | **DONE (parcial)** | Novo `run_engine/bootstrap.rs` (266 LOC) com `assemble_initial_messages()` + sub-helpers `inject_boot_context` / `inject_planning_context` + free fn `inject_skills_summary`. O prefacio de 200 LOC em `execute_with_history` (state-machine transitions + auto-init + autodream + system prompt + memory prefetch + episode replay + git boot + GRAPHCTX hints + skills + history + task objetivo) collapsa agora em 1 linha: `let mut messages = self.assemble_initial_messages(history).await;`. `mod.rs`: 3744 → **3551 LOC** (-193 esta iter; **-679 desde baseline 4230**). |
+
+**Baseline → atual (por metrica, desde Iteracao 0):**
+- `.expect/.unwrap/panic!`: 1071 → 1041
+- silent-swallow: 61 → 2
+- `std::env::var`: 25 → 6
+- `std::process::Command` producao: 2 → 1
+- phase tags: 310 → 186
+- **`run_engine/mod.rs` LOC: 4230 → 3551 (-679)**
+- **Extracao: 4 submodulos em run_engine/ (builders, lifecycle, bootstrap) + 3 siblings (helpers, auto_init, sandbox) = 7 arquivos novos**
+
+**Validacao:** 1132 unit + 96 integration (incluindo 8 caracterizacao snapshots byte-identicos) = **1228 tests passando, 0 falhas.**
+
+**Nao feito nesta iteracao (proximas):** T0.1 restante (7 cenarios LLM), T0.2 caracterizacao subagent, T1.1 bwrap, T3.4 retry inline, T4.2 continuar (main_loop, dispatch/done, dispatch/delegate, dispatch/skill, dispatch/batch), T4.3 Strategy, T4.4 Chain of Responsibility, T4.5 split subagent/mod.rs, T5.1 RunMetadata, T6.4 batch streaming, T7.*, T8.1 phase sweep.
+
+### Iteracao 11 (2026-04-24) — Fase 4: done-gate extraction + dispatch module
+
+| Task | Status | Notas |
+|---|---|---|
+| T4.2 run_engine split — quarta etapa (done handler) | **DONE (parcial)** | Novo dir `run_engine/dispatch/` com `mod.rs` (enum `DispatchOutcome`) + `done.rs` (251 LOC — `handle_done_call` + 3 sub-helpers: `maybe_emit_large_diff_hint`, `pick_done_gate_test_args`, `run_done_gate_tests`). Bloco de 207 LOC do meta-tool `done` no main loop colapsa em: `match self.handle_done_call(call, iteration, &mut messages).await { Converged(r) => {should_return=Some(r); break;} Continue => continue }`. O enum `DispatchOutcome` formaliza o contrato que o resto das extracoes (delegate/skill/batch) vao seguir. `mod.rs`: 3551 → **3354 LOC** (-197 esta iter; **-876 desde baseline 4230, -21%**). |
+
+**Baseline → atual (por metrica, desde Iteracao 0):**
+- `.expect/.unwrap/panic!`: 1071 → 1041
+- silent-swallow: 61 → 2
+- `std::env::var`: 25 → 6
+- `std::process::Command` producao: 2 → 1
+- phase tags: 310 → 186
+- **`run_engine/mod.rs` LOC: 4230 → 3354 (-876, -21%)**
+- **Modulos novos: run_engine/{builders, bootstrap, lifecycle, dispatch/mod, dispatch/done} + run_engine_{helpers, auto_init, sandbox} siblings = 8 files**
+
+**Validacao:** 1132 unit + 96 integration = **1228 tests passando, 0 falhas.** Caracterizacao snapshots byte-identicos.
+
+**Nao feito nesta iteracao (proximas):** T0.1 restante (7 cenarios LLM), T0.2 caracterizacao subagent, T1.1 bwrap, T3.4 retry inline, T4.2 continuar (main_loop, dispatch/delegate, dispatch/skill, dispatch/batch), T4.3 Strategy pattern, T4.4 Chain of Responsibility no done gates (agora viável com a extracao), T4.5 split subagent/mod.rs, T5.1 RunMetadata, T6.4 batch streaming, T7.*, T8.1 phase sweep.
+
+### Iteracao 12 (2026-04-24) — Fase 4: dispatch/delegate + dispatch/skill + dispatch/batch
+
+| Task | Status | Notas |
+|---|---|---|
+| T4.2 run_engine split — quinta etapa | **DONE (parcial)** | 3 novos handlers em `dispatch/`: `delegate.rs` (40 LOC, `dispatch_delegate_task`), `skill.rs` (130 LOC, `dispatch_skill` + `spawn_skill_subagent`), `batch.rs` (192 LOC, `dispatch_batch` com parallel `join_all`). Os 3 blocos (~280 LOC total) no main loop agora sao `self.dispatch_*(..).await; continue;`. `mod.rs`: 3354 → **3061 LOC** (-293 esta iter; **-1169 desde baseline 4230, -28%**). Estrutura: `run_engine/{mod, builders, bootstrap, lifecycle, dispatch/{mod, done, delegate, skill, batch}}` = 9 arquivos + 3 siblings = 12 arquivos total. |
+
+**Baseline → atual (por metrica, desde Iteracao 0):**
+- `.expect/.unwrap/panic!`: 1071 → 1041
+- silent-swallow: 61 → 2
+- `std::env::var`: 25 → 6
+- `std::process::Command` producao: 2 → 1
+- phase tags: 310 → 186
+- **`run_engine/mod.rs` LOC: 4230 → 3061 (-1169, -28%)**
+- **Modulos totais criados: 12 (9 em `run_engine/`, 3 siblings)**
+
+**Validacao:** 1132 unit + 96 integration = **1228 tests passando, 0 falhas.** Caracterizacao snapshots byte-identicos.
+
+**Nao feito nesta iteracao (proximas):** T0.1 restante (7 cenarios LLM), T0.2 caracterizacao subagent, T1.1 bwrap, T3.4 retry inline, T4.2 continuar (main_loop ainda ~2000 LOC — extrair o loop principal em sub-modulos semanticos), T4.3 Strategy pattern (trait unificada sobre os 4 handlers), T4.4 Chain of Responsibility em done gates, T4.5 split subagent/mod.rs, T5.1 RunMetadata, T6.4 batch streaming, T7.*, T8.1 phase sweep restante.
