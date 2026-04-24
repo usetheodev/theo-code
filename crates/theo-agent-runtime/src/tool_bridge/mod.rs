@@ -1,4 +1,8 @@
-use theo_domain::tool::{PermissionCollector, ToolContext};
+mod execute_meta;
+mod execute_regular;
+mod meta_schemas;
+
+use theo_domain::tool::ToolContext;
 use theo_infra_llm::types::{Message, ToolCall, ToolDefinition};
 use theo_tooling::registry::ToolRegistry;
 
@@ -23,230 +27,20 @@ pub fn registry_to_definitions(registry: &ToolRegistry) -> Vec<ToolDefinition> {
         })
         .collect();
 
-    // Add the `tool_search` meta-tool — lets the model discover deferred
-    // tools by keyword when it needs capability beyond the default set.
-    // Ref: opendev `search_hint` + registry discovery (traits.rs:547-575).
-    defs.push(ToolDefinition::new(
-        "tool_search",
-        concat!(
-            "Search for deferred (rarely-used) tools by keyword. Returns a list of `(id, hint)` \
-             pairs the agent can invoke by name. Use this only when none of the visible tools ",
-            "fit the task. Example: tool_search({query: 'wiki lookup'})."
-        ),
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "Keyword to match against deferred tool ids and search hints"
-                }
-            },
-            "required": ["query"]
-        }),
-    ));
-
-    // Add the `batch_execute` meta-tool — minimum-viable programmatic tool
-    // calling. The agent supplies an ordered list of {tool, args}, each
-    // executed serially. Early-exits on the first failure so downstream
-    // steps don't see stale data. This is NOT a full code interpreter; it
-    // is the deterministic core of Anthropic's "Programmatic Tool Calling"
-    // that unlocks for-loop-over-inputs patterns without a sandbox.
-    defs.push(ToolDefinition::new(
-        "batch_execute",
-        concat!(
-            "Execute an ordered list of tool calls in one assistant turn. ",
-            "Runs each step serially and stops at the first failure. Use this to collapse N round-trips ",
-            "(e.g. 'fetch 3 URLs then summarise') into a single LLM generation — cuts ~30-50% of tokens ",
-            "on parallelisable workflows. Each step is `{tool: string, args: object}` matching that ",
-            "tool's own schema. The aggregated result is returned as a JSON block with per-step ",
-            "`ok: bool`, `name`, and `result`/`error` fields. ",
-            "Example: batch_execute({calls: [",
-            "{tool: 'read', args: {filePath: 'Cargo.toml'}}, ",
-            "{tool: 'grep', args: {pattern: 'version', path: '.'}} ]})."
-        ),
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "calls": {
-                    "type": "array",
-                    "description": "Ordered list of tool invocations to execute serially.",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "tool": {
-                                "type": "string",
-                                "description": "Name of a visible tool (not a meta-tool). Cannot be `done`, `subagent`, `subagent_parallel`, `skill`, `tool_search`, or `batch_execute` itself."
-                            },
-                            "args": {
-                                "type": "object",
-                                "description": "Arguments for the invoked tool, matching its JSON schema."
-                            }
-                        },
-                        "required": ["tool", "args"]
-                    }
-                }
-            },
-            "required": ["calls"]
-        }),
-    ));
-
-    // Add the `done` meta-tool (not in the registry)
-    defs.push(ToolDefinition::new(
-        "done",
-        "Call when the task is complete. Requires a summary of what was accomplished.",
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "summary": {
-                    "type": "string",
-                    "description": "Brief summary of what was accomplished"
-                }
-            },
-            "required": ["summary"]
-        }),
-    ));
-
-    // Add the `skill` meta-tool for invoking packaged capabilities
-    defs.push(ToolDefinition::new(
-        "skill",
-        "Invoke a specialized skill workflow. Skills provide expert instructions for common tasks like commit, test, review, build, explain. Use when the task matches a skill's trigger.",
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "name": {
-                    "type": "string",
-                    "description": "Skill name to invoke (e.g., 'commit', 'test', 'review', 'build', 'explain')"
-                }
-            },
-            "required": ["name"]
-        }),
-    ));
-
-    // Phase 29 follow-up (sota-gaps-followup) — gap #7 fix:
-    // The unified `delegate_task` schema (one-of agent/parallel) confused
-    // weaker tool-callers like Codex — they emit JSON mixing both fields.
-    // Split into two single-purpose tools with FIXED required schemas.
-    // The legacy `delegate_task` stays registered for backward-compat.
-    defs.push(ToolDefinition::new(
-        "delegate_task_single",
-        concat!(
-            "Spawn ONE sub-agent. Both `agent` and `objective` are REQUIRED. ",
-            "Built-in agents: explorer, implementer, verifier, reviewer. ",
-            "Custom agents loadable from .theo/agents/*.md. ",
-            "Unknown names create on-demand READ-ONLY agents (max 10 iterations, 120s timeout)."
-        ),
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "agent": {
-                    "type": "string",
-                    "description": "Name of a registered agent OR an arbitrary name."
-                },
-                "objective": {
-                    "type": "string",
-                    "description": "What the agent should accomplish."
-                },
-                "context": {
-                    "type": "string",
-                    "description": "Optional background info, file paths, or constraints."
-                }
-            },
-            "required": ["agent", "objective"]
-        }),
-    ));
-
-    defs.push(ToolDefinition::new(
-        "delegate_task_parallel",
-        concat!(
-            "Spawn multiple sub-agents concurrently. `tasks` is REQUIRED. ",
-            "Each task has `agent` and `objective` (both required) plus optional `context`."
-        ),
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "tasks": {
-                    "type": "array",
-                    "description": "List of agents to spawn in parallel.",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "agent": { "type": "string" },
-                            "objective": { "type": "string" },
-                            "context": { "type": "string" }
-                        },
-                        "required": ["agent", "objective"]
-                    }
-                }
-            },
-            "required": ["tasks"]
-        }),
-    ));
-
-    // Legacy `delegate_task` — unified API kept for backward compatibility.
-    // Schema accepts EITHER a single delegation OR a `parallel` array.
-    defs.push(ToolDefinition::new(
-        "delegate_task",
-        concat!(
-            "DEPRECATED: prefer `delegate_task_single` or `delegate_task_parallel`. ",
-            "Delegate work to a specialized sub-agent. Single-mode: pass `agent` + `objective`. ",
-            "Parallel-mode: pass `parallel: [{agent, objective, context}, ...]`. ",
-            "Built-in agents: explorer, implementer, verifier, reviewer."
-        ),
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "agent": {
-                    "type": "string",
-                    "description": "Mutually exclusive with `parallel`."
-                },
-                "objective": { "type": "string" },
-                "context": { "type": "string" },
-                "parallel": {
-                    "type": "array",
-                    "description": "Mutually exclusive with `agent`/`objective`.",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "agent": { "type": "string" },
-                            "objective": { "type": "string" },
-                            "context": { "type": "string" }
-                        },
-                        "required": ["agent", "objective"]
-                    }
-                }
-            }
-        }),
-    ));
-
-    // Add the `batch` meta-tool for parallel execution (CodeAct-inspired)
-    defs.push(ToolDefinition::new(
-        "batch",
-        "Execute multiple tool calls in a single turn. Use for independent operations like reading multiple files. Max 25 calls. Cannot include batch/done/delegate_task/skill inside.",
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "calls": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "tool": {
-                                "type": "string",
-                                "description": "Tool name (e.g., 'read', 'grep', 'glob', 'bash')"
-                            },
-                            "args": {
-                                "type": "object",
-                                "description": "Arguments for the tool"
-                            }
-                        },
-                        "required": ["tool", "args"]
-                    },
-                    "description": "Array of tool calls to execute (max 25)"
-                }
-            },
-            "required": ["calls"]
-        }),
-    ));
+    // Meta-tools exposed to the main agent. Ordering matters for tests
+    // that assert `defs.len() == visible + 8`.
+    defs.push(meta_schemas::tool_search());
+    defs.push(meta_schemas::batch_execute());
+    defs.push(meta_schemas::done());
+    defs.push(meta_schemas::skill());
+    // Phase 29 follow-up (sota-gaps-followup) — gap #7 fix: the unified
+    // `delegate_task` schema confused weaker tool-callers like Codex, so
+    // we split it into two single-purpose tools with fixed required-shape
+    // schemas. The legacy unified variant stays for backward-compat.
+    defs.push(meta_schemas::delegate_task_single());
+    defs.push(meta_schemas::delegate_task_parallel());
+    defs.push(meta_schemas::delegate_task_legacy());
+    defs.push(meta_schemas::batch());
 
     defs
 }
@@ -272,44 +66,10 @@ pub fn registry_to_definitions_for_subagent(registry: &ToolRegistry) -> Vec<Tool
 
     // `done` is CRITICAL for sub-agents — it's how they signal completion.
     // Without it, sub-agents loop until max_iterations or timeout.
-    defs.push(ToolDefinition::new(
-        "done",
-        "Call when the task is complete. Requires a summary of what was accomplished.",
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "summary": {
-                    "type": "string",
-                    "description": "Brief summary of what was accomplished"
-                }
-            },
-            "required": ["summary"]
-        }),
-    ));
-
-    // No subagent, subagent_parallel, or skill — sub-agents cannot delegate.
-    // But sub-agents CAN use batch for efficiency (it's not delegation).
-    defs.push(ToolDefinition::new(
-        "batch",
-        "Execute multiple tool calls in a single turn. Use for independent operations like reading multiple files. Max 25 calls.",
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "calls": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "tool": { "type": "string" },
-                            "args": { "type": "object" }
-                        },
-                        "required": ["tool", "args"]
-                    }
-                }
-            },
-            "required": ["calls"]
-        }),
-    ));
+    defs.push(meta_schemas::done());
+    // No delegate_task / skill — sub-agents cannot delegate. But they CAN
+    // use batch for efficiency (it's not delegation).
+    defs.push(meta_schemas::batch_for_subagent());
 
     defs
 }
@@ -330,162 +90,13 @@ pub async fn execute_tool_call(
         }
     };
 
-    // Meta-tool: `batch_execute` — run a list of tool calls serially and
-    // return a combined JSON result. Early-exits on the first failure so
-    // downstream steps do not see stale data. Anthropic "Programmatic Tool
-    // Calling" (minimum-viable form: no code sandbox, just batched calls).
-    if name == "batch_execute" {
-        const BLOCKED: &[&str] = &[
-            "batch_execute",
-            "batch",
-            "tool_search",
-            "done",
-            "delegate_task",
-            "skill",
-        ];
-        let Some(calls) = args.get("calls").and_then(|v| v.as_array()) else {
-            return (
-                Message::tool_result(
-                    &call.id,
-                    name,
-                    "batch_execute requires a `calls` array. Example: batch_execute({calls: [{tool: 'read', args: {filePath: 'Cargo.toml'}}]}).",
-                ),
-                false,
-            );
-        };
-        if calls.is_empty() {
-            return (
-                Message::tool_result(&call.id, name, "batch_execute received an empty `calls` array — nothing to execute."),
-                false,
-            );
-        }
-        let mut results: Vec<serde_json::Value> = Vec::with_capacity(calls.len());
-        let mut any_failed = false;
-        for (i, step) in calls.iter().enumerate() {
-            let tool_name = step
-                .get("tool")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            let step_args = step
-                .get("args")
-                .cloned()
-                .unwrap_or(serde_json::Value::Object(Default::default()));
-            if tool_name.is_empty() || BLOCKED.contains(&tool_name.as_str()) {
-                results.push(serde_json::json!({
-                    "step": i,
-                    "tool": tool_name,
-                    "ok": false,
-                    "error": format!("cannot run `{tool_name}` inside batch_execute (missing or blocked meta-tool)")
-                }));
-                any_failed = true;
-                break;
-            }
-            let step_call = ToolCall {
-                id: format!("{}_step{i}", call.id),
-                call_type: "function".to_string(),
-                function: theo_infra_llm::types::FunctionCall {
-                    name: tool_name.clone(),
-                    arguments: step_args.to_string(),
-                },
-            };
-            let (step_msg, ok) =
-                Box::pin(execute_tool_call(registry, &step_call, ctx)).await;
-            let content = step_msg.content.unwrap_or_default();
-            results.push(serde_json::json!({
-                "step": i,
-                "tool": tool_name,
-                "ok": ok,
-                "result": content,
-            }));
-            if !ok {
-                any_failed = true;
-                break;
-            }
-        }
-        let body = serde_json::json!({
-            "ok": !any_failed,
-            "steps": results,
-        });
-        return (
-            Message::tool_result(&call.id, name, body.to_string()),
-            !any_failed,
-        );
-    }
-
-    // Meta-tool: `tool_search` — keyword lookup over deferred tools.
-    // Dispatched here (not in the registry) because it needs direct
-    // access to the registry to enumerate deferred entries.
-    if name == "tool_search" {
-        let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
-        if query.is_empty() {
-            return (
-                Message::tool_result(
-                    &call.id,
-                    name,
-                    "tool_search requires a non-empty `query`. Example: tool_search({query: 'wiki'}).",
-                ),
-                false,
-            );
-        }
-        let hits = registry.search_deferred(query);
-        let body = if hits.is_empty() {
-            format!("No deferred tools matched `{query}`.")
-        } else {
-            let mut out = format!("Deferred tools matching `{query}`:\n");
-            for (id, hint) in &hits {
-                out.push_str(&format!("- {id}: {hint}\n"));
-            }
-            out.push_str("\nInvoke any of these by name with their normal schema.");
-            out
-        };
-        return (Message::tool_result(&call.id, name, body), true);
-    }
-
-    let Some(tool) = registry.get(name) else {
-        let error_msg = format!(
-            "Unknown tool: {name}. Available tools: {}",
-            registry.ids().join(", ")
-        );
-        return (Message::tool_result(&call.id, name, &error_msg), false);
-    };
-
-    let mut permissions = PermissionCollector::new();
-    // Clone args so we can still pass them to `format_validation_error`
-    // after `execute` consumes its owned copy.
-    let args_for_error = args.clone();
-    match tool.execute(args, ctx, &mut permissions).await {
-        Ok(output) => {
-            // Per-tool truncation rule (opendev `ToolResultSanitizer` pattern).
-            // Falls back to the legacy 8000-char global cap when no rule is set.
-            let body = if let Some(rule) = tool.truncation_rule() {
-                rule.apply(&output.output).unwrap_or_else(|| output.output.clone())
-            } else if output.output.len() > 8000 {
-                format!(
-                    "{}...\n[truncated, {} chars total]",
-                    &output.output[..8000],
-                    output.output.len()
-                )
-            } else {
-                output.output.clone()
-            };
-            let result = match output.llm_suffix.as_deref() {
-                Some(suffix) if !suffix.is_empty() => format!("{body}\n\n{suffix}"),
-                _ => body,
-            };
-            (Message::tool_result(&call.id, name, result), true)
-        }
-        Err(e) => {
-            // Give the tool a chance to coach the agent on how to fix the
-            // call: named parameter, expected type, concrete example.
-            // Anthropic principle 8 (actionable errors).
-            let coached = tool.format_validation_error(&e, &args_for_error);
-            let error_msg = match coached {
-                Some(guidance) => format!("Tool error: {e}\n\n{guidance}"),
-                None => format!("Tool error: {e}"),
-            };
-            (Message::tool_result(&call.id, name, error_msg), false)
-        }
+    // Meta-tools are dispatched inline (not in the registry) because they
+    // need direct registry access. Anthropic "Programmatic Tool Calling"
+    // (batch_execute) + deferred-tool discovery (tool_search).
+    match name.as_str() {
+        "batch_execute" => execute_meta::handle_batch_execute(registry, call, ctx, &args).await,
+        "tool_search" => execute_meta::handle_tool_search(registry, call, &args),
+        _ => execute_regular::execute_regular_tool(registry, call, ctx, args).await,
     }
 }
 
@@ -495,7 +106,7 @@ mod tests {
     use async_trait::async_trait;
     use std::path::PathBuf;
     use theo_domain::error::ToolError;
-    use theo_domain::tool::{Tool, ToolOutput};
+    use theo_domain::tool::{PermissionCollector, Tool, ToolOutput};
     use theo_infra_llm::types::FunctionCall;
     use theo_tooling::registry::{ToolRegistry, create_default_registry};
 
