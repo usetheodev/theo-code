@@ -8,18 +8,47 @@
 set -euo pipefail
 
 THEO_VERSION="${THEO_VERSION:-latest}"
-THEO_BIN_URL="${THEO_BIN_URL:-}"
+# Default: HTTP server on the Docker host bridge (172.17.0.1:8080) where
+# scripts/bench/run-all.sh starts `python3 -m http.server` against the
+# /opt/theo-target/release/ directory. Override with THEO_BIN_URL env.
+THEO_BIN_URL="${THEO_BIN_URL:-http://172.17.0.1:8080/theo}"
 
 echo "[theo-setup] Installing Theo Code agent..."
 
-# Method 1: pre-built binary from URL (fastest)
+# Ensure curl exists (some minimal images skip it).
+if ! command -v curl >/dev/null 2>&1; then
+    echo "[theo-setup] curl missing; installing"
+    apt-get update -qq && apt-get install -y -qq curl ca-certificates >/dev/null
+fi
+
+# Setup auth.json — download from the bench HTTP server (fastest path
+# for OAuth Codex). THEO_AUTH_URL defaults to the same host as the binary.
+mkdir -p /root/.config/theo
+THEO_AUTH_URL="${THEO_AUTH_URL:-http://172.17.0.1:8080/auth.json}"
+if [ -n "$THEO_AUTH_URL" ]; then
+    if curl -fsSL --max-time 10 "$THEO_AUTH_URL" -o /root/.config/theo/auth.json 2>/dev/null; then
+        chmod 600 /root/.config/theo/auth.json
+        echo "[theo-setup] auth.json installed from $THEO_AUTH_URL"
+    fi
+fi
+
+# Method 1: pre-built binary from URL (fastest, default)
 if [ -n "$THEO_BIN_URL" ]; then
     echo "[theo-setup] Downloading from $THEO_BIN_URL"
-    curl -fsSL "$THEO_BIN_URL" -o /usr/local/bin/theo
-    chmod +x /usr/local/bin/theo
-    echo "[theo-setup] Installed from URL"
-    theo --version || true
-    exit 0
+    if curl -fsSL --max-time 30 "$THEO_BIN_URL" -o /usr/local/bin/theo; then
+        chmod +x /usr/local/bin/theo
+        # Verify it runs (catches glibc/musl mismatch)
+        if /usr/local/bin/theo --version >/dev/null 2>&1; then
+            echo "[theo-setup] Installed from URL: $(theo --version)"
+            exit 0
+        else
+            echo "[theo-setup] Binary downloaded but FAILED to run — likely glibc mismatch"
+            ldd /usr/local/bin/theo 2>&1 | head -5 || true
+            rm -f /usr/local/bin/theo
+        fi
+    else
+        echo "[theo-setup] HTTP download failed from $THEO_BIN_URL"
+    fi
 fi
 
 # Method 2: copy from mounted volume (for local dev)
