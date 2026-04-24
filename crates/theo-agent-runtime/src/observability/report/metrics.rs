@@ -170,6 +170,26 @@ pub struct ToolBreakdown {
     pub max_latency_ms: u64,
     pub retry_count: u32,
     pub success_rate: f64,
+    /// Phase 64 (benchmark-sota-metrics-plan Task 3.11): per-tool error
+    /// breakdown by category (e.g. "timeout", "permission_denied", "other").
+    #[serde(default)]
+    pub error_categories: HashMap<String, u32>,
+}
+
+/// Classify a tool error payload into a category string.
+fn classify_tool_error(payload: &str) -> String {
+    let lower = payload.to_lowercase();
+    if lower.contains("permission") || lower.contains("sandbox") || lower.contains("seccomp") || lower.contains("landlock") {
+        "permission_denied".to_string()
+    } else if lower.contains("not found") || lower.contains("no such file") || lower.contains("enoent") {
+        "not_found".to_string()
+    } else if lower.contains("invalid") || lower.contains("validation") || lower.contains("schema") {
+        "validation_error".to_string()
+    } else if lower.contains("timeout") || lower.contains("timed out") {
+        "timeout".to_string()
+    } else {
+        "execution_error".to_string()
+    }
 }
 
 pub fn compute_tool_breakdown(steps: &[ProjectedStep]) -> Vec<ToolBreakdown> {
@@ -192,8 +212,14 @@ pub fn compute_tool_breakdown(steps: &[ProjectedStep]) -> Vec<ToolBreakdown> {
                 if retryable {
                     entry.retry_count += 1;
                 }
+                let cat = classify_tool_error(&s.payload_summary);
+                *entry.error_categories.entry(cat).or_insert(0) += 1;
             }
-            Some(StepOutcome::Timeout) | Some(StepOutcome::Skipped) => {
+            Some(StepOutcome::Timeout) => {
+                entry.failure_count += 1;
+                *entry.error_categories.entry("timeout".to_string()).or_insert(0) += 1;
+            }
+            Some(StepOutcome::Skipped) => {
                 entry.failure_count += 1;
             }
             None => {}
