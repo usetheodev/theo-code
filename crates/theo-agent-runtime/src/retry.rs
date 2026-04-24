@@ -44,7 +44,11 @@ impl RetryExecutor {
                         return Err(e);
                     }
 
-                    // Publish retry event
+                    // Publish retry event. `delay_ms` is included so
+                    // dashboards can track backoff pressure over time
+                    // (T3.4 — previously the inline retry in run_engine
+                    // emitted this field; the executor now does too).
+                    let delay = policy.delay_for_attempt(attempt);
                     event_bus.publish(DomainEvent::new(
                         EventType::Error,
                         operation_name,
@@ -53,10 +57,10 @@ impl RetryExecutor {
                             "attempt": attempt + 1,
                             "max_retries": policy.max_retries,
                             "error": format!("{}", e),
+                            "delay_ms": delay.as_millis() as u64,
                         }),
                     ));
 
-                    let delay = policy.delay_for_attempt(attempt);
                     tokio::time::sleep(delay).await;
                 }
             }

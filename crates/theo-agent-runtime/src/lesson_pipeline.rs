@@ -119,7 +119,9 @@ pub fn run_gates_and_persist(
     }
     let existing = load_existing_lessons(project_dir);
     let dir = project_dir.join(".theo/memory/lessons");
-    let _ = std::fs::create_dir_all(&dir);
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        crate::fs_errors::warn_fs_error("lesson_pipeline/mkdir", &dir, &e);
+    }
     let mut approved = 0usize;
     let mut rejected = 0usize;
     for candidate in candidates {

@@ -920,3 +920,24 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 **Quebra de API introduzida:** `EventBus::events()` e `events_for()` agora retornam via iteradores clonados (antes um `.clone()` direto do Vec). API externa preserva assinatura `Vec<DomainEvent>`.
 
 **Nao feito nesta iteracao (proximas):** T0.1-T0.3 (caracterizacao), T1.1 sandbox do cargo test, T1.3 plugin hardening, T2.3 typed fs errors, T2.4 silent-swallow sweep restante, T3.2 unify run/run_with_history, T3.3 env centralization, T3.4 consolidate retry, T4.* split god-files, T5.*, T6.2-T6.5, T7.*, T8.1-T8.4.
+
+### Iteracao 3 (2026-04-24) — FS errors + Unify + Sandbox rlimits
+
+| Task | Status | Notas |
+|---|---|---|
+| T1.1 sandbox cargo test | **PARCIAL** | `spawn_done_gate_cargo` aplica `apply_rlimits(ProcessPolicy { cpu:180s, mem:2GiB, fsize:512MiB, nproc:128 })` via `pre_exec` nas 2 chamadas do done-gate (`cargo test`, `cargo check`). Bwrap/landlock completo fica como follow-up — este PR entrega o "no minimo" do plan. Linux-only (non-Linux falls back to unrestricted tokio::process). |
+| T2.3 typed fs errors em record_session_exit | **DONE** | novo `crate::fs_errors::{warn_fs_error, emit_fs_error}`. 4 `let _ = tokio::fs::...` em `record_session_exit` trocados por match + `emit_fs_error(..., site, path, err)` que emite `DomainEvent::Error {type: "fs", site, path, error}`. 3 testes unit. |
+| T2.4 silent-swallow sweep | **DONE** | migrado em `failure_tracker.rs` (3x), `session_bootstrap.rs` (2x), `hypothesis_pipeline.rs` (2x), `lesson_pipeline.rs` (1x), `autodream.rs` (2x), `run_engine.rs::auto_init_project_context` (3x). Cada site loga via `warn_fs_error(site, path, err)`. Silent-swallow: **61 → 2** (restantes sao em `fs_errors.rs` proprio e em test). |
+| T3.2 unificar run/run_with_history | **DONE** | `build_engine(task, project_dir, external_bus)`, `build_llm_client()`, `build_registry()`, `execute_and_shutdown(engine, history)` extraidos. `run()` e `run_with_history()` agora tem <= 10 LOC cada; ambos compartilham o mesmo shutdown path (elimina o bug de "headless callers silently skip episode summaries"). |
+| T3.4 consolidar retry | **PARCIAL** | `RetryExecutor::with_retry` agora emite `delay_ms` no payload (match do inline em run_engine). Consolidar o inline do `run_engine.rs` por si so exige generalizar o executor para aceitar streaming callback — nao feito nesta iteracao. |
+
+**Baseline → atual (por metrica, desde Iteracao 0):**
+- `.expect/.unwrap/panic!`: 1071 → **1004** (-67; contagem inalterada esta iteracao — rlimits nao adicionou expect em producao)
+- silent-swallow: 61 → **2** (-59 total; -11 esta iteracao)
+- `std::env::var`: 25 → 23
+- `std::process::Command` producao: 2 → 1 (teste helper restante)
+- phase tags: 310 → 240 (-70)
+
+**Validacao:** `cargo test -p theo-domain -p theo-agent-runtime` → 440 + 1099 = **1539 unit**, 88 integration, 0 falhas. Novo modulo `fs_errors.rs` com 3 testes.
+
+**Nao feito nesta iteracao (proximas):** T0.1-T0.3 caracterizacao, T1.3 plugin hardening, T3.3 env centralization, T3.4 consolidacao completa do retry inline, T4.* split god-files, T5.*, T6.2-T6.5, T7.*, T8.1-T8.4.

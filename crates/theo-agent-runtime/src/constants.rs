@@ -65,6 +65,29 @@ pub const SENSOR_OUTPUT_PREVIEW_BYTES: usize = 1000;
 /// for the retry completion.
 pub const EMERGENCY_COMPACT_RATIO: f64 = 0.5;
 
+// ---------------------------------------------------------------------------
+// Done-gate sandbox limits (T1.1)
+// ---------------------------------------------------------------------------
+
+/// Max CPU time (seconds) the done-gate `cargo test`/`cargo check` command
+/// may consume. Hard kill via RLIMIT_CPU if exceeded. Separate from the
+/// async wall-clock timeout — provides a kernel-enforced ceiling even if
+/// the tokio timer is starved.
+pub const DONE_GATE_CPU_SECONDS: u64 = 180;
+
+/// Max virtual address space (bytes) for the done-gate subprocess.
+/// 2 GiB — ample for `cargo check` / small `cargo test`, bounded enough to
+/// stop `build.rs` runaway allocations.
+pub const DONE_GATE_MEM_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+
+/// Max file size (bytes) the done-gate subprocess may write. Prevents a
+/// malicious `build.rs` from filling `/tmp` or `target/`.
+pub const DONE_GATE_FSIZE_BYTES: u64 = 512 * 1024 * 1024;
+
+/// Max concurrent child processes the done-gate subprocess may spawn.
+/// Enough for parallel rustc/jobserver workers without allowing fork-bombs.
+pub const DONE_GATE_NPROC: u32 = 128;
+
 #[cfg(test)]
 mod tests {
     use super::*;

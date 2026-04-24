@@ -148,13 +148,26 @@ fn load_patterns(project_dir: &Path) -> Option<FailurePatterns> {
 
 fn save_patterns(project_dir: &Path, data: &FailurePatterns) {
     let path = patterns_path(project_dir);
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
+    if let Some(parent) = path.parent()
+        && let Err(e) = std::fs::create_dir_all(parent)
+    {
+        crate::fs_errors::warn_fs_error("failure_tracker/mkdir", parent, &e);
     }
     if let Ok(json) = serde_json::to_string_pretty(data) {
         let tmp = path.with_extension("json.tmp");
-        if std::fs::write(&tmp, &json).is_ok() {
-            let _ = std::fs::rename(&tmp, &path);
+        match std::fs::write(&tmp, &json) {
+            Ok(()) => {
+                if let Err(e) = std::fs::rename(&tmp, &path) {
+                    crate::fs_errors::warn_fs_error(
+                        "failure_tracker/rename",
+                        &path,
+                        &e,
+                    );
+                }
+            }
+            Err(e) => {
+                crate::fs_errors::warn_fs_error("failure_tracker/write", &tmp, &e);
+            }
         }
     }
 }

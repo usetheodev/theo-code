@@ -493,16 +493,36 @@ impl AgentRunEngine {
         // Save failure pattern tracker
         self.failure_tracker.save();
 
-        // Save context metrics to .theo/metrics/{run_id}.json
+        // Save context metrics to .theo/metrics/{run_id}.json. Best-effort:
+        // a persistence failure is surfaced via DomainEvent::Error (fs) so
+        // the observability pipeline can alert, but the shutdown path does
+        // not abort.
         let metrics_dir = self.project_dir.join(".theo").join("metrics");
-        if tokio::fs::create_dir_all(&metrics_dir).await.is_ok() {
-            let report = self.context_metrics.to_report();
-            let metrics_path = metrics_dir.join(format!("{}.json", self.run.run_id.as_str()));
-            let _ = tokio::fs::write(
-                &metrics_path,
-                serde_json::to_string_pretty(&report).unwrap_or_default(),
-            )
-            .await;
+        match tokio::fs::create_dir_all(&metrics_dir).await {
+            Ok(()) => {
+                let report = self.context_metrics.to_report();
+                let metrics_path =
+                    metrics_dir.join(format!("{}.json", self.run.run_id.as_str()));
+                let body = serde_json::to_string_pretty(&report).unwrap_or_default();
+                if let Err(e) = tokio::fs::write(&metrics_path, body).await {
+                    crate::fs_errors::emit_fs_error(
+                        &self.event_bus,
+                        self.run.run_id.as_str(),
+                        "record_session_exit/metrics_write",
+                        &metrics_path,
+                        &e,
+                    );
+                }
+            }
+            Err(e) => {
+                crate::fs_errors::emit_fs_error(
+                    &self.event_bus,
+                    self.run.run_id.as_str(),
+                    "record_session_exit/metrics_mkdir",
+                    &metrics_dir,
+                    &e,
+                );
+            }
         }
 
         // Generate EpisodeSummary from run events and persist to .theo/memory/episodes/
@@ -530,13 +550,30 @@ impl AgentRunEngine {
                 .join(".theo")
                 .join("memory")
                 .join("episodes");
-            if tokio::fs::create_dir_all(&episodes_dir).await.is_ok() {
-                let episode_path = episodes_dir.join(format!("{}.json", summary.summary_id));
-                let _ = tokio::fs::write(
-                    &episode_path,
-                    serde_json::to_string_pretty(&summary).unwrap_or_default(),
-                )
-                .await;
+            match tokio::fs::create_dir_all(&episodes_dir).await {
+                Ok(()) => {
+                    let episode_path =
+                        episodes_dir.join(format!("{}.json", summary.summary_id));
+                    let body = serde_json::to_string_pretty(&summary).unwrap_or_default();
+                    if let Err(e) = tokio::fs::write(&episode_path, body).await {
+                        crate::fs_errors::emit_fs_error(
+                            &self.event_bus,
+                            self.run.run_id.as_str(),
+                            "record_session_exit/episode_write",
+                            &episode_path,
+                            &e,
+                        );
+                    }
+                }
+                Err(e) => {
+                    crate::fs_errors::emit_fs_error(
+                        &self.event_bus,
+                        self.run.run_id.as_str(),
+                        "record_session_exit/episode_mkdir",
+                        &episodes_dir,
+                        &e,
+                    );
+                }
             }
         }
 
@@ -1577,12 +1614,15 @@ impl AgentRunEngine {
                                 vec!["check".to_string(), "--message-format=short".to_string()]
                             };
 
+                        // T1.1: done-gate `cargo test` runs with kernel
+                        // rlimits (CPU / memory / file-size / NPROC) to
+                        // mitigate RCE via build.rs or proc-macro in code
+                        // written by the agent. Full bwrap sandbox is
+                        // still not applied here (follow-up); rlimits is
+                        // the partial mitigation from the plan.
                         let test_result = tokio::time::timeout(
                             crate::constants::DONE_GATE_TEST_TIMEOUT,
-                            tokio::process::Command::new("cargo")
-                                .args(&test_args)
-                                .current_dir(&self.project_dir)
-                                .output(),
+                            spawn_done_gate_cargo(&self.project_dir, &test_args),
                         )
                         .await;
 
@@ -1596,13 +1636,17 @@ impl AgentRunEngine {
                             Ok(Ok(_)) => None,  // Tests passed
                             Ok(Err(_)) => None, // Command not found — pass through
                             Err(_) => {
-                                // Timeout — fallback to cargo check with 30s
+                                // Timeout — fallback to cargo check (also
+                                // inside the rlimits envelope).
                                 let fallback = tokio::time::timeout(
                                     crate::constants::DONE_GATE_CHECK_FALLBACK_TIMEOUT,
-                                    tokio::process::Command::new("cargo")
-                                        .args(["check", "--message-format=short"])
-                                        .current_dir(&self.project_dir)
-                                        .output(),
+                                    spawn_done_gate_cargo(
+                                        &self.project_dir,
+                                        &[
+                                            "check".to_string(),
+                                            "--message-format=short".to_string(),
+                                        ],
+                                    ),
                                 )
                                 .await;
                                 match fallback {
@@ -2936,18 +2980,23 @@ fn auto_init_project_context(project_dir: &std::path::Path) {
     let content = sections.join("");
 
     let theo_dir = project_dir.join(".theo");
-    if std::fs::create_dir_all(&theo_dir).is_err() {
-        return; // Best-effort: can't create dir, skip silently
+    if let Err(e) = std::fs::create_dir_all(&theo_dir) {
+        crate::fs_errors::warn_fs_error("auto_init/theo_mkdir", &theo_dir, &e);
+        return;
     }
-    let _ = std::fs::write(&theo_md, content);
+    if let Err(e) = std::fs::write(&theo_md, content) {
+        crate::fs_errors::warn_fs_error("auto_init/theo_md_write", &theo_md, &e);
+    }
 
-    // Also create .gitignore if missing
+    // Also create .gitignore if missing.
     let gitignore = theo_dir.join(".gitignore");
-    if !gitignore.exists() {
-        let _ = std::fs::write(
+    if !gitignore.exists()
+        && let Err(e) = std::fs::write(
             &gitignore,
             "# Generated by Theo\ngraph.bin\ngraph.bin.tmp\nlearnings.json\nsnapshots/\nsessions/\n",
-        );
+        )
+    {
+        crate::fs_errors::warn_fs_error("auto_init/gitignore_write", &gitignore, &e);
     }
 
     eprintln!("[theo] Auto-initialized .theo/theo.md — run `theo init` for detailed context");
@@ -3023,6 +3072,48 @@ pub(crate) fn derive_provider_hint(base_url: &str) -> &'static str {
     } else {
         "openai_compatible"
     }
+}
+
+/// Spawn `cargo <args>` for the done-gate under kernel rlimits.
+///
+/// T1.1: previously the done gate invoked `cargo test` / `cargo check`
+/// with no isolation, which lets `build.rs` and proc-macros execute with
+/// full user privileges. Rlimits (CPU / memory / file-size / NPROC) are
+/// applied via `pre_exec` so the child cannot burn infinite CPU, allocate
+/// the host to death, fill disk, or fork-bomb. Full bwrap/landlock
+/// sandbox for the done gate is follow-up work; rlimits is the partial
+/// mitigation from the plan.
+///
+/// On non-Linux platforms, falls back to the unrestricted command —
+/// rlimits are a Linux-only feature in `theo-tooling::sandbox::rlimits`.
+async fn spawn_done_gate_cargo(
+    project_dir: &std::path::Path,
+    args: &[String],
+) -> std::io::Result<std::process::Output> {
+    let mut cmd = tokio::process::Command::new("cargo");
+    cmd.args(args).current_dir(project_dir);
+
+    #[cfg(target_os = "linux")]
+    {
+        use theo_domain::sandbox::ProcessPolicy;
+        let policy = ProcessPolicy {
+            max_cpu_seconds: crate::constants::DONE_GATE_CPU_SECONDS,
+            max_memory_bytes: crate::constants::DONE_GATE_MEM_BYTES,
+            max_file_size_bytes: crate::constants::DONE_GATE_FSIZE_BYTES,
+            max_processes: crate::constants::DONE_GATE_NPROC,
+            allowed_env_vars: vec![],
+        };
+        // SAFETY: `apply_rlimits` only calls `setrlimit` which is
+        // async-signal-safe. Runs in the child process after fork and
+        // before exec, as required.
+        unsafe {
+            cmd.pre_exec(move || {
+                theo_tooling::sandbox::rlimits::apply_rlimits(&policy)
+            });
+        }
+    }
+
+    cmd.output().await
 }
 
 #[cfg(test)]

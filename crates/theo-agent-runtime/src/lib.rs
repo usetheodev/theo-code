@@ -15,6 +15,7 @@ pub mod event_bus;
 pub mod evolution;
 pub mod extension;
 pub mod failure_tracker;
+pub mod fs_errors;
 pub mod frontmatter;
 pub mod handoff_guardrail;
 pub mod hooks;

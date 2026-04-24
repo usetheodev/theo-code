@@ -320,57 +320,8 @@ impl AgentLoop {
     ///
     /// Delegates entirely to `AgentRunEngine::execute()`.
     pub async fn run(&self, task: &str, project_dir: &Path) -> AgentResult {
-        let event_bus = Arc::new(EventBus::new());
-        self.attach_listeners(&event_bus);
-
-        // Create managers
-        let task_manager = Arc::new(TaskManager::new(event_bus.clone()));
-        let tcm = ToolCallManager::new(event_bus.clone());
-        let tool_call_manager = Arc::new(if let Some(ref caps) = self.config.capability_set {
-            let gate = Arc::new(CapabilityGate::new(caps.clone(), event_bus.clone()));
-            tcm.with_capability_gate(gate)
-        } else {
-            tcm
-        });
-
-        // Create task
-        let task_id =
-            task_manager.create_task(SessionId::new("agent"), AgentType::Coder, task.to_string());
-
-        // Build LLM client (same logic as old AgentLoop::new)
-        let mut client = LlmClient::new(
-            &self.client_base_url,
-            self.client_api_key.clone(),
-            &self.client_model,
-        );
-        if let Some(ref endpoint) = self.client_endpoint_override {
-            client = client.with_endpoint(endpoint);
-        }
-        for (k, v) in &self.client_extra_headers {
-            client = client.with_header(k, v);
-        }
-
-        // Create registry with plugin tools
-        let mut registry = theo_tooling::registry::create_default_registry();
-        load_plugin_tools(&mut registry, project_dir);
-        let registry = Arc::new(registry);
-
-        let mut engine = AgentRunEngine::new(
-            task_id,
-            task_manager,
-            tool_call_manager,
-            event_bus,
-            client,
-            registry,
-            self.config.clone(),
-            project_dir.to_path_buf(),
-        );
-        if let Some(ref gc) = self.graph_context {
-            engine = engine.with_graph_context(gc.clone());
-        }
-        engine = self.forward_subagent_integrations(engine);
-
-        engine.execute().await
+        let engine = self.build_engine(task, project_dir, None);
+        self.execute_and_shutdown(engine, Vec::new()).await
     }
 
     /// Run with session history and external EventBus.
@@ -384,36 +335,41 @@ impl AgentLoop {
         history: Vec<theo_infra_llm::types::Message>,
         external_bus: Option<Arc<EventBus>>,
     ) -> AgentResult {
+        let engine = self.build_engine(task, project_dir, external_bus);
+        self.execute_and_shutdown(engine, history).await
+    }
+
+    /// Build an `AgentRunEngine` wired with task manager, LLM client, tool
+    /// registry, graph context, and all sub-agent integrations. Extracted
+    /// from `run()` / `run_with_history()` to eliminate ~80 LOC of
+    /// duplicated setup (T3.2 / REVIEW §2 DRY).
+    fn build_engine(
+        &self,
+        task: &str,
+        project_dir: &Path,
+        external_bus: Option<Arc<EventBus>>,
+    ) -> AgentRunEngine {
         let event_bus = external_bus.unwrap_or_else(|| Arc::new(EventBus::new()));
         self.attach_listeners(&event_bus);
 
         let task_manager = Arc::new(TaskManager::new(event_bus.clone()));
         let tcm = ToolCallManager::new(event_bus.clone());
-        let tool_call_manager = Arc::new(if let Some(ref caps) = self.config.capability_set {
-            let gate = Arc::new(CapabilityGate::new(caps.clone(), event_bus.clone()));
-            tcm.with_capability_gate(gate)
-        } else {
-            tcm
+        let tool_call_manager = Arc::new(match &self.config.capability_set {
+            Some(caps) => {
+                let gate = Arc::new(CapabilityGate::new(caps.clone(), event_bus.clone()));
+                tcm.with_capability_gate(gate)
+            }
+            None => tcm,
         });
 
-        let task_id =
-            task_manager.create_task(SessionId::new("agent"), AgentType::Coder, task.to_string());
-
-        let mut client = LlmClient::new(
-            &self.client_base_url,
-            self.client_api_key.clone(),
-            &self.client_model,
+        let task_id = task_manager.create_task(
+            SessionId::new("agent"),
+            AgentType::Coder,
+            task.to_string(),
         );
-        if let Some(ref endpoint) = self.client_endpoint_override {
-            client = client.with_endpoint(endpoint);
-        }
-        for (k, v) in &self.client_extra_headers {
-            client = client.with_header(k, v);
-        }
 
-        let mut registry = theo_tooling::registry::create_default_registry();
-        load_plugin_tools(&mut registry, project_dir);
-        let registry = Arc::new(registry);
+        let client = self.build_llm_client();
+        let registry = Arc::new(self.build_registry(project_dir));
 
         let mut engine = AgentRunEngine::new(
             task_id,
@@ -428,13 +384,38 @@ impl AgentLoop {
         if let Some(ref gc) = self.graph_context {
             engine = engine.with_graph_context(gc.clone());
         }
-        engine = self.forward_subagent_integrations(engine);
+        self.forward_subagent_integrations(engine)
+    }
 
-        // Wrap execute_with_history + record_session_exit so headless
-        // callers (`theo -p "task"`, `AgentLoop::run_with_history`) hit
-        // the same shutdown path as `execute()`. Otherwise episode
-        // summaries, tokio::fs metrics, and the `on_session_end` memory
-        // hook silently skip (Phase 0 T0.1 wiring depends on this).
+    fn build_llm_client(&self) -> LlmClient {
+        let mut client = LlmClient::new(
+            &self.client_base_url,
+            self.client_api_key.clone(),
+            &self.client_model,
+        );
+        if let Some(ref endpoint) = self.client_endpoint_override {
+            client = client.with_endpoint(endpoint);
+        }
+        for (k, v) in &self.client_extra_headers {
+            client = client.with_header(k, v);
+        }
+        client
+    }
+
+    fn build_registry(&self, project_dir: &Path) -> theo_tooling::registry::ToolRegistry {
+        let mut registry = theo_tooling::registry::create_default_registry();
+        load_plugin_tools(&mut registry, project_dir);
+        registry
+    }
+
+    /// Runs `execute_with_history` then `record_session_exit`. Both
+    /// `run()` and `run_with_history()` share this path so the memory
+    /// hook + episode persistence + metrics flush fire unconditionally.
+    async fn execute_and_shutdown(
+        &self,
+        mut engine: AgentRunEngine,
+        history: Vec<theo_infra_llm::types::Message>,
+    ) -> AgentResult {
         let result = engine.execute_with_history(history).await;
         engine.record_session_exit_public(&result).await;
         result
