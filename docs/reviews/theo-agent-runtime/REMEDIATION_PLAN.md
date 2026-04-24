@@ -1033,3 +1033,23 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 - **Total: 1660 tests, 0 falhas.**
 
 **Nao feito nesta iteracao (proximas):** T0.1 restante (7 cenarios LLM), T0.2 caracterizacao do subagent, T0.3 coverage baseline, T1.1 bwrap, T3.4 retry inline, T4.* split god-files, T5.1 RunMetadata, T6.4 batch streaming, T7.* security/resilience/bench tests.
+
+### Iteracao 8 (2026-04-24) — Fase 4 kick-off: extract pure helpers
+
+| Task | Status | Notas |
+|---|---|---|
+| T4.2 run_engine.rs split — primeira etapa | **DONE (parcial)** | extraidos 3 novos arquivos irmaos + registrados em `lib.rs`: `run_engine_helpers.rs` (`llm_error_to_class`, `truncate_handoff_objective`, `truncate_batch_args`, `derive_provider_hint` — 169 LOC incl tests), `run_engine_auto_init.rs` (`auto_init_project_context` + `detect_project_name_simple` — 218 LOC incl tests), `run_engine_sandbox.rs` (`spawn_done_gate_cargo` — 65 LOC). `run_engine.rs`: 4230 → **4029 LOC** (−201). Os 8 snapshot tests de caracterizacao (T0.1) continuam verdes — comportamento observavel preservado. Esta e a **primeira extracao real do god-file**; as proximas iterations podem atacar `lifecycle.rs` (record_session_exit, finalize_observability), `main_loop.rs`, `dispatch/done.rs`, etc. |
+
+**Baseline → atual (por metrica, desde Iteracao 0):**
+- `.expect/.unwrap/panic!`: 1071 → 1041 (+24 desde iter 7 — novos testes dos extraidos usam `.unwrap()`)
+- silent-swallow: 61 → 2
+- `std::env::var`: 25 → 6
+- `std::process::Command` producao: 2 → 1
+- phase tags: 310 → 191 (-119)
+- **`run_engine.rs` LOC: 4230 → 4029 (-201)**
+
+**Validacao:** 1132 unit + 96 integration = **1228 tests passando, 0 falhas.**
+- `run_engine.rs` agora **usa** os helpers via `use crate::run_engine_helpers::{llm_error_to_class, ..., derive_provider_hint}` + analogos para auto_init e sandbox.
+- Os testes inline de `derive_provider_hint` dentro de `run_engine::tests` continuam no mesmo modulo mas testam o import — agora importado do helper.
+
+**Nao feito nesta iteracao (proximas):** T0.1 restante (7 cenarios LLM), T0.2 caracterizacao subagent, T1.1 bwrap completo, T3.4 retry inline, T4.2 continuar extracao (`lifecycle.rs`, `main_loop.rs`, `dispatch/*`), T4.3 Strategy pattern meta-tools, T4.4 Chain of Responsibility done gates, T4.5 split subagent/mod.rs, T5.1 RunMetadata, T6.4 batch streaming deltas, T7.* tests gap, T8.1 phase sweep restante.

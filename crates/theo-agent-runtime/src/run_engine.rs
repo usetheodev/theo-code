@@ -2870,260 +2870,28 @@ pub enum HandoffOutcome {
 /// that returns `AgentResult` from a failed LLM call so headless v3
 /// consumers can distinguish infra failures (rate-limit, quota, auth)
 /// from agent failures.
-fn llm_error_to_class(e: &theo_infra_llm::LlmError) -> ErrorClass {
-    use theo_infra_llm::LlmError;
-    match e {
-        LlmError::RateLimited { .. } => ErrorClass::RateLimited,
-        // Phase 61: distinct from RateLimited because retry doesn't help
-        // for quota exhaustion — only the billing cycle reset clears it.
-        LlmError::QuotaExceeded { .. } => ErrorClass::QuotaExceeded,
-        LlmError::AuthFailed(_) => ErrorClass::AuthFailed,
-        LlmError::ContextOverflow { .. } => ErrorClass::ContextOverflow,
-        // Network / Timeout / ServiceUnavailable / Parse / Api / etc.
-        // — none of these match a more specific class, so they fall
-        // into the catch-all "internal abort".
-        _ => ErrorClass::Aborted,
-    }
-}
-
-fn truncate_handoff_objective(s: &str) -> String {
-    if s.chars().count() <= 200 {
-        s.to_string()
-    } else {
-        let mut t: String = s.chars().take(199).collect();
-        t.push('…');
-        t
-    }
-}
-
-/// Truncate batch call args for display (e.g., filePath only).
-fn truncate_batch_args(args: &serde_json::Value) -> String {
-    if let Some(path) = args.get("filePath").and_then(|v| v.as_str()) {
-        return path.to_string();
-    }
-    if let Some(cmd) = args.get("command").and_then(|v| v.as_str()) {
-        let short = if cmd.len() > 40 { &cmd[..40] } else { cmd };
-        return short.to_string();
-    }
-    if let Some(pattern) = args.get("pattern").and_then(|v| v.as_str()) {
-        return format!("\"{}\"", pattern);
-    }
-    "...".to_string()
-}
-
-// ---------------------------------------------------------------------------
-// Auto-init: create .theo/theo.md if missing
-// ---------------------------------------------------------------------------
-
-/// Ensure .theo/theo.md exists with a static template. Best-effort, never fails.
-fn auto_init_project_context(project_dir: &std::path::Path) {
-    let theo_md = project_dir.join(".theo").join("theo.md");
-    if theo_md.exists() {
-        return;
-    }
-
-    // Detect project type for template
-    let lang = if project_dir.join("Cargo.toml").exists() {
-        "Rust"
-    } else if project_dir.join("package.json").exists() {
-        "Node.js / TypeScript"
-    } else if project_dir.join("pyproject.toml").exists() {
-        "Python"
-    } else if project_dir.join("go.mod").exists() {
-        "Go"
-    } else {
-        "Unknown"
-    };
-
-    // Detect project name (simple — first line with name= in manifest)
-    let name = detect_project_name_simple(project_dir).unwrap_or_else(|| {
-        project_dir
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("project")
-            .to_string()
-    });
-
-    // Progressive disclosure template: table of contents with pointers.
-    // ~60 lines — agent navigates deeper on demand.
-    let mut sections = Vec::new();
-    sections.push(format!("# {name}\n"));
-    sections.push(format!("## Language\n{lang}\n"));
-
-    // Detect and point to existing docs
-    let docs_dir = project_dir.join("docs");
-    let has_docs = docs_dir.exists();
-    let has_readme = project_dir.join("README.md").exists();
-    let has_adr = project_dir.join("docs").join("adr").exists();
-
-    sections.push("## Architecture\n".to_string());
-    if has_readme {
-        sections.push("See `README.md` for project overview.\n".to_string());
-    }
-    if has_docs {
-        sections.push("See `docs/` for detailed documentation.\n".to_string());
-    }
-    if has_adr {
-        sections.push("See `docs/adr/` for Architecture Decision Records.\n".to_string());
-    }
-    if !has_readme && !has_docs {
-        sections
-            .push("<!-- Run `theo init` to generate detailed project context -->\n".to_string());
-    }
-
-    // Point to key config files
-    sections.push("## Key Files\n".to_string());
-    let key_files = [
-        ("Cargo.toml", "Rust workspace manifest"),
-        ("package.json", "Node.js package config"),
-        ("pyproject.toml", "Python project config"),
-        ("go.mod", "Go module config"),
-        (".github/workflows", "CI/CD pipelines"),
-    ];
-    for (file, desc) in &key_files {
-        if project_dir.join(file).exists() {
-            sections.push(format!("- `{file}` — {desc}\n"));
-        }
-    }
-
-    let content = sections.join("");
-
-    let theo_dir = project_dir.join(".theo");
-    if let Err(e) = std::fs::create_dir_all(&theo_dir) {
-        crate::fs_errors::warn_fs_error("auto_init/theo_mkdir", &theo_dir, &e);
-        return;
-    }
-    if let Err(e) = std::fs::write(&theo_md, content) {
-        crate::fs_errors::warn_fs_error("auto_init/theo_md_write", &theo_md, &e);
-    }
-
-    // Also create .gitignore if missing.
-    let gitignore = theo_dir.join(".gitignore");
-    if !gitignore.exists()
-        && let Err(e) = std::fs::write(
-            &gitignore,
-            "# Generated by Theo\ngraph.bin\ngraph.bin.tmp\nlearnings.json\nsnapshots/\nsessions/\n",
-        )
-    {
-        crate::fs_errors::warn_fs_error("auto_init/gitignore_write", &gitignore, &e);
-    }
-
-    eprintln!("[theo] Auto-initialized .theo/theo.md — run `theo init` for detailed context");
-}
-
-/// Simple project name detection (no external deps).
-fn detect_project_name_simple(project_dir: &std::path::Path) -> Option<String> {
-    // Try Cargo.toml
-    if let Ok(content) = std::fs::read_to_string(project_dir.join("Cargo.toml")) {
-        for line in content.lines() {
-            let t = line.trim();
-            if t.starts_with("name") && t.contains('=')
-                && let Some(val) = t.split('=').nth(1) {
-                    let name = val.trim().trim_matches('"').trim_matches('\'');
-                    if !name.is_empty() {
-                        return Some(name.to_string());
-                    }
-                }
-        }
-    }
-    // Try package.json
-    if let Ok(content) = std::fs::read_to_string(project_dir.join("package.json")) {
-        for line in content.lines() {
-            let t = line.trim().trim_start_matches('{').trim();
-            if t.starts_with("\"name\"")
-                && let Some(val) = t.split(':').nth(1) {
-                    let name = val
-                        .trim()
-                        .trim_end_matches('}')
-                        .trim_matches(',')
-                        .trim()
-                        .trim_matches('"');
-                    if !name.is_empty() {
-                        return Some(name.to_string());
-                    }
-                }
-        }
-    }
-    None
-}
+// Helpers below (llm_error_to_class, truncate_handoff_objective,
+// truncate_batch_args, derive_provider_hint) were extracted to
+// `run_engine_helpers.rs` in Fase 4 — see `use` alias at bottom of
+// file. Auto-init + sandbox spawn likewise moved to their own modules.
 
 // ---------------------------------------------------------------------------
 // Doom Loop Detection
 // ---------------------------------------------------------------------------
 
 use crate::doom_loop::DoomLoopTracker;
+use crate::run_engine_auto_init::auto_init_project_context;
+use crate::run_engine_helpers::{
+    derive_provider_hint, llm_error_to_class, truncate_batch_args, truncate_handoff_objective,
+};
+use crate::run_engine_sandbox::spawn_done_gate_cargo;
 use theo_domain::clock::now_millis;
 
-/// Phase 43 (otlp-exporter-plan) — heuristic mapping `base_url → provider`
-/// for the OTel `gen_ai.system` attribute. Conservative: returns
-/// "openai_compatible" for unknown URLs since theo's protocol is
-/// OpenAI-compatible across providers (per the LLM crate's contract).
-pub(crate) fn derive_provider_hint(base_url: &str) -> &'static str {
-    let lower = base_url.to_ascii_lowercase();
-    if lower.contains("api.openai.com") || lower.contains("chatgpt.com") {
-        "openai"
-    } else if lower.contains("api.anthropic.com") {
-        "anthropic"
-    } else if lower.contains("googleapis.com") || lower.contains("gemini") {
-        "gemini"
-    } else if lower.contains("groq.com") {
-        "groq"
-    } else if lower.contains("mistral.ai") {
-        "mistral"
-    } else if lower.contains("deepseek") {
-        "deepseek"
-    } else if lower.contains("together.ai") {
-        "together"
-    } else if lower.contains("xai") || lower.contains("x.ai") {
-        "xai"
-    } else if lower.contains("localhost") || lower.contains("127.0.0.1") {
-        "openai_compatible_local"
-    } else {
-        "openai_compatible"
-    }
-}
-
-/// Spawn `cargo <args>` for the done-gate under kernel rlimits.
-///
-/// T1.1: previously the done gate invoked `cargo test` / `cargo check`
-/// with no isolation, which lets `build.rs` and proc-macros execute with
-/// full user privileges. Rlimits (CPU / memory / file-size / NPROC) are
-/// applied via `pre_exec` so the child cannot burn infinite CPU, allocate
-/// the host to death, fill disk, or fork-bomb. Full bwrap/landlock
-/// sandbox for the done gate is follow-up work; rlimits is the partial
-/// mitigation from the plan.
-///
-/// On non-Linux platforms, falls back to the unrestricted command —
-/// rlimits are a Linux-only feature in `theo-tooling::sandbox::rlimits`.
-async fn spawn_done_gate_cargo(
-    project_dir: &std::path::Path,
-    args: &[String],
-) -> std::io::Result<std::process::Output> {
-    let mut cmd = tokio::process::Command::new("cargo");
-    cmd.args(args).current_dir(project_dir);
-
-    #[cfg(target_os = "linux")]
-    {
-        use theo_domain::sandbox::ProcessPolicy;
-        let policy = ProcessPolicy {
-            max_cpu_seconds: crate::constants::DONE_GATE_CPU_SECONDS,
-            max_memory_bytes: crate::constants::DONE_GATE_MEM_BYTES,
-            max_file_size_bytes: crate::constants::DONE_GATE_FSIZE_BYTES,
-            max_processes: crate::constants::DONE_GATE_NPROC,
-            allowed_env_vars: vec![],
-        };
-        // SAFETY: `apply_rlimits` only calls `setrlimit` which is
-        // async-signal-safe. Runs in the child process after fork and
-        // before exec, as required.
-        unsafe {
-            cmd.pre_exec(move || {
-                theo_tooling::sandbox::rlimits::apply_rlimits(&policy)
-            });
-        }
-    }
-
-    cmd.output().await
-}
+// NOTE: `derive_provider_hint`, `llm_error_to_class`,
+// `truncate_batch_args`, `truncate_handoff_objective`,
+// `auto_init_project_context`, `spawn_done_gate_cargo` all moved to
+// `run_engine_helpers.rs` / `run_engine_auto_init.rs` /
+// `run_engine_sandbox.rs` in Fase 4 (REMEDIATION_PLAN T4.2).
 
 #[cfg(test)]
 mod tests {
