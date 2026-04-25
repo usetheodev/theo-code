@@ -9,6 +9,7 @@ mod dispatch;
 mod execution;
 mod handoff;
 mod lifecycle;
+mod llm_call;
 mod main_loop;
 mod stream_batcher;
 

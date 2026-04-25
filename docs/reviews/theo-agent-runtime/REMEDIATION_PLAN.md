@@ -1518,3 +1518,12 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 | T8.5 module-size CI gate | **DONE** | Novo `scripts/check-module-size.sh`: itera `crates/theo-agent-runtime/src/**/*.rs`, conta APENAS production LOC (ignora `#[cfg(test)]` em diante via `awk`), falha se algum arquivo excede `MAX_LOC` (default 1000 — regression-prevention cap; long-term target T4.* e 500, mas 5 arquivos pos-split ainda sitting >500: main_loop.rs 984, config.rs 720, pilot/mod.rs 571, spawn_helpers.rs 532, agent_loop.rs 509). Smoke test local OK: 116 arquivos escaneados, todos ≤1000 LOC. Novo job `module_size` em `.github/workflows/audit.yml` instala nada (script puro bash) e roda o checker. Cap pode ser apertado para 500 quando os 5 arquivos limitrofes forem split. |
 
 **Validacao:** 1157 unit + 105 integration + 8 security + 4 resilience + 6 meta-tools = **1280 tests passando, 0 falhas**. CI gates: arch/coverage/module-size todos verdes localmente. Zero warnings.
+
+### Iteracao 57 (2026-04-25) — main_loop.rs split + T8.5 MAX_LOC apertado para 750
+
+| Task | Status | Notas |
+|---|---|---|
+| T4.* main_loop.rs further split | **DONE** | Novo `run_engine/llm_call.rs` (~290 LOC) com 4 metodos LLM-cluster: `choose_model` (router decision com panic-safe fallback), `call_llm_with_retry` (LlmCallStart + retry executor + streaming batchers + LlmCallEnd), `build_llm_abort_result` (state-machine transitions + ErrorClass mapping), `handle_context_overflow` (FM-6 hot files snapshot + emergency compaction). Todos como `pub(super) impl AgentRunEngine` — execution.rs continua chamando-os sem mudanca. `main_loop.rs`: 1037 → **764 LOC** (-273, -26%). |
+| T8.5 MAX_LOC apertado | **DONE** | Apos o split, MAX_LOC do gate baixado de 1000 para 750. Top production-LOC files: main_loop.rs 722, config.rs 720, pilot/mod.rs 571, spawn_helpers.rs 532, agent_loop.rs 509. Smoke test local OK — todos ≤750. Long-term target T4.* permanece 500. |
+
+**Validacao:** 1157 unit + 105 integration + 8 security + 4 resilience + 6 meta-tools = **1280 tests passando, 0 falhas**. Zero warnings. Module-size gate verde com cap 750.
