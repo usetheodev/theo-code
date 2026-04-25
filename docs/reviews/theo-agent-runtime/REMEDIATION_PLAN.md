@@ -1673,3 +1673,14 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 **Cobertura T0.1 atual:** 8 dos cenarios canonicos do plano. Restantes (context overflow recovery, done-gate Gate 2 LLM-driven com cargo, batch+LLM stream, skill SubAgent driven by LLM, resume com ResumeContext) seguem a mesma receita SSE-canned-bodies.
 
 **Validacao:** 1307 tests passando entre `theo-agent-runtime`, 0 falhas. `cargo check -p theo-agent-runtime --lib` clean.
+
+### Iteracao 72 (2026-04-25) — Wire `record_retry()` no caminho de producao
+
+| Task | Status | Notas |
+|---|---|---|
+| Follow-up Iter 71 finding | **DONE** | `MetricsCollector::record_retry()` agora e chamado dentro de `call_llm_with_retry` em `run_engine/llm_call.rs`. Mecanismo: `Arc<AtomicU32>` capturado pela closure passada a `with_retry` incrementa a cada invocacao de `f()` (i.e. cada attempt — initial + retries); apos o `with_retry.await` retornar (Ok ou Err), o caller calcula `attempts.saturating_sub(1) = retries_done` e invoca `self.metrics.record_retry()` esse numero de vezes. Logica posicionada ANTES do `?` propagar o error para que mesmo um run que falhou no LLM tenha a contagem refletida em `AgentResult::retries`. Sem mudanca de assinatura em `RetryExecutor::with_retry` — todas as 5 chamadas (run_engine + 4 testes em retry.rs) ficam intactas. |
+| T0.1 cenario 8 — assertiva metrica | **DONE** | `agent_retries_after_503_and_succeeds` agora valida tambem `AgentResult.retries == counter.count()` — as duas surfaces de observabilidade (event bus + metric counter) estao em paridade. |
+
+**Conclusao do finding Iter 71:** o contador metrico nao e mais dead code; o event bus deixa de ser a unica source of truth para "retry happened". Para callers que querem contagem rapida sem subscrever bus, basta ler `AgentResult::retries`.
+
+**Validacao:** 1307 tests passando, 0 falhas. `cargo check -p theo-agent-runtime --lib` clean.

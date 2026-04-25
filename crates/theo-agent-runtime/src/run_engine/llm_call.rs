@@ -127,11 +127,21 @@ impl AgentRunEngine {
         let event_bus = self.event_bus.clone();
         let client = &self.client;
 
-        let resp = crate::retry::RetryExecutor::with_retry(
+        // Iter 71 finding follow-up — wire `MetricsCollector::record_retry`
+        // through the with_retry path. The executor doesn't own the
+        // metrics handle, so we count `f()` invocations via a shared
+        // atomic counter captured by the closure: every call after the
+        // first is a retry.
+        use std::sync::atomic::{AtomicU32, Ordering};
+        let attempt_count = std::sync::Arc::new(AtomicU32::new(0));
+        let attempt_count_inner = attempt_count.clone();
+
+        let resp_outcome = crate::retry::RetryExecutor::with_retry(
             &retry_policy,
             &run_id_str,
             &event_bus,
             || {
+                attempt_count_inner.fetch_add(1, Ordering::Relaxed);
                 let eb = event_bus.clone();
                 let rid = run_id_str.clone();
                 async move {
@@ -177,7 +187,19 @@ impl AgentRunEngine {
             },
             LlmError::is_retryable,
         )
-        .await?;
+        .await;
+
+        // Record every retry (attempts - 1) on the metrics collector
+        // BEFORE we may propagate an error — even a failed run should
+        // surface the retry count via `AgentResult::retries`. The bus
+        // already saw each `Error{type:retry}` event; this keeps the
+        // counter in sync.
+        let total_attempts = attempt_count.load(Ordering::Relaxed);
+        for _ in 0..total_attempts.saturating_sub(1) {
+            self.metrics.record_retry();
+        }
+
+        let resp = resp_outcome?;
 
         // Success path: accumulate usage + publish LlmCallEnd.
         let llm_duration = llm_start.elapsed().as_millis() as u64;

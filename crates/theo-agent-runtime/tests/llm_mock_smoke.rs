@@ -824,4 +824,12 @@ async fn agent_retries_after_503_and_succeeds() {
          got {} retry events",
         counter.count()
     );
+    // Iter 72 follow-up to the Iter 71 finding — the metrics counter
+    // is now wired through `with_retry` so `AgentResult::retries`
+    // matches the bus-observed retry events.
+    assert_eq!(
+        result.retries as u64, counter.count(),
+        "AgentResult.retries must match the EventBus retry-event count \
+         (metrics counter wired in Iter 72)"
+    );
 }
