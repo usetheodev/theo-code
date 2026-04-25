@@ -833,3 +833,111 @@ async fn agent_retries_after_503_and_succeeds() {
          (metrics counter wired in Iter 72)"
     );
 }
+
+/// Listener that records every `ContextOverflowRecovery` event seen.
+/// Used by the overflow-recovery scenario to prove the engine
+/// triggered emergency compaction at least once before re-attempting
+/// the LLM call.
+struct OverflowRecoveryCounter {
+    count: parking_lot::Mutex<u64>,
+}
+
+impl OverflowRecoveryCounter {
+    fn new() -> Self {
+        Self {
+            count: parking_lot::Mutex::new(0),
+        }
+    }
+    fn count(&self) -> u64 {
+        *self.count.lock()
+    }
+}
+
+impl EventListener for OverflowRecoveryCounter {
+    fn on_event(&self, e: &DomainEvent) {
+        if e.event_type == EventType::ContextOverflowRecovery {
+            *self.count.lock() += 1;
+        }
+    }
+}
+
+/// T0.1 scenario 9 — context overflow recovery. The mock serves a
+/// 400 with a body whose text matches the OpenAI
+/// `context_length_exceeded` family on the FIRST attempt. The
+/// runtime classifies it as `LlmError::ContextOverflow`, which is
+/// NOT retryable in `with_retry`'s sense, so `call_llm_with_retry`
+/// returns Err. `execution.rs` catches the overflow specifically,
+/// invokes `handle_context_overflow` (emits the
+/// `ContextOverflowRecovery` event + emergency compaction), and
+/// `continue`s the loop. The SECOND mock response is a clean SSE
+/// stream → agent converges.
+///
+/// Pins the recovery contract: a context overflow does NOT abort
+/// the run, the engine compacts and retries WITHOUT counting it as
+/// a `with_retry`-style retry attempt.
+#[tokio::test]
+async fn agent_recovers_from_context_overflow_then_converges() {
+    let responses: Vec<(u16, &'static str)> = vec![
+        (400, "context_length_exceeded — too many tokens"),
+        (
+            200,
+            "data: {\"choices\":[{\"delta\":{\"content\":\"after compaction\"}}]}\n\n\
+             data: [DONE]\n\n",
+        ),
+    ];
+    let mock_url = spawn_status_mock_multi(responses).await;
+
+    let project = tempfile::tempdir().expect("tempdir");
+
+    let mut config = AgentConfig::default();
+    config.base_url = mock_url;
+    config.api_key = Some("test-key".to_string());
+    config.is_subagent = true;
+    config.max_iterations = 5;
+
+    let bus = Arc::new(EventBus::new());
+    let recovery_counter = Arc::new(OverflowRecoveryCounter::new());
+    bus.subscribe(recovery_counter.clone() as Arc<dyn EventListener>);
+
+    let agent = AgentLoop::new(config, create_default_registry());
+    let result = agent
+        .run_with_history(
+            "trigger overflow then recover",
+            project.path(),
+            Vec::new(),
+            Some(bus.clone()),
+        )
+        .await;
+
+    assert!(
+        result.success,
+        "overflow recovery must converge with success=true; summary={:?}",
+        result.summary
+    );
+    assert!(
+        recovery_counter.count() >= 1,
+        "EventBus must observe at least one ContextOverflowRecovery event; \
+         got {}",
+        recovery_counter.count()
+    );
+    // The overflow path takes one logical iteration to fail-fast +
+    // recover, then a second logical iteration to land the clean
+    // response. Cap at 3 for a small safety margin (the engine may
+    // emit additional iterations for compaction bookkeeping).
+    assert!(
+        result.iterations_used <= 3,
+        "overflow + recovery + convergence should stay within ~2-3 iterations; \
+         got {}",
+        result.iterations_used
+    );
+    // Critically: a context overflow is NOT a retryable error in the
+    // `with_retry` sense — the engine recovers via compaction, not
+    // via a retry sleep. So `result.retries` must NOT be incremented
+    // by the overflow path.
+    assert_eq!(
+        result.retries, 0,
+        "context overflow must NOT register as a `with_retry` retry; \
+         got retries={}",
+        result.retries
+    );
+}

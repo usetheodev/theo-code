@@ -1684,3 +1684,13 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 **Conclusao do finding Iter 71:** o contador metrico nao e mais dead code; o event bus deixa de ser a unica source of truth para "retry happened". Para callers que querem contagem rapida sem subscrever bus, basta ler `AgentResult::retries`.
 
 **Validacao:** 1307 tests passando, 0 falhas. `cargo check -p theo-agent-runtime --lib` clean.
+
+### Iteracao 73 (2026-04-25) — T0.1 cenario 9 (context overflow recovery)
+
+| Task | Status | Notas |
+|---|---|---|
+| T0.1 cenario `agent_recovers_from_context_overflow_then_converges` | **DONE** | Mock devolve 400 com body `"context_length_exceeded — too many tokens"` no primeiro POST e SSE limpo no segundo. `LlmError::from_status` detecta "context_length_exceeded" via `crate::overflow::is_context_overflow` antes da classificacao por status code → retorna `LlmError::ContextOverflow`. `is_retryable()` retorna false para overflow → `with_retry` propaga Err imediatamente. `execution.rs` captura especificamente `e.is_context_overflow()` → invoca `handle_context_overflow` (snapshot FM-6 hot files + emergency compaction + emite `ContextOverflowRecovery` event) → `continue` no loop. Proxima iteracao do LLM hit no segundo body do mock → 200 SSE → converge. Listener custom `OverflowRecoveryCounter` prova que o evento foi publicado. Asserts: `success=true`, `recovery_counter.count() >= 1` (evento emitido), `iterations_used <= 3` (1 overflow + 1 recover + small safety margin), `retries == 0` (CRITICAL — overflow nao deve ser registrado como with_retry retry, e um caminho de recovery distinto). |
+
+**Cobertura T0.1 atual:** 9 dos cenarios canonicos do plano. Restantes (done-gate Gate 2 LLM-driven com cargo, batch+LLM stream, skill SubAgent driven by LLM, resume com ResumeContext) seguem a mesma receita.
+
+**Validacao:** 1308 tests passando entre `theo-agent-runtime`, 0 falhas. `cargo check -p theo-agent-runtime --lib` clean. (Pre-existing intermittent flakiness em `security_t7_1::home_unset_does_not_fallback_to_tmp` quando rodando em paralelo — documentado em iteracoes anteriores, passa solo, nao bloqueia gate.)
