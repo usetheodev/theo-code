@@ -59,7 +59,12 @@ impl AgentRunEngine {
         // .theo/memory/episodes/ (decision: meeting 20260420-221947 #4 —
         // episodes belong to memory namespace, not wiki; wiki is
         // reserved for compiled content).
-        let events = self.event_bus.events();
+        //
+        // T6.2 — scope to events for THIS run via `events_for(run_id)`
+        // instead of cloning the entire process-wide log. The episode
+        // summary should only reflect this run anyway, so the filter
+        // is also semantically tighter.
+        let events = self.event_bus.events_for(self.run.run_id.as_str());
         if !events.is_empty() {
             let task_objective = self
                 .task_manager

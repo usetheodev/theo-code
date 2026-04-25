@@ -277,3 +277,58 @@ fn solo_panicking_listener_does_not_stop_future_publishes() {
     );
     assert_eq!(bus.events().len(), 5);
 }
+
+// ────────────────────────────────────────────────────────────────────
+// T6.3 stress — long-session leak guard.
+//
+// The plan AC literal is `long_session_10k_tool_calls_does_not_leak_records`:
+// after a session that dispatches 10 000 tool calls, a single
+// `purge_completed` call MUST reclaim every terminal record so the
+// manager's `records` HashMap returns to zero. The 5-call test above
+// pins the per-call semantics; this one pins the scaling property
+// — that purge is O(n) and complete, not bounded by some hidden
+// internal cap.
+// ────────────────────────────────────────────────────────────────────
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn long_session_10k_tool_calls_does_not_leak_records() {
+    const N: usize = 10_000;
+
+    let bus = Arc::new(EventBus::new());
+    let manager = ToolCallManager::new(bus);
+    let registry = create_default_registry();
+    let ctx = ToolContext::test_context(std::path::PathBuf::from("/tmp"));
+
+    // Drive N enqueue+dispatch cycles. Each `read` of a non-existent
+    // path fails fast (~microseconds), so 10 000 cycles complete
+    // comfortably within the test's deadline budget. Failure and
+    // success are both terminal states — what matters here is that
+    // the record reaches a purgeable state.
+    for i in 0..N {
+        let id = manager.enqueue(
+            TaskId::new(format!("t-{i}")),
+            "read".into(),
+            serde_json::json!({ "filePath": format!("/nonexistent/{i}") }),
+        );
+        let _ = manager.dispatch_and_execute(&id, &registry, &ctx).await;
+    }
+    assert_eq!(
+        manager.record_count(),
+        N,
+        "all N enqueued records must persist before purge"
+    );
+
+    // Single sweep — far_future cutoff so age never gates eviction;
+    // older_than_ms = 0 so every terminal record qualifies.
+    let far_future = theo_domain::clock::now_millis() + 10_000_000;
+    let purged = manager.purge_completed(far_future, 0);
+    assert_eq!(
+        purged, N,
+        "purge_completed must reclaim every terminal record from a 10k-call session"
+    );
+    assert_eq!(
+        manager.record_count(),
+        0,
+        "no records may remain after purging a long session — leak guard"
+    );
+}
