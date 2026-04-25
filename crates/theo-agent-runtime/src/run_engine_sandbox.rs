@@ -1,7 +1,7 @@
 //! Sandbox spawning for done-gate `cargo` invocations.
 //!
 //! Extracted from `run_engine.rs` to isolate the unsafe `pre_exec`
-//! block. Current hardening layers (cumulative, T1.1):
+//! block. Hardening layers (cumulative, T1.1):
 //!   1. Linux kernel rlimits — CPU / memory / file-size / NPROC caps
 //!      via `setrlimit` in the child's `pre_exec` hook.
 //!   2. Environment sanitization — secret-bearing env vars
@@ -9,14 +9,19 @@
 //!      exec so a malicious `build.rs` / proc-macro cannot exfiltrate
 //!      them. Only a whitelist (PATH, HOME, USER, LANG, TERM, SHELL,
 //!      TMPDIR, …) passes through.
-//!
-//! Full filesystem isolation via bwrap/landlock is follow-up work —
-//! it requires tuning the allowed-write set so `cargo test` can still
-//! write to `target/` and the shared cargo cache.
+//!   3. Bubblewrap (bwrap) filesystem isolation — when
+//!      `/usr/bin/bwrap` is available, the cargo invocation runs
+//!      inside namespaces with read-only `/usr` `/lib` `/etc`,
+//!      `--tmpfs /tmp` (a malicious `build.rs` writing to `/tmp/X`
+//!      affects only the throwaway tmpfs), writable project dir, and
+//!      writable cargo / rustup caches under HOME. PID + network
+//!      namespaces are unshared. Falls back to the rlimits-only path
+//!      on hosts without bwrap (CI macOS, minimal containers, etc.).
 
 use std::path::Path;
 
 use theo_domain::sandbox::ProcessPolicy;
+use theo_tooling::sandbox::probe::BWRAP_PATH;
 
 /// Build the `ProcessPolicy` that governs the done-gate's spawn. The
 /// env whitelist is the crate-default (PATH/HOME/USER/LANG/…) minus
@@ -39,8 +44,26 @@ fn done_gate_policy() -> ProcessPolicy {
 
 /// Spawn `cargo <args>` under the done-gate sandbox. Applies kernel
 /// rlimits + env-var sanitization (Linux) or env-var sanitization only
-/// (other platforms).
+/// (other platforms). On Linux hosts with `/usr/bin/bwrap` installed,
+/// the cargo invocation additionally runs inside a bubblewrap mount
+/// namespace with read-only system dirs and `--tmpfs /tmp`.
 pub(crate) async fn spawn_done_gate_cargo(
+    project_dir: &Path,
+    args: &[String],
+) -> std::io::Result<std::process::Output> {
+    #[cfg(target_os = "linux")]
+    {
+        if Path::new(BWRAP_PATH).exists() {
+            return spawn_done_gate_cargo_in_bwrap(project_dir, args).await;
+        }
+    }
+    spawn_done_gate_cargo_rlimits_only(project_dir, args).await
+}
+
+/// Original spawn path — rlimits + env sanitization, no FS isolation.
+/// Kept as fallback for hosts without bwrap (macOS CI, minimal
+/// containers) and as a building block for the bwrap path.
+async fn spawn_done_gate_cargo_rlimits_only(
     project_dir: &Path,
     args: &[String],
 ) -> std::io::Result<std::process::Output> {
@@ -73,6 +96,108 @@ pub(crate) async fn spawn_done_gate_cargo(
     cmd.output().await
 }
 
+/// Spawn `cargo <args>` inside a bubblewrap mount namespace.
+///
+/// Isolation flags applied:
+///   - `--ro-bind /usr /usr`, `/lib`, `/lib64`, `/etc` — system
+///     binaries + resolver configs are read-only.
+///   - `--proc /proc`, `--dev /dev` — populated synthetically.
+///   - `--tmpfs /tmp` — a fresh tmpfs replaces the host /tmp inside
+///     the namespace. Build scripts that try `touch /tmp/<X>` write
+///     to the tmpfs and the file never appears on the host.
+///   - `--bind <project_dir>` — writable project tree.
+///   - `--bind ${HOME}/.cargo` and `${HOME}/.rustup` (when present)
+///     — cargo can populate its registry / build cache without
+///     dropping out of the sandbox.
+///   - `--unshare-pid`, `--unshare-net`, `--cap-drop ALL`,
+///     `--die-with-parent`, `--new-session` — process / network /
+///     capability isolation + auto-cleanup.
+///
+/// Env sanitization + rlimits are applied to the spawned `bwrap`
+/// process; bwrap propagates them to the wrapped cargo via its env
+/// model, so the same secret-stripping + setrlimit guarantees still
+/// hold. Returns `io::Result<Output>` like the rlimits-only path.
+#[cfg(target_os = "linux")]
+async fn spawn_done_gate_cargo_in_bwrap(
+    project_dir: &Path,
+    args: &[String],
+) -> std::io::Result<std::process::Output> {
+    let policy = done_gate_policy();
+
+    let mut cmd = tokio::process::Command::new(BWRAP_PATH);
+
+    // Read-only system root.
+    for path in &["/usr", "/lib", "/lib64", "/lib32", "/bin", "/sbin", "/etc"] {
+        if Path::new(path).exists() {
+            cmd.arg("--ro-bind").arg(path).arg(path);
+        }
+    }
+    // FHS compatibility for usr-merged distros.
+    if !Path::new("/bin").exists() && Path::new("/usr/bin").exists() {
+        cmd.arg("--symlink").arg("usr/bin").arg("/bin");
+    }
+    if !Path::new("/sbin").exists() && Path::new("/usr/sbin").exists() {
+        cmd.arg("--symlink").arg("usr/sbin").arg("/sbin");
+    }
+
+    cmd.arg("--proc").arg("/proc");
+    cmd.arg("--dev").arg("/dev");
+
+    // /tmp is a tmpfs visible only inside the sandbox — escape attempts
+    // like `touch /tmp/escape` from a malicious build.rs go nowhere.
+    cmd.arg("--tmpfs").arg("/tmp");
+
+    // Writable project directory + chdir.
+    cmd.arg("--bind").arg(project_dir).arg(project_dir);
+    cmd.arg("--chdir").arg(project_dir);
+
+    // Cargo + rustup caches must remain writable so the wrapped cargo
+    // can populate registries / build artifacts. We bind them into the
+    // sandbox at their host paths (cargo / rustup honor HOME/CARGO_HOME).
+    if let Ok(home) = std::env::var("HOME") {
+        let cargo_home = Path::new(&home).join(".cargo");
+        if cargo_home.exists() {
+            cmd.arg("--bind").arg(&cargo_home).arg(&cargo_home);
+        }
+        let rustup_home = Path::new(&home).join(".rustup");
+        if rustup_home.exists() {
+            cmd.arg("--bind").arg(&rustup_home).arg(&rustup_home);
+        }
+    }
+
+    // Namespaces / capability drop / lifetime tie-in.
+    cmd.arg("--unshare-pid");
+    cmd.arg("--unshare-net");
+    cmd.arg("--cap-drop").arg("ALL");
+    cmd.arg("--die-with-parent");
+    cmd.arg("--new-session");
+
+    // Strip env down to the allowlist BEFORE bwrap runs so the wrapped
+    // cargo never sees OPENAI_API_KEY / AWS_* / GITHUB_TOKEN.
+    let allowed = theo_tooling::sandbox::env_sanitizer::sanitized_env(&policy);
+    cmd.env_clear();
+    for (key, value) in allowed {
+        cmd.env(key, value);
+    }
+
+    // Apply rlimits to bwrap itself; the wrapped cargo inherits them.
+    // SAFETY: same contract as `spawn_done_gate_cargo_rlimits_only`.
+    let policy_for_exec = policy.clone();
+    unsafe {
+        cmd.pre_exec(move || {
+            theo_tooling::sandbox::rlimits::apply_rlimits(&policy_for_exec)
+        });
+    }
+
+    // Argv: cargo <args>.
+    cmd.arg("cargo");
+    for a in args {
+        cmd.arg(a);
+    }
+
+    cmd.output().await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -91,6 +216,95 @@ mod tests {
         // Permissive: cargo may or may not be installed in the test
         // environment. We just want the type to be io::Result.
         let _ = out;
+    }
+
+    /// T1.1 AC literal — `done_gate_cargo_test_runs_in_sandbox`. Build
+    /// a project whose `build.rs` tries to escape the sandbox by writing
+    /// to a host-visible path under `/tmp`. After running cargo through
+    /// `spawn_done_gate_cargo`, the host-side target path MUST NOT
+    /// exist. Skipped silently when bwrap or cargo are unavailable
+    /// (macOS CI, minimal containers) — those hosts run the
+    /// rlimits-only fallback which does not provide FS isolation.
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn done_gate_cargo_test_runs_in_sandbox() {
+        // Skip when bwrap is unavailable — fallback path does not
+        // isolate the FS, so the AC literal cannot be enforced.
+        if !std::path::Path::new(BWRAP_PATH).exists() {
+            return;
+        }
+        // Skip when cargo is missing.
+        if std::process::Command::new("cargo")
+            .arg("--version")
+            .output()
+            .map(|o| !o.status.success())
+            .unwrap_or(true)
+        {
+            return;
+        }
+
+        // Pick a per-process-unique escape target so concurrent test
+        // runs don't false-positive each other.
+        let escape_target = format!(
+            "/tmp/theo-done-gate-escape-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        // Pre-clean any leftover (defense in depth — test must observe
+        // the post-run state, not pre-run state).
+        let _ = std::fs::remove_file(&escape_target);
+        assert!(
+            !std::path::Path::new(&escape_target).exists(),
+            "pre-condition: escape target must not exist before the run"
+        );
+
+        let project = tempfile::tempdir().expect("tempdir");
+        let cargo_toml = format!(
+            "[package]\n\
+             name = \"theo_t1_1_fixture\"\n\
+             version = \"0.0.0\"\n\
+             edition = \"2021\"\n\
+             build = \"build.rs\"\n\
+             [lib]\n\
+             path = \"src/lib.rs\"\n"
+        );
+        std::fs::write(project.path().join("Cargo.toml"), cargo_toml).unwrap();
+        std::fs::create_dir_all(project.path().join("src")).unwrap();
+        std::fs::write(project.path().join("src/lib.rs"), "").unwrap();
+        // Malicious build.rs — tries to write `escape_target` on the
+        // host. Inside the sandbox this lands in `--tmpfs /tmp` which
+        // is private to the namespace; the host's `/tmp` is untouched.
+        let build_rs = format!(
+            "fn main() {{\n    \
+                let _ = std::fs::write(\"{escape_target}\", b\"escaped\");\n}}\n"
+        );
+        std::fs::write(project.path().join("build.rs"), build_rs).unwrap();
+
+        // Run cargo through the done-gate sandbox.
+        let out = spawn_done_gate_cargo(
+            project.path(),
+            &["build".to_string(), "--quiet".to_string()],
+        )
+        .await;
+
+        // The cargo invocation may fail (offline, missing toolchain,
+        // etc.) — that's not what this AC validates. What we DO assert
+        // is that the host's escape target is still absent, regardless
+        // of cargo's exit code.
+        let _ = out;
+
+        let leaked = std::path::Path::new(&escape_target).exists();
+        // Belt-and-suspenders cleanup before asserting so the next run
+        // starts clean even when this assertion fires.
+        let _ = std::fs::remove_file(&escape_target);
+        assert!(
+            !leaked,
+            "T1.1 AC violated: malicious build.rs escaped the sandbox \
+             and wrote {escape_target} on the host"
+        );
     }
 
     /// T1.1 AC regression — the done-gate policy MUST whitelist basic
