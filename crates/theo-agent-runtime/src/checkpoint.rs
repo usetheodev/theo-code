@@ -392,12 +392,21 @@ mod tests {
         assert!(matches!(err, CheckpointError::WorkdirMissing(_)));
     }
 
+    /// Test helper: probes for `git` on PATH via tokio's process API
+    /// (consistent with the rest of the crate; T2.6 AC). Sync wrapper
+    /// around the async call so the existing sync `#[test]` callers
+    /// don't need rewriting.
     fn git_available() -> bool {
-        std::process::Command::new("git")
-            .arg("--version")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
+        tokio::runtime::Runtime::new()
+            .expect("tokio runtime")
+            .block_on(async {
+                tokio::process::Command::new("git")
+                    .arg("--version")
+                    .output()
+                    .await
+                    .map(|o| o.status.success())
+                    .unwrap_or(false)
+            })
     }
 
     #[test]

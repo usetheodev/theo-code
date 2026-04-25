@@ -30,20 +30,24 @@ impl RetryExecutor {
         Fut: Future<Output = Result<T, E>>,
         E: Display,
     {
-        for attempt in 0..=policy.max_retries {
+        // T2.5: explicit `loop {}` so every exit path is a `return`.
+        // The previous `for attempt in 0..=max_retries` form needed an
+        // `unreachable!()` after the loop (the compiler couldn't see
+        // that the last iteration always returns) — that's a panic
+        // landmine for any future refactor.
+        let mut attempt: u32 = 0;
+        loop {
             match f().await {
                 Ok(value) => return Ok(value),
                 Err(e) => {
-                    // Check if the error is retryable
+                    // Non-retryable: bail immediately.
                     if !is_retryable(&e) {
                         return Err(e);
                     }
-
-                    // Last attempt — don't sleep, just return error
+                    // Final attempt: don't sleep, just surface the error.
                     if attempt == policy.max_retries {
                         return Err(e);
                     }
-
                     // Publish retry event. `delay_ms` is included so
                     // dashboards can track backoff pressure over time
                     // (T3.4 — previously the inline retry in run_engine
@@ -60,19 +64,11 @@ impl RetryExecutor {
                             "delay_ms": delay.as_millis() as u64,
                         }),
                     ));
-
                     tokio::time::sleep(delay).await;
+                    attempt += 1;
                 }
             }
         }
-
-        // Unreachable: the loop covers 0..=max_retries inclusive; the
-        // branch `attempt == max_retries` returns `Err(e)` before falling
-        // through. Kept as `unreachable!()` (not `.expect()`) so refactors
-        // that break this invariant surface as a compile-time lint or a
-        // clearer panic message instead of the ambiguous "retry loop
-        // should have returned".
-        unreachable!("retry loop always returns from within via Ok(v) or Err(e) paths")
     }
 }
 
