@@ -78,11 +78,11 @@ pub fn compute_doom_loop_frequency(steps: &[ProjectedStep]) -> SurrogateMetric {
             tool_calls[i].tool_name.clone().unwrap_or_default(),
             tool_calls[i].payload_summary
         );
-        for j in low..i {
+        for prior in &tool_calls[low..i] {
             let key_j = format!(
                 "{}|{}",
-                tool_calls[j].tool_name.clone().unwrap_or_default(),
-                tool_calls[j].payload_summary
+                prior.tool_name.clone().unwrap_or_default(),
+                prior.payload_summary
             );
             if key_i == key_j {
                 repetitions += 1;

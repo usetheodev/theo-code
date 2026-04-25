@@ -190,7 +190,7 @@ impl FileSubagentRunStore {
                 Some((path, mtime))
             })
             .collect();
-        entries.sort_by(|a, b| b.1.cmp(&a.1));
+        entries.sort_by_key(|x| std::cmp::Reverse(x.1));
         Ok(entries
             .into_iter()
             .filter_map(|(p, _)| {

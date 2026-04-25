@@ -104,7 +104,6 @@ pub fn compute_loop_metrics(
         .iter()
         .filter(|s| s.event_type == "LlmCallStart")
         .count() as u32;
-    let dist: HashMap<String, PhaseMetric>;
     let denom = total_iterations.max(1) as f64;
     let explore = steps.iter().filter(|s| s.event_type == "RetrievalExecuted").count() as u32;
     let edit = steps
@@ -126,7 +125,7 @@ pub fn compute_loop_metrics(
         ("Verify", verify),
         ("Done", done),
     ];
-    dist = counts
+    let dist: HashMap<String, PhaseMetric> = counts
         .into_iter()
         .map(|(name, iterations)| {
             (
@@ -216,7 +215,7 @@ pub fn compute_tool_breakdown(steps: &[ProjectedStep]) -> Vec<ToolBreakdown> {
         b.success_rate = safe_div(b.success_count as f64, b.call_count as f64);
     }
     let mut out: Vec<ToolBreakdown> = map.into_values().collect();
-    out.sort_by(|a, b| b.call_count.cmp(&a.call_count));
+    out.sort_by_key(|b| std::cmp::Reverse(b.call_count));
     out
 }
 

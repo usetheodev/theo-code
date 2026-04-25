@@ -24,6 +24,14 @@ pub(super) mod skill;
 /// Shape returned by every meta-tool handler. The main loop consumes
 /// this via `match` — no handler ever mutates `should_return` /
 /// `continue` flags directly anymore.
+///
+/// `Converged(AgentResult)` is large but the variant carries the
+/// canonical run-result owned across the dispatch boundary. Boxing
+/// it would force one extra heap allocation on the converge path,
+/// which is the only path the main loop selects on a successful
+/// completion — pessimization for no win. Hot-path code that breaks
+/// out of the loop hands the result up the stack as-is.
+#[allow(clippy::large_enum_variant)]
 pub(super) enum DispatchOutcome {
     /// Handler decided the run is done; break with this result.
     Converged(AgentResult),
