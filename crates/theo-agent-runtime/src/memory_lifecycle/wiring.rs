@@ -31,12 +31,12 @@ pub fn maybe_spawn_autodream(
     if attempted.swap(true, std::sync::atomic::Ordering::Relaxed) {
         return;
     }
-    let Some(handle) = cfg.autodream.clone() else {
+    let Some(handle) = cfg.evolution().autodream.cloned() else {
         return;
     };
     let memory_dir = project_dir.join(".theo").join("memory");
     let session_id = run_id.to_string();
-    let timeout = std::time::Duration::from_secs(cfg.autodream_timeout_secs);
+    let timeout = std::time::Duration::from_secs(cfg.evolution().autodream_timeout_secs);
     tokio::spawn(async move {
         match tokio::time::timeout(
             timeout,
@@ -64,7 +64,7 @@ pub fn maybe_prepend_bootstrap(
     project_dir: &std::path::Path,
     sp: String,
 ) -> String {
-    if cfg.is_subagent {
+    if cfg.loop_cfg().is_subagent {
         return sp;
     }
     let memory_dir = project_dir.join(".theo").join("memory");
@@ -87,7 +87,7 @@ pub async fn maybe_index_transcript(
     run_id: &str,
     events: Vec<theo_domain::event::DomainEvent>,
 ) {
-    if cfg.is_subagent || events.is_empty() {
+    if cfg.loop_cfg().is_subagent || events.is_empty() {
         return;
     }
     let Some(handle) = cfg.memory().transcript_indexer.cloned() else {
@@ -129,16 +129,16 @@ pub fn maybe_spawn_reviewers(
 
     if matches!(
         crate::skill_reviewer::should_trigger_skill_review(
-            cfg.skill_review_nudge_interval,
+            cfg.evolution().skill_review_nudge_interval,
             skill_counter,
             tool_calls_this_task,
             skill_created_this_task,
-            cfg.skill_reviewer.is_some(),
+            cfg.evolution().skill_reviewer.is_some(),
         ),
         crate::skill_reviewer::SkillReviewTrigger::ShouldSpawn
-    ) && let Some(reviewer) = cfg.skill_reviewer.clone()
+    ) && let Some(reviewer) = cfg.evolution().skill_reviewer.cloned()
     {
-        let window = recent_review_window(messages, cfg.skill_review_nudge_interval.max(10));
+        let window = recent_review_window(messages, cfg.evolution().skill_review_nudge_interval.max(10));
         // Fire-and-forget: dropping the handle detaches intentionally.
         drop(crate::skill_reviewer::spawn_skill_reviewer(reviewer, window));
         spawned = true;

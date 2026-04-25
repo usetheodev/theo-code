@@ -87,16 +87,34 @@ impl AgentLoop {
     /// changing the signature so existing call sites in `theo-application`
     /// and `apps/*` compile unchanged.
     pub fn new(config: AgentConfig, _registry: ToolRegistry) -> Self {
+        // Snapshot LLM-cluster fields BEFORE moving `config` into Self
+        // (T4.1 view migration — the borrow from `config.llm()` ends with
+        // these locals so the subsequent move is safe).
+        let (
+            client_base_url,
+            client_api_key,
+            client_model,
+            client_endpoint_override,
+            client_extra_headers,
+        ) = {
+            let llm = config.llm();
+            (
+                llm.base_url.to_string(),
+                llm.api_key.cloned(),
+                llm.model.to_string(),
+                llm.endpoint_override.cloned(),
+                llm.extra_headers
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect(),
+            )
+        };
         Self {
-            client_base_url: config.base_url.clone(),
-            client_api_key: config.api_key.clone(),
-            client_model: config.model.clone(),
-            client_endpoint_override: config.endpoint_override.clone(),
-            client_extra_headers: config
-                .extra_headers
-                .iter()
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect(),
+            client_base_url,
+            client_api_key,
+            client_model,
+            client_endpoint_override,
+            client_extra_headers,
             config,
             listeners: Vec::new(),
             graph_context: None,

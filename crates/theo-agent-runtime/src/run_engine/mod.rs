@@ -151,14 +151,14 @@ impl AgentRunEngine {
             task_id: task_id.clone(),
             state: RunState::Initialized,
             iteration: 0,
-            max_iterations: config.max_iterations,
+            max_iterations: config.loop_cfg().max_iterations,
             created_at: now,
             updated_at: now,
         };
 
         // Observability pipeline + LoopDetectingListener (T1.6 + T4.4) installed
         // BEFORE RunInitialized so the event is captured.
-        let observability = (!config.is_subagent).then(|| {
+        let observability = (!config.loop_cfg().is_subagent).then(|| {
             crate::observability::install_observability(
                 &event_bus,
                 run.run_id.as_str(),
@@ -171,14 +171,14 @@ impl AgentRunEngine {
             run.run_id.as_str(),
             serde_json::json!({
                 "task_id": task_id.as_str(),
-                "max_iterations": config.max_iterations,
+                "max_iterations": config.loop_cfg().max_iterations,
             }),
         ));
 
         let context_loop_state = ContextLoopState::new();
 
         let budget = Budget {
-            max_iterations: config.max_iterations,
+            max_iterations: config.loop_cfg().max_iterations,
             ..Budget::default()
         };
         let budget_enforcer = BudgetEnforcer::new(budget, event_bus.clone(), run.run_id.as_str());

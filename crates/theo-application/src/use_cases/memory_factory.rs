@@ -34,7 +34,7 @@ pub fn build_memory_engine(
     config: &AgentConfig,
     project_dir: &Path,
 ) -> Option<Arc<dyn MemoryProvider>> {
-    if !config.memory_enabled {
+    if !config.memory().enabled {
         return None;
     }
 
@@ -68,7 +68,7 @@ pub fn attach_memory_to_config(config: &mut AgentConfig, project_dir: &Path) {
     // `autodream_enabled == false` / `memory_enabled == false` setups
     // by leaving the handle empty.
     #[cfg(feature = "tantivy-backend")]
-    if config.memory_enabled && config.transcript_indexer.is_none() {
+    if config.memory().enabled && config.memory().transcript_indexer.is_none() {
         use std::sync::Arc;
         use theo_agent_runtime::transcript_indexer::TranscriptIndexerHandle;
         let indexer = Arc::new(crate::use_cases::transcript_indexer_impl::TantivyTranscriptIndexer::new());
