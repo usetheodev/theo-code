@@ -529,3 +529,124 @@ async fn agent_done_gate_force_accepts_after_max_attempts() {
         result.iterations_used
     );
 }
+
+/// T0.1 scenario 6 — `skill` meta-tool (InContext mode) loads
+/// instructions into the conversation. Turn 1 LLM calls
+/// `skill(name="commit")` (a bundled InContext skill); the runtime
+/// pushes the skill instructions as a system message AND a confirming
+/// tool_result. Turn 2 LLM returns text → converge. Pins the
+/// `dispatch_skill` InContext branch end-to-end.
+#[tokio::test]
+async fn agent_loads_in_context_skill_then_converges() {
+    let project = tempfile::tempdir().expect("tempdir");
+
+    let skill_body = "data: {\"choices\":[{\"delta\":{\"tool_calls\":[\
+                        {\"index\":0,\"id\":\"c-skill\",\"function\":\
+                        {\"name\":\"skill\",\"arguments\":\"{\\\"name\\\":\\\"commit\\\"}\"}}\
+                    ]}}]}\n\ndata: [DONE]\n\n";
+    let final_body = "data: {\"choices\":[{\"delta\":{\"content\":\"skill loaded\"}}]}\n\n\
+                      data: [DONE]\n\n";
+
+    let bodies = vec![skill_body, final_body];
+    let mock_url = spawn_sse_mock_multi(bodies).await;
+
+    let mut config = AgentConfig::default();
+    config.base_url = mock_url;
+    config.api_key = Some("test-key".to_string());
+    config.is_subagent = true;
+    config.max_iterations = 5;
+
+    let agent = AgentLoop::new(config, create_default_registry());
+    let result = agent.run("commit my changes", project.path()).await;
+
+    assert!(
+        result.success,
+        "skill InContext flow must converge with success=true; summary={:?}",
+        result.summary
+    );
+    assert_eq!(
+        result.iterations_used, 2,
+        "exactly two LLM iterations: skill load → text → converge"
+    );
+    // `tool_calls_total` counts only regular (non-meta) tool dispatches
+    // routed through the ToolCallManager. Meta-tools like `skill`,
+    // `done`, `delegate_task`, `batch_execute` flow through
+    // `dispatch_meta_tool` and don't increment that counter — they
+    // are exercised by `iterations_used` and the side-effect (a
+    // skill-loaded system message + tool_result in the conversation).
+    // Pin the iteration count instead of the tool counter here.
+}
+
+/// T0.1 scenario 7 — tool error + retry. Turn 1 LLM calls `read`
+/// against a path that does not exist (tool returns error). Turn 2
+/// LLM picks a different path (still nonexistent — error again, but
+/// the test verifies the LOOP continues, not the path resolves).
+/// Turn 3 LLM returns text → converge. Pins the contract that a
+/// tool failure does NOT abort the run; the engine surfaces the
+/// error via tool_result and lets the LLM decide what to do.
+#[tokio::test]
+async fn agent_continues_after_tool_failure_until_converge() {
+    let project = tempfile::tempdir().expect("tempdir");
+    let target1 = project.path().join("first-miss.txt");
+    let target1_str = target1.to_string_lossy().replace('\\', "\\\\");
+    let target2 = project.path().join("second-miss.txt");
+    let target2_str = target2.to_string_lossy().replace('\\', "\\\\");
+
+    let read1_body = Box::leak(
+        format!(
+            "data: {{\"choices\":[{{\"delta\":{{\"tool_calls\":[\
+                {{\"index\":0,\"id\":\"c-read1\",\"function\":\
+                {{\"name\":\"read\",\"arguments\":\"{{\\\"filePath\\\":\\\"{target1_str}\\\"}}\"}}}}\
+            ]}}}}]}}\n\ndata: [DONE]\n\n"
+        )
+        .into_boxed_str(),
+    );
+    let read2_body = Box::leak(
+        format!(
+            "data: {{\"choices\":[{{\"delta\":{{\"tool_calls\":[\
+                {{\"index\":0,\"id\":\"c-read2\",\"function\":\
+                {{\"name\":\"read\",\"arguments\":\"{{\\\"filePath\\\":\\\"{target2_str}\\\"}}\"}}}}\
+            ]}}}}]}}\n\ndata: [DONE]\n\n"
+        )
+        .into_boxed_str(),
+    );
+    let final_body = "data: {\"choices\":[{\"delta\":{\"content\":\"giving up\"}}]}\n\n\
+                      data: [DONE]\n\n";
+
+    let bodies = vec![
+        read1_body as &'static str,
+        read2_body as &'static str,
+        final_body,
+    ];
+    let mock_url = spawn_sse_mock_multi(bodies).await;
+
+    let mut config = AgentConfig::default();
+    config.base_url = mock_url;
+    config.api_key = Some("test-key".to_string());
+    config.is_subagent = true;
+    config.max_iterations = 5;
+
+    let agent = AgentLoop::new(config, create_default_registry());
+    let result = agent.run("read file with retry", project.path()).await;
+
+    assert!(
+        result.success,
+        "tool error + retry path must still converge cleanly; summary={:?}",
+        result.summary
+    );
+    assert_eq!(
+        result.iterations_used, 3,
+        "three LLM iterations: failed read → failed read → text"
+    );
+    assert_eq!(
+        result.tool_calls_total, 2,
+        "two tool calls dispatched (both `read` failures)"
+    );
+    // Both reads failed at the tool level — `tool_calls_success`
+    // counts only successful dispatches. Pins that tool-level
+    // failures don't crash the run.
+    assert_eq!(
+        result.tool_calls_success, 0,
+        "both reads must have failed at the tool level"
+    );
+}

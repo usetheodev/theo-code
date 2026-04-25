@@ -1650,3 +1650,14 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 **Cobertura T0.1 atual:** 5 dos cenarios canonicos do plano (text-only converge, single-tool dispatch round-trip, multi-tool happy path, budget exhaustion, done-gate force-accept). Restantes (context overflow recovery, LLM retry+success, done-gate Gate 2 LLM-driven com cargo test, batch tool com LLM stream, skill InContext/SubAgent driven by LLM) seguem a mesma receita SSE-canned-bodies.
 
 **Validacao:** 1304 tests passando entre `theo-agent-runtime`, 0 falhas. `cargo check -p theo-agent-runtime --lib` clean.
+
+### Iteracao 70 (2026-04-25) — T0.1 cenarios 6+7 (skill InContext + tool error retry)
+
+| Task | Status | Notas |
+|---|---|---|
+| T0.1 cenario `agent_loads_in_context_skill_then_converges` | **DONE** | Two-turn flow: turn 1 LLM responde com `skill(name="commit")` (skill bundled em modo `InContext`); o runtime entra em `dispatch_skill::SkillPlan::InContext`, push system message com instructions + tool_result "Skill 'commit' loaded...". Turn 2 LLM responde com texto "skill loaded" → converge. Asserts `success=true`, `iterations_used=2`. Nota documentada: meta-tools (`skill`, `done`, `delegate_task`, `batch_execute`) nao incrementam `tool_calls_total` — esse contador e so para regular tools via ToolCallManager. Pin do contrato InContext skill end-to-end. |
+| T0.1 cenario `agent_continues_after_tool_failure_until_converge` | **DONE** | Three-turn flow: turn 1 LLM responde com `read` em path inexistente (tool fails); turn 2 LLM responde com `read` em path diferente (tambem inexistente — falha de novo); turn 3 LLM responde com texto "giving up" → converge. Asserts `success=true`, `iterations_used=3` exatamente, `tool_calls_total=2` (ambas reads dispatched), `tool_calls_success=0` (ambas falharam no nivel da tool). Pin do contrato "tool failure NAO aborta o run, deixa o LLM decidir o que fazer". |
+
+**Cobertura T0.1 atual:** 7 dos cenarios canonicos do plano. Restantes (context overflow recovery, LLM retry+success com network error, done-gate Gate 2 LLM-driven com cargo, batch+LLM stream, skill SubAgent driven by LLM, resume com ResumeContext) seguem a mesma receita SSE-canned-bodies — dois deles (skill SubAgent, batch+LLM) requerem mais setup mas continuam tractable.
+
+**Validacao:** 1306 tests passando entre `theo-agent-runtime`, 0 falhas. `cargo check -p theo-agent-runtime --lib` clean.
