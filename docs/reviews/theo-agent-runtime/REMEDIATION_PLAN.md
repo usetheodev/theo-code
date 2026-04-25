@@ -1715,3 +1715,14 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 **Cobertura T0.1 atual:** 11 dos cenarios canonicos do plano. Restantes (done-gate Gate 2 LLM-driven com cargo test fail, skill SubAgent driven by LLM) seguem a mesma receita.
 
 **Validacao:** 1310 tests passando entre `theo-agent-runtime`, 0 falhas. `cargo check -p theo-agent-runtime --lib` clean.
+
+### Iteracao 76 (2026-04-25) — T0.1 cenarios 12+13 (Gate 1 block + Gate 2 cargo)
+
+| Task | Status | Notas |
+|---|---|---|
+| T0.1 cenario `agent_done_gate_1_blocks_then_recovers_with_text` | **DONE** | Two-turn flow: turn 1 LLM responde com `done(summary="too eager")` → handle_done_call: attempts=1 (Gate 0 pass), Gate 1 (convergence AllOf GitDiff+EditSuccess) bloqueia porque `edits_succeeded=0`, push `BLOCKED: convergence criteria not met` tool_result, transition para Replanning, DispatchOutcome::Continue. Turn 2 LLM observa o block na history e responde com texto "OK, retracting" → converge cleanly. Asserts: `success=true`, `iterations_used=2`, `summary` NAO contem "too eager" (a summary final do converge nao carrega o summary do done bloqueado). Pin do contrato Gate 1: premature done() NAO aborta o run, surfacing block via tool_result e deixando LLM decidir. |
+| T0.1 cenario 13 underpinning `done_gate_cargo_check_fails_on_broken_manifest` | **DONE** | Unit test em `run_engine_sandbox.rs` que pina o invariante de baixo nivel que Gate 2 usa. Cria tempdir com Cargo.toml propositadamente quebrado (`"this is not valid TOML at all }}}"`), invoca `spawn_done_gate_cargo(project, ["check", "--message-format=short"])` direto, asserta `output.status.success() == false` e que stderr/stdout combinados nao estao vazios (Gate 2 surfacing diagnostico para o LLM). Skip silencioso se cargo missing. O cenario end-to-end de Gate 2 driven by LLM exige choreography write+done sobre git repo (Gate 1 precisa passar primeiro), o que extrapola o escopo de uma iteracao — esse teste underpinning estabiliza o contrato cargo-spawn que Gate 2 chama. |
+
+**Cobertura T0.1 atual:** 12 cenarios canonicos do plano + 1 underpinning para Gate 2. Restante (skill SubAgent driven by LLM com recursive sub-agent spawn) requer setup mais complexo (sub-agent tambem chama LLM, mock saturating handles, registry resolution para spec "verifier") — deixado como follow-up explicito.
+
+**Validacao:** 1312 tests passando entre `theo-agent-runtime`, 0 falhas. `cargo check -p theo-agent-runtime --lib` clean.

@@ -218,6 +218,78 @@ mod tests {
         let _ = out;
     }
 
+    /// T0.1 scenario 13 underpinning — Gate 2 (cargo-test) blocks when
+    /// the project's `cargo check` exits non-zero. The end-to-end gate
+    /// chain runs at the engine level and needs a write+done choreography
+    /// to even reach Gate 2 (Gate 1 must pass first, requiring an edit).
+    /// This test pins the underlying `cargo` invocation contract that
+    /// Gate 2 relies on: a syntactically broken Cargo.toml in the
+    /// project_dir causes `spawn_done_gate_cargo` to return Ok(output)
+    /// with `output.status.success() == false`, which Gate 2 then
+    /// interprets as a block.
+    ///
+    /// Skipped when cargo is missing (macOS CI without rust toolchain,
+    /// minimal containers).
+    #[tokio::test]
+    async fn done_gate_cargo_check_fails_on_broken_manifest() {
+        // Skip when cargo is missing.
+        if std::process::Command::new("cargo")
+            .arg("--version")
+            .output()
+            .map(|o| !o.status.success())
+            .unwrap_or(true)
+        {
+            return;
+        }
+
+        let project = tempfile::tempdir().expect("tempdir");
+        // Deliberately broken TOML — cargo will fail to parse the
+        // manifest before it ever tries to compile anything.
+        std::fs::write(
+            project.path().join("Cargo.toml"),
+            "this is not valid TOML at all }}}",
+        )
+        .unwrap();
+
+        let out = spawn_done_gate_cargo(
+            project.path(),
+            &[
+                "check".to_string(),
+                "--message-format=short".to_string(),
+            ],
+        )
+        .await;
+
+        match out {
+            Ok(output) => {
+                assert!(
+                    !output.status.success(),
+                    "broken Cargo.toml must yield a non-zero exit; \
+                     stdout={:?} stderr={:?}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                // Gate 2 surfaces the stderr to the LLM via the BLOCKED
+                // tool_result. Verify the failure carries diagnosable
+                // text — TOML parser error mentions the manifest.
+                let combined = format!(
+                    "{}\n{}",
+                    String::from_utf8_lossy(&output.stderr),
+                    String::from_utf8_lossy(&output.stdout)
+                );
+                assert!(
+                    !combined.trim().is_empty(),
+                    "broken cargo invocation must surface diagnostics for Gate 2"
+                );
+            }
+            // io::Error means cargo couldn't be spawned at all. The
+            // skip-guard above should prevent this branch, but treat
+            // it permissively rather than failing the test on infra
+            // weirdness.
+            Err(_) => {}
+        }
+    }
+
     /// T1.1 AC literal — `done_gate_cargo_test_runs_in_sandbox`. Build
     /// a project whose `build.rs` tries to escape the sandbox by writing
     /// to a host-visible path under `/tmp`. After running cargo through

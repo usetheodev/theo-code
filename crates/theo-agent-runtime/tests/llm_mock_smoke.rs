@@ -1136,3 +1136,60 @@ async fn agent_replays_cached_tool_result_on_resume() {
         result.tool_calls_total
     );
 }
+
+/// T0.1 scenario 12 — Done-gate Gate 1 (convergence) blocks a
+/// premature `done()` call. Turn 1 LLM calls `done()` with no
+/// edits made (`edits_succeeded=0`). Gate 0 (attempt limit) passes
+/// because attempts=1 ≤ MAX_DONE_ATTEMPTS=3. Gate 1 (convergence
+/// AllOf GitDiff + EditSuccess) fails because `edits_succeeded=0`,
+/// blocks with a "BLOCKED: convergence criteria not met" tool
+/// result, and transitions to Replanning. Turn 2 LLM observes the
+/// block in history and emits text → converge cleanly.
+///
+/// Pins the Gate 1 contract: a single premature done() call does
+/// NOT abort the run; the engine surfaces the convergence violation
+/// via tool_result and lets the LLM decide what to do next.
+#[tokio::test]
+async fn agent_done_gate_1_blocks_then_recovers_with_text() {
+    let project = tempfile::tempdir().expect("tempdir");
+
+    let done_body = "data: {\"choices\":[{\"delta\":{\"tool_calls\":[\
+                        {\"index\":0,\"id\":\"c-done-premature\",\"function\":\
+                        {\"name\":\"done\",\"arguments\":\"{\\\"summary\\\":\\\"too eager\\\"}\"}}\
+                    ]}}]}\n\ndata: [DONE]\n\n";
+    let final_body = "data: {\"choices\":[{\"delta\":{\"content\":\"OK, retracting\"}}]}\n\n\
+                      data: [DONE]\n\n";
+
+    let bodies = vec![done_body, final_body];
+    let mock_url = spawn_sse_mock_multi(bodies).await;
+
+    let mut config = AgentConfig::default();
+    config.base_url = mock_url;
+    config.api_key = Some("test-key".to_string());
+    config.is_subagent = true;
+    config.max_iterations = 5;
+
+    let agent = AgentLoop::new(config, create_default_registry());
+    let result = agent.run("premature done", project.path()).await;
+
+    // Final outcome: text-only convergence on turn 2.
+    assert!(
+        result.success,
+        "Gate 1 block + text retreat must converge cleanly; summary={:?}",
+        result.summary
+    );
+    assert_eq!(
+        result.iterations_used, 2,
+        "exactly two LLM iterations: blocked done → text → converge"
+    );
+    // The summary surfaces the FINAL turn's content, not the blocked
+    // done's attempted "too eager" summary. This pins the contract
+    // that a Gate-1-blocked done() does not corrupt the converge
+    // result.
+    assert!(
+        !result.summary.contains("too eager"),
+        "final summary must not carry the blocked done's summary; \
+         got {:?}",
+        result.summary
+    );
+}
