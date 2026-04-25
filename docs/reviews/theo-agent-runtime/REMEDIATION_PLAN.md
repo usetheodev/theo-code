@@ -1489,3 +1489,12 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 | T5.2 SubAgentIntegrations | **DONE (migration coordenada)** | A struct `SubAgentIntegrations` (11 fields) + builder `with_subagent_integrations` ja existiam em iter anterior. Faltava migrar o ultimo caller real (`theo-application::use_cases::run_agent_session::SubagentInjections::apply_to`) para usar a struct ao inves de chain de 10 `with_subagent_*`. Aplicado: `apply_to` agora constroi um `SubAgentIntegrations` literal com 11 campos `Option::clone()` e chama `loop_.with_subagent_integrations(integrations)` em uma unica linha (substitui ~30 LOC de if-let chains). `SubAgentIntegrations` adicionada ao `pub use` de `lib.rs` para tornar o tipo publicamente acessivel. Os 11 builders individuais permanecem em `AgentLoop` para manter compatibilidade com 16 testes internos (de-facto-deprecated mas sem `#[deprecated]` para nao quebrar `RUSTFLAGS=-D warnings` em CI). |
 
 **Validacao:** 1156 unit (+1 T1.4 AC) + 103 integration + 6 security + 4 resilience + 6 meta-tools = **1275 tests passando, 0 falhas**. Zero warnings em `theo-agent-runtime`. `theo-application` compila + tests verdes (1 warning pre-existente fora do escopo: `scorer` field unused em graph_context_service).
+
+### Iteracao 54 (2026-04-25) — T2.2 expect UNIX epoch + T1.2 AC literals
+
+| Task | Status | Notas |
+|---|---|---|
+| T2.2 expect("system clock") elimination | **DONE** | Unico site remanescente em `autodream::tests::now_secs` (`.expect("system time before UNIX epoch")`) substituido por `.map(|d| d.as_secs()).unwrap_or(0)` — alinha com a politica do helper unificado `theo_domain::clock::now_millis()` (retorna 0 em caso de skew). `rg "expect.*system.*UNIX\|expect.*system clock"` retorna 0 hits. |
+| T1.2 AC test literals | **DONE** | Adicionados em `tests/security_t7_1.rs` os 2 nomes literais do AC: `git_log_with_injection_tokens_is_stripped` (verifica strip de `<\|im_start\|>`, `<\|im_end\|>`, `[INST]`, `[/INST]` em commit message + survival do conteudo benigno) e `git_log_is_fenced_in_xml_tags` (valida o envelope canonico `<git-log>...</git-log>` + survival do body). Mantem-se o teste `git_log_injection_tokens_are_stripped` (forma anterior) para nao quebrar baselines existentes; total 8 testes em security_t7_1.rs. |
+
+**Validacao:** 1156 unit + 105 integration (+2 T1.2 AC) + 8 security (+2 aliases) + 4 resilience + 6 meta-tools = **1279 tests passando, 0 falhas**. Zero warnings.

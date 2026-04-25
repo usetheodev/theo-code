@@ -430,10 +430,13 @@ mod tests {
     use super::*;
 
     fn now_secs() -> u64 {
+        // T2.2: never `.expect()` on system-clock arithmetic — a clock
+        // skew before UNIX_EPOCH yields 0 seconds (matches the unified
+        // `theo_domain::clock::now_millis()` helper's policy).
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .expect("system time before UNIX epoch")
-            .as_secs()
+            .map(|d| d.as_secs())
+            .unwrap_or(0)
     }
 
     // ── AC-2.6 & AC-2.8 ────────────────────────────────────────────
