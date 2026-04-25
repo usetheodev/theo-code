@@ -311,7 +311,7 @@ mod tests {
         let f = File::open(path).unwrap();
         let r = BufReader::new(f);
         r.lines()
-            .filter_map(|l| l.ok())
+            .map_while(Result::ok)
             .filter(|l| !l.is_empty())
             .filter_map(|l| serde_json::from_str(&l).ok())
             .collect()

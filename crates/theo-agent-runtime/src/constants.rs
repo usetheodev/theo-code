@@ -92,7 +92,13 @@ pub const DONE_GATE_NPROC: u32 = 128;
 mod tests {
     use super::*;
 
+    /// These assertions are deliberate guards: each one fires only if a
+    /// future PR raises/lowers a sanity-bound constant past the
+    /// documented invariant. Clippy flags them as "constant" because at
+    /// the current commit every operand is a compile-time literal — but
+    /// that's the point of the test (compile-time invariant pinning).
     #[test]
+    #[allow(clippy::assertions_on_constants)]
     fn constants_are_within_sanity_bounds() {
         assert!(MAX_DONE_ATTEMPTS >= 1 && MAX_DONE_ATTEMPTS <= 10);
         assert!(MAX_BATCH_SIZE >= 1 && MAX_BATCH_SIZE <= 100);

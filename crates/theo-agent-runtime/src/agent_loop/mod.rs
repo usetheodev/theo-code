@@ -349,7 +349,7 @@ impl AgentLoop {
 
         let task_manager = Arc::new(TaskManager::new(event_bus.clone()));
         let tcm = ToolCallManager::new(event_bus.clone());
-        let tool_call_manager = Arc::new(match &self.config.capability_set {
+        let tool_call_manager = Arc::new(match self.config.plugin().capability_set {
             Some(caps) => {
                 let gate = Arc::new(CapabilityGate::new(caps.clone(), event_bus.clone()));
                 tcm.with_capability_gate(gate)
@@ -406,7 +406,7 @@ impl AgentLoop {
         load_plugin_tools(
             &mut registry,
             project_dir,
-            self.config.plugin_allowlist.as_ref(),
+            self.config.plugin().allowlist,
             event_bus,
         );
         registry
@@ -485,11 +485,12 @@ mod tests {
 
     /// T3.2 AC regression — `run()` and `run_with_history()` MUST both
     /// route through `execute_and_shutdown`, which in turn invokes
-    /// `record_session_exit_public` so the memory + episode persistence
-    /// + metrics flush always fire. A future refactor that re-inlines
-    /// either path or skips the shutdown call would break this
-    /// invariant. We assert it structurally on the source rather than
-    /// running an end-to-end test (which would need an LLM mock).
+    /// `record_session_exit_public` so the memory hook, episode
+    /// persistence, and metrics flush always fire. A future refactor
+    /// that re-inlines either path or skips the shutdown call would
+    /// break this invariant. We assert it structurally on the source
+    /// rather than running an end-to-end test (which would need an
+    /// LLM mock).
     #[test]
     fn run_and_run_with_history_both_call_record_session_exit() {
         let src = include_str!("mod.rs");
