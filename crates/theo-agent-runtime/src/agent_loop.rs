@@ -142,8 +142,6 @@ pub struct AgentLoop {
     client_model: String,
     client_endpoint_override: Option<String>,
     client_extra_headers: Vec<(String, String)>,
-    #[allow(dead_code)] // Stored for backward compat; runtime uses create_default_registry()
-    registry: ToolRegistry,
     config: AgentConfig,
     listeners: Vec<Arc<dyn EventListener>>,
     graph_context: Option<Arc<dyn theo_domain::graph_context::GraphContextProvider>>,
@@ -172,7 +170,15 @@ pub struct AgentLoop {
 }
 
 impl AgentLoop {
-    pub fn new(config: AgentConfig, registry: ToolRegistry) -> Self {
+    /// Construct an AgentLoop bound to a config + tool registry.
+    ///
+    /// The `registry` parameter is preserved for backward compatibility
+    /// with the original API shape but is intentionally dropped — the
+    /// runtime materializes its own registry via `create_default_registry()`
+    /// inside `AgentRunEngine`. We keep the parameter rather than
+    /// changing the signature so existing call sites in `theo-application`
+    /// and `apps/*` compile unchanged.
+    pub fn new(config: AgentConfig, _registry: ToolRegistry) -> Self {
         Self {
             client_base_url: config.base_url.clone(),
             client_api_key: config.api_key.clone(),
@@ -183,7 +189,6 @@ impl AgentLoop {
                 .iter()
                 .map(|(k, v)| (k.clone(), v.clone()))
                 .collect(),
-            registry,
             config,
             listeners: Vec::new(),
             graph_context: None,
