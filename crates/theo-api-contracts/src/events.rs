@@ -176,7 +176,7 @@ mod tests {
 
     #[test]
     fn every_variant_is_distinguishable_on_the_wire() {
-        let variants = vec![
+        let variants = [
             FrontendEvent::Token { text: "t".into() },
             FrontendEvent::ToolStart {
                 name: "n".into(),
