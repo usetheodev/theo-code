@@ -1705,3 +1705,13 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 **Cobertura T0.1 atual:** 10 dos cenarios canonicos do plano. Restantes (done-gate Gate 2 LLM-driven com cargo, skill SubAgent driven by LLM, resume com ResumeContext) seguem a mesma receita.
 
 **Validacao:** 1309 tests passando entre `theo-agent-runtime`, 0 falhas. `cargo check -p theo-agent-runtime --lib` clean.
+
+### Iteracao 75 (2026-04-25) — T0.1 cenario 11 (resume com ResumeContext)
+
+| Task | Status | Notas |
+|---|---|---|
+| T0.1 cenario `agent_replays_cached_tool_result_on_resume` | **DONE** | Setup: pre-build de `ResumeContext` com `executed_tool_calls = {"c-cached"}` e `executed_tool_results["c-cached"] = Message::tool_result("c-cached", "read", "cached file contents")`. Wired no AgentLoop via `with_resume_context(ctx)`. Mock LLM turn 1 retorna tool_call com mesmo `id="c-cached"` → engine consulta resume context, ve `should_skip_tool_call=true`, push o cached `tool_result` message, emite `ToolCallCompleted{replayed:true}` event, NAO invoca o dispatcher. Turn 2 LLM texto → converge. Listener custom `ReplayCounter` prova evento publicado. Asserts: `success=true`, `iterations_used=2`, `replay_counter.count() >= 1`, `tool_calls_total == 0` (CRITICAL — replay path bypassa o dispatcher entirely). Pin do invariante gap-#3: resumed run nunca double-executa tool calls que ja completaram. |
+
+**Cobertura T0.1 atual:** 11 dos cenarios canonicos do plano. Restantes (done-gate Gate 2 LLM-driven com cargo test fail, skill SubAgent driven by LLM) seguem a mesma receita.
+
+**Validacao:** 1310 tests passando entre `theo-agent-runtime`, 0 falhas. `cargo check -p theo-agent-runtime --lib` clean.

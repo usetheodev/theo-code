@@ -1005,3 +1005,134 @@ async fn agent_dispatches_batch_execute_then_converges() {
         result.tool_calls_total
     );
 }
+
+/// Listener that records every `ToolCallCompleted` event whose
+/// payload has `replayed: true`. Used by the resume scenario to
+/// prove the engine bypassed the dispatcher and pulled the cached
+/// tool_result instead.
+struct ReplayCounter {
+    count: parking_lot::Mutex<u64>,
+}
+
+impl ReplayCounter {
+    fn new() -> Self {
+        Self {
+            count: parking_lot::Mutex::new(0),
+        }
+    }
+    fn count(&self) -> u64 {
+        *self.count.lock()
+    }
+}
+
+impl EventListener for ReplayCounter {
+    fn on_event(&self, e: &DomainEvent) {
+        if e.event_type == EventType::ToolCallCompleted
+            && e.payload
+                .get("replayed")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+        {
+            *self.count.lock() += 1;
+        }
+    }
+}
+
+/// T0.1 scenario 11 — resume with `ResumeContext` replays a cached
+/// tool result instead of dispatching. Setup:
+///   - Build a `ResumeContext` containing one cached tool_result
+///     for `call_id = "c-cached"`.
+///   - Wire it into `AgentLoop::with_resume_context`.
+///   - Mock LLM returns the SAME `call_id` in turn 1 → engine
+///     consults the resume context, sees the call_id is in the
+///     `executed_tool_calls` set, pushes the cached `tool_result`
+///     message, emits a `ToolCallCompleted{replayed:true}` event,
+///     and DOES NOT invoke the dispatcher.
+///   - Turn 2 LLM returns text → converge.
+///
+/// Pins the gap-#3 invariant: a resumed run never double-executes
+/// a tool call that already completed in the original run.
+#[tokio::test]
+async fn agent_replays_cached_tool_result_on_resume() {
+    use std::collections::{BTreeMap, BTreeSet};
+    use theo_agent_runtime::subagent::resume::{ResumeContext, WorktreeStrategy};
+    use theo_domain::agent_spec::AgentSpec;
+    use theo_infra_llm::types::Message;
+
+    let project = tempfile::tempdir().expect("tempdir");
+
+    // Pre-build the resume context. The cached tool_result is what
+    // the engine will inject in lieu of dispatching the `read`.
+    let mut executed = BTreeSet::new();
+    executed.insert("c-cached".to_string());
+    let mut cached: BTreeMap<String, Message> = BTreeMap::new();
+    cached.insert(
+        "c-cached".to_string(),
+        Message::tool_result("c-cached", "read", "cached file contents"),
+    );
+    let resume_ctx = Arc::new(ResumeContext {
+        spec: AgentSpec::on_demand("scout", "noop"),
+        start_iteration: 0,
+        history: Vec::new(),
+        prior_tokens_used: 0,
+        checkpoint_before: None,
+        executed_tool_calls: executed,
+        executed_tool_results: cached,
+        worktree_strategy: WorktreeStrategy::None,
+    });
+
+    // LLM turn 1: same `call_id` as the cached entry → triggers replay.
+    let read_body = "data: {\"choices\":[{\"delta\":{\"tool_calls\":[\
+                        {\"index\":0,\"id\":\"c-cached\",\"function\":\
+                        {\"name\":\"read\",\"arguments\":\"{\\\"filePath\\\":\\\"x.rs\\\"}\"}}\
+                    ]}}]}\n\ndata: [DONE]\n\n";
+    let final_body = "data: {\"choices\":[{\"delta\":{\"content\":\"resumed and done\"}}]}\n\n\
+                      data: [DONE]\n\n";
+    let bodies = vec![read_body, final_body];
+    let mock_url = spawn_sse_mock_multi(bodies).await;
+
+    let mut config = AgentConfig::default();
+    config.base_url = mock_url;
+    config.api_key = Some("test-key".to_string());
+    config.is_subagent = true;
+    config.max_iterations = 5;
+
+    let bus = Arc::new(EventBus::new());
+    let replay_counter = Arc::new(ReplayCounter::new());
+    bus.subscribe(replay_counter.clone() as Arc<dyn EventListener>);
+
+    let agent = AgentLoop::new(config, create_default_registry())
+        .with_resume_context(resume_ctx);
+    let result = agent
+        .run_with_history(
+            "resume run",
+            project.path(),
+            Vec::new(),
+            Some(bus.clone()),
+        )
+        .await;
+
+    assert!(
+        result.success,
+        "resume + cached replay must converge with success=true; summary={:?}",
+        result.summary
+    );
+    assert_eq!(
+        result.iterations_used, 2,
+        "two LLM iterations: replay turn → text → converge"
+    );
+    assert!(
+        replay_counter.count() >= 1,
+        "EventBus must observe at least one ToolCallCompleted{{replayed:true}}; \
+         got {}",
+        replay_counter.count()
+    );
+    // The engine bypassed the dispatcher entirely — the regular
+    // tool counter must not register the replayed call.
+    assert_eq!(
+        result.tool_calls_total, 0,
+        "replay path must NOT increment tool_calls_total (the dispatcher \
+         was bypassed); got {}",
+        result.tool_calls_total
+    );
+}
