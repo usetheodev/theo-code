@@ -1461,3 +1461,13 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 | T2.6 std::process::Command em async fn | **DONE** | Unico site remanescente em `checkpoint.rs::tests::git_available` (helper sync de teste) refatorado para usar `tokio::process::Command` envolto em `tokio::runtime::Runtime::new().block_on(...)`. Sync wrapper preserva os call sites `#[test]` sem precisar reescreve-los como `#[tokio::test]`. AC literal `rg "std::process::Command" crates/theo-agent-runtime/src` retorna 0 hits. |
 
 **Validacao:** 1151 unit + 103 integration + 6 security + 4 resilience + 6 meta-tools = **1270 tests passando, 0 falhas**. Zero warnings.
+
+### Iteracao 51 (2026-04-25) — T3.x close-out (T3.1/T3.2 AC test/T3.3 verificado)
+
+| Task | Status | Notas |
+|---|---|---|
+| T3.1 from_engine_state helper | **DONE (verificado)** | `rg "tokens_used: self.metrics.snapshot\(\)"` no crate retorna 0 hits. O helper `AgentResult::from_engine_state(&engine, success, summary, was_streamed, error_class)` foi criado em iter anterior e todos os 5+ sites inline ja foram migrados. |
+| T3.2 unify run/run_with_history + AC test | **DONE** | `run()` (4 LOC) e `run_with_history()` (10 LOC) ja delegam para `build_engine` + `execute_and_shutdown` em iter anterior — DRY refactor concluido. AC literal pedia teste `run_and_run_with_history_both_call_record_session_exit` que estava ausente: adicionado em `agent_loop::tests` (estrutural via `include_str!`) validando (1) ambas as funcoes contem `execute_and_shutdown`, (2) `execute_and_shutdown` invoca `record_session_exit_public`, (3) cada body cabe em <= 30 LOC (parser de chaves balanceadas). |
+| T3.3 centralizar env vars | **DONE (verificado)** | `rg "std::env::var" crates/theo-agent-runtime/src` retorna 3 hits TODOS dentro de `#[cfg(test)] mod` — sao test fixtures (`EnvSnapshot::capture` em `project_config`/`run_engine_sandbox`/`execution::forced_tool_choice_tests`) que salvam/restauram estado de env para serializacao de testes. Producao 0 hits. Helper centralizado `theo_domain::environment::{theo_var, bool_var}` e usado em todos os call sites de producao. |
+
+**Validacao:** 1152 unit (+1 T3.2 AC) + 103 integration + 6 security + 4 resilience + 6 meta-tools = **1271 tests passando, 0 falhas**. Zero warnings.

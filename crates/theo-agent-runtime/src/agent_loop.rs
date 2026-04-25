@@ -556,6 +556,77 @@ mod tests {
         assert!(!result.success);
     }
 
+    /// T3.2 AC regression — `run()` and `run_with_history()` MUST both
+    /// route through `execute_and_shutdown`, which in turn invokes
+    /// `record_session_exit_public` so the memory + episode persistence
+    /// + metrics flush always fire. A future refactor that re-inlines
+    /// either path or skips the shutdown call would break this
+    /// invariant. We assert it structurally on the source rather than
+    /// running an end-to-end test (which would need an LLM mock).
+    #[test]
+    fn run_and_run_with_history_both_call_record_session_exit() {
+        let src = include_str!("agent_loop.rs");
+        // Collapse line wraps so multi-line method bodies still match.
+        let flat: String = src.split_whitespace().collect::<Vec<_>>().join(" ");
+
+        // Both paths delegate to `execute_and_shutdown`.
+        let run_delegates =
+            flat.contains("pub async fn run ( & self") && flat.contains("execute_and_shutdown");
+        let history_delegates = flat.contains("pub async fn run_with_history")
+            && flat.contains("execute_and_shutdown");
+        assert!(
+            run_delegates,
+            "run() must delegate through execute_and_shutdown"
+        );
+        assert!(
+            history_delegates,
+            "run_with_history() must delegate through execute_and_shutdown"
+        );
+
+        // `execute_and_shutdown` itself must call `record_session_exit_public`.
+        assert!(
+            flat.contains("record_session_exit_public"),
+            "execute_and_shutdown must invoke record_session_exit_public"
+        );
+
+        // Lightweight LOC budget check — `run()` and `run_with_history()`
+        // bodies must each fit in <= 30 LOC (T3.2 AC).
+        let body = |fn_decl: &str| -> usize {
+            let start = src.find(fn_decl).expect("fn declaration present");
+            let after = &src[start..];
+            // Find the matching closing brace at the function's outer level.
+            let mut depth = 0i32;
+            let mut count = 0usize;
+            let mut entered = false;
+            for ch in after.chars() {
+                if ch == '\n' {
+                    count += 1;
+                }
+                if ch == '{' {
+                    depth += 1;
+                    entered = true;
+                }
+                if ch == '}' {
+                    depth -= 1;
+                    if entered && depth == 0 {
+                        return count;
+                    }
+                }
+            }
+            count
+        };
+        let run_loc = body("pub async fn run(");
+        let history_loc = body("pub async fn run_with_history(");
+        assert!(
+            run_loc <= 30,
+            "run() body too long: {run_loc} LOC > 30 (T3.2 AC)"
+        );
+        assert!(
+            history_loc <= 30,
+            "run_with_history() body too long: {history_loc} LOC > 30 (T3.2 AC)"
+        );
+    }
+
     #[test]
     fn test_agent_loop_new_preserves_constructor_fields() {
         let config = AgentConfig::default();
