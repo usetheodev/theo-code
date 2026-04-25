@@ -147,7 +147,7 @@ pub fn list_agent_runs(project_dir: &Path, agent_name: &str) -> Vec<RecentRun> {
         .filter_map(|id| store.load(&id).ok())
         .filter(|r| r.agent_name == agent_name)
         .collect();
-    runs.sort_by(|a, b| b.started_at.cmp(&a.started_at));
+    runs.sort_by_key(|r| std::cmp::Reverse(r.started_at));
     runs.into_iter()
         .map(|r| RecentRun {
             run_id: r.run_id,
@@ -174,7 +174,7 @@ pub fn get_agent(project_dir: &Path, agent_name: &str, limit: usize) -> Option<A
     if runs.is_empty() {
         return None;
     }
-    runs.sort_by(|a, b| b.started_at.cmp(&a.started_at));
+    runs.sort_by_key(|r| std::cmp::Reverse(r.started_at));
 
     // Build stats from full set
     let mut stats = AgentStats {
