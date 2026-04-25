@@ -1821,3 +1821,11 @@ Plus underpinning: `done_gate_cargo_check_fails_on_broken_manifest` em `run_engi
 | Cleanup remaining clippy warnings | **DONE** | Reduzidos clippy warnings em `theo-agent-runtime` lib de 10 para **0**. Fixes mecanicos (4): (1) `subagent_runs.rs:193` — `sort_by(\|a,b\| b.1.cmp(&a.1))` → `sort_by_key(\|x\| Reverse(x.1))`; (2) `observability/otel.rs:226` — mesmo padrao para `top_by_tokens`; (3) `observability/report/metrics.rs:219` — mesmo padrao para tool breakdown; (4) `observability/report/metrics.rs:107` — `let dist: HashMap;` declarado antes do uso → combinado com a atribuicao via `let dist: HashMap = ...`; (5) `observability/derived_metrics.rs:81` — `for j in low..i { tool_calls[j] }` → `for prior in &tool_calls[low..i]`. Allow com justificativa em 5 sites estruturais: `DispatchOutcome`, `GateOutcome`, `GuardrailResolution` (large_enum_variant — boxing custaria allocation a cada converge/short-circuit), `register_cancellation_or_bail` + `enforce_max_depth` (result_large_err — boxing AgentResult forçaria deref extra em todo call site da spawn flow). |
 
 **Validacao:** 1174 unit tests passando, 0 falhas. `cargo clippy -p theo-agent-runtime --lib` agora **silent** — zero warnings em codigo proprio (warnings remanescentes sao apenas em deps externos: theo-infra-llm, theo-infra-mcp).
+
+### Iteracao 84 (2026-04-25) — Hygiene: clippy tests cleanup
+
+| Task | Status | Notas |
+|---|---|---|
+| Cleanup test-binary clippy warnings | **DONE** | (1) `tests/run_engine_characterization.rs` — `CapturingListener::new()` agora usa `#[derive(Default)]` + `Self::default()` (clippy::new_without_default). (2) Mesmo arquivo — duas chamadas `call_id.as_str().to_string().into()` simplificadas para `.to_string()` (useless_conversion — `.into()` apos `.to_string()` so converte String para String). (3) `tests/sota12_integration.rs:99` — `&format!("r-{}", i)` → `format!("r-{}", i)` (SubagentRun::new_running aceita `impl Into<String>`, sem precisar do borrow). (4) `tests/observability_live_probe.rs` — adicionado `#![allow(clippy::field_reassign_with_default)]` no topo (mesmo padrao de `run_engine_routing.rs` e `llm_mock_smoke.rs`). |
+
+**Validacao:** todos os tests passando, 0 falhas. Tests-binary clippy warnings reduzidos. Os 15 lib-test warnings remanescentes (constant assertions, useless format/vec) sao em testes inline e fora do escopo desta iteracao.

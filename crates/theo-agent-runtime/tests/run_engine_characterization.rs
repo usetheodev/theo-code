@@ -42,15 +42,14 @@ use theo_tooling::registry::create_default_registry;
 
 /// Local capturing listener (the one in `event_bus.rs` is gated by
 /// `#[cfg(test)]` and thus invisible to integration test crates).
+#[derive(Default)]
 pub struct CapturingListener {
     events: Mutex<Vec<DomainEvent>>,
 }
 
 impl CapturingListener {
     pub fn new() -> Self {
-        Self {
-            events: Mutex::new(Vec::new()),
-        }
+        Self::default()
     }
     pub fn captured(&self) -> Vec<DomainEvent> {
         self.events.lock().clone()
@@ -162,7 +161,7 @@ async fn scenario_tool_call_dispatch_emits_three_events_in_order() {
     let ctx = ToolContext {
         session_id: SessionId::new("s"),
         message_id: MessageId::new("m"),
-        call_id: call_id.as_str().to_string().into(),
+        call_id: call_id.as_str().to_string(),
         agent: "test".to_string(),
         abort: tokio::sync::watch::channel(false).1,
         project_dir: PathBuf::from("/tmp"),
@@ -250,7 +249,7 @@ async fn scenario_task_plus_tool_lifecycle_combined_sequence() {
     let ctx = ToolContext {
         session_id: SessionId::new("s"),
         message_id: MessageId::new("m"),
-        call_id: call_id.as_str().to_string().into(),
+        call_id: call_id.as_str().to_string(),
         agent: "test".to_string(),
         abort: tokio::sync::watch::channel(false).1,
         project_dir: PathBuf::from("/tmp"),
