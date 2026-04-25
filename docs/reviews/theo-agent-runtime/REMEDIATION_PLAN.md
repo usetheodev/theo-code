@@ -1536,3 +1536,11 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 | T8.5 MAX_LOC apertado | **DONE** | Cap baixado de 750 para 725. Top files: main_loop 722, pilot/mod 571, spawn_helpers 532, config/mod 518, agent_loop 509. Smoke test OK — todos ≤725. |
 
 **Validacao:** 1157 unit + 105 integration + 8 security + 4 resilience + 6 meta-tools = **1280 tests passando, 0 falhas**. Zero warnings. Module-size gate verde a cap 725.
+
+### Iteracao 59 (2026-04-25) — pilot/mod.rs split (types + git helpers)
+
+| Task | Status | Notas |
+|---|---|---|
+| T4.* pilot/mod.rs split | **DONE** | Convertido para diretorio com dois novos child modules: `pilot/types.rs` (~50 LOC) com `CircuitBreakerState` + `ExitReason` + `ExitReason::Display` + `PilotResult`, re-exportados via `pub use types::{...}` para preservar paths publicos byte-identicos; e `pilot/git.rs` (~65 LOC, `pub(super)` only) com `GitProgress` + `detect_git_progress` + `get_git_sha` + `get_changed_file_count`. Tests internos em `mod tests` continuam acessando `GitProgress` via `super::*` sem mudanca. `pilot/mod.rs`: 571 → **481 LOC** (-90, -16%) — primeiro arquivo a cair abaixo do alvo long-term de 500 desde que o gate foi introduzido. |
+
+**Validacao:** 1157 unit tests passando, 0 falhas. `cargo check -p theo-agent-runtime --lib` clean. Module-size gate verde a cap 725. Top production-LOC restantes >500: main_loop 722, spawn_helpers 532, config/mod 518, agent_loop 509 (4 arquivos, era 5).
