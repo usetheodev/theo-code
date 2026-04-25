@@ -314,3 +314,6 @@ evolution-output/
 !.theo/wiki/code/
 .theo/secrets/
 .theo/bench-data/
+
+# insta pending snapshots — review state, not source
+**/*.pending-snap

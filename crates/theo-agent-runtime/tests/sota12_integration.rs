@@ -96,7 +96,7 @@ fn phase15_subagent_runs_index_by_agent_name() {
     let spec = builtins::explorer();
     for i in 0..3 {
         let mut run = SubagentRun::new_running(
-            &format!("r-{}", i),
+            format!("r-{}", i),
             None,
             &spec,
             "obj",

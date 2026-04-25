@@ -117,7 +117,11 @@ impl SubAgentManager {
     /// on the happy path, or a `ready-to-publish` AgentResult when we must
     /// short-circuit (cancelled-before-start). `None` token return means no
     /// cancellation tree is attached — the agent runs without cancellation.
-    #[allow(clippy::type_complexity)]
+    // The Err variant is `AgentResult` (large) to keep the early-return
+    // shape of pre-run guards uniform with the rest of the spawn flow.
+    // Boxing it would force every spawn call site to deref through an
+    // extra heap allocation on the (rare) cancellation path.
+    #[allow(clippy::type_complexity, clippy::result_large_err)]
     pub(super) fn register_cancellation_or_bail(
         &self,
         run_id: &str,
@@ -147,6 +151,9 @@ impl SubAgentManager {
     /// Enforce `MAX_DEPTH` on sub-agent nesting. Returns `Err(AgentResult)`
     /// when the limit is reached (caller persists + publishes); `Ok(())`
     /// otherwise.
+    // Same Err-variant rationale as `register_cancellation_or_bail`:
+    // uniform shape with the rest of the spawn flow.
+    #[allow(clippy::result_large_err)]
     pub(super) fn enforce_max_depth(
         &self,
         spec: &AgentSpec,
@@ -325,14 +332,18 @@ impl SubAgentManager {
     }
 
     /// Resolve a worktree handle honoring the override.
+    ///
     /// Precedence:
-    ///   - `Reuse(path)` → wrap the existing path with `WorktreeHandle::existing`
-    ///     (synthetic branch `"(reused)"` flags it for cleanup-skip).
-    ///   - `Recreate { base }` → call `provider.create(spec.name, base)`.
-    ///   - `None` → legacy behavior: use `spec.isolation_base_branch` or `main`.
-    /// A `master` fallback is attempted on provider failure to cover legacy git
-    /// defaults. Returns `None` when no provider is attached OR
-    /// `spec.isolation != "worktree"`.
+    /// - `Reuse(path)` → wrap the existing path with
+    ///   `WorktreeHandle::existing` (synthetic branch `"(reused)"`
+    ///   flags it for cleanup-skip).
+    /// - `Recreate { base }` → call `provider.create(spec.name, base)`.
+    /// - `None` → legacy behavior: use `spec.isolation_base_branch` or
+    ///   `main`.
+    ///
+    /// A `master` fallback is attempted on provider failure to cover
+    /// legacy git defaults. Returns `None` when no provider is
+    /// attached OR `spec.isolation != "worktree"`.
     pub(super) fn resolve_worktree(
         &self,
         spec: &AgentSpec,

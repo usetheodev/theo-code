@@ -53,9 +53,9 @@ use std::sync::Arc;
 
 use crate::event_bus::EventBus;
 
-/// Convenience pipeline bundling: ObservabilityListener + background writer
-/// + trajectory file path. Holds the writer join-handle so the caller can
-/// drain and fsync at shutdown.
+/// Convenience pipeline bundling: ObservabilityListener, the background
+/// writer, and the trajectory file path. Holds the writer join-handle
+/// so the caller can drain and fsync at shutdown.
 pub struct ObservabilityPipeline {
     pub run_id: String,
     pub file_path: PathBuf,

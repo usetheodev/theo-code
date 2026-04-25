@@ -223,7 +223,7 @@ impl MetricsByAgent {
     /// Top-N agents by total tokens consumed (cost dashboard).
     pub fn top_by_tokens(&self, n: usize) -> Vec<(&String, &AgentMetrics)> {
         let mut items: Vec<_> = self.by_agent.iter().collect();
-        items.sort_by(|a, b| b.1.total_tokens.cmp(&a.1.total_tokens));
+        items.sort_by_key(|x| std::cmp::Reverse(x.1.total_tokens));
         items.into_iter().take(n).collect()
     }
 }

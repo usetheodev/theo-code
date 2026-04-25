@@ -146,9 +146,9 @@ pub fn build_adapters_for_spec(
 /// `ToolDefinition` directly (bypasses the trait machinery).
 ///
 /// Useful for tests that want to inspect the `mcp:<server>:<tool>` naming
-/// + raw inputSchema preservation without spawning the registry. The
-/// runtime path always goes through `McpToolAdapter`, but this helper
-/// exists so the plan-mandated tests
+/// and the raw inputSchema preservation without spawning the registry.
+/// The runtime path always goes through `McpToolAdapter`, but this
+/// helper exists so the plan-mandated tests
 /// `mcp_tool_to_definition_uses_qualified_name` and
 /// `mcp_tool_to_definition_preserves_input_schema` can exercise the
 /// conversion in isolation.

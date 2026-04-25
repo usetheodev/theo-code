@@ -218,16 +218,11 @@ impl SessionTree {
         &self.file_path
     }
 
-    /// Build the LLM context: walk from root to the current leaf, collecting
-    /// entries along the path.
-    ///
-    /// When a `Compaction` entry is encountered, messages before its
-    /// `first_kept_entry_id` are dropped from the result (the compaction
-    /// summary replaces them).
-    ///
-    /// Returns entries in root-to-leaf order, excluding the `Header`.
-    // `build_context` + `walk_to_root` moved to `context_builder.rs` as
-    // `impl SessionTree` methods. See that file for docs.
+    // `build_context` + `walk_to_root` (which built the LLM context by
+    // walking from root to the current leaf, applying any `Compaction`
+    // entry's `first_kept_entry_id` to drop earlier messages) moved to
+    // `context_builder.rs` as `impl SessionTree` methods. See that
+    // file for docs.
 
     // -----------------------------------------------------------------------
     // Convenience helpers for appending specific entry types

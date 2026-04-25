@@ -1779,3 +1779,53 @@ Plus: T0.1 underpinning `done_gate_cargo_check_fails_on_broken_manifest` em `run
 Plus underpinning: `done_gate_cargo_check_fails_on_broken_manifest` em `run_engine_sandbox.rs` (cargo invocation contract).
 
 **Validacao:** 1314 tests passando entre `theo-agent-runtime`, 0 falhas. `cargo check -p theo-agent-runtime --lib` clean. T0.1 AC literal cumprido: cada cenario produz sequencia observavel via mock; tests rodando em ~3s; snapshots committados via assertivas de `iterations_used` / `tool_calls_total` / `success`.
+
+### Iteracao 79 (2026-04-25) — T7.3 batch 26-overflow closure
+
+| Task | Status | Notas |
+|---|---|---|
+| T7.3 cenario `agent_dispatches_batch_with_26_calls_truncates_at_max` | **DONE** | Pin do contrato `MAX_BATCH_SIZE=25` cap end-to-end via LLM mock. Turn 1 LLM responde com `batch` tool_call carregando 26 sub-calls (gerados programaticamente — `glob` em padroes /tmp/theo-batch-26-*). `dispatch_batch::take(MAX_BATCH)` trunca ao 25o; o 26o e silenciosamente descartado e um warning e anexado ao tool_result agregado. Turn 2 LLM texto → converge. Asserts: `success=true` (cap nao crasha o run), `iterations_used=2`. Fecha o caso `batch × 26 overflow` que estava listado mas nao tinha cobertura LLM-driven (`meta_tools_t7_3.rs` so testava batch_execute que nao tem cap). |
+
+**Cobertura T7.3 final:** dimensoes `batch × [5 ok / 5 with 1 blocked / 25 max / 26 overflow]` agora todas cobertas. Plus done × {Gate 1 / Gate 2 / force-accept}, delegate_task × {single / parallel / both / neither}, skill × {InContext / SubAgent / Unknown} via pure-function planners (Iter 66) e cenarios E2E (Iters 67-78).
+
+**Validacao:** 1315 tests passando, 0 falhas. `cargo check -p theo-agent-runtime --lib` clean.
+
+### Iteracao 80 (2026-04-25) — Hygiene: remove pre-existing unused-import warnings
+
+| Task | Status | Notas |
+|---|---|---|
+| Cleanup unused imports em test sub-modules | **DONE** | Tres warnings persistentes em `run_engine/mod.rs` removidos: (1) `use super::*` em `mod llm_error_class_mapping` — todas as referencias eram fully-qualified via `crate::` ou imports explicitos; (2) `use super::*` em `mod provider_hint` — mesmo padrao; (3) `use crate::agent_loop::AgentResult` em `mod success_semantics` — o tipo so era nomeado nas helpers fora do submodule, nao dentro. Cleanup de hygiene — `cargo check -p theo-agent-runtime --tests` agora silent, zero warnings. |
+
+**Validacao:** 1315 tests passando, 0 falhas. `cargo check -p theo-agent-runtime --tests` clean (zero warnings — anteriormente 3 warnings persistentes desde iteracoes ~57+).
+
+### Iteracao 81 (2026-04-25) — Hygiene: clippy field_reassign_with_default em llm_mock_smoke
+
+| Task | Status | Notas |
+|---|---|---|
+| Silence clippy field-reassign-with-default em llm_mock_smoke | **DONE** | Adicionado `#![allow(clippy::field_reassign_with_default)]` no topo de `tests/llm_mock_smoke.rs` (mesmo padrao usado em `run_engine_routing.rs:10`). Eram 14 warnings nesse arquivo todos sobre `let mut config = AgentConfig::default(); config.X = ...` — a forma com struct literal seria menos legivel para tests com 4-5 fields tweaked. Allow + comment explicativo "tweak individual fields for readability" alinha com o padrao do crate. |
+
+**Validacao:** 1315 tests passando, 0 falhas. `cargo clippy -p theo-agent-runtime --test llm_mock_smoke` agora apenas reporta warnings em deps externos (theo-infra-llm, theo-infra-mcp); zero warnings no proprio arquivo de testes. Lib warnings remanescentes (22) sao pre-existentes e fora do escopo da iteracao.
+
+### Iteracao 82 (2026-04-25) — Hygiene: clean up doc comment warnings (22 → 10)
+
+| Task | Status | Notas |
+|---|---|---|
+| Cleanup doc comment warnings | **DONE** | Reduzidos clippy warnings em `theo-agent-runtime` lib de 22 para 10. Fixes: (1) `run_engine/mod.rs:395` — orphan doc comment para funcao movida para `run_engine_helpers.rs` convertido para regular comment. (2) `session_tree/mod.rs:221` — orphan doc comment para `build_context` movido para `context_builder.rs` convertido para regular comment. (3) `subagent/mod.rs:116` — orphan doc para "Construct a manager" sem corresponding fn (todas as builders foram para `manager_builders.rs`) convertido. (4) `observability/mod.rs:56` — `+ trajectory file path` em doc comment estava sendo interpretado como markdown list item; reescrito como prosa. (5) `subagent/mcp_tools.rs:148` — mesmo padrao com `+ raw inputSchema preservation`; reescrito como prosa. (6) `subagent/spawn_helpers.rs:328` — list items continuavam em prosa sem blank line, fazendo markdown stretch o item; adicionado blank line entre lista e prosa de continuacao. |
+
+**Validacao:** 1174 unit tests passando, 0 falhas. `cargo clippy -p theo-agent-runtime --lib` reduzido de 22 → 10 warnings. Os 10 remanescentes sao items maiores (large size difference between variants, sort_by_key, late_initialization) que requerem mudancas estruturais — fora do escopo desta iteracao.
+
+### Iteracao 83 (2026-04-25) — Hygiene: clippy lib zero warnings (10 → 0)
+
+| Task | Status | Notas |
+|---|---|---|
+| Cleanup remaining clippy warnings | **DONE** | Reduzidos clippy warnings em `theo-agent-runtime` lib de 10 para **0**. Fixes mecanicos (4): (1) `subagent_runs.rs:193` — `sort_by(\|a,b\| b.1.cmp(&a.1))` → `sort_by_key(\|x\| Reverse(x.1))`; (2) `observability/otel.rs:226` — mesmo padrao para `top_by_tokens`; (3) `observability/report/metrics.rs:219` — mesmo padrao para tool breakdown; (4) `observability/report/metrics.rs:107` — `let dist: HashMap;` declarado antes do uso → combinado com a atribuicao via `let dist: HashMap = ...`; (5) `observability/derived_metrics.rs:81` — `for j in low..i { tool_calls[j] }` → `for prior in &tool_calls[low..i]`. Allow com justificativa em 5 sites estruturais: `DispatchOutcome`, `GateOutcome`, `GuardrailResolution` (large_enum_variant — boxing custaria allocation a cada converge/short-circuit), `register_cancellation_or_bail` + `enforce_max_depth` (result_large_err — boxing AgentResult forçaria deref extra em todo call site da spawn flow). |
+
+**Validacao:** 1174 unit tests passando, 0 falhas. `cargo clippy -p theo-agent-runtime --lib` agora **silent** — zero warnings em codigo proprio (warnings remanescentes sao apenas em deps externos: theo-infra-llm, theo-infra-mcp).
+
+### Iteracao 84 (2026-04-25) — Hygiene: clippy tests cleanup
+
+| Task | Status | Notas |
+|---|---|---|
+| Cleanup test-binary clippy warnings | **DONE** | (1) `tests/run_engine_characterization.rs` — `CapturingListener::new()` agora usa `#[derive(Default)]` + `Self::default()` (clippy::new_without_default). (2) Mesmo arquivo — duas chamadas `call_id.as_str().to_string().into()` simplificadas para `.to_string()` (useless_conversion — `.into()` apos `.to_string()` so converte String para String). (3) `tests/sota12_integration.rs:99` — `&format!("r-{}", i)` → `format!("r-{}", i)` (SubagentRun::new_running aceita `impl Into<String>`, sem precisar do borrow). (4) `tests/observability_live_probe.rs` — adicionado `#![allow(clippy::field_reassign_with_default)]` no topo (mesmo padrao de `run_engine_routing.rs` e `llm_mock_smoke.rs`). |
+
+**Validacao:** todos os tests passando, 0 falhas. Tests-binary clippy warnings reduzidos. Os 15 lib-test warnings remanescentes (constant assertions, useless format/vec) sao em testes inline e fora do escopo desta iteracao.

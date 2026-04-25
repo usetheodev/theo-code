@@ -364,6 +364,13 @@ impl AgentRunEngine {
 
 /// Internal outcome of `apply_handoff_guardrails`: either a short-circuit
 /// refusal or the resolved (spec, objective, optional note) tuple.
+///
+/// `Resolved` carries an owned `AgentSpec` (heavy) while `Block`
+/// only carries a refusal string. Boxing the spec would mean an
+/// extra allocation on every successful handoff resolution — the
+/// common path. The size asymmetry is intentional given the call
+/// pattern (Block is rare, Resolved is the default).
+#[allow(clippy::large_enum_variant)]
 enum GuardrailResolution {
     Block(String),
     Resolved {

@@ -401,13 +401,8 @@ impl AgentRunEngine {
     // `run_engine/handoff.rs`. See those files for docs.
 }
 
-/// Map an LLM error to its
-/// canonical `ErrorClass`. Used at every site in `execute_with_history`
-/// that returns `AgentResult` from a failed LLM call so headless v3
-/// consumers can distinguish infra failures (rate-limit, quota, auth)
-/// from agent failures.
-// Helpers below (llm_error_to_class, truncate_handoff_objective,
-// truncate_batch_args, derive_provider_hint) were extracted to
+// `llm_error_to_class` (and friends — `truncate_handoff_objective`,
+// `truncate_batch_args`, `derive_provider_hint`) were extracted to
 // `run_engine_helpers.rs` in Fase 4 — see `use` alias at bottom of
 // file. Auto-init + sandbox spawn likewise moved to their own modules.
 
@@ -704,7 +699,6 @@ mod tests {
     }
 
     mod llm_error_class_mapping {
-        use super::*;
         use theo_domain::error_class::ErrorClass;
         use theo_infra_llm::LlmError;
 
@@ -1399,8 +1393,6 @@ mod tests {
     // -----------------------------------------------------------------------
 
     mod provider_hint {
-        use super::*;
-
         #[test]
         fn derive_provider_hint_recognizes_openai() {
             assert_eq!(crate::run_engine_helpers::derive_provider_hint("https://api.openai.com/v1"), "openai");
@@ -1444,7 +1436,6 @@ mod tests {
 
     mod success_semantics {
         use super::*;
-        use crate::agent_loop::AgentResult;
 
         /// The fix: budget-exceeded must always return success=false.
         /// Old behavior: success = (edits_succeeded > 0) which is wrong.

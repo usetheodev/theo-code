@@ -30,6 +30,14 @@ use crate::run_engine::AgentRunEngine;
 use crate::run_engine_sandbox::spawn_done_gate_cargo;
 
 /// Outcome returned by every done-gate.
+///
+/// `Return(DispatchOutcome)` carries the inner enum which itself
+/// embeds a full `AgentResult` on the converge variant. Boxing
+/// would mean one extra heap allocation on every gate that
+/// short-circuits, while the `Pass` branch (the common case)
+/// would still pay the discriminant cost. Allow the size
+/// asymmetry — gate dispatch is not a hot allocation path.
+#[allow(clippy::large_enum_variant)]
 pub(super) enum GateOutcome {
     /// Gate approved — move to the next one.
     Pass,
