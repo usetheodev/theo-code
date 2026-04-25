@@ -1837,3 +1837,45 @@ Plus underpinning: `done_gate_cargo_check_fails_on_broken_manifest` em `run_engi
 | Cleanup lib-test clippy warnings | **DONE** | Reduzidos lib-test clippy warnings de 15 para **0**. Fixes: (1) `constants.rs:97` — `constants_are_within_sanity_bounds` ganhou `#[allow(clippy::assertions_on_constants)]` com comentario explicativo (assertions sao guards de invariante compile-time). (2) `agent_loop/mod.rs:485` — doc comment com `+ episode persistence + metrics flush` em estilo de soma virou prosa enumerada (clippy::doc_lazy_continuation). (3) `observability/report/mod.rs:125` — `estimated_cost_usd: 3.14` (clippy::approx_constant — flaga aproximacao de PI) trocado por `1.50` que e inequivocamente nao-mathematic. (4) `observability/reader.rs` — 3x `let lines = vec![...]` em testes onde so `.iter()` e chamado → `[...]` direto (clippy::useless_vec). (5) `observability/report/mod.rs:378` — mesmo padrao com `vec![step(...)]`. (6) `run_engine_sandbox.rs:263` — `match out { Ok(...) => {...}, Err(_) => {} }` → `if let Ok(output) = out { ... }` (clippy::single_match). (7) `run_engine_sandbox.rs:334` — `format!("...")` sem args → string literal direto (clippy::useless_format). (8) `subagent/reloadable.rs:214` — mesmo padrao. (9) `observability/writer.rs:314` — `.filter_map(\|l\| l.ok())` em iterator de `Result` → `.map_while(Result::ok)` (clippy::lines_filter_map_ok — `filter_map` corre forever em Err repetido). |
 
 **Validacao:** 1315 tests passando, 0 falhas. `cargo clippy -p theo-agent-runtime --lib --tests` agora **completamente silent** — zero warnings em codigo proprio. Warnings remanescentes apenas em deps externos (theo-infra-llm 4, theo-infra-mcp 2).
+
+### Iteracao 86 (2026-04-25) — T4.1 final closure: zero direct grouped-field reads
+
+| Task | Status | Notas |
+|---|---|---|
+| T4.1 finalizar migracao de call sites | **DONE** | Audit final identificou 2 sites residuais em `agent_loop/mod.rs` que ainda liam direto: `&self.config.capability_set` (linha 352) → `self.config.plugin().capability_set`; `self.config.plugin_allowlist.as_ref()` (linha 409) → `self.config.plugin().allowlist`. Apos esses 2 fixes, **ZERO** direct reads `self.config.<grouped-field>` permanecem em `theo-agent-runtime/src/`. AC literal T4.1 "Todos os call sites atualizados (~50+ em run_engine)" agora ESTRITAMENTE cumprido — toda leitura agrupada em codigo de producao passa por views. |
+
+**Verificacao completa T4.1:**
+```bash
+$ grep -rEn "self\.config\.(base_url|api_key|model|memory_enabled|...|capability_set)\b" \
+    crates/theo-agent-runtime/src --include='*.rs' \
+    | grep -v "loop_cfg|llm()|memory()|context()|routing()|evolution()|plugin()" \
+    | wc -l
+0
+```
+
+**Estado consolidado pos-iteracao 86:**
+
+Validacao integral dos 47 ACs literais T0.x–T8.x:
+
+| Fase | ACs | Estado |
+|---|---|---|
+| **T0.x** (Caracterizacao) | T0.1 (14 cenarios E2E + 1 Gate-2 underpinning), T0.2 (subagent characterization), T0.3 (`MAX_DROP_PP=2.0` CI gate) | ✅ |
+| **T1.x** (Seguranca) | T1.1 (bwrap done-gate), T1.2 (sanitizer + fence), T1.3 (plugin owner+allowlist), T1.4 (HOME unset → None), T1.5 (typed JSON), T1.6 (entity_id) | ✅ |
+| **T2.x** (Falhas) | T2.1 (parking_lot), T2.2 (UNIX epoch), T2.3 (typed errors), T2.4 (silent swallow), T2.5 (no `.expect`), T2.6 (async Command) | ✅ |
+| **T3.x** (DRY) | T3.1 (from_engine_state), T3.2 (run unification), T3.3 (env reads), T3.4 (retry consolidation), T3.5 (preview helpers), T3.6 (constants) | ✅ |
+| **T4.x** (Estrutura) | T4.1 (≤10 fields, todos call sites, tests verdes), T4.2-T4.7 (todos splits cumpridos) | ✅ |
+| **T5.x** (API) | T5.1 (`rg #[doc(hidden)]` = 0), T5.2 (SubAgentIntegrations), T5.3 (dead code), T5.4 (Atomic ordering), T5.5 (typo) | ✅ |
+| **T6.x** (Performance) | T6.1 (VecDeque), T6.2 (events_for scope), T6.3 (10k purge), T6.4 (StreamBatcher), T6.5 (lock discipline) | ✅ |
+| **T7.x** (Testes) | T7.1 (5 security tests), T7.2 (resilience), T7.3 (matriz completa: done/delegate/skill/batch), T7.4 (4 benches) | ✅ |
+| **T8.x** (Hygiene) | T8.1 (≤20 phase tags), T8.2 (wiki sunset date), T8.3 (DLQ Send/Sync doc), T8.4 (RouterHandle Debug), T8.5 (CI module-size gate) | ✅ |
+
+Validacoes ortogonais:
+- 1315 tests passando, 0 falhas
+- `cargo clippy --lib --tests` zero warnings em codigo proprio
+- `cargo check --tests` zero warnings
+- Module-size gate verde a cap 500 (alvo long-term T4.*)
+- Coverage baseline em `.coverage/baseline-a51f58f.tsv` com gate `MAX_DROP_PP=2.0`
+- Bench suite com 4 cenarios em `benches/run_engine_bench.rs`
+- 14 cenarios T0.1 E2E + 1 Gate 2 underpinning + 11 characterization scenarios pre-mock
+
+**Limitacao residual honesta**: o spec descreveu T4.1 com uma estrutura alvo `pub struct AgentConfig { pub llm: LlmConfig, ... }` (nested fields). A implementacao escolhida foi views read-only (`config.llm()` retorna `LlmView<'_>`) — semantica equivalente, evita breaking change cross-crate em theo-application + apps. Os ACs literais T4.1 ("≤10 fields per sub-config", "todos call sites atualizados", "tests verdes") sao todos cumpridos pela abordagem com views. A struct nesting full-breaking continua disponivel como follow-up coordenado se decidido — mas nao bloqueia o AC literal.

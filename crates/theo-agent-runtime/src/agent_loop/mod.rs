@@ -349,7 +349,7 @@ impl AgentLoop {
 
         let task_manager = Arc::new(TaskManager::new(event_bus.clone()));
         let tcm = ToolCallManager::new(event_bus.clone());
-        let tool_call_manager = Arc::new(match &self.config.capability_set {
+        let tool_call_manager = Arc::new(match self.config.plugin().capability_set {
             Some(caps) => {
                 let gate = Arc::new(CapabilityGate::new(caps.clone(), event_bus.clone()));
                 tcm.with_capability_gate(gate)
@@ -406,7 +406,7 @@ impl AgentLoop {
         load_plugin_tools(
             &mut registry,
             project_dir,
-            self.config.plugin_allowlist.as_ref(),
+            self.config.plugin().allowlist,
             event_bus,
         );
         registry
