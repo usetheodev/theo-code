@@ -374,6 +374,74 @@ impl AgentRunEngine {
     // `record_session_exit` + `record_session_exit_public` +
     // `finalize_observability` moved to `lifecycle.rs` (Fase 4 — T4.2).
 
+    /// Attempt a task-state transition and observe genuine failures.
+    ///
+    /// Replaces the `let _ = self.task_manager.transition(...)` pattern
+    /// that silently discarded both no-op transitions (semantically
+    /// fine) and *real* invalid transitions (which signal state-machine
+    /// divergence and need to be observable).
+    ///
+    /// T1.4 / find_p4_005 / INV-002. Idempotent for same-state targets;
+    /// emits `tracing::error!` + `EventType::Error` for every other
+    /// failure so downstream listeners (metrics, OTel, dashboards) can
+    /// see the divergence.
+    pub(crate) fn try_task_transition(&self, target: theo_domain::task::TaskState) {
+        if let Err(e) = self.task_manager.transition(&self.task_id, target) {
+            if e.is_already_in_state() {
+                // Idempotent no-op — caller's intent is satisfied.
+                return;
+            }
+            tracing::error!(
+                run_id = %self.run.run_id,
+                target = ?target,
+                error = %e,
+                "task transition failed unexpectedly"
+            );
+            self.event_bus.publish(DomainEvent::new(
+                EventType::Error,
+                self.run.run_id.as_str(),
+                serde_json::json!({
+                    "kind": "task_transition_failed",
+                    "target": format!("{:?}", target),
+                    "error": e.to_string(),
+                }),
+            ));
+        }
+    }
+
+    /// Publish a failure to persist a message to the state manager.
+    ///
+    /// Used by `execute_with_history` when `StateManager::append_message`
+    /// returns `Err` — historically this was discarded via `let _ = ...`,
+    /// leaving the JSONL crash-recovery file inconsistent with no
+    /// operational signal. T1.3 / find_p4_002 / INV-002.
+    ///
+    /// Emits both a `tracing::error!` (for log aggregation) and an
+    /// `EventType::Error` event on the bus (for in-process listeners,
+    /// metrics, OTel export). The run is allowed to continue —
+    /// persistence is best-effort — but the failure is now observable.
+    pub(crate) fn publish_state_append_failure(
+        &self,
+        role: &str,
+        err: &crate::session_tree::SessionTreeError,
+    ) {
+        tracing::error!(
+            run_id = %self.run.run_id,
+            role = role,
+            error = %err,
+            "state_manager append failed; resume may be incomplete"
+        );
+        self.event_bus.publish(DomainEvent::new(
+            EventType::Error,
+            self.run.run_id.as_str(),
+            serde_json::json!({
+                "kind": "state_manager_append_failed",
+                "role": role,
+                "error": err.to_string(),
+            }),
+        ));
+    }
+
     /// Transition RunState and publish event.
     fn transition_run(&mut self, target: RunState) {
         let from = self.run.state;
@@ -507,6 +575,122 @@ mod tests {
         let last = state_changed.last().unwrap();
         assert_eq!(last.payload["from"].as_str().unwrap(), "Initialized");
         assert_eq!(last.payload["to"].as_str().unwrap(), "Planning");
+    }
+
+    // ---------------------------------------------------------------------
+    // T1.3 / find_p4_002 / INV-002 — state_manager append failures must be
+    // observable on EventBus + tracing instead of being discarded by
+    // `let _ = sm.append_message(...)`.
+    // ---------------------------------------------------------------------
+
+    #[test]
+    fn publish_state_append_failure_emits_error_event_with_role_context() {
+        // Arrange — engine + capturing listener.
+        let setup = TestSetup::new();
+        let engine = setup.create_engine("test");
+        let baseline = setup.listener.captured().len();
+
+        // Act — synthesise a SessionTreeError and publish it.
+        let err = crate::session_tree::SessionTreeError::Io(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "disk full (synthesised)",
+        ));
+        engine.publish_state_append_failure("assistant", &err);
+
+        // Assert — exactly one new EventType::Error with the expected
+        // structured payload appeared on the bus.
+        let events = setup.listener.captured();
+        assert_eq!(
+            events.len(),
+            baseline + 1,
+            "exactly one Error event should be emitted"
+        );
+        let last = events.last().expect("at least one event");
+        assert_eq!(last.event_type, EventType::Error);
+        assert_eq!(last.entity_id, engine.run_id().as_str());
+        assert_eq!(
+            last.payload["kind"].as_str().unwrap(),
+            "state_manager_append_failed",
+            "kind discriminator must be set so listeners can filter"
+        );
+        assert_eq!(
+            last.payload["role"].as_str().unwrap(),
+            "assistant",
+            "role must be propagated to allow distinguishing assistant vs tool failures"
+        );
+        assert!(
+            last.payload["error"]
+                .as_str()
+                .map(|s| s.contains("disk full"))
+                .unwrap_or(false),
+            "error message must be propagated for diagnostics; got {:?}",
+            last.payload["error"]
+        );
+    }
+
+    #[test]
+    fn try_task_transition_is_silent_for_already_in_state() {
+        // Arrange: engine in initial task state Pending. Targeting
+        // Pending again is a no-op (semantically idempotent) and must
+        // NOT emit any event.
+        let setup = TestSetup::new();
+        let engine = setup.create_engine("test");
+        let baseline = setup.listener.captured().len();
+
+        // Act
+        engine.try_task_transition(theo_domain::task::TaskState::Pending);
+
+        // Assert
+        let after = setup.listener.captured().len();
+        assert_eq!(
+            after, baseline,
+            "no-op transition should not emit any new event"
+        );
+    }
+
+    #[test]
+    fn try_task_transition_emits_error_for_genuine_invalid() {
+        // Arrange: task starts in Pending. Pending → Completed is NOT
+        // a valid transition per the state machine, so this is a real
+        // failure that must be observable.
+        let setup = TestSetup::new();
+        let engine = setup.create_engine("test");
+        let baseline = setup.listener.captured().len();
+
+        // Act
+        engine.try_task_transition(theo_domain::task::TaskState::Completed);
+
+        // Assert
+        let events = setup.listener.captured();
+        assert_eq!(
+            events.len(),
+            baseline + 1,
+            "exactly one Error event should be emitted"
+        );
+        let last = events.last().unwrap();
+        assert_eq!(last.event_type, EventType::Error);
+        assert_eq!(
+            last.payload["kind"].as_str().unwrap(),
+            "task_transition_failed"
+        );
+        assert_eq!(
+            last.payload["target"].as_str().unwrap(),
+            "Completed",
+            "target must be in the payload so listeners can correlate"
+        );
+    }
+
+    #[test]
+    fn publish_state_append_failure_distinguishes_role_label() {
+        let setup = TestSetup::new();
+        let engine = setup.create_engine("test");
+
+        let err = crate::session_tree::SessionTreeError::Io(std::io::Error::other("x"));
+        engine.publish_state_append_failure("tool", &err);
+
+        let events = setup.listener.captured();
+        let last = events.last().unwrap();
+        assert_eq!(last.payload["role"].as_str().unwrap(), "tool");
     }
 
     #[test]

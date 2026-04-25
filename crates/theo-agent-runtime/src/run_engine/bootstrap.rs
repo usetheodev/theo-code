@@ -33,11 +33,12 @@ impl AgentRunEngine {
         // Transition to Planning
         self.transition_run(RunState::Planning);
 
-        // Transition task to Running
-        let _ = self.task_manager.transition(&self.task_id, TaskState::Ready);
-        let _ = self
-            .task_manager
-            .transition(&self.task_id, TaskState::Running);
+        // Transition task to Running.
+        // T1.4 / find_p4_005 — `try_task_transition` distinguishes
+        // semantically-idempotent same-state transitions (silent) from
+        // real failures (logged + EventType::Error).
+        self.try_task_transition(TaskState::Ready);
+        self.try_task_transition(TaskState::Running);
 
         // Auto-init: create .theo/theo.md if it doesn't exist (main agent only).
         // Uses static template — instantaneous, no LLM cost. The agent can

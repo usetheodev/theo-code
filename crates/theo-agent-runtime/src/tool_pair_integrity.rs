@@ -1,17 +1,27 @@
-//! Tool pair integrity sanitizer — post-compaction correctness.
+//! Tool pair integrity — post-compaction structural correctness.
 //!
-//! After compaction (masking, pruning, summarization) the message list can
-//! end up with:
+//! **This module is NOT a secret/PII scrubber.** Despite the legacy name
+//! `sanitizer.rs` (renamed to `tool_pair_integrity.rs` in T1.2 of the
+//! agent-runtime remediation plan, see ADR/finding FIND-P6-008), this
+//! module's only responsibility is repairing **orphaned `tool_use` /
+//! `tool_result` pairs** in a message list after compaction.
+//!
+//! For PII / API-key redaction see `secret_scrubber.rs` (added in T4.5).
+//!
+//! After compaction (masking, pruning, summarization) the message list
+//! can end up with:
 //!
 //! 1. **Orphaned tool results** — a `Role::Tool` message whose matching
-//!    assistant `tool_calls[].id` was dropped. Providers reject this with
-//!    "No tool call found for call_id".
-//! 2. **Orphaned tool calls** — an assistant `tool_calls[i]` whose matching
-//!    `Role::Tool` result was dropped. Providers reject this with "Tool call
-//!    has no matching result".
+//!    assistant `tool_calls[].id` was dropped. Providers reject this
+//!    with "No tool call found for call_id".
+//! 2. **Orphaned tool calls** — an assistant `tool_calls[i]` whose
+//!    matching `Role::Tool` result was dropped. Providers reject this
+//!    with "Tool call has no matching result".
 //!
-//! This module provides `sanitize_tool_pairs` that MUST be called after any
-//! compaction that mutates the message list. Idempotent when pairs are valid.
+//! This module provides `sanitize_tool_pairs` that MUST be called after
+//! any compaction that mutates the message list. Idempotent when pairs
+//! are valid. After T3.4 the compaction algorithm preserves pairs at
+//! design level — `sanitize_tool_pairs` becomes a defensive backstop.
 //!
 //! Reference pattern: `referencias/hermes-agent/agent/context_compressor.py:778-836`
 

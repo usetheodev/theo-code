@@ -10,7 +10,7 @@
 mod policy_engine;
 
 use crate::config::CompactionPolicy;
-use crate::sanitizer::sanitize_tool_pairs;
+use crate::tool_pair_integrity::sanitize_tool_pairs;
 use theo_infra_llm::types::{Message, Role};
 
 /// Structured context for semantic compaction summaries.

@@ -148,6 +148,18 @@ pub enum TaskManagerError {
     Transition(#[from] TransitionError),
 }
 
+impl TaskManagerError {
+    /// Forwards to [`TransitionError::is_already_in_state`] when the
+    /// underlying error is a `Transition`. Returns `false` for any
+    /// other variant (e.g. `TaskNotFound`).
+    ///
+    /// Added in T1.4 so call sites in the run engine can use a single
+    /// idempotency check without unwrapping the variant manually.
+    pub fn is_already_in_state(&self) -> bool {
+        matches!(self, TaskManagerError::Transition(t) if t.is_already_in_state())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

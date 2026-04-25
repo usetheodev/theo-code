@@ -307,9 +307,7 @@ impl AgentRunEngine {
             return None;
         }
         self.transition_run(RunState::Aborted);
-        let _ = self
-            .task_manager
-            .transition(&self.task_id, TaskState::Failed);
+        self.try_task_transition(TaskState::Failed);
         self.metrics.record_run_complete(false);
         let summary = format!(
             "Doom loop abort: '{}' called identically {} times. Agent is stuck.",
@@ -424,9 +422,7 @@ impl AgentRunEngine {
             return None;
         };
         self.transition_run(RunState::Aborted);
-        let _ = self
-            .task_manager
-            .transition(&self.task_id, TaskState::Failed);
+        self.try_task_transition(TaskState::Failed);
 
         let summary = format!(
             "Budget exceeded: {}. Edits succeeded: {}. Files: {}",

@@ -28,6 +28,9 @@ notify.workspace = true
 notify-debouncer-mini.workspace = true
 theo-isolation.workspace = true
 theo-infra-mcp.workspace = true
+# Structured logging — used by `publish_state_append_failure` and the
+# T3.7 migration away from `eprintln!`.
+tracing.workspace = true
 # Phase 40 (otlp-exporter-plan) — OTel SDK, gated by feature `otel`.
 opentelemetry = { workspace = true, optional = true }
 opentelemetry_sdk = { workspace = true, optional = true }

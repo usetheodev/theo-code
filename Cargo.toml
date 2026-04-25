@@ -57,6 +57,8 @@ walkdir = "2"
 clap = { version = "4", features = ["derive"] }
 ignore = "0.4"
 log = "0.4"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 landlock = "0.4"
 libc = "0.2"
 rustyline = "15"

@@ -9,7 +9,7 @@
 
 use crate::compaction::{CompactionContext, compact_with_policy, estimate_total_tokens};
 use crate::config::CompactionPolicy;
-use crate::sanitizer::sanitize_tool_pairs;
+use crate::tool_pair_integrity::sanitize_tool_pairs;
 use theo_infra_llm::types::{Message, Role};
 
 /// Sentinel substituted for the content of a pruned tool message.

@@ -104,9 +104,7 @@ impl AgentRunEngine {
             .store(false, std::sync::atomic::Ordering::Relaxed);
 
         self.transition_run(RunState::Converged);
-        let _ = self
-            .task_manager
-            .transition(&self.task_id, TaskState::Completed);
+        self.try_task_transition(TaskState::Completed);
         self.metrics.record_run_complete(true);
         DispatchOutcome::Converged(AgentResult::from_engine_state(
             self,

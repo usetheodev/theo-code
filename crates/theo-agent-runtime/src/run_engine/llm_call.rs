@@ -266,9 +266,7 @@ impl AgentRunEngine {
     /// mapping. The caller `return`s this from the main loop.
     pub(super) fn build_llm_abort_result(&mut self, err: &LlmError) -> AgentResult {
         self.transition_run(RunState::Aborted);
-        let _ = self
-            .task_manager
-            .transition(&self.task_id, TaskState::Failed);
+        self.try_task_transition(TaskState::Failed);
         self.metrics.record_run_complete(false);
         let class = llm_error_to_class(err);
         AgentResult::from_engine_state(

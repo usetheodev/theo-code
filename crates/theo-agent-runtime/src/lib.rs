@@ -44,7 +44,16 @@ pub mod project_config;
 pub mod reflector;
 pub mod retry;
 pub mod roadmap;
-pub mod sanitizer;
+pub mod tool_pair_integrity;
+/// Legacy alias for `tool_pair_integrity` (renamed in T1.2 / FIND-P6-008).
+/// The original name `sanitizer` was misleading because the module never
+/// scrubbed PII or secrets — it only repairs orphaned tool pairs after
+/// compaction. Use `tool_pair_integrity` directly in new code.
+#[deprecated(
+    since = "0.2.0",
+    note = "use `theo_agent_runtime::tool_pair_integrity` directly; this alias will be removed once external consumers migrate"
+)]
+pub use tool_pair_integrity as sanitizer;
 pub mod run_engine;
 pub(crate) mod run_engine_auto_init;
 pub(crate) mod run_engine_helpers;

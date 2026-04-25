@@ -91,7 +91,33 @@ impl AgentRunEngine {
         } else {
             tool_bridge::registry_to_definitions(&self.registry)
         };
-        let (_abort_tx, abort_rx) = tokio::sync::watch::channel(false);
+        // T1.1 / find_p7_001 / INV-008 — bridge user cancellation to the
+        // tools' watch::Receiver.
+        //
+        // Tools accept `watch::Receiver<bool>` for abort signalling, but
+        // the runtime's source-of-truth is `CancellationTree`. Without
+        // this bridge the sender of the abort channel was being prefixed
+        // with `_` which made Rust drop it immediately, leaving any tool
+        // long-running after a `cancel_agent()` call (the previous
+        // behaviour leaked dozens of seconds of latency on `git clone`,
+        // `web-fetch`, etc.).
+        //
+        // The sender is kept alive for the entire scope via
+        // `_abort_tx_keepalive` (the `_` prefix is intentional and only
+        // applies to the keep-alive binding, *not* to the original
+        // sender).
+        let (abort_tx, abort_rx) = tokio::sync::watch::channel(false);
+        if let Some(ct) = self.subagent_cancellation.as_ref() {
+            let token = ct.child(self.run.run_id.as_str());
+            let tx = abort_tx.clone();
+            tokio::spawn(async move {
+                token.cancelled().await;
+                let _ = tx.send(true);
+            });
+        }
+        // Keep `abort_tx` alive for the entire `execute_with_history` scope
+        // so the bridge above (and any future bridges) can still send.
+        let _abort_tx_keepalive = abort_tx;
 
         loop {
             self.run.iteration += 1;
@@ -190,10 +216,19 @@ impl AgentRunEngine {
                 tool_calls.to_vec(),
             ));
 
-            // Persist assistant message to state manager (crash recovery)
+            // Persist assistant message to state manager (crash recovery).
+            //
+            // T1.3 / find_p4_002 / INV-002 — failures here used to be
+            // silently discarded via `let _ = ...`, leaving the JSONL
+            // crash-recovery file inconsistent without any operational
+            // signal. Now they fan out to tracing + EventBus so the
+            // failure is observable; the run still continues because
+            // persistence is best-effort.
             if let Some(ref mut sm) = state_manager {
                 let content = response.content().unwrap_or("");
-                let _ = sm.append_message("assistant", content);
+                if let Err(e) = sm.append_message("assistant", content) {
+                    self.publish_state_append_failure("assistant", &e);
+                }
             }
 
             let mut should_return = None;
@@ -285,9 +320,12 @@ impl AgentRunEngine {
                 // main_loop::update_context_loop_post_tool.
                 self.update_context_loop_post_tool(call, name, success, &output);
 
-                // Persist tool result to state manager (crash recovery)
+                // Persist tool result to state manager (crash recovery).
+                // T1.3 / find_p4_002 — see assistant-side comment above.
                 if let Some(ref mut sm) = state_manager {
-                    let _ = sm.append_message("tool", &output);
+                    if let Err(e) = sm.append_message("tool", &output) {
+                        self.publish_state_append_failure("tool", &e);
+                    }
                 }
 
                 // Sensor fire — extracted to
