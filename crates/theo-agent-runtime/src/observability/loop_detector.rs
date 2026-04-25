@@ -38,8 +38,6 @@ pub enum LoopVerdict {
 #[derive(Debug, Clone)]
 struct WindowEntry {
     tool_name: String,
-    #[allow(dead_code)]
-    fingerprint: u64,
 }
 
 /// Detector with sliding window and consecutive counter.
@@ -98,7 +96,6 @@ impl LoopDetector {
 
         self.window.push_back(WindowEntry {
             tool_name: tool_name.to_string(),
-            fingerprint: fp,
         });
         while self.window.len() > WINDOW_SIZE {
             self.window.pop_front();

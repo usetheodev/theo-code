@@ -131,21 +131,6 @@ pub trait HandoffGuardrail: Send + Sync + std::fmt::Debug {
 // `builtins.rs`. Re-exported at module level above so every path
 // `crate::handoff_guardrail::*` stays byte-identical for callers.
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/// Char-aware truncation used by built-in guardrail messages.
-#[allow(dead_code)]
-fn truncate(s: &str, n: usize) -> String {
-    if s.chars().count() <= n {
-        s.to_string()
-    } else {
-        let mut t: String = s.chars().take(n - 1).collect();
-        t.push('…');
-        t
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Tests

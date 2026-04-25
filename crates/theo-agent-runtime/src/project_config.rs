@@ -322,6 +322,57 @@ fn parse_agent_file(content: &str) -> Option<CustomAgentDef> {
 mod tests {
     use super::*;
 
+    /// Process-wide env var lock so tests that mutate `THEO_*` don't
+    /// race when run in parallel (cargo test default) or under the
+    /// serial scheduler used by `cargo tarpaulin`. Mirrors the same
+    /// pattern in `observability::otel_exporter::tests`.
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        use std::sync::{Mutex, OnceLock};
+        static M: OnceLock<Mutex<()>> = OnceLock::new();
+        M.get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Snapshot of the env vars touched by `with_env_overrides`. Used
+    /// to restore the process state when a test exits — guards against
+    /// other test files that read these vars (e.g. live config loaders
+    /// in long integration tests).
+    struct EnvSnapshot {
+        prior: Vec<(&'static str, Option<std::ffi::OsString>)>,
+    }
+
+    impl EnvSnapshot {
+        fn capture() -> Self {
+            let keys = ["THEO_TEMPERATURE", "THEO_MODEL", "THEO_MAX_ITERATIONS"];
+            let prior = keys
+                .iter()
+                .map(|k| (*k, std::env::var_os(k)))
+                .collect::<Vec<_>>();
+            // Strip any pre-existing value so `with_env_overrides`
+            // sees a known-clean slate.
+            unsafe {
+                for (k, _) in &prior {
+                    std::env::remove_var(k);
+                }
+            }
+            Self { prior }
+        }
+    }
+
+    impl Drop for EnvSnapshot {
+        fn drop(&mut self) {
+            unsafe {
+                for (k, v) in &self.prior {
+                    match v {
+                        Some(val) => std::env::set_var(k, val),
+                        None => std::env::remove_var(k),
+                    }
+                }
+            }
+        }
+    }
+
     // ── validate() — per-field error coverage ────────────────────
 
     #[test]
@@ -544,7 +595,11 @@ max_iterations = 50
     #[test]
     fn env_override_temperature_applied_to_agent_config() {
         // This test proves the P0 bug fix: THEO_TEMPERATURE env var must
-        // propagate through ProjectConfig → apply_to → AgentConfig.temperature
+        // propagate through ProjectConfig → apply_to → AgentConfig.temperature.
+        // The lock + snapshot guarantees this test never races with sibling
+        // env-mutating tests under either parallel or serial schedulers.
+        let _lock = env_lock();
+        let _snap = EnvSnapshot::capture();
         unsafe { std::env::set_var("THEO_TEMPERATURE", "0.0") };
 
         let project = ProjectConfig::default().with_env_overrides();
@@ -558,15 +613,13 @@ max_iterations = 50
             config.temperature, 0.0,
             "after apply_to, temperature should be 0.0 from env var"
         );
-
-        // Cleanup
-        unsafe { std::env::remove_var("THEO_TEMPERATURE") };
+        // EnvSnapshot::drop restores the original env automatically.
     }
 
     #[test]
     fn env_override_does_not_affect_unset_fields() {
-        unsafe { std::env::remove_var("THEO_TEMPERATURE") };
-        unsafe { std::env::remove_var("THEO_MODEL") };
+        let _lock = env_lock();
+        let _snap = EnvSnapshot::capture(); // strips THEO_* into a clean slate
 
         let project = ProjectConfig::default().with_env_overrides();
         assert!(project.temperature.is_none());

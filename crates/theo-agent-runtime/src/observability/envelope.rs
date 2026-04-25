@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use theo_domain::event::{DomainEvent, EventKind, EventType};
+use theo_domain::event::{DomainEvent, EventKind};
 
 /// Current schema version for the trajectory JSONL format.
 pub const ENVELOPE_SCHEMA_VERSION: u32 = 1;
@@ -131,11 +131,6 @@ impl TrajectoryEnvelope {
             dropped_since_last: 0,
         }
     }
-}
-
-#[allow(dead_code)]
-fn event_type_stub() -> EventType {
-    EventType::TaskCreated
 }
 
 #[cfg(test)]

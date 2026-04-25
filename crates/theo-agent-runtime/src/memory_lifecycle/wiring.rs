@@ -24,6 +24,10 @@ pub fn maybe_spawn_autodream(
     if !cfg.autodream_enabled {
         return;
     }
+    // Relaxed: this is a single-thread idempotency flag (no causal
+    // dependency on any other shared state). The swap returns the
+    // previous value; if it was already `true`, another caller already
+    // spawned autodream and we no-op (T5.4).
     if attempted.swap(true, std::sync::atomic::Ordering::Relaxed) {
         return;
     }
