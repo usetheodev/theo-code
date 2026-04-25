@@ -121,12 +121,14 @@ mod tests {
 
     #[test]
     fn test_cost_usd_accumulated_correctly() {
+        // Arbitrary cost figure — 1.50 is unambiguously NOT pi or e,
+        // sidestepping clippy::approx_constant while staying simple.
         let u = TokenUsage {
-            estimated_cost_usd: 3.14,
+            estimated_cost_usd: 1.50,
             ..Default::default()
         };
         let m = compute_token_metrics(&u, 0);
-        assert_eq!(m.total_cost_usd, 3.14);
+        assert_eq!(m.total_cost_usd, 1.50);
     }
 
     #[test]
@@ -373,7 +375,7 @@ mod tests {
 
     #[test]
     fn test_error_taxonomy_classifies_network() {
-        let s = vec![step(0, 0, "Error", None, None, None)];
+        let s = [step(0, 0, "Error", None, None, None)];
         let s = vec![ProjectedStep {
             payload_summary: "network timeout connecting to api.openai.com".into(),
             ..s[0].clone()

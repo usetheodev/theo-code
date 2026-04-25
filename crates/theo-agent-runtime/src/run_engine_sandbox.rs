@@ -260,33 +260,30 @@ mod tests {
         )
         .await;
 
-        match out {
-            Ok(output) => {
-                assert!(
-                    !output.status.success(),
-                    "broken Cargo.toml must yield a non-zero exit; \
-                     stdout={:?} stderr={:?}",
-                    String::from_utf8_lossy(&output.stdout),
-                    String::from_utf8_lossy(&output.stderr)
-                );
-                // Gate 2 surfaces the stderr to the LLM via the BLOCKED
-                // tool_result. Verify the failure carries diagnosable
-                // text — TOML parser error mentions the manifest.
-                let combined = format!(
-                    "{}\n{}",
-                    String::from_utf8_lossy(&output.stderr),
-                    String::from_utf8_lossy(&output.stdout)
-                );
-                assert!(
-                    !combined.trim().is_empty(),
-                    "broken cargo invocation must surface diagnostics for Gate 2"
-                );
-            }
-            // io::Error means cargo couldn't be spawned at all. The
-            // skip-guard above should prevent this branch, but treat
-            // it permissively rather than failing the test on infra
-            // weirdness.
-            Err(_) => {}
+        // io::Error means cargo couldn't be spawned at all. The
+        // skip-guard above should prevent that, but treat it
+        // permissively rather than failing on infra weirdness — the
+        // `if let Ok(...)` skips the assertions in that case.
+        if let Ok(output) = out {
+            assert!(
+                !output.status.success(),
+                "broken Cargo.toml must yield a non-zero exit; \
+                 stdout={:?} stderr={:?}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            // Gate 2 surfaces the stderr to the LLM via the BLOCKED
+            // tool_result. Verify the failure carries diagnosable
+            // text — TOML parser error mentions the manifest.
+            let combined = format!(
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stderr),
+                String::from_utf8_lossy(&output.stdout)
+            );
+            assert!(
+                !combined.trim().is_empty(),
+                "broken cargo invocation must surface diagnostics for Gate 2"
+            );
         }
     }
 
@@ -334,15 +331,13 @@ mod tests {
         );
 
         let project = tempfile::tempdir().expect("tempdir");
-        let cargo_toml = format!(
-            "[package]\n\
+        let cargo_toml = "[package]\n\
              name = \"theo_t1_1_fixture\"\n\
              version = \"0.0.0\"\n\
              edition = \"2021\"\n\
              build = \"build.rs\"\n\
              [lib]\n\
-             path = \"src/lib.rs\"\n"
-        );
+             path = \"src/lib.rs\"\n";
         std::fs::write(project.path().join("Cargo.toml"), cargo_toml).unwrap();
         std::fs::create_dir_all(project.path().join("src")).unwrap();
         std::fs::write(project.path().join("src/lib.rs"), "").unwrap();

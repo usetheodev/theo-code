@@ -211,7 +211,7 @@ mod tests {
         let agents = dir.join(".theo").join("agents");
         std::fs::create_dir_all(&agents).unwrap();
         let frontmatter = if mcp_servers.is_empty() {
-            format!("---\ndescription: x\n---\nbody")
+            "---\ndescription: x\n---\nbody".to_string()
         } else {
             let list = mcp_servers
                 .iter()

@@ -484,11 +484,12 @@ mod tests {
 
     /// T3.2 AC regression — `run()` and `run_with_history()` MUST both
     /// route through `execute_and_shutdown`, which in turn invokes
-    /// `record_session_exit_public` so the memory + episode persistence
-    /// + metrics flush always fire. A future refactor that re-inlines
-    /// either path or skips the shutdown call would break this
-    /// invariant. We assert it structurally on the source rather than
-    /// running an end-to-end test (which would need an LLM mock).
+    /// `record_session_exit_public` so the memory hook, episode
+    /// persistence, and metrics flush always fire. A future refactor
+    /// that re-inlines either path or skips the shutdown call would
+    /// break this invariant. We assert it structurally on the source
+    /// rather than running an end-to-end test (which would need an
+    /// LLM mock).
     #[test]
     fn run_and_run_with_history_both_call_record_session_exit() {
         let src = include_str!("mod.rs");
