@@ -1614,3 +1614,15 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 **Estrategia:** as 3 dimensoes T7.3 que dependiam de "live AgentRunEngine" foram cobertas via extracao pure-function das decisoes de dispatch. A logica decision-table ficou unit-testavel sem fixture; os side-effects (cargo spawn, sub-agent spawn, eventos) seguem o caminho do engine e tem cobertura via fixtures + characterization existentes. Mesmo padrao aplicado pelo `run_engine_routing.rs` (Iter prior — router decision). Padrao formalizado: T7.3 dispatch matrix dimensions = pure planner + thin engine consumer.
 
 **Validacao:** 1297 tests passando, 0 falhas (+15 da iteracao: 6 done + 6 delegate + 3 skill). `cargo check -p theo-agent-runtime --lib` clean. Module-size gate verde a cap 500.
+
+### Iteracao 67 (2026-04-25) — T0.1 LLM mock infrastructure (unblocker)
+
+| Task | Status | Notas |
+|---|---|---|
+| T0.1 LLM mock infrastructure | **DONE (foundational)** | Novo `tests/llm_mock_smoke.rs` (~140 LOC) com helper `spawn_sse_mock(sse_body) -> base_url` que sobe um servidor TCP single-shot em `127.0.0.1:0` (porta atribuida pelo kernel), aceita um POST, ignora o body e devolve `Content-Type: text/event-stream` com os chunks SSE fornecidos. Padrao herdado de `otlp_network_smoke.rs` (Phase 45). Sem dependencia nova — usa apenas `tokio::net::TcpListener` + leitura/escrita raw. **Por que importa**: as 4 cenarios T0.1 LLM-dependentes (context overflow recovery, retry+success, done-gate Gate 2 LLM-driven, batch tool com LLM stream) eram bloqueadas por "preciso de wiremock SSE infrastructure". Esse arquivo destrava todos eles — ja prova round-trip end-to-end de duas variantes do contrato OA-compativel: |
+| T0.1 smoke `llm_mock_serves_content_only_sse_stream` | **DONE** | Mock devolve `data: {"choices":[{"delta":{"content":"Hello"}}]}` + ` world` + `[DONE]`. Verifica (1) callback de streaming recebe "Hello" e " world" em ordem; (2) `ChatResponse.choices[0].message.content == "Hello world"` (concatenado pelo `StreamCollector`); (3) `tool_calls` vazio. |
+| T0.1 smoke `llm_mock_serves_tool_call_sse_stream` | **DONE** | Mock devolve um `tool_calls` delta com `index=0`, `id=c-1`, `function.name=read`, `function.arguments={"filePath":"x.rs"}`. Verifica `ChatResponse.choices[0].message.tool_calls` populated com id+name+arguments JSON intactos. |
+
+**Estrategia para T0.1 follow-up**: cenarios futuros (retry+success, context overflow, batch+LLM-stream, done-gate Gate 2 driven) serao adicionados sobre esse helper — multi-shot via state interno ao spawn (counter + Vec<sse_body>) ou via tokio::sync::Mutex<VecDeque<...>>. Adapter ao caminho do AgentLoop fica trivial: `AgentLoop::new(config_with_base_url=mock_url, ...)` ja resolve.
+
+**Validacao:** 1299 tests passando, 0 falhas (+2 smoke tests). `cargo check -p theo-agent-runtime --lib` clean. Module-size gate verde a cap 500.
