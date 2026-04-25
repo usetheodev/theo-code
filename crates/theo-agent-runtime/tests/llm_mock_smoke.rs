@@ -1,3 +1,5 @@
+#![allow(clippy::field_reassign_with_default)] // Tests tweak individual fields for readability.
+
 //! REMEDIATION_PLAN T0.1 infrastructure — minimal in-process LLM mock.
 //!
 //! The 4 LLM-dependent characterization scenarios in T0.1 (context

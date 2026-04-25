@@ -1797,3 +1797,11 @@ Plus underpinning: `done_gate_cargo_check_fails_on_broken_manifest` em `run_engi
 | Cleanup unused imports em test sub-modules | **DONE** | Tres warnings persistentes em `run_engine/mod.rs` removidos: (1) `use super::*` em `mod llm_error_class_mapping` — todas as referencias eram fully-qualified via `crate::` ou imports explicitos; (2) `use super::*` em `mod provider_hint` — mesmo padrao; (3) `use crate::agent_loop::AgentResult` em `mod success_semantics` — o tipo so era nomeado nas helpers fora do submodule, nao dentro. Cleanup de hygiene — `cargo check -p theo-agent-runtime --tests` agora silent, zero warnings. |
 
 **Validacao:** 1315 tests passando, 0 falhas. `cargo check -p theo-agent-runtime --tests` clean (zero warnings — anteriormente 3 warnings persistentes desde iteracoes ~57+).
+
+### Iteracao 81 (2026-04-25) — Hygiene: clippy field_reassign_with_default em llm_mock_smoke
+
+| Task | Status | Notas |
+|---|---|---|
+| Silence clippy field-reassign-with-default em llm_mock_smoke | **DONE** | Adicionado `#![allow(clippy::field_reassign_with_default)]` no topo de `tests/llm_mock_smoke.rs` (mesmo padrao usado em `run_engine_routing.rs:10`). Eram 14 warnings nesse arquivo todos sobre `let mut config = AgentConfig::default(); config.X = ...` — a forma com struct literal seria menos legivel para tests com 4-5 fields tweaked. Allow + comment explicativo "tweak individual fields for readability" alinha com o padrao do crate. |
+
+**Validacao:** 1315 tests passando, 0 falhas. `cargo clippy -p theo-agent-runtime --test llm_mock_smoke` agora apenas reporta warnings em deps externos (theo-infra-llm, theo-infra-mcp); zero warnings no proprio arquivo de testes. Lib warnings remanescentes (22) sao pre-existentes e fora do escopo da iteracao.
