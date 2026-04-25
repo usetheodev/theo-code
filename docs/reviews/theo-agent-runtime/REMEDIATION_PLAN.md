@@ -1789,3 +1789,11 @@ Plus underpinning: `done_gate_cargo_check_fails_on_broken_manifest` em `run_engi
 **Cobertura T7.3 final:** dimensoes `batch × [5 ok / 5 with 1 blocked / 25 max / 26 overflow]` agora todas cobertas. Plus done × {Gate 1 / Gate 2 / force-accept}, delegate_task × {single / parallel / both / neither}, skill × {InContext / SubAgent / Unknown} via pure-function planners (Iter 66) e cenarios E2E (Iters 67-78).
 
 **Validacao:** 1315 tests passando, 0 falhas. `cargo check -p theo-agent-runtime --lib` clean.
+
+### Iteracao 80 (2026-04-25) — Hygiene: remove pre-existing unused-import warnings
+
+| Task | Status | Notas |
+|---|---|---|
+| Cleanup unused imports em test sub-modules | **DONE** | Tres warnings persistentes em `run_engine/mod.rs` removidos: (1) `use super::*` em `mod llm_error_class_mapping` — todas as referencias eram fully-qualified via `crate::` ou imports explicitos; (2) `use super::*` em `mod provider_hint` — mesmo padrao; (3) `use crate::agent_loop::AgentResult` em `mod success_semantics` — o tipo so era nomeado nas helpers fora do submodule, nao dentro. Cleanup de hygiene — `cargo check -p theo-agent-runtime --tests` agora silent, zero warnings. |
+
+**Validacao:** 1315 tests passando, 0 falhas. `cargo check -p theo-agent-runtime --tests` clean (zero warnings — anteriormente 3 warnings persistentes desde iteracoes ~57+).

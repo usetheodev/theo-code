@@ -695,7 +695,6 @@ mod tests {
     }
 
     mod llm_error_class_mapping {
-        use super::*;
         use theo_domain::error_class::ErrorClass;
         use theo_infra_llm::LlmError;
 
@@ -1390,8 +1389,6 @@ mod tests {
     // -----------------------------------------------------------------------
 
     mod provider_hint {
-        use super::*;
-
         #[test]
         fn derive_provider_hint_recognizes_openai() {
             assert_eq!(crate::run_engine_helpers::derive_provider_hint("https://api.openai.com/v1"), "openai");
@@ -1435,7 +1432,6 @@ mod tests {
 
     mod success_semantics {
         use super::*;
-        use crate::agent_loop::AgentResult;
 
         /// The fix: budget-exceeded must always return success=false.
         /// Old behavior: success = (edits_succeeded > 0) which is wrong.
