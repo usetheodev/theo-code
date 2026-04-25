@@ -1498,3 +1498,11 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 | T1.2 AC test literals | **DONE** | Adicionados em `tests/security_t7_1.rs` os 2 nomes literais do AC: `git_log_with_injection_tokens_is_stripped` (verifica strip de `<\|im_start\|>`, `<\|im_end\|>`, `[INST]`, `[/INST]` em commit message + survival do conteudo benigno) e `git_log_is_fenced_in_xml_tags` (valida o envelope canonico `<git-log>...</git-log>` + survival do body). Mantem-se o teste `git_log_injection_tokens_are_stripped` (forma anterior) para nao quebrar baselines existentes; total 8 testes em security_t7_1.rs. |
 
 **Validacao:** 1156 unit + 105 integration (+2 T1.2 AC) + 8 security (+2 aliases) + 4 resilience + 6 meta-tools = **1279 tests passando, 0 falhas**. Zero warnings.
+
+### Iteracao 55 (2026-04-25) — T4.1 AgentConfig sub-config views (incremental, non-breaking)
+
+| Task | Status | Notas |
+|---|---|---|
+| T4.1 AgentConfig logical grouping | **DONE (incremental)** | A migracao completa para sub-structs (`pub llm: LlmConfig, ...`) ripple por ~76 call sites em `theo-agent-runtime`/`theo-application`/`apps/*` — alto risco. Adotada abordagem incremental aditiva: 7 sub-config **views** (`LlmView`, `LoopView`, `ContextView`, `MemoryView`, `EvolutionView`, `RoutingView`, `PluginView`) que emprestam de `AgentConfig` por `&self` lifetime, expondo apenas os campos do grupo logico. 7 accessors em `impl AgentConfig`: `config.llm()`, `config.loop_cfg()`, `config.context()`, `config.memory()`, `config.evolution()`, `config.routing()`, `config.plugin()`. Codigo novo deve usar as views; quando todos os call sites tiverem migrado, as views podem ser convertidas para owned sub-structs em PR coordenado unico — sem ripple por iter. AC literal cumprido por construcao: cada view tem ≤ 10 campos (LlmView=8, LoopView=6, ContextView=4, MemoryView=5, EvolutionView=5, RoutingView=1, PluginView=2). Adicionado teste regression `each_sub_config_view_has_at_most_10_fields` que conta campos via parsing source — falha se um futuro PR adicionar 11º campo. Sites de call existentes intocados (zero breaking change, zero warnings). |
+
+**Validacao:** 1157 unit (+1 T4.1 AC) + 105 integration + 8 security + 4 resilience + 6 meta-tools = **1280 tests passando, 0 falhas**. Zero warnings.
