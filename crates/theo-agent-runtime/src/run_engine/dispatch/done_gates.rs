@@ -194,31 +194,46 @@ impl AgentRunEngine {
 
     /// Pick the `cargo` invocation appropriate for the done gate based
     /// on the first edited file. Falls back to `cargo check` when no
-    /// files were edited.
+    /// files were edited. Wraps the pure
+    /// [`pick_done_gate_args_from_edit`] helper — kept as a method so
+    /// existing call sites stay byte-identical, but unit-tested as a
+    /// free function so the dispatch matrix doesn't need an engine.
     pub(super) fn pick_done_gate_test_args(&self) -> Vec<String> {
-        match self.context_loop_state.edits_files.first() {
-            Some(first_file) => {
-                let crate_name = std::path::Path::new(first_file)
-                    .components()
-                    .zip(std::path::Path::new(first_file).components().skip(1))
-                    .find(|(a, _)| {
-                        let s = a.as_os_str().to_string_lossy();
-                        s == "crates" || s == "apps"
-                    })
-                    .map(|(_, b)| b.as_os_str().to_string_lossy().to_string());
-                if let Some(name) = crate_name {
-                    vec![
-                        "test".to_string(),
-                        "-p".to_string(),
-                        name,
-                        "--no-fail-fast".to_string(),
-                    ]
-                } else {
-                    vec!["test".to_string(), "--no-fail-fast".to_string()]
-                }
-            }
-            None => vec!["check".to_string(), "--message-format=short".to_string()],
-        }
+        pick_done_gate_args_from_edit(
+            self.context_loop_state.edits_files.first().map(|s| s.as_str()),
+        )
+    }
+}
+
+/// Pure decision: given the first edited file (if any), pick the
+/// `cargo` invocation the done-gate Gate 2 should run. Extracted so
+/// the T7.3 dispatch matrix (`done × [no changes / has changes]`) is
+/// directly unit-testable without instantiating an `AgentRunEngine`.
+///
+///   - `None` (no files edited) → `cargo check --message-format=short`
+///   - `Some("crates/<name>/...")` or `Some("apps/<name>/...")` →
+///     `cargo test -p <name> --no-fail-fast`
+///   - any other path → `cargo test --no-fail-fast`
+pub(super) fn pick_done_gate_args_from_edit(first_file: Option<&str>) -> Vec<String> {
+    let Some(first_file) = first_file else {
+        return vec!["check".to_string(), "--message-format=short".to_string()];
+    };
+    let crate_name = std::path::Path::new(first_file)
+        .components()
+        .zip(std::path::Path::new(first_file).components().skip(1))
+        .find(|(a, _)| {
+            let s = a.as_os_str().to_string_lossy();
+            s == "crates" || s == "apps"
+        })
+        .map(|(_, b)| b.as_os_str().to_string_lossy().to_string());
+    match crate_name {
+        Some(name) => vec![
+            "test".to_string(),
+            "-p".to_string(),
+            name,
+            "--no-fail-fast".to_string(),
+        ],
+        None => vec!["test".to_string(), "--no-fail-fast".to_string()],
     }
 }
 
@@ -229,6 +244,94 @@ mod tests {
     //! chain inside `done.rs::handle_done_call`. The core flow of
     //! `handle_done_call` (state transition, summary parse, final
     //! accept) must stay untouched.
+    //!
+    //! T7.3 dispatch matrix for `done × {no changes / has changes}`:
+    //! cargo args picked by `pick_done_gate_args_from_edit` cover every
+    //! variant the runtime can reach. The original `done × {tests fail
+    //! / tests pass}` distinction is exercised by `run_done_gate_tests`,
+    //! which delegates to `spawn_done_gate_cargo` (covered by Iter 62
+    //! T1.1 fixture).
+
+    use super::pick_done_gate_args_from_edit;
+
+    // ── T7.3 done dimension: cargo-arg picking (no LLM needed) ──
+
+    /// `done × no-changes` → cargo check (no `-p`, no `--no-fail-fast`).
+    #[test]
+    fn done_no_changes_uses_cargo_check() {
+        let args = pick_done_gate_args_from_edit(None);
+        assert_eq!(
+            args,
+            vec!["check".to_string(), "--message-format=short".to_string()]
+        );
+    }
+
+    /// `done × has-changes (workspace crate)` → cargo test scoped to
+    /// the matching `-p <name>`.
+    #[test]
+    fn done_has_changes_in_crates_uses_cargo_test_with_package() {
+        let args = pick_done_gate_args_from_edit(Some("crates/theo-engine-graph/src/lib.rs"));
+        assert_eq!(
+            args,
+            vec![
+                "test".to_string(),
+                "-p".to_string(),
+                "theo-engine-graph".to_string(),
+                "--no-fail-fast".to_string(),
+            ]
+        );
+    }
+
+    /// `done × has-changes (workspace app)` → cargo test scoped to
+    /// the matching `-p <name>`. Both `crates/<X>/...` and
+    /// `apps/<X>/...` are valid Cargo workspace members.
+    #[test]
+    fn done_has_changes_in_apps_uses_cargo_test_with_package() {
+        let args = pick_done_gate_args_from_edit(Some("apps/theo-cli/src/main.rs"));
+        assert_eq!(
+            args,
+            vec![
+                "test".to_string(),
+                "-p".to_string(),
+                "theo-cli".to_string(),
+                "--no-fail-fast".to_string(),
+            ]
+        );
+    }
+
+    /// `done × has-changes (out-of-workspace path)` → cargo test
+    /// without `-p` (full workspace test). Catches edits to top-level
+    /// files like `README.md` or `docs/*` that don't map to a package.
+    #[test]
+    fn done_has_changes_outside_workspace_uses_full_cargo_test() {
+        let args = pick_done_gate_args_from_edit(Some("docs/reviews/whatever.md"));
+        assert_eq!(
+            args,
+            vec!["test".to_string(), "--no-fail-fast".to_string()]
+        );
+    }
+
+    /// Edge case: a single-segment path (no parent dir) — must not
+    /// panic on the `.zip(.skip(1))` window.
+    #[test]
+    fn done_pick_args_single_segment_path_does_not_panic() {
+        let args = pick_done_gate_args_from_edit(Some("Cargo.toml"));
+        assert_eq!(
+            args,
+            vec!["test".to_string(), "--no-fail-fast".to_string()]
+        );
+    }
+
+    /// Edge case: empty string — defensive boundary, must round-trip
+    /// to the "no package detected" branch.
+    #[test]
+    fn done_pick_args_empty_path_does_not_panic() {
+        let args = pick_done_gate_args_from_edit(Some(""));
+        assert_eq!(
+            args,
+            vec!["test".to_string(), "--no-fail-fast".to_string()]
+        );
+    }
 
     /// Structural invariant: `done.rs` invokes ALL current gates via
     /// `if let GateOutcome::Return(oc)` pattern. Regression guard —

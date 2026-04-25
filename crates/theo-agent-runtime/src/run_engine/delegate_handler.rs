@@ -9,6 +9,37 @@ use std::sync::Arc;
 
 use crate::run_engine::{AgentRunEngine, HandoffOutcome};
 
+/// Routing decision for `delegate_task` based on the JSON args. Pure
+/// function — extracted for the T7.3 dispatch matrix so the four
+/// branches (single / parallel / both / neither) can be unit-tested
+/// without instantiating an `AgentRunEngine`.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum DelegateRoute {
+    /// `agent`+`objective` provided → single delegation.
+    Single,
+    /// `parallel` array provided → parallel fan-out.
+    Parallel,
+    /// Both `agent` and `parallel` present → caller error.
+    ErrorBoth,
+    /// Neither `agent` nor `parallel` present → caller error.
+    ErrorNeither,
+}
+
+/// Classify the `delegate_task` args into a `DelegateRoute`. The
+/// runtime accepts EITHER the `agent`+`objective` form OR the
+/// `parallel` form — not both, not neither. This helper is the
+/// single source of truth for that contract.
+pub(super) fn classify_delegate_args(args: &serde_json::Value) -> DelegateRoute {
+    let has_agent = args.get("agent").is_some();
+    let has_parallel = args.get("parallel").is_some();
+    match (has_agent, has_parallel) {
+        (true, true) => DelegateRoute::ErrorBoth,
+        (false, false) => DelegateRoute::ErrorNeither,
+        (true, false) => DelegateRoute::Single,
+        (false, true) => DelegateRoute::Parallel,
+    }
+}
+
 impl AgentRunEngine {
     /// Dispatch a `delegate_task` call. Args accept either
     /// `agent`+`objective` (single) OR `parallel: [...]` (multi). Both
@@ -18,25 +49,25 @@ impl AgentRunEngine {
     /// - Known agent name → `spawn_with_spec` with the registered spec.
     /// - Unknown name → `AgentSpec::on_demand` (read-only by S1).
     pub(super) async fn handle_delegate_task(&mut self, args: serde_json::Value) -> String {
-        let has_agent = args.get("agent").is_some();
-        let has_parallel = args.get("parallel").is_some();
-
-        if has_agent && has_parallel {
-            return "Error: delegate_task accepts EITHER `agent`+`objective` OR `parallel`, not both."
-                .to_string();
-        }
-        if !has_agent && !has_parallel {
-            return "Error: delegate_task requires either `agent`+`objective` or `parallel`."
-                .to_string();
-        }
-
-        let manager = self.build_subagent_manager();
-        let guardrails = self.resolve_handoff_guardrails();
-
-        if has_agent {
-            self.delegate_single(args, manager, guardrails).await
-        } else {
-            self.delegate_parallel(args, manager, guardrails).await
+        match classify_delegate_args(&args) {
+            DelegateRoute::Single => {
+                let manager = self.build_subagent_manager();
+                let guardrails = self.resolve_handoff_guardrails();
+                self.delegate_single(args, manager, guardrails).await
+            }
+            DelegateRoute::Parallel => {
+                let manager = self.build_subagent_manager();
+                let guardrails = self.resolve_handoff_guardrails();
+                self.delegate_parallel(args, manager, guardrails).await
+            }
+            DelegateRoute::ErrorBoth => {
+                "Error: delegate_task accepts EITHER `agent`+`objective` OR `parallel`, not both."
+                    .to_string()
+            }
+            DelegateRoute::ErrorNeither => {
+                "Error: delegate_task requires either `agent`+`objective` or `parallel`."
+                    .to_string()
+            }
         }
     }
 
@@ -340,4 +371,72 @@ enum GuardrailResolution {
         objective: String,
         note: Option<String>,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    //! T7.3 dispatch matrix for `delegate_task × {single / parallel /
+    //! both / neither}`. The classify function is pure on its JSON
+    //! args, so we can pin every branch without an engine fixture.
+    //! The {single / parallel / worktree} dimension from the plan
+    //! splits "single" into worktree-strategy variants, which the
+    //! runtime decides INSIDE the spawn (`subagent::spawn_helpers::
+    //! resolve_worktree`) rather than at the dispatch entry — they
+    //! are exercised via the existing `subagent_characterization`
+    //! suite.
+    use super::{DelegateRoute, classify_delegate_args};
+
+    #[test]
+    fn delegate_single_when_only_agent_present() {
+        let args = serde_json::json!({
+            "agent": "scout",
+            "objective": "investigate"
+        });
+        assert_eq!(classify_delegate_args(&args), DelegateRoute::Single);
+    }
+
+    #[test]
+    fn delegate_parallel_when_only_parallel_present() {
+        let args = serde_json::json!({
+            "parallel": [
+                {"agent": "scout", "objective": "task-1"},
+                {"agent": "scout", "objective": "task-2"}
+            ]
+        });
+        assert_eq!(classify_delegate_args(&args), DelegateRoute::Parallel);
+    }
+
+    #[test]
+    fn delegate_error_both_when_agent_and_parallel_present() {
+        let args = serde_json::json!({
+            "agent": "scout",
+            "objective": "investigate",
+            "parallel": []
+        });
+        assert_eq!(classify_delegate_args(&args), DelegateRoute::ErrorBoth);
+    }
+
+    #[test]
+    fn delegate_error_neither_when_neither_present() {
+        let args = serde_json::json!({});
+        assert_eq!(classify_delegate_args(&args), DelegateRoute::ErrorNeither);
+    }
+
+    /// Edge: presence is keyed off `args.get(field).is_some()`, so
+    /// even a `null`-valued field counts as present. The dispatcher
+    /// downstream is expected to surface a clear error from the
+    /// extractor when the field is the wrong type.
+    #[test]
+    fn delegate_classify_treats_null_field_as_present() {
+        let args = serde_json::json!({ "agent": null });
+        assert_eq!(classify_delegate_args(&args), DelegateRoute::Single);
+    }
+
+    /// Edge: an unrelated field alone is the `ErrorNeither` branch —
+    /// no auto-routing to single just because *some* field is set.
+    #[test]
+    fn delegate_classify_unrelated_field_is_error_neither() {
+        let args = serde_json::json!({ "context": "anything" });
+        assert_eq!(classify_delegate_args(&args), DelegateRoute::ErrorNeither);
+    }
 }
