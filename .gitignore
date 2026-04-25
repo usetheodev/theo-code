@@ -7,6 +7,10 @@
 # Rust / Cargo
 # ----------------------------------------------------------------------------
 /target/
+# REMEDIATION_PLAN T0.3 — only baseline TSVs are committed; the raw
+# tarpaulin XML and the regenerated current.tsv stay local.
+.coverage/cobertura.xml
+.coverage/current.tsv
 **/*.rs.bk
 *.pdb
 *.d
