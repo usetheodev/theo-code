@@ -14,6 +14,18 @@ use theo_domain::prompt_sanitizer::{
 };
 use theo_domain::user_paths::{home_dir, theo_config_dir, theo_config_subdir};
 
+/// Process-wide env-var lock for HOME-mutating tests in this binary.
+/// Without it, `home_unset_does_not_fallback_to_tmp` and
+/// `home_set_returns_config_theo_subdir` race on the shared HOME
+/// var when run in parallel — observed flakiness in Iter 76.
+fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+    use std::sync::{Mutex, OnceLock};
+    static M: OnceLock<Mutex<()>> = OnceLock::new();
+    M.get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
+
 // ────────────────────────────────────────────────────────────────────
 // T1.4 — `$HOME` unset MUST NOT fall back to `/tmp`
 //
@@ -33,6 +45,7 @@ use theo_domain::user_paths::{home_dir, theo_config_dir, theo_config_subdir};
 /// parallelizable with other env-mutating tests.
 #[test]
 fn home_unset_does_not_fallback_to_tmp() {
+    let _l = env_lock();
     // Save and clear HOME.
     let saved = std::env::var_os("HOME");
     unsafe {
@@ -67,6 +80,7 @@ fn home_unset_does_not_fallback_to_tmp() {
 /// `$HOME/.config/theo/<subdir>` (canonical shape).
 #[test]
 fn home_set_returns_config_theo_subdir() {
+    let _l = env_lock();
     let saved = std::env::var_os("HOME");
     unsafe {
         std::env::set_var("HOME", "/opt/fakeuser");

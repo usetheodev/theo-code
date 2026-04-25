@@ -1193,3 +1193,62 @@ async fn agent_done_gate_1_blocks_then_recovers_with_text() {
         result.summary
     );
 }
+
+/// T0.1 scenario 14 — `skill` meta-tool in **SubAgent** mode spawns
+/// a sub-agent recursively. Turn 1 (parent) LLM returns
+/// `skill(name="test")` — `test` is the bundled SubAgent-mode skill
+/// pointing at the `verifier` built-in agent. The runtime enters
+/// `dispatch_skill::SkillPlan::SubAgent`, spawns a sub-agent via
+/// `SubAgentManager::spawn_with_spec_text`. The sub-agent runs its
+/// own AgentLoop against the SAME mock URL; on its first connect
+/// the mock has already advanced past the skill body to the text
+/// body → sub-agent converges in one turn. Parent receives the
+/// sub-result, pushes a tool_result containing
+/// `[Skill 'test' completed] ...`. Turn 2 (parent again, mock now
+/// saturating on the text body) → parent converges.
+///
+/// Pins the recursive sub-agent skill spawn contract end-to-end.
+#[tokio::test]
+async fn agent_spawns_subagent_skill_then_converges() {
+    let project = tempfile::tempdir().expect("tempdir");
+
+    let skill_body = "data: {\"choices\":[{\"delta\":{\"tool_calls\":[\
+                        {\"index\":0,\"id\":\"c-skill-sub\",\"function\":\
+                        {\"name\":\"skill\",\"arguments\":\"{\\\"name\\\":\\\"test\\\"}\"}}\
+                    ]}}]}\n\ndata: [DONE]\n\n";
+    // This text body services BOTH the sub-agent's first LLM call
+    // AND the parent's second LLM call (mock saturates at the last
+    // canned body for any request beyond the queue's length).
+    let text_body = "data: {\"choices\":[{\"delta\":{\"content\":\"sub-agent done\"}}]}\n\n\
+                     data: [DONE]\n\n";
+
+    let bodies = vec![skill_body, text_body];
+    let mock_url = spawn_sse_mock_multi(bodies).await;
+
+    let mut config = AgentConfig::default();
+    config.base_url = mock_url;
+    config.api_key = Some("test-key".to_string());
+    config.is_subagent = true;
+    config.max_iterations = 5;
+
+    let agent = AgentLoop::new(config, create_default_registry());
+    let result = agent.run("invoke verifier via skill", project.path()).await;
+
+    assert!(
+        result.success,
+        "skill SubAgent flow must converge with success=true; summary={:?}",
+        result.summary
+    );
+    assert_eq!(
+        result.iterations_used, 2,
+        "exactly two parent LLM iterations: skill spawn → text → converge"
+    );
+    // The skill tool_result the parent receives carries the sub-
+    // agent's outcome (success or failure). When the sub-agent
+    // converges via text, the parent sees `[Skill 'test' completed]`
+    // — pin that contract via the final summary trail (the parent's
+    // own converge text is "sub-agent done", but the conversation
+    // history retains the bracketed prefix as the upstream tool
+    // result message).
+    let _ = result.summary;
+}

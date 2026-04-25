@@ -1726,3 +1726,29 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 **Cobertura T0.1 atual:** 12 cenarios canonicos do plano + 1 underpinning para Gate 2. Restante (skill SubAgent driven by LLM com recursive sub-agent spawn) requer setup mais complexo (sub-agent tambem chama LLM, mock saturating handles, registry resolution para spec "verifier") — deixado como follow-up explicito.
 
 **Validacao:** 1312 tests passando entre `theo-agent-runtime`, 0 falhas. `cargo check -p theo-agent-runtime --lib` clean.
+
+### Iteracao 77 (2026-04-25) — T0.1 cenario 14 (skill SubAgent recursive) + fix flakiness security_t7_1
+
+| Task | Status | Notas |
+|---|---|---|
+| T0.1 cenario `agent_spawns_subagent_skill_then_converges` | **DONE** | Two-turn parent flow + recursive sub-agent: turn 1 (parent) LLM responde com `skill(name="test")` — `test` e o skill bundled em modo SubAgent apontando para o `verifier` agent built-in. `dispatch_skill::SkillPlan::SubAgent` spawn via `SubAgentManager::spawn_with_spec_text`. O sub-agent roda seu proprio AgentLoop contra a MESMA mock URL; no primeiro connect ja avancou alem do skill body para o text body → sub-agent converge em 1 turn. Parent recebe sub-result, push tool_result `[Skill 'test' completed] ...`. Turn 2 parent (mock saturated no text body) → converge. Bodies = 2 (skill_body, text_body) graças ao saturating behavior do mock. Asserts: `success=true`, `iterations_used=2`. Pin do contrato recursive sub-agent skill spawn end-to-end. |
+| Fix flakiness `security_t7_1` (env_lock) | **DONE** | Adicionado `env_lock()` helper module-local em `tests/security_t7_1.rs` mirror do pattern usado em `run_engine/execution.rs:373` (OnceLock<Mutex<()>>). Aplicado em `home_unset_does_not_fallback_to_tmp` e `home_set_returns_config_theo_subdir` — ambos mutavam `HOME` env sem serializacao, causando race em runs paralelas (observada em iteracoes 71+, 73, 76 nas runs full-suite). Single-threaded sempre passou; agora parallel tambem. |
+
+**Cobertura T0.1 final:** 13 cenarios end-to-end via mock LLM + 1 underpinning Gate 2. Cenarios cobertos:
+1. text-only converge
+2. single-tool dispatch round-trip
+3. multi-tool happy path (read+glob+text)
+4. budget exhaustion (max_iterations)
+5. done-gate force-accept apos MAX_DONE_ATTEMPTS
+6. skill InContext (commit skill)
+7. tool error + retry continuation
+8. LLM retry+success (503 → 200)
+9. context overflow recovery (400 com "context_length_exceeded")
+10. batch_execute LLM-driven (2 sub-globs)
+11. resume com ResumeContext (cached tool_result replay)
+12. done-gate Gate 1 block + recover via text
+13. skill SubAgent recursive (verifier built-in)
+
+Plus: T0.1 underpinning `done_gate_cargo_check_fails_on_broken_manifest` em `run_engine_sandbox.rs`.
+
+**Validacao:** 1313 tests passando entre `theo-agent-runtime`, 0 falhas. Parallel runs estaveis (sem flakiness HOME-env). `cargo check -p theo-agent-runtime --lib` clean.
