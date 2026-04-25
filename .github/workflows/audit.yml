@@ -127,3 +127,17 @@ jobs:
         run: cargo install cargo-tarpaulin --locked
       - name: run coverage check
         run: bash scripts/check-coverage.sh
+
+  # ── Module-size gate (T8.5): cap production-only LOC per file. ──
+  # Counts non-test lines (stops at first `#[cfg(test)]`) in every .rs
+  # file under `crates/theo-agent-runtime/src/`. Fails the build when
+  # any file exceeds `MAX_LOC` (default 1000 — regression-prevention
+  # cap; long-term target is 500 but several mature post-split modules
+  # still sit above and need their own dedicated split iteration).
+  module_size:
+    name: Module-size gate (T8.5)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: run module-size check
+        run: bash scripts/check-module-size.sh
