@@ -310,7 +310,19 @@ impl AgentRunEngine {
                     return result;
                 }
 
-                let result_msg = Message::tool_result(&call.id, name, &output);
+                // T2.1 / FIND-P6-001 / D5 — all untrusted tool output is
+                // fenced before becoming a `Message::tool_result(...)` so
+                // injection tokens (`<|im_start|>`, `[INST]`, `<system>`,
+                // …) embedded in file contents, shell output, fetched
+                // pages, etc. cannot hijack the next LLM turn. The
+                // `tool:{name}` source label flows into the fence tag for
+                // auditability.
+                let fenced_output = theo_domain::prompt_sanitizer::fence_untrusted(
+                    &output,
+                    &format!("tool:{name}"),
+                    crate::constants::MAX_TOOL_OUTPUT_BYTES,
+                );
+                let result_msg = Message::tool_result(&call.id, name, &fenced_output);
 
                 // Working set + context metrics — extracted to
                 // main_loop::update_working_set_post_tool.

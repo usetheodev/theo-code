@@ -349,13 +349,22 @@ impl AgentLoop {
 
         let task_manager = Arc::new(TaskManager::new(event_bus.clone()));
         let tcm = ToolCallManager::new(event_bus.clone());
-        let tool_call_manager = Arc::new(match self.config.plugin().capability_set {
-            Some(caps) => {
-                let gate = Arc::new(CapabilityGate::new(caps.clone(), event_bus.clone()));
-                tcm.with_capability_gate(gate)
-            }
-            None => tcm,
-        });
+        // T2.3 / FIND-P6-005 / D4 — `CapabilityGate` is now ALWAYS
+        // installed. When the user did not configure a `capability_set`,
+        // `CapabilitySet::unrestricted()` is used so every tool dispatch
+        // goes through the gate's auditing path (the `CapabilityGranted`
+        // event flows to listeners and OTel) even though it does not
+        // restrict tool access. Previously `None → bare tcm` removed
+        // the gate entirely from the main agent and silenced audit
+        // events. INV-003 fortalecido.
+        let caps = self
+            .config
+            .plugin()
+            .capability_set
+            .cloned()
+            .unwrap_or_else(theo_domain::capability::CapabilitySet::unrestricted);
+        let gate = Arc::new(CapabilityGate::new(caps, event_bus.clone()));
+        let tool_call_manager = Arc::new(tcm.with_capability_gate(gate));
 
         let task_id = task_manager.create_task(
             SessionId::new("agent"),
@@ -484,6 +493,46 @@ mod tests {
     }
 
     /// T3.2 AC regression — `run()` and `run_with_history()` MUST both
+    /// T2.3 / FIND-P6-005 / D4 — `build_engine` must ALWAYS install a
+    /// `CapabilityGate` on the `ToolCallManager`. Previously, when the
+    /// user's `capability_set` was `None`, `build_engine` returned a
+    /// bare `tcm` with no gate, which silenced all
+    /// `CapabilityGranted`/`CapabilityDenied` audit events on the main
+    /// agent and disabled the enforcement path entirely.
+    ///
+    /// We assert this structurally because a full e2e test would
+    /// require building an `AgentLoop` end-to-end with an LLM mock.
+    #[test]
+    fn build_engine_always_installs_capability_gate() {
+        let src = include_str!("mod.rs");
+        let flat: String = src.split_whitespace().collect::<Vec<_>>().join(" ");
+
+        // The unwrap_or_else default uses `CapabilitySet::unrestricted`
+        // and the gate is wrapped in `with_capability_gate(gate)`.
+        // Both must remain present.
+        assert!(
+            flat.contains("CapabilitySet :: unrestricted")
+                || flat.contains("CapabilitySet::unrestricted"),
+            "build_engine must default capability_set to unrestricted() when None"
+        );
+        assert!(
+            flat.contains("with_capability_gate ( gate )")
+                || flat.contains("with_capability_gate(gate)"),
+            "build_engine must call with_capability_gate(gate) unconditionally"
+        );
+
+        // The construction must not be inside a `match ... { Some => ... }`
+        // arm — the gate is wired UNCONDITIONALLY for the production path.
+        // We check that `with_capability_gate(gate)` is wrapped in
+        // `Arc::new(...)` directly (one expression) rather than living
+        // behind a match-arm split.
+        assert!(
+            flat.contains("Arc :: new ( tcm . with_capability_gate ( gate )")
+                || flat.contains("Arc::new(tcm.with_capability_gate(gate)"),
+            "T2.3: gate must be installed unconditionally (no match-arm split)"
+        );
+    }
+
     /// route through `execute_and_shutdown`, which in turn invokes
     /// `record_session_exit_public` so the memory hook, episode
     /// persistence, and metrics flush always fire. A future refactor

@@ -53,6 +53,17 @@ pub const TOOL_INPUT_TRUNCATE_BYTES: usize = 500;
 /// `cargo test` fails. Long compiler output gets an ellipsis suffix.
 pub const DONE_GATE_ERROR_PREVIEW_BYTES: usize = 2000;
 
+/// Byte cap applied via `theo_domain::prompt_sanitizer::fence_untrusted`
+/// to every tool output before it becomes a `Message::tool_result(...)`
+/// fed back to the LLM (T2.1 / FIND-P6-001).
+///
+/// The cap is intentionally generous (256 KB) — far above
+/// `DEFAULT_MAX_BYTES = 4 KB` from `theo-domain` — because tools
+/// legitimately need to return file contents, command output, and
+/// search results. The fencing is the primary defence; the cap is a
+/// secondary prompt-bloat guard.
+pub const MAX_TOOL_OUTPUT_BYTES: usize = 256 * 1024;
+
 /// Byte cap on sensor output injected into the next LLM turn's context.
 pub const SENSOR_OUTPUT_PREVIEW_BYTES: usize = 1000;
 

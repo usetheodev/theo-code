@@ -274,10 +274,20 @@ impl AgentRunEngine {
             }
             Err(err) => format!("[mcp dispatch failed] {}", err),
         };
+        // T2.2 / find_p6_003 / D5 — MCP responses are remote, untrusted
+        // input and must be fenced before reaching the LLM. Same
+        // `fence_untrusted` helper as T2.1 (regular tools); the source
+        // label keeps `mcp:` so audit trails distinguish remote vs
+        // local tool output.
+        let fenced = theo_domain::prompt_sanitizer::fence_untrusted(
+            &result_text,
+            &format!("mcp:{name}"),
+            crate::constants::MAX_TOOL_OUTPUT_BYTES,
+        );
         Some(theo_infra_llm::types::Message::tool_result(
             &call.id,
             name,
-            &result_text,
+            &fenced,
         ))
     }
 

@@ -2,21 +2,21 @@
 
 **Source:** [agent-runtime-remediation-plan.md](../plans/agent-runtime-remediation-plan.md)
 **Created:** 2026-04-25
-**Last updated:** 2026-04-25 (iter 2 — Phase 1 done)
+**Last updated:** 2026-04-25 (iter 3 — Phase 2 done)
 
 ## Progress
 
 ```
-[==============·······························] 32% (10/31 done)
+[=====================························] 48% (15/31 done)
 ```
 
 | Column | Count | Cards |
 |---|---|---|
-| backlog | 17 | T2.5, T3.1, T3.2, T3.5, T3.6, T3.7, T4.1, T4.2, T4.3, T4.4, T4.5, T4.6, T4.9, T4.10 |
-| ready | 4 | T2.1, T2.3, T3.3, T3.4 |
+| backlog | 12 | T3.1, T3.2, T3.5, T3.6, T3.7, T4.1, T4.2, T4.3, T4.4, T4.5, T4.6, T4.9, T4.10 |
+| ready | 4 | T3.3, T3.4, T3.6, T3.8 |
 | doing | 0 | — |
 | review | 0 | — |
-| done | 10 | T0.1, T0.2, T0.3, T0.4, T1.1, T1.2, T1.3, T1.4, T4.7, T4.8 |
+| done | 15 | T0.1, T0.2, T0.3, T0.4, T1.1, T1.2, T1.3, T1.4, T2.1, T2.2, T2.3, T2.4, T2.5, T4.7, T4.8 |
 
 ## Phase Summary
 
@@ -24,10 +24,10 @@
 |---|---|---|---|---|
 | 0 | Foundation / Unblockers | 4 | 4 | 100% |
 | 1 | Correção P1 Crítica | 4 | 4 | 100% |
-| 2 | Defesas Wired | 5 | 0 | 0% |
+| 2 | Defesas Wired | 5 | 5 | 100% |
 | 3 | Refactor Arquitetural | 8 | 0 | 0% |
 | 4 | Hardening Backlog | 10 | 2 | 20% |
-| **Total** | — | **31** | **10** | **32%** |
+| **Total** | — | **31** | **15** | **48%** |
 
 ## Dependency Graph (Live)
 
@@ -771,3 +771,8 @@ Status annotations: `[done]`, `[review]`, `[doing]`, `[ready]`, `[backlog]`
 | 2026-04-25 | T1.4 | backlog | done | `is_already_in_state()` on `TransitionError` + `try_task_transition` helper + 7 sites + 5 tests |
 | 2026-04-25 | T1.1 | backlog | done | `_abort_tx` → `abort_tx` + `tokio::spawn` bridge observing `CancellationToken` + integration test (3/3, ≤500ms) |
 | 2026-04-25 | (deps) | — | — | Added `tracing` + `tracing-subscriber` to workspace deps (foundation for T1.3 logs and T3.7 migration) |
+| 2026-04-25 | T2.1 | backlog | done | `fence_untrusted(output, "tool:{name}", MAX_TOOL_OUTPUT_BYTES)` em execution.rs:313 + 3 testes regression |
+| 2026-04-25 | T2.2 | backlog | done | `fence_untrusted(text, "mcp:{name}", MAX)` em try_dispatch_mcp_tool |
+| 2026-04-25 | T2.3 | backlog | done | CapabilityGate sempre instalado (default `unrestricted()`) + structural test |
+| 2026-04-25 | T2.4 | backlog | done | `HookResponse::inject_context_sanitized()` helper + doc + 3 unit tests |
+| 2026-04-25 | T2.5 | backlog | done | `load_promise()` faz strip + cap 8KB; `MAX_PROMPT_MD_BYTES` constant + 2 unit tests |

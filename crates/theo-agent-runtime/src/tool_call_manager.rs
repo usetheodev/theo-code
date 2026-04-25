@@ -46,6 +46,16 @@ impl ToolCallManager {
         self
     }
 
+    /// Whether this manager has a capability gate installed.
+    ///
+    /// Always `true` after the runtime builds the manager via
+    /// `AgentLoop::build_run_engine` (T2.3 / FIND-P6-005). Used by
+    /// regression tests to assert the gate is wired regardless of the
+    /// user's `capability_set` configuration.
+    pub fn has_capability_gate(&self) -> bool {
+        self.capability_gate.is_some()
+    }
+
 
     /// Enqueues a new tool call with a unique CallId (Invariant 2).
     ///
