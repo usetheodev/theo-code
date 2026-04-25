@@ -1556,3 +1556,14 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 | T8.5 MAX_LOC apertado | **DONE** | Cap baixado de 725 para **650**. Top files: main_loop 625 (unico >500), pilot/mod 481, spawn_helpers 429, observability/report/metrics 423, agent_loop/mod 417, subagent/mod 402. Smoke test OK — todos ≤650. Long-term target T4.* permanece 500. |
 
 **Validacao:** 1279 tests passando (1157 unit + 122 integration), 0 falhas. `cargo check -p theo-agent-runtime --lib` clean (zero warnings). Module-size gate verde a cap 650. Apenas 1 arquivo (`main_loop.rs` 625) ainda >500 — era 5 antes da iteracao 59.
+
+### Iteracao 61 (2026-04-25) — main_loop.rs final split + T4.* TARGET 500 ATINGIDO
+
+| Task | Status | Notas |
+|---|---|---|
+| T4.* main_loop.rs splits remanescentes | **DONE** | Dois novos siblings em `run_engine/`: (1) `iteration_prelude.rs` (~125 LOC) com `drain_sensor_messages` (sensor result drain → system messages + `SensorExecuted` events) + `inject_context_loop_and_compact` (context-loop nudge + phase transitions + pre-compress memory hook + staged compaction + metrics record); (2) `post_dispatch_updates.rs` (~110 LOC) com `update_working_set_post_tool` (working set + context metrics classification by tool name) + `update_context_loop_post_tool` (read/search/edit attempt log com filePath / patchText fallback). main_loop.rs: 625 → **419 LOC** (-206, -33%) — abaixo do alvo T4.* de 500 pela primeira vez. |
+| T8.5 MAX_LOC apertado para 500 (alvo final) | **DONE** | Cap baixado de 650 para **500** — alvo long-term T4.* atingido. Header do script `check-module-size.sh` atualizado: a justificativa "5 modulos ainda acima do alvo" deu lugar a "raising it is a regression". Top 10 files agora todos ≤481: pilot/mod 481, spawn_helpers 429, observability/report/metrics 423, main_loop 419, agent_loop/mod 417, subagent/mod 402, bin/theo-agent 398, autodream 381, config/mod 375, subagent/registry 367. |
+
+**Validacao:** 1279 tests passando, 0 falhas. `cargo check -p theo-agent-runtime --lib` clean (zero warnings). Module-size gate verde a cap **500** (alvo long-term).
+
+**Marco T4.*: cumprido.** Toda a `theo-agent-runtime/src/` esta abaixo do alvo de 500 production-LOC por arquivo. O processo iniciado na Iter 56 (cap=1000) seguiu ratchet apertando a cada split: 1000 → 750 → 725 → 650 → 500. Decisao de design preservada: views read-only de `AgentConfig` (T4.1) ainda esperam migracao plena dos call sites antes de virarem owned sub-config structs — esta e a ultima peca pendente do T4.*.

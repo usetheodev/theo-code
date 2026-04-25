@@ -17,13 +17,12 @@
 set -euo pipefail
 
 #
-# `MAX_LOC` is the regression-prevention cap. The long-term target
-# from REMEDIATION_PLAN T4.* is 500, but several files still sit
-# above (post-split mature modules with extensive docs). The cap is
-# intentionally loose to catch *new* regressions without forcing a
-# rewrite of every borderline file in one PR. Tighten when the
-# remaining 5 modules clear the 500 line.
-MAX_LOC="${MAX_LOC:-650}"
+# `MAX_LOC` is the regression-prevention cap, set to the long-term
+# target from REMEDIATION_PLAN T4.* (500). All modules in
+# `theo-agent-runtime/src/` cleared this threshold by Iter 61 — the
+# cap exists to keep them there. Raising it is a regression and
+# requires explicit justification in the PR description.
+MAX_LOC="${MAX_LOC:-500}"
 ROOT="${ROOT:-crates/theo-agent-runtime/src}"
 
 if [[ ! -d "${ROOT}" ]]; then
