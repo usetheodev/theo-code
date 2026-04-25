@@ -1471,3 +1471,11 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 | T3.3 centralizar env vars | **DONE (verificado)** | `rg "std::env::var" crates/theo-agent-runtime/src` retorna 3 hits TODOS dentro de `#[cfg(test)] mod` — sao test fixtures (`EnvSnapshot::capture` em `project_config`/`run_engine_sandbox`/`execution::forced_tool_choice_tests`) que salvam/restauram estado de env para serializacao de testes. Producao 0 hits. Helper centralizado `theo_domain::environment::{theo_var, bool_var}` e usado em todos os call sites de producao. |
 
 **Validacao:** 1152 unit (+1 T3.2 AC) + 103 integration + 6 security + 4 resilience + 6 meta-tools = **1271 tests passando, 0 falhas**. Zero warnings.
+
+### Iteracao 52 (2026-04-25) — T1.3 AC tests literais (plugin hardening)
+
+| Task | Status | Notas |
+|---|---|---|
+| T1.3 plugin hardening | **DONE + AC tests literais** | A implementacao do hardening (uid check via `manifest_is_owned_by_current_user` + allowlist por SHA-256 via `load_plugins_with_policy` + `DomainEvent::PluginLoaded` + `ToolCategory::Plugin`) ja existia em iter anterior. Faltavam os 3 nomes literais de teste do AC: adicionados em `plugin::tests`: `plugin_with_wrong_owner_rejected` (testa o helper `manifest_is_owned_by_current_user` com path inexistente → reject + `/etc/passwd` (owned by root) com guard de `am_root` skip se rodando como root no CI), `plugin_not_in_allowlist_rejected_when_configured` (espelho de `plugin_rejected_when_sha256_missing_from_allowlist` sob o nome literal do AC), `plugin_tool_blocked_by_capability_gate_read_only` (constroi um `CapabilitySet` read-only sem `ToolCategory::Plugin` no allowlist, valida que `can_use_tool("any-plugin", Plugin)` retorna `false`). Cobertura AC literal: 3/3 tests presentes com nomes do plano. |
+
+**Validacao:** 1155 unit (+3 T1.3 AC literais) + 103 integration + 6 security + 4 resilience + 6 meta-tools = **1274 tests passando, 0 falhas**. Zero warnings.
