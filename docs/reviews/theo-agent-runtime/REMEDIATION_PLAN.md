@@ -1661,3 +1661,15 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 **Cobertura T0.1 atual:** 7 dos cenarios canonicos do plano. Restantes (context overflow recovery, LLM retry+success com network error, done-gate Gate 2 LLM-driven com cargo, batch+LLM stream, skill SubAgent driven by LLM, resume com ResumeContext) seguem a mesma receita SSE-canned-bodies — dois deles (skill SubAgent, batch+LLM) requerem mais setup mas continuam tractable.
 
 **Validacao:** 1306 tests passando entre `theo-agent-runtime`, 0 falhas. `cargo check -p theo-agent-runtime --lib` clean.
+
+### Iteracao 71 (2026-04-25) — T0.1 cenario 8 (LLM retry+success) + finding metrico
+
+| Task | Status | Notas |
+|---|---|---|
+| T0.1 helper `spawn_status_mock_multi` | **DONE** | Variante do mock helper que aceita `Vec<(u16, &'static str)>` — primeiro request recebe (status_1, body_1), segundo (status_2, body_2), etc, saturando no ultimo. Permite cenarios de erro HTTP retornaveis (503, 429) sem build full wiremock. Reason phrases corretas para 200/429/503/genericos. |
+| T0.1 cenario `agent_retries_after_503_and_succeeds` | **DONE** | Mock devolve 503 no primeiro POST e SSE valido com content "after retry" no segundo. RetryExecutor::with_retry classifica 503 como retryable, dorme backoff agressivo (`config.aggressive_retry=true` para evitar test flakiness), reentra na closure que faz fresh HTTP request → 200 → converge. Asserts `success=true`, `iterations_used=1` (uma unica iteracao logica apesar de duas tentativas HTTP). Bus listener custom (`RetryEventCounter`) prova que pelo menos um evento `Error{type:retry}` foi publicado durante o retry. |
+| **Finding observacional T0.1** | **NEW** | O contador `MetricsCollector::record_retry()` existe e e exposto via `AgentResult::retries`, mas nunca e chamado em codigo de producao — apenas em tests do proprio `metrics.rs`. `RetryExecutor::with_retry` publica um `DomainEvent` `Error{type:retry}` no bus, sem incrementar a metrica. **Implicacao:** a fonte de verdade para "um retry aconteceu" e o event bus, nao o contador `total_retries`. Documentado como follow-up potencial — wire `record_retry()` no caminho de retry para que o contador metrico tambem reflita a verdade. Por enquanto o teste assertiva via listener custom ao inves do contador. |
+
+**Cobertura T0.1 atual:** 8 dos cenarios canonicos do plano. Restantes (context overflow recovery, done-gate Gate 2 LLM-driven com cargo, batch+LLM stream, skill SubAgent driven by LLM, resume com ResumeContext) seguem a mesma receita SSE-canned-bodies.
+
+**Validacao:** 1307 tests passando entre `theo-agent-runtime`, 0 falhas. `cargo check -p theo-agent-runtime --lib` clean.

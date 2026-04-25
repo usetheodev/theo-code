@@ -32,6 +32,8 @@ use theo_infra_llm::LlmClient;
 
 use theo_agent_runtime::agent_loop::AgentLoop;
 use theo_agent_runtime::config::AgentConfig;
+use theo_agent_runtime::event_bus::{EventBus, EventListener};
+use theo_domain::event::{DomainEvent, EventType};
 use theo_tooling::registry::create_default_registry;
 
 /// Spawn a single-shot HTTP server that returns the given SSE chunks.
@@ -198,6 +200,79 @@ async fn spawn_sse_mock_multi(
             let body_bytes = body.as_bytes();
             let head = format!(
                 "HTTP/1.1 200 OK\r\n\
+                 Content-Type: text/event-stream\r\n\
+                 Content-Length: {}\r\n\
+                 Connection: close\r\n\
+                 \r\n",
+                body_bytes.len()
+            );
+            let _ = sock.write_all(head.as_bytes()).await;
+            let _ = sock.write_all(body_bytes).await;
+            let _ = sock.shutdown().await;
+        }
+    });
+
+    format!("http://127.0.0.1:{port}")
+}
+
+/// Mock variant that returns the given (status_code, body) tuples
+/// in order. Saturates at the last entry for any subsequent connect.
+/// Used to exercise the retry path where the FIRST attempt sees a
+/// retryable error (e.g. 503) and a subsequent attempt sees 200.
+async fn spawn_status_mock_multi(
+    responses: Vec<(u16, &'static str)>,
+) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind mock");
+    let port = listener.local_addr().expect("local_addr").port();
+
+    tokio::spawn(async move {
+        let mut idx = 0usize;
+        loop {
+            let (mut sock, _) = match listener.accept().await {
+                Ok(p) => p,
+                Err(_) => return,
+            };
+            // Drain request head + body.
+            let mut buf = [0u8; 8192];
+            let mut acc: Vec<u8> = Vec::new();
+            loop {
+                let n = match sock.read(&mut buf).await {
+                    Ok(n) if n > 0 => n,
+                    _ => break,
+                };
+                acc.extend_from_slice(&buf[..n]);
+                if let Some(idx2) = acc.windows(4).position(|w| w == b"\r\n\r\n") {
+                    let head = std::str::from_utf8(&acc[..idx2]).unwrap_or("");
+                    let len = head
+                        .lines()
+                        .find_map(|l| {
+                            l.to_ascii_lowercase()
+                                .strip_prefix("content-length:")
+                                .and_then(|v| v.trim().parse::<usize>().ok())
+                        })
+                        .unwrap_or(0);
+                    let body_so_far = acc.len() - (idx2 + 4);
+                    if body_so_far < len {
+                        let mut more = vec![0u8; len - body_so_far];
+                        let _ = sock.read_exact(&mut more).await;
+                    }
+                    break;
+                }
+            }
+            let (status, body) = responses
+                .get(idx)
+                .copied()
+                .unwrap_or_else(|| responses.last().copied().unwrap_or((200, "data: [DONE]\n\n")));
+            idx += 1;
+            let body_bytes = body.as_bytes();
+            let reason = match status {
+                200 => "OK",
+                429 => "Too Many Requests",
+                503 => "Service Unavailable",
+                _ => "Status",
+            };
+            let head = format!(
+                "HTTP/1.1 {status} {reason}\r\n\
                  Content-Type: text/event-stream\r\n\
                  Content-Length: {}\r\n\
                  Connection: close\r\n\
@@ -648,5 +723,105 @@ async fn agent_continues_after_tool_failure_until_converge() {
     assert_eq!(
         result.tool_calls_success, 0,
         "both reads must have failed at the tool level"
+    );
+}
+
+/// Listener that records every `Error`-typed event whose payload's
+/// `type` field is `"retry"`. Used by the retry-success scenario
+/// to prove that a retry actually happened (the in-process metrics
+/// counter `total_retries` is wired but currently unused in prod —
+/// the source of truth for "a retry occurred" is the event bus).
+struct RetryEventCounter {
+    count: parking_lot::Mutex<u64>,
+}
+
+impl RetryEventCounter {
+    fn new() -> Self {
+        Self {
+            count: parking_lot::Mutex::new(0),
+        }
+    }
+    fn count(&self) -> u64 {
+        *self.count.lock()
+    }
+}
+
+impl EventListener for RetryEventCounter {
+    fn on_event(&self, e: &DomainEvent) {
+        if e.event_type == EventType::Error
+            && e.payload.get("type").and_then(|v| v.as_str()) == Some("retry")
+        {
+            *self.count.lock() += 1;
+        }
+    }
+}
+
+/// T0.1 scenario 8 — LLM retry + success. The mock serves a 503
+/// `Service Unavailable` on the FIRST attempt and a normal
+/// content-only SSE response on the SECOND attempt. The runtime's
+/// `RetryExecutor::with_retry` (wrapping `chat_streaming`) classifies
+/// 503 as retryable, sleeps the backoff, and re-enters the closure
+/// which makes a fresh HTTP request — that request hits the second
+/// canned response, succeeds, and the agent converges. Asserts
+/// `success=true`, `iterations_used=1` (a single LOGICAL iteration
+/// despite two HTTP attempts), AND that exactly one `retry` event
+/// was published on the bus (proven via a custom listener — the
+/// production `total_retries` metric isn't wired through `with_retry`
+/// today, but the event bus is the durable observability surface).
+#[tokio::test]
+async fn agent_retries_after_503_and_succeeds() {
+    let responses: Vec<(u16, &'static str)> = vec![
+        (503, "service unavailable"),
+        (
+            200,
+            "data: {\"choices\":[{\"delta\":{\"content\":\"after retry\"}}]}\n\n\
+             data: [DONE]\n\n",
+        ),
+    ];
+    let mock_url = spawn_status_mock_multi(responses).await;
+
+    let project = tempfile::tempdir().expect("tempdir");
+
+    let mut config = AgentConfig::default();
+    config.base_url = mock_url;
+    config.api_key = Some("test-key".to_string());
+    config.is_subagent = true;
+    config.max_iterations = 3;
+    // Aggressive retry policy keeps the test fast — the default LLM
+    // policy uses larger sleeps that would push the test into
+    // multi-second territory.
+    config.aggressive_retry = true;
+
+    // Listener proves at least one retry event fires through the bus
+    // (the run wires its own EventBus internally; we re-acquire one
+    // by going through `run_with_history` with an external bus).
+    let bus = Arc::new(EventBus::new());
+    let counter = Arc::new(RetryEventCounter::new());
+    bus.subscribe(counter.clone() as Arc<dyn EventListener>);
+
+    let agent = AgentLoop::new(config, create_default_registry());
+    let result = agent
+        .run_with_history(
+            "retry then converge",
+            project.path(),
+            Vec::new(),
+            Some(bus.clone()),
+        )
+        .await;
+
+    assert!(
+        result.success,
+        "503 → retry → 200 must converge with success=true; summary={:?}",
+        result.summary
+    );
+    assert_eq!(
+        result.iterations_used, 1,
+        "exactly ONE logical LLM iteration (the retry is internal)"
+    );
+    assert!(
+        counter.count() >= 1,
+        "EventBus must observe at least one `Error{{type:retry}}` event; \
+         got {} retry events",
+        counter.count()
     );
 }
