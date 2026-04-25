@@ -14,9 +14,6 @@ theo-application.workspace = true
 # into runtime-side stores. This is an explicit exception to ADR-010 for
 # operational tooling that doesn't go through the use_cases pipeline.
 theo-agent-runtime.workspace = true
-# sota-gaps Phase 17: build the MCP discovery cache once at CLI startup so
-# every sub-agent spawn shares the same memo'd result.
-theo-infra-mcp.workspace = true
 tokio.workspace = true
 async-trait.workspace = true
 clap.workspace = true
