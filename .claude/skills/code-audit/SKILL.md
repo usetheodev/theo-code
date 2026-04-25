@@ -12,6 +12,7 @@ Run static code-audit techniques on the Theo Code workspace. Each technique is e
 
 | Arg          | Agent                      | Technique                                      |
 |--------------|----------------------------|------------------------------------------------|
+| `lint`       | lint-auditor               | Linting — Rust + TS                            |
 | `complexity` | complexity-analyzer        | Cyclomatic complexity (CCN) — Rust + TS        |
 | `coverage`   | test-coverage-auditor      | Coverage + mutation testing                    |
 | `size`       | module-size-auditor        | File / function / class size limits            |
