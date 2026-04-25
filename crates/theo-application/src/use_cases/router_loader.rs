@@ -184,7 +184,7 @@ mod tests {
 
     #[test]
     fn load_router_recorder_captures_decisions() {
-        use theo_domain::routing::{ModelRouter, RoutingContext, RoutingPhase};
+        use theo_domain::routing::{RoutingContext, RoutingPhase};
         let dir = fixture(
             r#"
             [routing]

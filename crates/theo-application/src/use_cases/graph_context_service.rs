@@ -61,7 +61,12 @@ struct GraphState {
     /// MultiSignalScorer: only built when no RRF pipeline available (Tier 0 only).
     /// When tantivy-backend is active, query_context uses FileBm25 directly,
     /// saving ~200MB RAM from scorer's BM25 index + TF-IDF model.
+    /// Held even when no `&self.scorer` reads exist on the current build —
+    /// the indexer still needs to be constructed at startup so the
+    /// fallback path is wired. Mark `#[allow(dead_code)]` to silence
+    /// clippy on builds where the field genuinely has no readers.
     #[cfg(not(feature = "tantivy-backend"))]
+    #[allow(dead_code)]
     scorer: MultiSignalScorer,
     /// Tantivy BM25F index (Tier 1).
     #[cfg(feature = "tantivy-backend")]
