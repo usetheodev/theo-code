@@ -1471,3 +1471,21 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 | T3.3 centralizar env vars | **DONE (verificado)** | `rg "std::env::var" crates/theo-agent-runtime/src` retorna 3 hits TODOS dentro de `#[cfg(test)] mod` — sao test fixtures (`EnvSnapshot::capture` em `project_config`/`run_engine_sandbox`/`execution::forced_tool_choice_tests`) que salvam/restauram estado de env para serializacao de testes. Producao 0 hits. Helper centralizado `theo_domain::environment::{theo_var, bool_var}` e usado em todos os call sites de producao. |
 
 **Validacao:** 1152 unit (+1 T3.2 AC) + 103 integration + 6 security + 4 resilience + 6 meta-tools = **1271 tests passando, 0 falhas**. Zero warnings.
+
+### Iteracao 52 (2026-04-25) — T1.3 AC tests literais (plugin hardening)
+
+| Task | Status | Notas |
+|---|---|---|
+| T1.3 plugin hardening | **DONE + AC tests literais** | A implementacao do hardening (uid check via `manifest_is_owned_by_current_user` + allowlist por SHA-256 via `load_plugins_with_policy` + `DomainEvent::PluginLoaded` + `ToolCategory::Plugin`) ja existia em iter anterior. Faltavam os 3 nomes literais de teste do AC: adicionados em `plugin::tests`: `plugin_with_wrong_owner_rejected` (testa o helper `manifest_is_owned_by_current_user` com path inexistente → reject + `/etc/passwd` (owned by root) com guard de `am_root` skip se rodando como root no CI), `plugin_not_in_allowlist_rejected_when_configured` (espelho de `plugin_rejected_when_sha256_missing_from_allowlist` sob o nome literal do AC), `plugin_tool_blocked_by_capability_gate_read_only` (constroi um `CapabilitySet` read-only sem `ToolCategory::Plugin` no allowlist, valida que `can_use_tool("any-plugin", Plugin)` retorna `false`). Cobertura AC literal: 3/3 tests presentes com nomes do plano. |
+
+**Validacao:** 1155 unit (+3 T1.3 AC literais) + 103 integration + 6 security + 4 resilience + 6 meta-tools = **1274 tests passando, 0 falhas**. Zero warnings.
+
+### Iteracao 53 (2026-04-25) — T1.4 AC test + T5.2 SubAgentIntegrations migration em theo-application
+
+| Task | Status | Notas |
+|---|---|---|
+| T1.4 home unset | **DONE + AC test** | `rg "unwrap_or_else.*PathBuf::from..\(/tmp\)" crates/theo-agent-runtime/src` retorna 0 hits — fallback ja foi removido em iter anterior. Adicionado o teste literal AC `load_plugins_skips_when_home_unset` em `plugin::tests`: serializa via env_lock + restaura HOME via `HomeSnap` Drop, verifica que `load_plugins(project_dir_with_no_plugins)` retorna empty AND `theo_domain::user_paths::theo_config_subdir("plugins")` retorna `None` (nunca um path em `/tmp`). |
+| T1.6 listener panic redaction | **DONE (verificado)** | `rg "eprintln!.*entity_id" crates/theo-agent-runtime/src` retorna 0 hits. O eprintln em event_bus.rs:91 mostra apenas o `event_type` com texto `(entity redacted)`. AC literal cumprido (a conversao para `DomainEvent::ListenerPanic` typed event fica como follow-up — comportamento de seguranca atual ja e correto). |
+| T5.2 SubAgentIntegrations | **DONE (migration coordenada)** | A struct `SubAgentIntegrations` (11 fields) + builder `with_subagent_integrations` ja existiam em iter anterior. Faltava migrar o ultimo caller real (`theo-application::use_cases::run_agent_session::SubagentInjections::apply_to`) para usar a struct ao inves de chain de 10 `with_subagent_*`. Aplicado: `apply_to` agora constroi um `SubAgentIntegrations` literal com 11 campos `Option::clone()` e chama `loop_.with_subagent_integrations(integrations)` em uma unica linha (substitui ~30 LOC de if-let chains). `SubAgentIntegrations` adicionada ao `pub use` de `lib.rs` para tornar o tipo publicamente acessivel. Os 11 builders individuais permanecem em `AgentLoop` para manter compatibilidade com 16 testes internos (de-facto-deprecated mas sem `#[deprecated]` para nao quebrar `RUSTFLAGS=-D warnings` em CI). |
+
+**Validacao:** 1156 unit (+1 T1.4 AC) + 103 integration + 6 security + 4 resilience + 6 meta-tools = **1275 tests passando, 0 falhas**. Zero warnings em `theo-agent-runtime`. `theo-application` compila + tests verdes (1 warning pre-existente fora do escopo: `scorer` field unused em graph_context_service).

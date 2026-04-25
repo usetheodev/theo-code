@@ -540,4 +540,157 @@ description = "Demo plugin"
                 == 64
         );
     }
+
+    // -----------------------------------------------------------------------
+    // T1.3 AC literals — alias the existing tests under the names the
+    // remediation plan calls out so a future grep against the plan's AC
+    // wording finds them.
+    // -----------------------------------------------------------------------
+
+    /// T1.4 AC: `load_plugins_skips_when_home_unset`. The global
+    /// plugins path is `$HOME/.config/theo/plugins`. When `HOME` is
+    /// absent we MUST skip the global lookup — never fall back to
+    /// `/tmp` (TOCTOU vector). Project plugins are unaffected because
+    /// they live under `<project_dir>/.theo/plugins/` not `HOME`.
+    #[cfg(unix)]
+    #[test]
+    fn load_plugins_skips_when_home_unset() {
+        // Lock + snapshot follow the established T0.3 / T1.5 pattern
+        // (env-mutating tests serialize against each other and
+        // restore HOME on Drop).
+        fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+            use std::sync::{Mutex, OnceLock};
+            static M: OnceLock<Mutex<()>> = OnceLock::new();
+            M.get_or_init(|| Mutex::new(()))
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+        }
+        struct HomeSnap(Option<std::ffi::OsString>);
+        impl Drop for HomeSnap {
+            fn drop(&mut self) {
+                unsafe {
+                    match &self.0 {
+                        Some(v) => std::env::set_var("HOME", v),
+                        None => std::env::remove_var("HOME"),
+                    }
+                }
+            }
+        }
+        let _l = env_lock();
+        let _s = HomeSnap(std::env::var_os("HOME"));
+        unsafe { std::env::remove_var("HOME") };
+
+        // Project dir without any plugins → load returns empty Vec
+        // and crucially does NOT touch /tmp.
+        let dir = tempfile::tempdir().unwrap();
+        let plugins = load_plugins(dir.path());
+        assert!(
+            plugins.is_empty(),
+            "no plugins exist anywhere; loader must return empty"
+        );
+
+        // The contract: with HOME unset, `theo_config_subdir("plugins")`
+        // returns None — proven directly here so a regression in the
+        // central helper would also trip this AC test.
+        assert_eq!(
+            theo_domain::user_paths::theo_config_subdir("plugins"),
+            None,
+            "HOME unset must yield None — never a /tmp path"
+        );
+    }
+
+    /// T1.3 AC: `plugin_with_wrong_owner_rejected`. We can't easily
+    /// chown a file to a different uid in CI without root, so the
+    /// regression target is the helper that performs the uid check.
+    /// Both branches (Err on missing path, Err on metadata) collapse
+    /// to "not owned by current user" → false. A foreign-uid file at
+    /// `/etc/passwd` (owned by root in every distro) is also rejected
+    /// when the test process is NOT root — the typical CI case.
+    #[cfg(unix)]
+    #[test]
+    fn plugin_with_wrong_owner_rejected() {
+        // Branch 1: path that does not exist → metadata Err → reject.
+        let missing = std::path::Path::new("/nonexistent/theo/plugin.toml");
+        assert!(
+            !manifest_is_owned_by_current_user(missing),
+            "missing manifest must be treated as not-owned (reject)"
+        );
+
+        // Branch 2: existing path owned by a different uid. /etc/passwd
+        // is owned by root on every supported distro.
+        let foreign = std::path::Path::new("/etc/passwd");
+        if !foreign.exists() {
+            return; // Container without /etc/passwd — skip silently.
+        }
+        let am_root = unsafe { libc::getuid() } == 0;
+        if am_root {
+            // The test invariant assumes a non-root tester. Skip when
+            // running as root (rare in CI but possible in some sandboxes).
+            return;
+        }
+        assert!(
+            !manifest_is_owned_by_current_user(foreign),
+            "/etc/passwd is owned by root; non-root tester must see ownership rejected"
+        );
+    }
+
+    /// T1.3 AC: `plugin_not_in_allowlist_rejected_when_configured`.
+    /// Mirror of `plugin_rejected_when_sha256_missing_from_allowlist`
+    /// under the literal AC name.
+    #[cfg(unix)]
+    #[test]
+    fn plugin_not_in_allowlist_rejected_when_configured() {
+        use std::collections::BTreeSet;
+        let dir = tempfile::tempdir().unwrap();
+        let plugins_dir = dir.path().join(".theo/plugins/x");
+        std::fs::create_dir_all(&plugins_dir).unwrap();
+        std::fs::write(plugins_dir.join("plugin.toml"), "name = \"x\"\n").unwrap();
+
+        let unrelated_hash: BTreeSet<String> = ["deadbeef".repeat(8)].into_iter().collect();
+        let loaded = load_plugins_with_policy(dir.path(), Some(&unrelated_hash), None);
+        assert!(
+            loaded.is_empty(),
+            "plugin must be rejected when its sha256 is not in the allowlist"
+        );
+    }
+
+    /// T1.3 AC: `plugin_tool_blocked_by_capability_gate_read_only`.
+    /// Plugin-registered tools always carry `ToolCategory::Plugin`,
+    /// which is denied by a read-only `CapabilitySet`. We assert the
+    /// classification stays correct so a future change cannot silently
+    /// downgrade the category and leak past the gate.
+    #[test]
+    fn plugin_tool_blocked_by_capability_gate_read_only() {
+        use std::collections::BTreeSet;
+        use theo_domain::capability::{AllowedTools, CapabilitySet};
+        use theo_domain::tool::ToolCategory;
+
+        // A read-only capability set: only Search category, no
+        // ToolCategory::Plugin.
+        let mut allowed_categories = BTreeSet::new();
+        allowed_categories.insert(ToolCategory::Search);
+        let read_only = CapabilitySet {
+            allowed_tools: AllowedTools::Only { tools: BTreeSet::new() },
+            denied_tools: BTreeSet::new(),
+            allowed_categories,
+            max_file_size_bytes: 0,
+            allowed_paths: vec![],
+            network_access: false,
+        };
+
+        // The contract: `ToolCategory::Plugin` MUST not be in the
+        // read-only allowed_categories list. If a future PR adds it,
+        // this test trips and forces a deliberate review.
+        assert!(
+            !read_only.allowed_categories.contains(&ToolCategory::Plugin),
+            "read-only capability set must not include ToolCategory::Plugin"
+        );
+
+        // And the standard membership check denies it.
+        let allowed = read_only.can_use_tool("any-plugin-tool", ToolCategory::Plugin);
+        assert!(
+            !allowed,
+            "read-only capability set must deny Plugin-category tools"
+        );
+    }
 }

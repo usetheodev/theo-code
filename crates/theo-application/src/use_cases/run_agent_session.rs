@@ -53,38 +53,28 @@ impl SubagentInjections {
     }
 
     /// Apply all present injections to the AgentLoop.
-    pub fn apply_to(&self, mut loop_: AgentLoop) -> AgentLoop {
-        if let Some(r) = &self.registry {
-            loop_ = loop_.with_subagent_registry(r.clone());
-        }
-        if let Some(s) = &self.run_store {
-            loop_ = loop_.with_subagent_run_store(s.clone());
-        }
-        if let Some(h) = &self.hooks {
-            loop_ = loop_.with_subagent_hooks(h.clone());
-        }
-        if let Some(c) = &self.cancellation {
-            loop_ = loop_.with_subagent_cancellation(c.clone());
-        }
-        if let Some(cm) = &self.checkpoint {
-            loop_ = loop_.with_subagent_checkpoint(cm.clone());
-        }
-        if let Some(w) = &self.worktree {
-            loop_ = loop_.with_subagent_worktree(w.clone());
-        }
-        if let Some(m) = &self.mcp {
-            loop_ = loop_.with_subagent_mcp(m.clone());
-        }
-        if let Some(d) = &self.mcp_discovery {
-            loop_ = loop_.with_subagent_mcp_discovery(d.clone());
-        }
-        if let Some(g) = &self.handoff_guardrails {
-            loop_ = loop_.with_subagent_handoff_guardrails(g.clone());
-        }
-        if let Some(r) = &self.reloadable {
-            loop_ = loop_.with_subagent_reloadable(r.clone());
-        }
-        loop_
+    ///
+    /// REMEDIATION_PLAN T5.2 — translates this app-level injection
+    /// container into the runtime's `SubAgentIntegrations` bundle and
+    /// applies it via the single `with_subagent_integrations` builder.
+    /// The previous chain of 10 individual `with_subagent_*` calls is
+    /// gone; the runtime now sees ONE build site, so adding a new
+    /// integration field is one struct change instead of two.
+    pub fn apply_to(&self, loop_: AgentLoop) -> AgentLoop {
+        let integrations = theo_agent_runtime::SubAgentIntegrations {
+            registry: self.registry.clone(),
+            run_store: self.run_store.clone(),
+            hooks: self.hooks.clone(),
+            cancellation: self.cancellation.clone(),
+            checkpoint: self.checkpoint.clone(),
+            worktree: self.worktree.clone(),
+            mcp: self.mcp.clone(),
+            mcp_discovery: self.mcp_discovery.clone(),
+            handoff_guardrails: self.handoff_guardrails.clone(),
+            reloadable: self.reloadable.clone(),
+            resume_context: None,
+        };
+        loop_.with_subagent_integrations(integrations)
     }
 }
 
