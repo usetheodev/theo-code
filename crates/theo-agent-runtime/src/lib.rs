@@ -64,7 +64,7 @@ pub mod task_manager;
 pub mod tool_bridge;
 pub mod tool_call_manager;
 
-pub use agent_loop::{AgentLoop, AgentResult};
+pub use agent_loop::{AgentLoop, AgentResult, SubAgentIntegrations};
 pub use config::{AgentConfig, CompactionPolicy, MessageQueues, ToolExecutionMode};
 pub use event_bus::{EventBus, EventListener};
 pub use run_engine::AgentRunEngine;

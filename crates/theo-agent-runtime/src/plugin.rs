@@ -547,6 +547,58 @@ description = "Demo plugin"
     // wording finds them.
     // -----------------------------------------------------------------------
 
+    /// T1.4 AC: `load_plugins_skips_when_home_unset`. The global
+    /// plugins path is `$HOME/.config/theo/plugins`. When `HOME` is
+    /// absent we MUST skip the global lookup — never fall back to
+    /// `/tmp` (TOCTOU vector). Project plugins are unaffected because
+    /// they live under `<project_dir>/.theo/plugins/` not `HOME`.
+    #[cfg(unix)]
+    #[test]
+    fn load_plugins_skips_when_home_unset() {
+        // Lock + snapshot follow the established T0.3 / T1.5 pattern
+        // (env-mutating tests serialize against each other and
+        // restore HOME on Drop).
+        fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+            use std::sync::{Mutex, OnceLock};
+            static M: OnceLock<Mutex<()>> = OnceLock::new();
+            M.get_or_init(|| Mutex::new(()))
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+        }
+        struct HomeSnap(Option<std::ffi::OsString>);
+        impl Drop for HomeSnap {
+            fn drop(&mut self) {
+                unsafe {
+                    match &self.0 {
+                        Some(v) => std::env::set_var("HOME", v),
+                        None => std::env::remove_var("HOME"),
+                    }
+                }
+            }
+        }
+        let _l = env_lock();
+        let _s = HomeSnap(std::env::var_os("HOME"));
+        unsafe { std::env::remove_var("HOME") };
+
+        // Project dir without any plugins → load returns empty Vec
+        // and crucially does NOT touch /tmp.
+        let dir = tempfile::tempdir().unwrap();
+        let plugins = load_plugins(dir.path());
+        assert!(
+            plugins.is_empty(),
+            "no plugins exist anywhere; loader must return empty"
+        );
+
+        // The contract: with HOME unset, `theo_config_subdir("plugins")`
+        // returns None — proven directly here so a regression in the
+        // central helper would also trip this AC test.
+        assert_eq!(
+            theo_domain::user_paths::theo_config_subdir("plugins"),
+            None,
+            "HOME unset must yield None — never a /tmp path"
+        );
+    }
+
     /// T1.3 AC: `plugin_with_wrong_owner_rejected`. We can't easily
     /// chown a file to a different uid in CI without root, so the
     /// regression target is the helper that performs the uid check.
