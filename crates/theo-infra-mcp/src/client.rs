@@ -329,8 +329,7 @@ mod tests {
         #[test]
         fn http_client_from_config_rejects_stdio_variant() {
             let err = McpHttpClient::from_config(&stdio_cfg("x"))
-                .err()
-                .expect("Stdio config must be rejected by McpHttpClient");
+                .expect_err("Stdio config must be rejected by McpHttpClient");
             match err {
                 McpError::InvalidConfig(msg) => {
                     assert!(msg.contains("McpHttpClient requires Http"))
@@ -350,8 +349,7 @@ mod tests {
                 timeout_ms: None,
             };
             let err = McpHttpClient::from_config(&cfg)
-                .err()
-                .expect("invalid header value must surface");
+                .expect_err("invalid header value must surface");
             assert!(matches!(err, McpError::InvalidConfig(_)));
         }
     }

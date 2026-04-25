@@ -79,7 +79,7 @@ async fn real_mcp_filesystem_server_lists_expected_tools() {
     // The filesystem server exposes at least these tools (per its README).
     for expected in ["read_file", "list_directory"] {
         assert!(
-            names.iter().any(|n| *n == expected),
+            names.contains(&expected),
             "expected '{}' in {:?}",
             expected,
             names

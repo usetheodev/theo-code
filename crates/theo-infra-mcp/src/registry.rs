@@ -62,8 +62,8 @@ impl McpRegistry {
         }
         let lines: Vec<String> = self
             .by_name
-            .iter()
-            .map(|(n, _)| format!("- {}: invoke tools as `mcp:{}:<tool>`", n, n))
+            .keys()
+            .map(|n| format!("- {}: invoke tools as `mcp:{}:<tool>`", n, n))
             .collect();
         format!(
             "## MCP servers available\n\n\

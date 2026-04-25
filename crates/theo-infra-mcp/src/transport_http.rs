@@ -215,8 +215,7 @@ mod tests {
         let mut h = BTreeMap::new();
         h.insert("Bad Header With Spaces".into(), "v".into());
         let err = HttpTransport::new("http://x", h, Duration::from_secs(5))
-            .err()
-            .expect("invalid header name must be rejected");
+            .expect_err("invalid header name must be rejected");
         match err {
             McpError::InvalidConfig(msg) => assert!(msg.contains("bad header name")),
             _ => panic!("expected InvalidConfig, got {err:?}"),
@@ -229,8 +228,7 @@ mod tests {
         // Newline / control char in header value is illegal per RFC 7230.
         h.insert("X-Trail".into(), "bad\nvalue".into());
         let err = HttpTransport::new("http://x", h, Duration::from_secs(5))
-            .err()
-            .expect("invalid header value must be rejected");
+            .expect_err("invalid header value must be rejected");
         assert!(matches!(err, McpError::InvalidConfig(_)));
     }
 
@@ -285,8 +283,7 @@ mod tests {
     fn decode_sse_event_returns_serde_error_for_invalid_json() {
         let event = "data: {not json";
         let err = decode_sse_event(event, &req_id_one())
-            .err()
-            .expect("invalid json must surface as Err");
+            .expect_err("invalid json must surface as Err");
         assert!(matches!(err, McpError::Serde(_)));
     }
 
@@ -341,8 +338,7 @@ mod tests {
                             .find_map(|l| {
                                 let lc = l.to_ascii_lowercase();
                                 lc.strip_prefix("content-length:")
-                                    .map(|v| v.trim().parse::<usize>().ok())
-                                    .flatten()
+                                    .and_then(|v| v.trim().parse::<usize>().ok())
                             })
                             .unwrap_or(0);
                         let body_so_far = acc.len() - (idx + 4);
