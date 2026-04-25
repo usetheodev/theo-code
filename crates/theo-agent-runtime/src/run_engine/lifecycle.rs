@@ -74,7 +74,7 @@ impl AgentRunEngine {
             );
             // Usage + cost accounting + lesson/hypothesis pipelines.
             let mut usage = self.session_token_usage.clone();
-            if let Some(c) = theo_domain::budget::known_model_cost(&self.config.model) {
+            if let Some(c) = theo_domain::budget::known_model_cost(self.config.llm().model) {
                 usage.recompute_cost(&c);
             }
             summary.token_usage = Some(usage);
@@ -136,7 +136,7 @@ impl AgentRunEngine {
         .await;
 
         // Record session end for cross-session progress tracking
-        if !self.config.is_subagent {
+        if !self.config.loop_cfg().is_subagent {
             let tasks = if result.success {
                 vec![crate::session_bootstrap::CompletedTask {
                     name: result.summary.chars().take(100).collect(),
@@ -184,7 +184,7 @@ impl AgentRunEngine {
             result.success,
             result.files_edited.len() as u64,
             &self.session_token_usage,
-            self.config.max_iterations,
+            self.config.loop_cfg().max_iterations,
             self.budget_enforcer.usage(),
             &self.context_metrics.to_report(),
             self.done_attempts,

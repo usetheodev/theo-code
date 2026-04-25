@@ -50,7 +50,7 @@ impl AgentRunEngine {
         }
 
         // 2. Plan-mode nudge (one-shot).
-        if self.config.mode == crate::config::AgentMode::Plan
+        if self.config.loop_cfg().mode == crate::config::AgentMode::Plan
             && !self.plan_mode_nudged
             && !content.is_empty()
         {

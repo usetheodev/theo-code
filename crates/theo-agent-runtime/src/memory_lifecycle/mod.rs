@@ -60,11 +60,8 @@ impl MemoryLifecycle {
     }
 
     fn active_handle(cfg: &AgentConfig) -> Option<&crate::config::MemoryHandle> {
-        if cfg.memory_enabled {
-            cfg.memory_provider.as_ref()
-        } else {
-            None
-        }
+        let mem = cfg.memory();
+        if mem.enabled { mem.provider } else { None }
     }
 }
 
@@ -139,16 +136,17 @@ pub fn should_trigger_memory_review(
     // Disabled when: interval == 0, memory off, no provider, or no
     // reviewer wired. The provider check matches Hermes's
     // `"memory" in self.valid_tool_names` guard.
-    if cfg.memory_review_nudge_interval == 0
-        || !cfg.memory_enabled
-        || cfg.memory_provider.is_none()
-        || cfg.memory_reviewer.is_none()
+    let mem = cfg.memory();
+    if mem.review_nudge_interval == 0
+        || !mem.enabled
+        || mem.provider.is_none()
+        || mem.reviewer.is_none()
     {
         return MemoryReviewTrigger::Disabled;
     }
 
     let current = counter.increment();
-    if current >= cfg.memory_review_nudge_interval {
+    if current >= mem.review_nudge_interval {
         counter.reset();
         MemoryReviewTrigger::ShouldSpawn
     } else {

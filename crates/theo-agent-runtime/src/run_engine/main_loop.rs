@@ -285,7 +285,7 @@ impl AgentRunEngine {
         if !tracker.record(name, &args) {
             return None;
         }
-        let threshold = self.config.doom_loop_threshold.unwrap_or(3);
+        let threshold = self.config.loop_cfg().doom_loop_threshold.unwrap_or(3);
         let warning = format!(
             "⚠️ DOOM LOOP DETECTED: You have called '{}' with identical arguments {} times in a row. \
              You are stuck in a loop. Try a DIFFERENT approach or tool.",
@@ -297,7 +297,7 @@ impl AgentRunEngine {
             serde_json::json!({
                 "type": "doom_loop",
                 "tool_name": name,
-                "threshold": self.config.doom_loop_threshold,
+                "threshold": self.config.loop_cfg().doom_loop_threshold,
             }),
         ));
         messages.push(Message::user(&warning));
@@ -377,7 +377,7 @@ impl AgentRunEngine {
         call: &theo_infra_llm::types::ToolCall,
         messages: &mut Vec<Message>,
     ) -> bool {
-        if self.config.mode != crate::config::AgentMode::Plan {
+        if self.config.loop_cfg().mode != crate::config::AgentMode::Plan {
             return false;
         }
         let name = &call.function.name;

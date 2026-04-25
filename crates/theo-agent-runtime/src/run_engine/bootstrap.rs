@@ -43,12 +43,12 @@ impl AgentRunEngine {
         // Uses static template — instantaneous, no LLM cost. The agent can
         // enrich later. Best-effort: if write fails, continue without
         // project context.
-        if !self.config.is_subagent {
+        if !self.config.loop_cfg().is_subagent {
             auto_init_project_context(&self.project_dir);
         }
 
         // Autodream at session start (main agent only).
-        if !self.config.is_subagent {
+        if !self.config.loop_cfg().is_subagent {
             crate::memory_lifecycle::maybe_spawn_autodream(
                 &self.config,
                 &self.autodream_attempted,
@@ -60,11 +60,11 @@ impl AgentRunEngine {
         // System prompt: .theo/system-prompt.md replaces default, or use
         // config default. Bootstrap prompt prepended when USER.md is
         // missing/empty.
-        let base_prompt = if !self.config.is_subagent {
+        let base_prompt = if !self.config.loop_cfg().is_subagent {
             crate::project_config::load_system_prompt(&self.project_dir)
-                .unwrap_or_else(|| self.config.system_prompt.clone())
+                .unwrap_or_else(|| self.config.context().system_prompt.to_string())
         } else {
-            self.config.system_prompt.clone()
+            self.config.context().system_prompt.to_string()
         };
         let system_prompt = crate::memory_lifecycle::maybe_prepend_bootstrap(
             &self.config,
@@ -75,7 +75,7 @@ impl AgentRunEngine {
         let mut messages: Vec<Message> = vec![Message::system(&system_prompt)];
 
         // Project context: .theo/theo.md prepended as separate system message
-        if !self.config.is_subagent
+        if !self.config.loop_cfg().is_subagent
             && let Some(context) =
                 crate::project_config::load_project_context(&self.project_dir)
         {
@@ -90,7 +90,7 @@ impl AgentRunEngine {
         // Memory injection: prefetch when enabled (sole source), else
         // legacy FileMemoryStore fallback. Dual-injection is prevented
         // by this explicit branch.
-        if self.config.memory_enabled {
+        if self.config.memory().enabled {
             let query = self
                 .task_manager
                 .get(&self.task_id)
@@ -112,11 +112,11 @@ impl AgentRunEngine {
 
         // Feed eligible episode summaries back into context
         // (lifecycle != Archived, TTL not expired, 5% token budget).
-        if !self.config.is_subagent {
+        if !self.config.loop_cfg().is_subagent {
             let injected =
                 crate::memory_lifecycle::run_engine_hooks::inject_episode_history(
                     &self.project_dir,
-                    self.config.context_window_tokens,
+                    self.config.context().context_window_tokens,
                     &mut messages,
                 );
             self.episodes_injected = self.episodes_injected.saturating_add(injected as u32);
@@ -125,7 +125,7 @@ impl AgentRunEngine {
         // Boot sequence: inject progress from previous sessions + recent
         // git activity. Inserted after memories, before skills — so the
         // agent knows where it left off.
-        if !self.config.is_subagent {
+        if !self.config.loop_cfg().is_subagent {
             self.inject_boot_context(&mut messages).await;
         }
 
@@ -133,14 +133,14 @@ impl AgentRunEngine {
         // relevant files as system message so the LLM starts with
         // structural orientation. Skip if Building (don't use stale
         // for planning), only use fresh Ready state.
-        if !self.config.is_subagent {
+        if !self.config.loop_cfg().is_subagent {
             self.inject_planning_context(&mut messages).await;
         }
 
         // Inject available skills into system context (main agent only).
         // Sub-agents do NOT receive skills — they execute their direct
         // objective. This is Layer 2 of recursive spawning prevention.
-        if !self.config.is_subagent {
+        if !self.config.loop_cfg().is_subagent {
             inject_skills_summary(&self.project_dir, &mut messages);
         }
 

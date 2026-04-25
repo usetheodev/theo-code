@@ -76,7 +76,7 @@ impl AgentRunEngine {
             edits_succeeded: self.context_loop_state.edits_files.len(),
             done_requested: true,
             iteration,
-            max_iterations: self.config.max_iterations,
+            max_iterations: self.config.loop_cfg().max_iterations,
         };
         if self.convergence.evaluate(&convergence_ctx) {
             return GateOutcome::Pass;

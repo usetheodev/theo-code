@@ -50,25 +50,31 @@ impl AgentRunEngine {
         routing_ctx.iteration = iteration;
         routing_ctx.requires_tool_use = requires_tool_use;
 
-        match &self.config.router {
+        match self.config.routing().router {
             Some(handle) => {
                 let choice = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     handle.as_router().route(&routing_ctx)
                 }));
                 match choice {
                     Ok(c) => (c.model_id, c.reasoning_effort, c.routing_reason),
-                    Err(_) => (
-                        self.config.model.clone(),
-                        self.config.reasoning_effort.clone(),
-                        "router_panic_fallback_default",
-                    ),
+                    Err(_) => {
+                        let llm = self.config.llm();
+                        (
+                            llm.model.to_string(),
+                            llm.reasoning_effort.cloned(),
+                            "router_panic_fallback_default",
+                        )
+                    }
                 }
             }
-            None => (
-                self.config.model.clone(),
-                self.config.reasoning_effort.clone(),
-                "no_router",
-            ),
+            None => {
+                let llm = self.config.llm();
+                (
+                    llm.model.to_string(),
+                    llm.reasoning_effort.cloned(),
+                    "no_router",
+                )
+            }
         }
     }
 
@@ -92,7 +98,7 @@ impl AgentRunEngine {
         // Publish LlmCallStart (triggers "Thinking..." in CLI).
         // OTel payload lets OtelExportingListener build a
         // `gen_ai.*`-attributed span.
-        let provider_hint = derive_provider_hint(&self.config.base_url);
+        let provider_hint = derive_provider_hint(self.config.llm().base_url);
         let llm_start_span =
             crate::observability::otel::llm_call_span(provider_hint, chosen_model);
         self.event_bus.publish(DomainEvent::new(
@@ -112,7 +118,7 @@ impl AgentRunEngine {
         // streaming callback still forwards deltas to the bus per attempt;
         // it's rebuilt inside each invocation so the bus/run-id captures
         // survive the FnMut requirement of `with_retry`.
-        let retry_policy = if self.config.aggressive_retry {
+        let retry_policy = if self.config.loop_cfg().aggressive_retry {
             theo_domain::retry_policy::RetryPolicy::benchmark()
         } else {
             theo_domain::retry_policy::RetryPolicy::default_llm()
@@ -197,7 +203,7 @@ impl AgentRunEngine {
             });
 
         let mut llm_end_span = crate::observability::otel::llm_call_span(
-            derive_provider_hint(&self.config.base_url),
+            derive_provider_hint(self.config.llm().base_url),
             chosen_model,
         );
         llm_end_span.set(
@@ -279,7 +285,7 @@ impl AgentRunEngine {
         ));
 
         // Emergency compaction: keep only a bounded fraction of context.
-        let model_ctx = self.config.context_window_tokens;
+        let model_ctx = self.config.context().context_window_tokens;
         let target =
             (model_ctx as f64 * crate::constants::EMERGENCY_COMPACT_RATIO) as usize;
         let before_len = messages.len();

@@ -16,7 +16,7 @@ pub async fn inject_prefetch(
     messages: &mut Vec<Message>,
     query: &str,
 ) -> bool {
-    if !cfg.memory_enabled {
+    if !cfg.memory().enabled {
         return false;
     }
     let block = MemoryLifecycle::prefetch(cfg, query).await;
@@ -30,7 +30,7 @@ pub async fn inject_prefetch(
 /// Invoke `on_pre_compress` and push any extracted content into
 /// `messages` so it survives the subsequent compaction step.
 pub async fn pre_compress_push(cfg: &AgentConfig, messages: &mut Vec<Message>) {
-    if !cfg.memory_enabled {
+    if !cfg.memory().enabled {
         return;
     }
     let text: String = messages
@@ -53,7 +53,7 @@ pub async fn sync_final_turn(
     messages: &[Message],
     assistant_content: &str,
 ) {
-    if !cfg.memory_enabled {
+    if !cfg.memory().enabled {
         return;
     }
     let user_msg = messages

@@ -61,7 +61,7 @@ impl AgentRunEngine {
     ) -> usize {
         // Context loop injection — fires every N iterations.
         if iteration > 1
-            && iteration.is_multiple_of(self.config.context_loop_interval)
+            && iteration.is_multiple_of(self.config.context().context_loop_interval)
         {
             let task_objective = self
                 .task_manager
@@ -70,7 +70,7 @@ impl AgentRunEngine {
                 .unwrap_or_default();
             let ctx_msg = self.context_loop_state.build_context_loop(
                 iteration,
-                self.config.max_iterations,
+                self.config.loop_cfg().max_iterations,
                 &task_objective,
             );
             messages.push(Message::user(ctx_msg));
@@ -78,7 +78,7 @@ impl AgentRunEngine {
 
         // Phase transitions (legacy, preserved for context loop diagnostics).
         self.context_loop_state
-            .maybe_transition(iteration, self.config.max_iterations);
+            .maybe_transition(iteration, self.config.loop_cfg().max_iterations);
 
         // Compaction: compress history with semantic progress context.
         let compaction_ctx = crate::compaction::CompactionContext {
@@ -111,9 +111,9 @@ impl AgentRunEngine {
 
         crate::compaction_stages::compact_staged_with_policy(
             messages,
-            self.config.context_window_tokens,
+            self.config.context().context_window_tokens,
             Some(&compaction_ctx),
-            &self.config.compaction_policy,
+            self.config.context().compaction_policy,
         );
 
         // Record context size for metrics (estimated tokens ≈ chars/4).
