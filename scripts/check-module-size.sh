@@ -23,7 +23,7 @@ set -euo pipefail
 # intentionally loose to catch *new* regressions without forcing a
 # rewrite of every borderline file in one PR. Tighten when the
 # remaining 5 modules clear the 500 line.
-MAX_LOC="${MAX_LOC:-750}"
+MAX_LOC="${MAX_LOC:-725}"
 ROOT="${ROOT:-crates/theo-agent-runtime/src}"
 
 if [[ ! -d "${ROOT}" ]]; then

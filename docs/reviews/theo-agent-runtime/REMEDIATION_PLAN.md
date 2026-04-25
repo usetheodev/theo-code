@@ -1527,3 +1527,12 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 | T8.5 MAX_LOC apertado | **DONE** | Apos o split, MAX_LOC do gate baixado de 1000 para 750. Top production-LOC files: main_loop.rs 722, config.rs 720, pilot/mod.rs 571, spawn_helpers.rs 532, agent_loop.rs 509. Smoke test local OK — todos ≤750. Long-term target T4.* permanece 500. |
 
 **Validacao:** 1157 unit + 105 integration + 8 security + 4 resilience + 6 meta-tools = **1280 tests passando, 0 falhas**. Zero warnings. Module-size gate verde com cap 750.
+
+### Iteracao 58 (2026-04-25) — config.rs split + T8.5 cap apertado para 725
+
+| Task | Status | Notas |
+|---|---|---|
+| T4.* config.rs split | **DONE** | `config.rs` (720 LOC produção) convertido para diretorio `config/` com novo child `prompts.rs` (~270 LOC). Conteudo movido: `system_prompt_for_mode` (79 LOC, raw-string Plan/Ask mode prompts) + `default_system_prompt` (175 LOC, SOTA prompt sintetizado de Codex/Claude/Gemini scaffolds). `pub use prompts::system_prompt_for_mode` em mod.rs preserva path publico byte-identical. `default_system_prompt` agora `pub(super)` chamada via `prompts::default_system_prompt()` em `Default for AgentConfig`. Tests existentes em `mod tests` usam via `use super::prompts::default_system_prompt`. `config/mod.rs`: 720 → **518 LOC** (-202, -28%). |
+| T8.5 MAX_LOC apertado | **DONE** | Cap baixado de 750 para 725. Top files: main_loop 722, pilot/mod 571, spawn_helpers 532, config/mod 518, agent_loop 509. Smoke test OK — todos ≤725. |
+
+**Validacao:** 1157 unit + 105 integration + 8 security + 4 resilience + 6 meta-tools = **1280 tests passando, 0 falhas**. Zero warnings. Module-size gate verde a cap 725.
