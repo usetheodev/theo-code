@@ -1252,3 +1252,140 @@ async fn agent_spawns_subagent_skill_then_converges() {
     // result message).
     let _ = result.summary;
 }
+
+/// T0.1 scenario 15 (E2E Gate 2 cargo-driven). Full choreography
+/// reaching the done-gate's Gate 2 (cargo test) via the LLM mock:
+/// 1. Project pre-staged: `git init` + valid `Cargo.toml` + empty
+///    `src/lib.rs` + initial `git commit`. This ensures HEAD has a
+///    tracked Cargo.toml so a subsequent write produces a real
+///    `git diff --stat` output (has_git_changes=true).
+/// 2. Turn 1 LLM returns `write` tool_call against `Cargo.toml`
+///    with deliberately-broken TOML content (`"this is not valid
+///    TOML }}}"`). The write tool dispatches successfully,
+///    `edits_succeeded` becomes 1, and the tracked file is now
+///    modified-and-syntactically-broken.
+/// 3. Turns 2-N LLM returns `done()` repeatedly. Gate 0 passes
+///    while `done_attempts <= MAX_DONE_ATTEMPTS=3`. Gate 1
+///    (convergence AllOf GitDiff+EditSuccess) NOW passes (both
+///    has_git_changes=true and edits=1). Gate 2 runs `cargo check`,
+///    fails on the broken manifest, blocks with the diagnostic →
+///    Continue. After 3 blocks, the 4th done() trips Gate 0
+///    (attempts=4 > 3) → force-accept.
+///
+/// Skipped silently when git or cargo are missing. Pins the full
+/// done-gate chain end-to-end including the cargo invocation.
+#[tokio::test]
+async fn agent_done_gate_2_blocks_via_cargo_then_force_accepts() {
+    // Skip when git or cargo missing.
+    let git_ok = std::process::Command::new("git")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    let cargo_ok = std::process::Command::new("cargo")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    if !git_ok || !cargo_ok {
+        return;
+    }
+
+    let project = tempfile::tempdir().expect("tempdir");
+    let project_path = project.path();
+
+    // Stage a minimal Rust project under git so write→diff produces
+    // observable `git diff --stat` output that satisfies Gate 1.
+    std::fs::create_dir_all(project_path.join("src")).unwrap();
+    let valid_toml = "[package]\n\
+                      name = \"theo_t0_1_gate2_fixture\"\n\
+                      version = \"0.0.0\"\n\
+                      edition = \"2021\"\n\
+                      [lib]\n\
+                      path = \"src/lib.rs\"\n";
+    std::fs::write(project_path.join("Cargo.toml"), valid_toml).unwrap();
+    std::fs::write(project_path.join("src/lib.rs"), "").unwrap();
+    let run_git = |args: &[&str]| {
+        std::process::Command::new("git")
+            .args(args)
+            .current_dir(project_path)
+            .env("GIT_AUTHOR_NAME", "Theo Test")
+            .env("GIT_AUTHOR_EMAIL", "test@theo.local")
+            .env("GIT_COMMITTER_NAME", "Theo Test")
+            .env("GIT_COMMITTER_EMAIL", "test@theo.local")
+            .output()
+            .ok()
+    };
+    if run_git(&["init", "-q"]).is_none() {
+        return;
+    }
+    let _ = run_git(&["add", "."]);
+    let _ = run_git(&["commit", "-q", "-m", "init"]);
+
+    // Mock LLM bodies. Turn 1 = write to Cargo.toml with broken TOML.
+    // The tool's `content` argument carries the broken TOML; we
+    // escape JSON specials minimally (no embedded newlines / quotes
+    // beyond the closing braces).
+    let broken_toml = "this is not valid TOML at all }}}";
+    let cargo_path = project_path.join("Cargo.toml");
+    let cargo_path_str = cargo_path.to_string_lossy().replace('\\', "\\\\");
+    let write_body = Box::leak(
+        format!(
+            "data: {{\"choices\":[{{\"delta\":{{\"tool_calls\":[\
+                {{\"index\":0,\"id\":\"c-write-broken\",\"function\":\
+                {{\"name\":\"write\",\"arguments\":\
+                \"{{\\\"filePath\\\":\\\"{cargo_path_str}\\\",\\\"content\\\":\\\"{broken_toml}\\\"}}\"\
+                }}}}\
+            ]}}}}]}}\n\ndata: [DONE]\n\n"
+        )
+        .into_boxed_str(),
+    );
+    // Done body — LLM keeps asking; Gate 2 keeps blocking until
+    // attempt 4 force-accepts.
+    let done_body = "data: {\"choices\":[{\"delta\":{\"tool_calls\":[\
+                        {\"index\":0,\"id\":\"c-done-gate2\",\"function\":\
+                        {\"name\":\"done\",\"arguments\":\"{\\\"summary\\\":\\\"please accept\\\"}\"}}\
+                    ]}}]}\n\ndata: [DONE]\n\n";
+
+    // Saturate on done_body so every iteration past the first hits done().
+    let bodies = vec![write_body as &'static str, done_body];
+    let mock_url = spawn_sse_mock_multi(bodies).await;
+
+    let mut config = AgentConfig::default();
+    config.base_url = mock_url;
+    config.api_key = Some("test-key".to_string());
+    config.is_subagent = true;
+    // Generous budget: 1 write + ≥4 done() iterations + safety margin.
+    config.max_iterations = 20;
+
+    let agent = AgentLoop::new(config, create_default_registry());
+    let result = agent.run("break Cargo.toml then claim done", project_path).await;
+
+    assert!(
+        result.success,
+        "Gate 2 chain must eventually force-accept (attempts > MAX_DONE_ATTEMPTS); \
+         summary={:?}",
+        result.summary
+    );
+    assert!(
+        result.summary.contains("accepted after"),
+        "force-accept must annotate the summary; got {:?}",
+        result.summary
+    );
+    // 1 write iteration + 4 done() iterations (3 blocked + 1 force-
+    // accept) = 5 minimum. Allow a safety margin for the engine's
+    // bookkeeping iterations.
+    assert!(
+        result.iterations_used >= 5,
+        "the chain needs at least 5 iterations (1 write + 4 done); got {}",
+        result.iterations_used
+    );
+    // `tool_calls_total` includes the `write` (regular tool, dispatched
+    // through ToolCallManager). `done` is a meta-tool and doesn't
+    // increment the counter. So we expect tool_calls_total == 1.
+    assert_eq!(
+        result.tool_calls_total, 1,
+        "exactly one regular tool dispatch (the `write`); got {}",
+        result.tool_calls_total
+    );
+}

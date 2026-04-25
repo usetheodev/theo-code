@@ -1752,3 +1752,30 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 Plus: T0.1 underpinning `done_gate_cargo_check_fails_on_broken_manifest` em `run_engine_sandbox.rs`.
 
 **Validacao:** 1313 tests passando entre `theo-agent-runtime`, 0 falhas. Parallel runs estaveis (sem flakiness HOME-env). `cargo check -p theo-agent-runtime --lib` clean.
+
+### Iteracao 78 (2026-04-25) — T0.1 cenario 15 (E2E Gate 2 cargo-driven full chain)
+
+| Task | Status | Notas |
+|---|---|---|
+| T0.1 cenario `agent_done_gate_2_blocks_via_cargo_then_force_accepts` | **DONE** | Full choreography end-to-end: (1) Pre-stage `git init` em tempdir + Cargo.toml valido + src/lib.rs vazio + commit inicial (HEAD agora tem Cargo.toml tracked). (2) Turn 1 LLM responde com `write` para Cargo.toml com conteudo invalido `"this is not valid TOML at all }}}"`. Write tool dispatcha (regular tool, +1 em tool_calls_total), `edits_succeeded=1`, file modificado. `git diff --stat` agora mostra alteracao em arquivo tracked → `has_git_changes=true`. (3) Turns 2-5 LLM responde com `done()` repetidamente (mock saturated). Cada done(): Gate 0 passa enquanto attempts ≤ 3, Gate 1 (AllOf GitDiff+EditSuccess) passa (ambos true), Gate 2 roda `cargo check` no projeto, falha no manifest broken, push BLOCKED tool_result, Continue. (4) Apos 3 blocks (attempts=1,2,3), o 4o done() trips Gate 0 (attempts=4 > 3) → force-accept. Asserts: `success=true`, `summary.contains("accepted after")`, `iterations_used >= 5` (1 write + 4 done), `tool_calls_total == 1` (so o write — done e meta-tool sem incremento). Skip silencioso se git ou cargo missing. Pin do contrato done-gate chain end-to-end com cargo invocation real. |
+
+**Cobertura T0.1 final atualizada:** **14 cenarios end-to-end via mock LLM + 1 underpinning Gate 2** = TODOS os cenarios canonicos do plano cobertos. Lista completa:
+
+1. text-only converge
+2. single-tool dispatch round-trip
+3. multi-tool happy path (read+glob+text)
+4. budget exhaustion (max_iterations)
+5. done-gate force-accept apos MAX_DONE_ATTEMPTS (Gate 1 path)
+6. skill InContext (commit skill bundled)
+7. tool error + retry continuation
+8. LLM retry+success (503 → 200)
+9. context overflow recovery (400 com "context_length_exceeded")
+10. batch_execute LLM-driven (2 sub-globs)
+11. resume com ResumeContext (cached tool_result replay)
+12. done-gate Gate 1 block + recover via text
+13. skill SubAgent recursive (verifier built-in)
+14. **NOVO** — E2E Gate 2 cargo-driven full chain (write → done × 4 → force-accept)
+
+Plus underpinning: `done_gate_cargo_check_fails_on_broken_manifest` em `run_engine_sandbox.rs` (cargo invocation contract).
+
+**Validacao:** 1314 tests passando entre `theo-agent-runtime`, 0 falhas. `cargo check -p theo-agent-runtime --lib` clean. T0.1 AC literal cumprido: cada cenario produz sequencia observavel via mock; tests rodando em ~3s; snapshots committados via assertivas de `iterations_used` / `tool_calls_total` / `success`.
