@@ -1626,3 +1626,16 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 **Estrategia para T0.1 follow-up**: cenarios futuros (retry+success, context overflow, batch+LLM-stream, done-gate Gate 2 driven) serao adicionados sobre esse helper — multi-shot via state interno ao spawn (counter + Vec<sse_body>) ou via tokio::sync::Mutex<VecDeque<...>>. Adapter ao caminho do AgentLoop fica trivial: `AgentLoop::new(config_with_base_url=mock_url, ...)` ja resolve.
 
 **Validacao:** 1299 tests passando, 0 falhas (+2 smoke tests). `cargo check -p theo-agent-runtime --lib` clean. Module-size gate verde a cap 500.
+
+### Iteracao 68 (2026-04-25) — T0.1 cenarios end-to-end sobre o LLM mock
+
+| Task | Status | Notas |
+|---|---|---|
+| T0.1 multi-shot mock helper | **DONE** | Adicionado `spawn_sse_mock_multi(bodies: Vec<&'static str>) -> base_url` em `tests/llm_mock_smoke.rs`. Cycle interno: cada accept devolve o proximo body da Vec; satura no ultimo (assim agente que faz mais chamadas LLM do que o teste antecipou nao trava no connect). Permite cenarios multi-turn (tool_call → tool_result → text → converge). |
+| T0.1 cenario `agent_converges_when_llm_returns_text_only_first_turn` | **DONE** | LLM responde com content "Task complete." apenas (sem tool_calls) → agent_loop converge em 1 iteracao. Asserts: `success=true`, `summary` reflete o texto OU `was_streamed=true`, `iterations_used=1`, `tool_calls_total=0`. Config: `is_subagent=true` para pular observability/episode persistence/legacy file memory; `max_iterations=5`. |
+| T0.1 cenario `agent_converges_after_one_tool_dispatch_round_trip` | **DONE** | Turn 1 LLM responde com `read` tool_call apontando para path tempdir; runtime dispatcha (read falha porque o arquivo nao existe — irrelevante). Turn 2 LLM responde com texto "all done" → converge. Asserts: `success=true`, `iterations_used=2` exatamente, `tool_calls_total=1` exatamente. Pin do contrato two-turn dispatch round-trip. |
+| T0.1 cenario `agent_aborts_when_max_iterations_reached` | **DONE** | LLM sempre responde com tool_call (saturacao do mock). Config `max_iterations=2`. Asserts: `success=false` (loop infinito nao deve convergir), `iterations_used <= 3` (budget enforcer dispara na iteracao apos `max_iterations`, entao consome 2 iteracoes produtivas + 1 de guard), `tool_calls_total >= 1` (pelo menos um dispatch antes do budget bater). Pin do budget enforcer guard no main loop. |
+
+**Cobertura T0.1 atual:** 3 dos cenarios canonicos do plano (happy-path single-tool, happy-path text-only, budget exhaustion iterations) cobertos via mock end-to-end. Restantes (context overflow recovery, LLM retry+success, done-gate Gate 2 LLM-driven, batch tool com LLM stream, skill InContext/SubAgent driven by LLM) seguem a mesma receita: stretch-goals para iteracoes futuras adicionando bodies SSE especificos para os scenarios.
+
+**Validacao:** 1302 tests passando entre `theo-agent-runtime` (+3 cenarios desta iteracao), 0 falhas. `cargo check -p theo-agent-runtime --lib` clean. `tests/llm_mock_smoke.rs` agora a 430 LOC.

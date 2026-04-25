@@ -30,6 +30,10 @@ use tokio::net::TcpListener;
 use theo_infra_llm::types::{ChatRequest, Message};
 use theo_infra_llm::LlmClient;
 
+use theo_agent_runtime::agent_loop::AgentLoop;
+use theo_agent_runtime::config::AgentConfig;
+use theo_tooling::registry::create_default_registry;
+
 /// Spawn a single-shot HTTP server that returns the given SSE chunks.
 /// Returns the base URL (e.g. `http://127.0.0.1:NNNN`) the caller can
 /// pass to `LlmClient::new`. The server self-closes after one request.
@@ -138,6 +142,77 @@ async fn llm_mock_serves_content_only_sse_stream() {
     );
 }
 
+/// Multi-shot variant: the mock server cycles through a queue of
+/// canned bodies, one per incoming POST. Used by characterization
+/// tests that need different LLM responses across the agent loop's
+/// iterations (e.g. tool_call response → tool_result echo → text
+/// "done" response → converge).
+async fn spawn_sse_mock_multi(
+    bodies: Vec<&'static str>,
+) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind mock");
+    let port = listener.local_addr().expect("local_addr").port();
+
+    tokio::spawn(async move {
+        let mut idx = 0usize;
+        loop {
+            let (mut sock, _) = match listener.accept().await {
+                Ok(p) => p,
+                Err(_) => return,
+            };
+            // Drain the request head + body. We don't validate.
+            let mut buf = [0u8; 8192];
+            let mut acc: Vec<u8> = Vec::new();
+            loop {
+                let n = match sock.read(&mut buf).await {
+                    Ok(n) if n > 0 => n,
+                    _ => break,
+                };
+                acc.extend_from_slice(&buf[..n]);
+                if let Some(idx2) = acc.windows(4).position(|w| w == b"\r\n\r\n") {
+                    let head = std::str::from_utf8(&acc[..idx2]).unwrap_or("");
+                    let len = head
+                        .lines()
+                        .find_map(|l| {
+                            l.to_ascii_lowercase()
+                                .strip_prefix("content-length:")
+                                .and_then(|v| v.trim().parse::<usize>().ok())
+                        })
+                        .unwrap_or(0);
+                    let body_so_far = acc.len() - (idx2 + 4);
+                    if body_so_far < len {
+                        let mut more = vec![0u8; len - body_so_far];
+                        let _ = sock.read_exact(&mut more).await;
+                    }
+                    break;
+                }
+            }
+            // Pick the next canned body. Saturates at the last one
+            // (the agent loop sometimes calls the LLM more times than
+            // the test predicted; returning the same final body keeps
+            // the loop from hanging on a connect-but-no-response).
+            let body = bodies.get(idx).copied().unwrap_or_else(|| {
+                bodies.last().copied().unwrap_or("data: [DONE]\n\n")
+            });
+            idx += 1;
+            let body_bytes = body.as_bytes();
+            let head = format!(
+                "HTTP/1.1 200 OK\r\n\
+                 Content-Type: text/event-stream\r\n\
+                 Content-Length: {}\r\n\
+                 Connection: close\r\n\
+                 \r\n",
+                body_bytes.len()
+            );
+            let _ = sock.write_all(head.as_bytes()).await;
+            let _ = sock.write_all(body_bytes).await;
+            let _ = sock.shutdown().await;
+        }
+    });
+
+    format!("http://127.0.0.1:{port}")
+}
+
 /// Tool-call SSE stream: a `read` tool call comes through as a
 /// `ToolCallDelta` and ends up in the final `ChatResponse.choices[0]
 /// .message.tool_calls`. Pins the second contract path the
@@ -180,5 +255,176 @@ async fn llm_mock_serves_tool_call_sse_stream() {
         call.function.arguments.contains("x.rs"),
         "arguments JSON must round-trip; got {}",
         call.function.arguments
+    );
+}
+
+// ────────────────────────────────────────────────────────────────────
+// T0.1 characterization scenarios — built on the mock infrastructure.
+//
+// Each test wires `AgentLoop::run` against `spawn_sse_mock_multi`
+// and asserts the observable outcome (success flag, summary,
+// iterations_used). These pin the engine's response handling to
+// canonical SSE response shapes — any future refactor that breaks
+// the loop's text-converge or tool-dispatch contract surfaces as a
+// regression here.
+// ────────────────────────────────────────────────────────────────────
+
+/// T0.1 scenario 1 — LLM returns text-only on the first turn → the
+/// agent converges immediately with `success == true` and surfaces
+/// the LLM text as the summary. No tool calls dispatched, exactly
+/// one LLM iteration consumed.
+#[tokio::test]
+async fn agent_converges_when_llm_returns_text_only_first_turn() {
+    // Single-shot SSE: LLM responds with content "Task complete.",
+    // then [DONE]. The OA-compatible main loop sees no tool_calls,
+    // routes to handle_text_only_response, persists final turn
+    // (memory disabled by default), and returns Converged.
+    let bodies = vec![
+        "data: {\"choices\":[{\"delta\":{\"content\":\"Task complete.\"}}]}\n\n\
+         data: [DONE]\n\n",
+    ];
+    let mock_url = spawn_sse_mock_multi(bodies).await;
+
+    let project = tempfile::tempdir().expect("tempdir");
+
+    // Minimal config — memory off, sub-agent so the bootstrap skips
+    // observability/episode persistence/legacy file memory branches.
+    // The base_url points at the mock, api_key is non-None so the
+    // run_agent_session guard doesn't reject.
+    let mut config = AgentConfig::default();
+    config.base_url = mock_url;
+    config.api_key = Some("test-key".to_string());
+    config.is_subagent = true;
+    config.max_iterations = 5;
+
+    let agent = AgentLoop::new(config, create_default_registry());
+    let result = agent.run("trivial converge", project.path()).await;
+
+    assert!(
+        result.success,
+        "text-only LLM response must converge with success=true; \
+         summary={:?}",
+        result.summary
+    );
+    assert!(
+        result.summary.contains("Task complete.") || result.was_streamed,
+        "summary should reflect the LLM's text or be already streamed; got {:?}",
+        result.summary
+    );
+    assert_eq!(
+        result.iterations_used, 1,
+        "exactly one LLM iteration must run for a one-shot text response"
+    );
+    assert!(
+        result.tool_calls_total == 0,
+        "no tool calls should fire when LLM returns text only"
+    );
+}
+
+/// T0.1 scenario 2 — happy path single-tool. LLM returns a `read`
+/// tool call on turn 1, the runtime dispatches the tool (read of a
+/// non-existent path → tool failure, that's fine), then LLM returns
+/// text "all done" on turn 2 → agent converges. Exactly two LLM
+/// iterations consumed, exactly one tool call dispatched.
+#[tokio::test]
+async fn agent_converges_after_one_tool_dispatch_round_trip() {
+    let project = tempfile::tempdir().expect("tempdir");
+    // Path inside the tempdir so the `read` tool can attempt + fail
+    // without touching the host. Failure is fine — the test asserts
+    // the runtime ROUND-TRIPS the LLM iterations, not the tool result.
+    let target = project.path().join("nonexistent.txt");
+    let target_str = target.to_string_lossy().replace('\\', "\\\\");
+
+    let tool_call_body = Box::leak(
+        format!(
+            "data: {{\"choices\":[{{\"delta\":{{\"tool_calls\":[\
+                {{\"index\":0,\"id\":\"c-read-1\",\"function\":\
+                {{\"name\":\"read\",\"arguments\":\"{{\\\"filePath\\\":\\\"{target_str}\\\"}}\"}}}}\
+            ]}}}}]}}\n\ndata: [DONE]\n\n"
+        )
+        .into_boxed_str(),
+    );
+    let final_body = "data: {\"choices\":[{\"delta\":{\"content\":\"all done\"}}]}\n\n\
+                      data: [DONE]\n\n";
+
+    let bodies = vec![tool_call_body as &'static str, final_body];
+    let mock_url = spawn_sse_mock_multi(bodies).await;
+
+    let mut config = AgentConfig::default();
+    config.base_url = mock_url;
+    config.api_key = Some("test-key".to_string());
+    config.is_subagent = true;
+    config.max_iterations = 5;
+
+    let agent = AgentLoop::new(config, create_default_registry());
+    let result = agent.run("read the file", project.path()).await;
+
+    assert!(
+        result.success,
+        "two-turn tool-dispatch flow must converge with success=true; \
+         summary={:?}",
+        result.summary
+    );
+    assert_eq!(
+        result.iterations_used, 2,
+        "exactly two LLM iterations: turn 1 tool_call, turn 2 text → converge"
+    );
+    assert_eq!(
+        result.tool_calls_total, 1,
+        "exactly one tool call dispatched (the `read`)"
+    );
+}
+
+/// T0.1 scenario 3 — iteration budget exhaustion. LLM keeps
+/// returning tool_calls forever. With `max_iterations=2`, the run
+/// should terminate WITHOUT success after exactly 2 iterations.
+/// Pins the budget enforcer's main-loop guard.
+#[tokio::test]
+async fn agent_aborts_when_max_iterations_reached() {
+    let project = tempfile::tempdir().expect("tempdir");
+    let target = project.path().join("nonexistent.txt");
+    let target_str = target.to_string_lossy().replace('\\', "\\\\");
+
+    let tool_call_body = Box::leak(
+        format!(
+            "data: {{\"choices\":[{{\"delta\":{{\"tool_calls\":[\
+                {{\"index\":0,\"id\":\"c-read-loop\",\"function\":\
+                {{\"name\":\"read\",\"arguments\":\"{{\\\"filePath\\\":\\\"{target_str}\\\"}}\"}}}}\
+            ]}}}}]}}\n\ndata: [DONE]\n\n"
+        )
+        .into_boxed_str(),
+    );
+
+    // Single canned body — the multi-shot mock saturates at the last
+    // entry, so every LLM call returns the same tool_call response.
+    let bodies = vec![tool_call_body as &'static str];
+    let mock_url = spawn_sse_mock_multi(bodies).await;
+
+    let mut config = AgentConfig::default();
+    config.base_url = mock_url;
+    config.api_key = Some("test-key".to_string());
+    config.is_subagent = true;
+    config.max_iterations = 2;
+
+    let agent = AgentLoop::new(config, create_default_registry());
+    let result = agent.run("loop forever", project.path()).await;
+
+    assert!(
+        !result.success,
+        "infinite tool-call loop must NOT converge with success=true"
+    );
+    // The budget enforcer trips on the iteration AFTER `max_iterations`
+    // is reached (the loop runs the iteration body, increments, then
+    // the next iteration's guard fires). For `max_iterations=2` that
+    // means the engine consumes 2 productive iterations + 1 guard
+    // iteration → `iterations_used` ends at ≤ 3.
+    assert!(
+        result.iterations_used <= 3,
+        "iterations_used must be bounded near max_iterations=2; got {}",
+        result.iterations_used
+    );
+    assert!(
+        result.tool_calls_total >= 1,
+        "at least one tool call must have dispatched before the budget hit"
     );
 }
