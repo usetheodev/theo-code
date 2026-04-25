@@ -1779,3 +1779,13 @@ Plus: T0.1 underpinning `done_gate_cargo_check_fails_on_broken_manifest` em `run
 Plus underpinning: `done_gate_cargo_check_fails_on_broken_manifest` em `run_engine_sandbox.rs` (cargo invocation contract).
 
 **Validacao:** 1314 tests passando entre `theo-agent-runtime`, 0 falhas. `cargo check -p theo-agent-runtime --lib` clean. T0.1 AC literal cumprido: cada cenario produz sequencia observavel via mock; tests rodando em ~3s; snapshots committados via assertivas de `iterations_used` / `tool_calls_total` / `success`.
+
+### Iteracao 79 (2026-04-25) — T7.3 batch 26-overflow closure
+
+| Task | Status | Notas |
+|---|---|---|
+| T7.3 cenario `agent_dispatches_batch_with_26_calls_truncates_at_max` | **DONE** | Pin do contrato `MAX_BATCH_SIZE=25` cap end-to-end via LLM mock. Turn 1 LLM responde com `batch` tool_call carregando 26 sub-calls (gerados programaticamente — `glob` em padroes /tmp/theo-batch-26-*). `dispatch_batch::take(MAX_BATCH)` trunca ao 25o; o 26o e silenciosamente descartado e um warning e anexado ao tool_result agregado. Turn 2 LLM texto → converge. Asserts: `success=true` (cap nao crasha o run), `iterations_used=2`. Fecha o caso `batch × 26 overflow` que estava listado mas nao tinha cobertura LLM-driven (`meta_tools_t7_3.rs` so testava batch_execute que nao tem cap). |
+
+**Cobertura T7.3 final:** dimensoes `batch × [5 ok / 5 with 1 blocked / 25 max / 26 overflow]` agora todas cobertas. Plus done × {Gate 1 / Gate 2 / force-accept}, delegate_task × {single / parallel / both / neither}, skill × {InContext / SubAgent / Unknown} via pure-function planners (Iter 66) e cenarios E2E (Iters 67-78).
+
+**Validacao:** 1315 tests passando, 0 falhas. `cargo check -p theo-agent-runtime --lib` clean.

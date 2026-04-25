@@ -1389,3 +1389,64 @@ async fn agent_done_gate_2_blocks_via_cargo_then_force_accepts() {
         result.tool_calls_total
     );
 }
+
+/// T7.3 batch dimension closure — `batch × 26 overflow`. The
+/// `batch` meta-tool has a hard `MAX_BATCH_SIZE=25` cap enforced
+/// by `dispatch_batch::take(MAX_BATCH)`. Submitting 26 sub-calls
+/// must not crash; the 26th is silently dropped from execution
+/// and a warning is appended to the aggregated tool_result.
+///
+/// Pins the cap-overflow contract end-to-end via the LLM mock.
+/// The plan literal `batch × [5 ok / 5 with 1 blocked / 25 max /
+/// 26 overflow]` had its first three cases covered in
+/// `meta_tools_t7_3.rs`; this closes the 26-overflow case at the
+/// engine level (where the cap actually fires).
+#[tokio::test]
+async fn agent_dispatches_batch_with_26_calls_truncates_at_max() {
+    let project = tempfile::tempdir().expect("tempdir");
+
+    // Build a `batch` tool_call carrying 26 trivial `glob` sub-calls.
+    // Programmatically generate the JSON to avoid a 26-line literal.
+    let mut sub_calls = String::new();
+    for i in 0..26 {
+        if i > 0 {
+            sub_calls.push(',');
+        }
+        sub_calls.push_str(&format!(
+            "{{\\\"tool\\\":\\\"glob\\\",\\\"args\\\":{{\\\"pattern\\\":\\\"/tmp/theo-batch-26-{i}-*\\\"}}}}"
+        ));
+    }
+    let batch_body = Box::leak(
+        format!(
+            "data: {{\"choices\":[{{\"delta\":{{\"tool_calls\":[\
+                {{\"index\":0,\"id\":\"c-batch-26\",\"function\":\
+                {{\"name\":\"batch\",\"arguments\":\"{{\\\"calls\\\":[{sub_calls}]}}\"}}}}\
+            ]}}}}]}}\n\ndata: [DONE]\n\n"
+        )
+        .into_boxed_str(),
+    );
+    let final_body = "data: {\"choices\":[{\"delta\":{\"content\":\"batch overflow done\"}}]}\n\n\
+                      data: [DONE]\n\n";
+
+    let bodies = vec![batch_body as &'static str, final_body];
+    let mock_url = spawn_sse_mock_multi(bodies).await;
+
+    let mut config = AgentConfig::default();
+    config.base_url = mock_url;
+    config.api_key = Some("test-key".to_string());
+    config.is_subagent = true;
+    config.max_iterations = 5;
+
+    let agent = AgentLoop::new(config, create_default_registry());
+    let result = agent.run("submit 26 batch sub-calls", project.path()).await;
+
+    // The cap must NOT crash the run — agent converges on turn 2.
+    assert!(
+        result.success,
+        "26-call batch must not crash; agent must converge on the next turn"
+    );
+    assert_eq!(
+        result.iterations_used, 2,
+        "exactly two LLM iterations: batch dispatch (truncated to 25) → text → converge"
+    );
+}
