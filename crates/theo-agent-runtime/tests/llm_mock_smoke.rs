@@ -941,3 +941,67 @@ async fn agent_recovers_from_context_overflow_then_converges() {
         result.retries
     );
 }
+
+/// T0.1 scenario 10 — `batch_execute` meta-tool driven by LLM.
+/// Turn 1 LLM returns a `batch_execute` tool_call carrying TWO
+/// sub-calls (`glob` + `glob` against unrelated patterns). The
+/// runtime expands the batch (`tool_bridge::execute_meta::handle_
+/// batch_execute`) and runs all sub-tools, returning a single
+/// aggregated tool_result with `ok: true` and `steps[2]`. Turn 2
+/// LLM returns text "batch done" → converge. Pins the contract
+/// that batch_execute is dispatched as a single LLM-visible tool
+/// call but expands to N sub-tool dispatches internally.
+#[tokio::test]
+async fn agent_dispatches_batch_execute_then_converges() {
+    let project = tempfile::tempdir().expect("tempdir");
+
+    // Two glob sub-calls inside a single batch_execute. Both
+    // patterns target /tmp/<unique> paths that don't exist —
+    // glob returns success with empty matches either way.
+    let batch_body = "data: {\"choices\":[{\"delta\":{\"tool_calls\":[\
+                        {\"index\":0,\"id\":\"c-batch\",\"function\":\
+                        {\"name\":\"batch_execute\",\"arguments\":\
+                        \"{\\\"calls\\\":[\
+                            {\\\"tool\\\":\\\"glob\\\",\\\"args\\\":{\\\"pattern\\\":\\\"/tmp/theo-t0-1-batch-a-*\\\"}},\
+                            {\\\"tool\\\":\\\"glob\\\",\\\"args\\\":{\\\"pattern\\\":\\\"/tmp/theo-t0-1-batch-b-*\\\"}}\
+                        ]}\"}}\
+                    ]}}]}\n\ndata: [DONE]\n\n";
+    let final_body = "data: {\"choices\":[{\"delta\":{\"content\":\"batch done\"}}]}\n\n\
+                      data: [DONE]\n\n";
+
+    let bodies = vec![batch_body, final_body];
+    let mock_url = spawn_sse_mock_multi(bodies).await;
+
+    let mut config = AgentConfig::default();
+    config.base_url = mock_url;
+    config.api_key = Some("test-key".to_string());
+    config.is_subagent = true;
+    config.max_iterations = 5;
+
+    let agent = AgentLoop::new(config, create_default_registry());
+    let result = agent.run("run two globs in a batch", project.path()).await;
+
+    assert!(
+        result.success,
+        "batch_execute flow must converge with success=true; summary={:?}",
+        result.summary
+    );
+    assert_eq!(
+        result.iterations_used, 2,
+        "exactly two LLM iterations: batch dispatch → text → converge"
+    );
+    // Empirical finding (Iter 74): unlike `done`/`delegate_task`/
+    // `skill` (which flow through `dispatch_meta_tool` and don't
+    // increment `tool_calls_total`), `batch_execute` is dispatched
+    // through the regular ToolCallManager path — so the OUTER call
+    // increments the counter once, and the inner sub-calls run
+    // directly via `tool_bridge` without re-entering the manager.
+    // Net: tool_calls_total surfaces 1 per batch_execute invocation
+    // regardless of sub-call count. Pins this contract.
+    assert_eq!(
+        result.tool_calls_total, 1,
+        "batch_execute counts as exactly one tool dispatch (outer); \
+         the inner sub-calls don't re-enter the manager. Got {}",
+        result.tool_calls_total
+    );
+}

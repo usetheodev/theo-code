@@ -1694,3 +1694,14 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 **Cobertura T0.1 atual:** 9 dos cenarios canonicos do plano. Restantes (done-gate Gate 2 LLM-driven com cargo, batch+LLM stream, skill SubAgent driven by LLM, resume com ResumeContext) seguem a mesma receita.
 
 **Validacao:** 1308 tests passando entre `theo-agent-runtime`, 0 falhas. `cargo check -p theo-agent-runtime --lib` clean. (Pre-existing intermittent flakiness em `security_t7_1::home_unset_does_not_fallback_to_tmp` quando rodando em paralelo — documentado em iteracoes anteriores, passa solo, nao bloqueia gate.)
+
+### Iteracao 74 (2026-04-25) — T0.1 cenario 10 (batch_execute LLM-driven)
+
+| Task | Status | Notas |
+|---|---|---|
+| T0.1 cenario `agent_dispatches_batch_execute_then_converges` | **DONE** | Two-turn flow: turn 1 LLM responde com `batch_execute` tool_call carregando 2 sub-calls (`glob` + `glob` em padroes diferentes); o runtime expande o batch via `tool_bridge::execute_meta::handle_batch_execute`, roda os sub-tools, retorna agregado com `ok: true` e `steps[2]`. Turn 2 LLM responde com texto "batch done" → converge. Asserts: `success=true`, `iterations_used=2` exatamente, `tool_calls_total=1` (descoberta empirica de Iter 74 — `batch_execute`, ao contrario de `done`/`delegate_task`/`skill`, e dispatched via ToolCallManager regular path; o outer call incrementa o contador uma vez, mas os inner sub-calls rodam direto via `tool_bridge` sem reentrar no manager). |
+| **Finding observacional T0.1** | **NEW** | Inconsistencia de contagem entre meta-tools: `done`, `delegate_task`, `skill` flow via `dispatch_meta_tool` e NAO incrementam `tool_calls_total`. `batch_execute` flow via ToolCallManager regular path e INCREMENTA o contador uma vez (independente do numero de sub-calls). Documentado nos comentarios do teste — pode ser oportunidade de unificar a contagem em iteracao futura. |
+
+**Cobertura T0.1 atual:** 10 dos cenarios canonicos do plano. Restantes (done-gate Gate 2 LLM-driven com cargo, skill SubAgent driven by LLM, resume com ResumeContext) seguem a mesma receita.
+
+**Validacao:** 1309 tests passando entre `theo-agent-runtime`, 0 falhas. `cargo check -p theo-agent-runtime --lib` clean.
