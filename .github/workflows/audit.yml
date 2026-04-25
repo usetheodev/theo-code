@@ -112,3 +112,18 @@ jobs:
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ── Coverage gate (T0.3): theo-agent-runtime line-rate per module. ──
+  # Re-runs cargo tarpaulin and fails the build if any tracked module
+  # drops by more than MAX_DROP_PP percentage points vs the canonical
+  # baseline TSV in .coverage/. The baseline is updated by committing
+  # a new baseline-<sha>.tsv after a deliberate change.
+  coverage:
+    name: Coverage gate (T0.3)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: install tarpaulin
+        run: cargo install cargo-tarpaulin --locked
+      - name: run coverage check
+        run: bash scripts/check-coverage.sh
