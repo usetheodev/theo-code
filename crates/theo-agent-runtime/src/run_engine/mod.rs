@@ -12,6 +12,7 @@ mod lifecycle;
 mod llm_call;
 mod main_loop;
 mod stream_batcher;
+mod text_response;
 
 pub use handoff::HandoffOutcome;
 

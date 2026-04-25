@@ -15,6 +15,7 @@ pub mod parser;
 pub mod registry;
 pub mod reloadable;
 pub mod resume;
+mod finalize_helpers;
 mod spawn_helpers;
 pub mod watcher;
 
