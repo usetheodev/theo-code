@@ -1805,3 +1805,11 @@ Plus underpinning: `done_gate_cargo_check_fails_on_broken_manifest` em `run_engi
 | Silence clippy field-reassign-with-default em llm_mock_smoke | **DONE** | Adicionado `#![allow(clippy::field_reassign_with_default)]` no topo de `tests/llm_mock_smoke.rs` (mesmo padrao usado em `run_engine_routing.rs:10`). Eram 14 warnings nesse arquivo todos sobre `let mut config = AgentConfig::default(); config.X = ...` — a forma com struct literal seria menos legivel para tests com 4-5 fields tweaked. Allow + comment explicativo "tweak individual fields for readability" alinha com o padrao do crate. |
 
 **Validacao:** 1315 tests passando, 0 falhas. `cargo clippy -p theo-agent-runtime --test llm_mock_smoke` agora apenas reporta warnings em deps externos (theo-infra-llm, theo-infra-mcp); zero warnings no proprio arquivo de testes. Lib warnings remanescentes (22) sao pre-existentes e fora do escopo da iteracao.
+
+### Iteracao 82 (2026-04-25) — Hygiene: clean up doc comment warnings (22 → 10)
+
+| Task | Status | Notas |
+|---|---|---|
+| Cleanup doc comment warnings | **DONE** | Reduzidos clippy warnings em `theo-agent-runtime` lib de 22 para 10. Fixes: (1) `run_engine/mod.rs:395` — orphan doc comment para funcao movida para `run_engine_helpers.rs` convertido para regular comment. (2) `session_tree/mod.rs:221` — orphan doc comment para `build_context` movido para `context_builder.rs` convertido para regular comment. (3) `subagent/mod.rs:116` — orphan doc para "Construct a manager" sem corresponding fn (todas as builders foram para `manager_builders.rs`) convertido. (4) `observability/mod.rs:56` — `+ trajectory file path` em doc comment estava sendo interpretado como markdown list item; reescrito como prosa. (5) `subagent/mcp_tools.rs:148` — mesmo padrao com `+ raw inputSchema preservation`; reescrito como prosa. (6) `subagent/spawn_helpers.rs:328` — list items continuavam em prosa sem blank line, fazendo markdown stretch o item; adicionado blank line entre lista e prosa de continuacao. |
+
+**Validacao:** 1174 unit tests passando, 0 falhas. `cargo clippy -p theo-agent-runtime --lib` reduzido de 22 → 10 warnings. Os 10 remanescentes sao items maiores (large size difference between variants, sort_by_key, late_initialization) que requerem mudancas estruturais — fora do escopo desta iteracao.

@@ -113,10 +113,10 @@ pub struct SubAgentManager {
 }
 
 impl SubAgentManager {
-    /// Construct a manager bound to a registry. The registry resolves
-    /// `agent_name` lookups (built-in / project / global / on-demand).
-    // All `with_*` builders and `&self` accessors moved to
-    // `manager_builders.rs` (Fase 4 — T4.5).
+    // Construct + builder methods + accessors moved to
+    // `manager_builders.rs` (Fase 4 — T4.5). Manager registry binding
+    // resolves `agent_name` lookups via built-in / project / global /
+    // on-demand chain.
 
     // ---------------------------------------------------------------------
     // Spec-based spawn API (the only API)

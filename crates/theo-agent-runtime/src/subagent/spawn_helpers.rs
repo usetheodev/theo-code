@@ -325,14 +325,18 @@ impl SubAgentManager {
     }
 
     /// Resolve a worktree handle honoring the override.
+    ///
     /// Precedence:
-    ///   - `Reuse(path)` → wrap the existing path with `WorktreeHandle::existing`
-    ///     (synthetic branch `"(reused)"` flags it for cleanup-skip).
-    ///   - `Recreate { base }` → call `provider.create(spec.name, base)`.
-    ///   - `None` → legacy behavior: use `spec.isolation_base_branch` or `main`.
-    /// A `master` fallback is attempted on provider failure to cover legacy git
-    /// defaults. Returns `None` when no provider is attached OR
-    /// `spec.isolation != "worktree"`.
+    /// - `Reuse(path)` → wrap the existing path with
+    ///   `WorktreeHandle::existing` (synthetic branch `"(reused)"`
+    ///   flags it for cleanup-skip).
+    /// - `Recreate { base }` → call `provider.create(spec.name, base)`.
+    /// - `None` → legacy behavior: use `spec.isolation_base_branch` or
+    ///   `main`.
+    ///
+    /// A `master` fallback is attempted on provider failure to cover
+    /// legacy git defaults. Returns `None` when no provider is
+    /// attached OR `spec.isolation != "worktree"`.
     pub(super) fn resolve_worktree(
         &self,
         spec: &AgentSpec,
