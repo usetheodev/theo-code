@@ -206,9 +206,11 @@ impl ChatRequest {
     /// Phase 29 follow-up (sota-gaps-followup) — closes gap #7.
     /// Override the `tool_choice` field with an arbitrary string so the
     /// caller can force the model to invoke a tool:
-    ///   - `"auto"` (default) — model decides
-    ///   - `"required"` — model MUST call a tool
-    ///   - `"none"` — model MUST NOT call a tool
+    ///
+    /// - `"auto"` (default) — model decides
+    /// - `"required"` — model MUST call a tool
+    /// - `"none"` — model MUST NOT call a tool
+    ///
     /// Per-tool forcing (`{"type":"function","function":{"name":"X"}}`)
     /// requires switching the field to a JSON value, which is a future
     /// breaking change; for now we cover the OpenAI/Anthropic-compatible

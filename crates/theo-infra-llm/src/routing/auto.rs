@@ -260,13 +260,11 @@ mod tests {
             captured: Mutex<Vec<(String, String, String)>>,
         }
 
-        fn build_recorder() -> (
-            std::sync::Arc<Recorder>,
-            std::sync::Arc<dyn Fn(&str, &str, &str) + Send + Sync>,
-        ) {
+        type RecorderFn = std::sync::Arc<dyn Fn(&str, &str, &str) + Send + Sync>;
+        fn build_recorder() -> (std::sync::Arc<Recorder>, RecorderFn) {
             let r = std::sync::Arc::new(Recorder::default());
             let r_clone = r.clone();
-            let f: std::sync::Arc<dyn Fn(&str, &str, &str) + Send + Sync> =
+            let f: RecorderFn =
                 std::sync::Arc::new(move |t, ti, m| {
                     r_clone
                         .captured
