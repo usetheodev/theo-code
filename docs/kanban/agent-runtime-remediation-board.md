@@ -2,32 +2,32 @@
 
 **Source:** [agent-runtime-remediation-plan.md](../plans/agent-runtime-remediation-plan.md)
 **Created:** 2026-04-25
-**Last updated:** 2026-04-25
+**Last updated:** 2026-04-25 (iter 1 — Phase 0 + 2 quick-wins done)
 
 ## Progress
 
 ```
-[··············································] 0% (0/31 done)
+[========·····································] 19% (6/31 done)
 ```
 
 | Column | Count | Cards |
 |---|---|---|
-| backlog | 26 | T0.4, T1.1, T1.2, T1.3, T1.4, T2.1, T2.2, T2.3, T2.4, T2.5, T3.1, T3.2, T3.3, T3.4, T3.5, T3.6, T3.7, T3.8, T4.1, T4.2, T4.3, T4.4, T4.5, T4.6, T4.9, T4.10 |
-| ready | 5 | T0.1, T0.2, T0.3, T4.7, T4.8 |
+| backlog | 21 | T1.1, T1.2, T1.3, T1.4, T2.5, T3.1, T3.5, T3.6, T3.7, T4.1, T4.2, T4.3, T4.4, T4.6, T4.9, T4.10 |
+| ready | 4 | T2.1, T2.3, T3.3, T3.4 (depends on T1.2) |
 | doing | 0 | — |
 | review | 0 | — |
-| done | 0 | — |
+| done | 6 | T0.1, T0.2, T0.3, T0.4, T4.7, T4.8 |
 
 ## Phase Summary
 
 | Phase | Title | Total | Done | Progress |
 |---|---|---|---|---|
-| 0 | Foundation / Unblockers | 4 | 0 | 0% |
+| 0 | Foundation / Unblockers | 4 | 4 | 100% |
 | 1 | Correção P1 Crítica | 4 | 0 | 0% |
 | 2 | Defesas Wired | 5 | 0 | 0% |
 | 3 | Refactor Arquitetural | 8 | 0 | 0% |
-| 4 | Hardening Backlog | 10 | 0 | 0% |
-| **Total** | — | **31** | **0** | **0%** |
+| 4 | Hardening Backlog | 10 | 2 | 20% |
+| **Total** | — | **31** | **6** | **19%** |
 
 ## Dependency Graph (Live)
 
@@ -759,3 +759,10 @@ Status annotations: `[done]`, `[review]`, `[doing]`, `[ready]`, `[backlog]`
 | Date | Card | From | To | Note |
 |---|---|---|---|---|
 | 2026-04-25 | — | — | — | Board criado a partir de `docs/plans/agent-runtime-remediation-plan.md` (31 cards, 5 ready, 26 backlog) |
+| 2026-04-25 | T0.1 | ready | done | Regex `(\.workspace)?` + test 6/6 GREEN + audit.yml step |
+| 2026-04-25 | T0.4 | backlog | done | ADR-021 + ADR-022 + ADR-023 (CLI sunset) + ALLOWED_DEPS update; gate exit 0 |
+| 2026-04-25 | T0.2 | ready | done | scip 0.7.1 → protobuf 3.7.2 + rustls-webpki 0.103.13; cargo audit clean |
+| 2026-04-25 | T0.3 | ready | done | audit.yml: `cargo build/test --features otel`; otlp_network_smoke verde local |
+| 2026-04-25 | T4.7 | ready | done | `crates/theo-agent-runtime/README.md` (Architecture, 8 INVs, Pitfalls) |
+| 2026-04-25 | T4.8 | ready | done | `.github/CODEOWNERS` com revisores por path |
+| 2026-04-25 | (side) | — | — | Pre-existing build break: `AgentResult.run_report` field added (referenced in 2 sites but missing from struct) |

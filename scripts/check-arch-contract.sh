@@ -32,10 +32,12 @@
 set -euo pipefail
 
 MODE="strict"
+SOURCE_ONLY=0
 for arg in "$@"; do
     case "$arg" in
         --report) MODE="report" ;;
         --json)   MODE="json" ;;
+        --source-only) SOURCE_ONLY=1 ;;
         --help|-h)
             sed -n '2,30p' "$0"; exit 0 ;;
         *) echo "unknown flag: $arg" >&2; exit 2 ;;
@@ -58,11 +60,17 @@ declare -A ALLOWED_DEPS=(
     ["crates/theo-infra-auth"]="theo-domain"
     ["crates/theo-infra-memory"]="theo-domain theo-engine-retrieval"
     ["crates/theo-tooling"]="theo-domain"
-    ["crates/theo-agent-runtime"]="theo-domain theo-governance theo-infra-llm theo-infra-auth theo-tooling"
+    # ADR-021 (theo-isolation) + ADR-022 (theo-infra-mcp) authorize these deps.
+    ["crates/theo-agent-runtime"]="theo-domain theo-governance theo-infra-llm theo-infra-auth theo-tooling theo-isolation theo-infra-mcp"
     ["crates/theo-api-contracts"]="theo-domain"
-    ["crates/theo-application"]="theo-domain theo-engine-graph theo-engine-parser theo-engine-retrieval theo-governance theo-infra-llm theo-infra-auth theo-infra-memory theo-tooling theo-agent-runtime theo-api-contracts"
+    # `theo-application` aggregates all runtime + engine crates; ADR-021/ADR-022
+    # propagate transitively to it.
+    ["crates/theo-application"]="theo-domain theo-engine-graph theo-engine-parser theo-engine-retrieval theo-governance theo-infra-llm theo-infra-auth theo-infra-memory theo-tooling theo-agent-runtime theo-api-contracts theo-isolation theo-infra-mcp"
     ["crates/theo-test-memory-fixtures"]="theo-domain theo-infra-memory"
-    ["apps/theo-cli"]="theo-application theo-api-contracts theo-domain"
+    # ADR-023 grants `apps/theo-cli` a TEMPORARY exception to import
+    # `theo-agent-runtime` directly. Sunsets when T3.3 (encapsulation
+    # via theo-application) is merged.
+    ["apps/theo-cli"]="theo-application theo-api-contracts theo-domain theo-agent-runtime"
     ["apps/theo-desktop"]="theo-application theo-api-contracts theo-domain"
     ["apps/theo-marklive"]="theo-application theo-api-contracts theo-domain"
 )
@@ -73,7 +81,7 @@ ALL_WORKSPACE_CRATES=(
     theo-domain theo-engine-graph theo-engine-parser theo-engine-retrieval
     theo-governance theo-infra-llm theo-infra-auth theo-infra-memory
     theo-tooling theo-agent-runtime theo-api-contracts theo-application
-    theo-test-memory-fixtures
+    theo-test-memory-fixtures theo-isolation theo-infra-mcp
 )
 
 # --- Helpers ----------------------------------------------------------------
@@ -106,8 +114,11 @@ declared_theo_deps() {
             continue
         fi
         (( in_deps )) || continue
-        # Match "theo-foo.workspace" or "theo-foo = { path = ... }"
-        if [[ "$stripped" =~ ^(theo-[a-zA-Z0-9_-]+)[[:space:]]*=.+ ]]; then
+        # Match both inline form `theo-foo = ...` and workspace form
+        # `theo-foo.workspace = true`. The optional `(\.workspace)?`
+        # group covers the workspace syntax — without it, deps that
+        # use `.workspace = true` slip past the gate (find_p5_001).
+        if [[ "$stripped" =~ ^(theo-[a-zA-Z0-9_-]+)(\.workspace)?[[:space:]]*=.+ ]]; then
             printf '%s\n' "${BASH_REMATCH[1]}"
         fi
     done < "$cargo" | sort -u
@@ -131,6 +142,13 @@ dep_is_allowed() {
 }
 
 # --- Scan -------------------------------------------------------------------
+
+# `--source-only` exits here so callers can `source` the script and reuse
+# the helper functions (`declared_theo_deps`, `dep_is_allowed`, etc.) for
+# unit testing without triggering the full scan.
+if (( SOURCE_ONLY )); then
+    return 0 2>/dev/null || exit 0
+fi
 
 total_crates=0
 ok_crates=0

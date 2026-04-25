@@ -62,6 +62,12 @@ pub struct AgentResult {
     /// Invariant (validated by tests): `success == true ⇔ class ==
     /// Some(ErrorClass::Solved)`.
     pub error_class: Option<theo_domain::error_class::ErrorClass>,
+    /// Aggregate observability report (`RunReport`) for this run.
+    /// `None` when observability is disabled or when the run completed
+    /// before the report could be finalized. Populated by
+    /// `AgentRunEngine::take_run_report()` from the engine's
+    /// `last_run_report` slot.
+    pub run_report: Option<crate::observability::report::RunReport>,
 }
 
 impl AgentResult {

@@ -26,6 +26,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: arch-contract regex regression (T0.1 / find_p5_001)
+        run: bash scripts/check-arch-contract.test.sh
       - name: arch-contract (T1.5)
         run: bash scripts/check-arch-contract.sh
       - name: size (T4.6)
@@ -53,6 +55,10 @@ jobs:
         run: cargo build --workspace --exclude theo-code-desktop
       - name: test
         run: cargo test --workspace --exclude theo-code-desktop --lib --tests
+      - name: build OTel feature (T0.3 / find_p5_002)
+        run: cargo build -p theo-agent-runtime --features otel
+      - name: test OTel feature (T0.3 / find_p5_002)
+        run: cargo test -p theo-agent-runtime --features otel --test otlp_network_smoke
 
   # ── UI build + tests ────────────────────────────────────────────────────
   ui:
