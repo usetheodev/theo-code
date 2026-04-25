@@ -14,6 +14,18 @@ use theo_domain::prompt_sanitizer::{
 };
 use theo_domain::user_paths::{home_dir, theo_config_dir, theo_config_subdir};
 
+/// Process-wide env-var lock for HOME-mutating tests in this binary.
+/// Without it, `home_unset_does_not_fallback_to_tmp` and
+/// `home_set_returns_config_theo_subdir` race on the shared HOME
+/// var when run in parallel — observed flakiness in Iter 76.
+fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+    use std::sync::{Mutex, OnceLock};
+    static M: OnceLock<Mutex<()>> = OnceLock::new();
+    M.get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
+
 // ────────────────────────────────────────────────────────────────────
 // T1.4 — `$HOME` unset MUST NOT fall back to `/tmp`
 //
@@ -33,6 +45,7 @@ use theo_domain::user_paths::{home_dir, theo_config_dir, theo_config_subdir};
 /// parallelizable with other env-mutating tests.
 #[test]
 fn home_unset_does_not_fallback_to_tmp() {
+    let _l = env_lock();
     // Save and clear HOME.
     let saved = std::env::var_os("HOME");
     unsafe {
@@ -67,6 +80,7 @@ fn home_unset_does_not_fallback_to_tmp() {
 /// `$HOME/.config/theo/<subdir>` (canonical shape).
 #[test]
 fn home_set_returns_config_theo_subdir() {
+    let _l = env_lock();
     let saved = std::env::var_os("HOME");
     unsafe {
         std::env::set_var("HOME", "/opt/fakeuser");
@@ -210,6 +224,105 @@ fn git_log_is_fenced_in_xml_tags() {
     );
     // The body content survives the fence wrap.
     assert!(fenced.contains(body));
+}
+
+/// AC-T7.1: `test_hook_with_shell_metacharacters_escaped`. The hook
+/// runner spawns `sh <script-path>` with argv-style invocation and
+/// streams the event JSON over stdin. Both vectors MUST treat shell
+/// metacharacters as literal bytes — there is no string interpolation
+/// path that could reach `/bin/sh -c`.
+///
+/// We verify by writing a hook that records its stdin to a host file,
+/// then invoking it with an event whose payload contains
+/// `; touch /tmp/<unique>` (the canonical injection probe). Post-run,
+/// the recorded stdin MUST contain the literal bytes and the host
+/// MUST NOT have the touched file. Skipped when /bin/sh is missing
+/// (Windows / minimal containers).
+#[cfg(unix)]
+#[tokio::test]
+async fn test_hook_with_shell_metacharacters_escaped() {
+    use std::os::unix::fs::PermissionsExt;
+    use std::time::SystemTime;
+    use theo_agent_runtime::hooks::{HookConfig, HookEvent, HookRunner};
+
+    if !PathBuf::from("/bin/sh").exists() {
+        return;
+    }
+
+    // Per-process-unique escape target so concurrent test runs don't
+    // false-positive each other.
+    let nanos = SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let escape_target = format!(
+        "/tmp/theo-hook-shell-escape-{}-{nanos}",
+        std::process::id()
+    );
+    let _ = std::fs::remove_file(&escape_target);
+    assert!(
+        !std::path::Path::new(&escape_target).exists(),
+        "pre-condition: escape target must not exist"
+    );
+
+    let project = tempfile::tempdir().expect("tempdir");
+    let hooks_dir = project.path().join(".theo/hooks");
+    std::fs::create_dir_all(&hooks_dir).unwrap();
+
+    // Path where the hook will record its stdin (so the test can
+    // inspect the literal bytes the hook saw).
+    let stdin_capture = project.path().join("captured-stdin");
+
+    // Hook script: copies stdin verbatim to `stdin_capture`. If shell
+    // injection were possible, the metacharacters would have already
+    // escaped before this script runs.
+    let script_path = hooks_dir.join("test_metachar_hook.sh");
+    std::fs::write(
+        &script_path,
+        format!(
+            "#!/bin/sh\ncat > {}\n",
+            stdin_capture.display()
+        ),
+    )
+    .unwrap();
+    let mut perm = std::fs::metadata(&script_path).unwrap().permissions();
+    perm.set_mode(0o755);
+    std::fs::set_permissions(&script_path, perm).unwrap();
+
+    // Event payload contains the canonical injection probe inside a
+    // tool argument string. The hook executor serializes the event to
+    // JSON and writes it to the script's stdin via `write_all`. No
+    // string interpolation along the way reaches sh -c.
+    let injection = format!("'; touch {escape_target}; '");
+    let event = HookEvent {
+        hook_type: "test_metachar_hook".into(),
+        timestamp: 0,
+        project_dir: project.path().to_string_lossy().to_string(),
+        tool_name: Some("read".into()),
+        tool_args: Some(serde_json::json!({ "filePath": injection })),
+    };
+
+    let runner = HookRunner::new(project.path(), HookConfig::default());
+    let _ = runner.run_pre_hook("test_metachar_hook", &event).await;
+
+    // Post-condition 1: the host's escape target must not exist —
+    // any execution of the injected `touch` would have created it.
+    let leaked = std::path::Path::new(&escape_target).exists();
+    let _ = std::fs::remove_file(&escape_target);
+    assert!(
+        !leaked,
+        "T7.1 violated: shell metacharacters in hook payload escaped \
+         and created {escape_target} on the host"
+    );
+
+    // Post-condition 2: the script DID receive the literal bytes —
+    // proves the runner actually ran the hook (otherwise the absence
+    // check above would be vacuous).
+    let captured = std::fs::read_to_string(&stdin_capture).unwrap_or_default();
+    assert!(
+        captured.contains(&injection),
+        "hook stdin must contain the injection bytes verbatim; got {captured:?}"
+    );
 }
 
 /// AC-T1.2: `char_boundary_truncate` NEVER returns a string that slices a

@@ -50,7 +50,7 @@ impl AgentRunEngine {
             target_agent,
             target_spec,
             objective,
-            source_capabilities: self.config.capability_set.as_ref(),
+            source_capabilities: self.config.plugin().capability_set,
         };
 
         let decisions = chain.evaluate(&ctx);

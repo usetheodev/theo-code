@@ -40,7 +40,7 @@ impl AgentRunEngine {
 
         // Initialize state manager for file-backed persistence (crash recovery).
         // Best-effort: if creation fails, continue without persistence.
-        let mut state_manager = if !self.config.is_subagent {
+        let mut state_manager = if !self.config.loop_cfg().is_subagent {
             match crate::state_manager::StateManager::create(
                 &self.project_dir,
                 self.run.run_id.as_str(),
@@ -56,7 +56,7 @@ impl AgentRunEngine {
         };
 
         // Initialize hook runner for pre/post tool hooks
-        let hook_runner = if !self.config.is_subagent {
+        let hook_runner = if !self.config.loop_cfg().is_subagent {
             Some(crate::hooks::HookRunner::new(
                 &self.project_dir,
                 crate::hooks::HookConfig::default(),
@@ -67,7 +67,7 @@ impl AgentRunEngine {
 
         // Initialize sensor runner for computational verification after write tools.
         // Sensors fire asynchronously and results are drained before each LLM call.
-        let sensor_runner = if !self.config.is_subagent {
+        let sensor_runner = if !self.config.loop_cfg().is_subagent {
             let runner = crate::sensor::SensorRunner::new(
                 &self.project_dir,
                 crate::hooks::HookConfig::default(),
@@ -82,11 +82,11 @@ impl AgentRunEngine {
         };
 
         // Doom loop detector — tracks recent tool calls to detect repetition
-        let mut doom_tracker = self.config.doom_loop_threshold.map(DoomLoopTracker::new);
+        let mut doom_tracker = self.config.loop_cfg().doom_loop_threshold.map(DoomLoopTracker::new);
 
         // Layer 1: Schema stripping — sub-agents get filtered tool definitions
         // that exclude delegation meta-tools (subagent, subagent_parallel, skill).
-        let tool_defs = if self.config.is_subagent {
+        let tool_defs = if self.config.loop_cfg().is_subagent {
             tool_bridge::registry_to_definitions_for_subagent(&self.registry)
         } else {
             tool_bridge::registry_to_definitions(&self.registry)
@@ -130,8 +130,8 @@ impl AgentRunEngine {
 
             let mut request = ChatRequest::new(&chosen_model, messages.clone())
                 .with_tools(tool_defs.clone())
-                .with_max_tokens(self.config.max_tokens)
-                .with_temperature(self.config.temperature);
+                .with_max_tokens(self.config.llm().max_tokens)
+                .with_temperature(self.config.llm().temperature);
 
             if let Some(ref effort) = chosen_effort {
                 request = request.with_reasoning_effort(effort);

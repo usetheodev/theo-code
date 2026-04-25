@@ -6,7 +6,12 @@
 //!
 //! Pilot is a pure addition — zero changes to RunEngine or AgentLoop.
 
+mod git;
 mod run_loop;
+mod types;
+
+use git::{GitProgress, detect_git_progress, get_git_sha};
+pub use types::{CircuitBreakerState, ExitReason, PilotResult};
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -98,114 +103,6 @@ impl PilotConfig {
             },
             Err(_) => Self::default(),
         }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// CircuitBreakerState
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone)]
-pub enum CircuitBreakerState {
-    Closed,
-    Open,
-    HalfOpen,
-}
-
-// ---------------------------------------------------------------------------
-// ExitReason + PilotResult
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone)]
-pub enum ExitReason {
-    PromiseFulfilled,
-    FixPlanComplete,
-    RateLimitExhausted,
-    CircuitBreakerOpen(String),
-    MaxCallsReached,
-    UserInterrupt,
-    Error(String),
-}
-
-impl std::fmt::Display for ExitReason {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ExitReason::PromiseFulfilled => write!(f, "Promise fulfilled"),
-            ExitReason::FixPlanComplete => write!(f, "Fix plan complete"),
-            ExitReason::RateLimitExhausted => write!(f, "Rate limit exhausted"),
-            ExitReason::CircuitBreakerOpen(reason) => write!(f, "Circuit breaker: {reason}"),
-            ExitReason::MaxCallsReached => write!(f, "Max calls reached"),
-            ExitReason::UserInterrupt => write!(f, "User interrupt"),
-            ExitReason::Error(e) => write!(f, "Error: {e}"),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct PilotResult {
-    pub success: bool,
-    pub reason: ExitReason,
-    pub loops_completed: usize,
-    pub total_tokens: u64,
-    pub files_edited: Vec<String>,
-    pub promise: String,
-}
-
-// ---------------------------------------------------------------------------
-// GitProgress
-// ---------------------------------------------------------------------------
-
-struct GitProgress {
-    sha_changed: bool,
-    files_changed: usize,
-}
-
-async fn detect_git_progress(project_dir: &Path, previous_sha: &Option<String>) -> GitProgress {
-    let current_sha = get_git_sha(project_dir).await;
-
-    let sha_changed = match (previous_sha, &current_sha) {
-        (Some(prev), Some(curr)) => prev != curr,
-        _ => false,
-    };
-
-    // Count changed files (staged + unstaged + untracked)
-    let files_changed = get_changed_file_count(project_dir).await;
-
-    GitProgress {
-        sha_changed,
-        files_changed,
-    }
-}
-
-async fn get_git_sha(project_dir: &Path) -> Option<String> {
-    let output = tokio::process::Command::new("git")
-        .args(["rev-parse", "HEAD"])
-        .current_dir(project_dir)
-        .output()
-        .await
-        .ok()?;
-    if output.status.success() {
-        Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
-    } else {
-        None
-    }
-}
-
-async fn get_changed_file_count(project_dir: &Path) -> usize {
-    let output = tokio::process::Command::new("git")
-        .args(["diff", "--stat"])
-        .current_dir(project_dir)
-        .output()
-        .await;
-    match output {
-        Ok(out) => {
-            let text = String::from_utf8_lossy(&out.stdout);
-            text.lines()
-                .filter(|l| !l.trim().is_empty())
-                .count()
-                .saturating_sub(1) // last line is summary
-        }
-        Err(_) => 0,
     }
 }
 

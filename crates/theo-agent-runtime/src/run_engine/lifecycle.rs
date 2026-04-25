@@ -59,7 +59,12 @@ impl AgentRunEngine {
         // .theo/memory/episodes/ (decision: meeting 20260420-221947 #4 —
         // episodes belong to memory namespace, not wiki; wiki is
         // reserved for compiled content).
-        let events = self.event_bus.events();
+        //
+        // T6.2 — scope to events for THIS run via `events_for(run_id)`
+        // instead of cloning the entire process-wide log. The episode
+        // summary should only reflect this run anyway, so the filter
+        // is also semantically tighter.
+        let events = self.event_bus.events_for(self.run.run_id.as_str());
         if !events.is_empty() {
             let task_objective = self
                 .task_manager
@@ -74,7 +79,7 @@ impl AgentRunEngine {
             );
             // Usage + cost accounting + lesson/hypothesis pipelines.
             let mut usage = self.session_token_usage.clone();
-            if let Some(c) = theo_domain::budget::known_model_cost(&self.config.model) {
+            if let Some(c) = theo_domain::budget::known_model_cost(self.config.llm().model) {
                 usage.recompute_cost(&c);
             }
             summary.token_usage = Some(usage);
@@ -136,7 +141,7 @@ impl AgentRunEngine {
         .await;
 
         // Record session end for cross-session progress tracking
-        if !self.config.is_subagent {
+        if !self.config.loop_cfg().is_subagent {
             let tasks = if result.success {
                 vec![crate::session_bootstrap::CompletedTask {
                     name: result.summary.chars().take(100).collect(),
@@ -184,7 +189,7 @@ impl AgentRunEngine {
             result.success,
             result.files_edited.len() as u64,
             &self.session_token_usage,
-            self.config.max_iterations,
+            self.config.loop_cfg().max_iterations,
             self.budget_enforcer.usage(),
             &self.context_metrics.to_report(),
             self.done_attempts,

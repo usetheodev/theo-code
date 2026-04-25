@@ -66,7 +66,7 @@ impl AgentRunEngine {
             }
 
             // Plan mode guard: block write-class tools inside a batch.
-            if self.config.mode == crate::config::AgentMode::Plan
+            if self.config.loop_cfg().mode == crate::config::AgentMode::Plan
                 && matches!(tool_name.as_str(), "edit" | "write" | "apply_patch")
             {
                 blocked_results.push((

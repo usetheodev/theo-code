@@ -111,7 +111,7 @@ pub async fn run_agent_session_with_injections(
     event_listener: Arc<dyn EventListener>,
     injections: SubagentInjections,
 ) -> Result<AgentResult, RunSessionError> {
-    if config.api_key.is_none() {
+    if config.llm().api_key.is_none() {
         return Err(RunSessionError::MissingApiKey);
     }
 
