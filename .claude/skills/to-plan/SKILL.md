@@ -13,8 +13,6 @@ This skill takes the current conversation context and codebase understanding and
 
 3. **Write the plan** using the template below and save it to `docs/plans/{slug}-plan.md`. The slug should be kebab-case derived from the plan title.
 
-4. **Submit as GitHub issue** using `gh issue create` with the plan title as the issue title and a summary linking to the plan file.
-
 ## Plan Template
 
 Every plan MUST follow this structure. Each section is mandatory unless marked (optional).
