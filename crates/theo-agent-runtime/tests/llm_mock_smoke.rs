@@ -428,3 +428,104 @@ async fn agent_aborts_when_max_iterations_reached() {
         "at least one tool call must have dispatched before the budget hit"
     );
 }
+
+/// T0.1 scenario 4 — happy path multi-tool. LLM returns a `read`
+/// then a `glob` then text — exactly 3 iterations, exactly 2 tool
+/// calls dispatched. Pins the multi-turn dispatch contract.
+#[tokio::test]
+async fn agent_converges_after_two_tool_calls_then_text() {
+    let project = tempfile::tempdir().expect("tempdir");
+    let target = project.path().join("nonexistent.txt");
+    let target_str = target.to_string_lossy().replace('\\', "\\\\");
+
+    let read_body = Box::leak(
+        format!(
+            "data: {{\"choices\":[{{\"delta\":{{\"tool_calls\":[\
+                {{\"index\":0,\"id\":\"c-read\",\"function\":\
+                {{\"name\":\"read\",\"arguments\":\"{{\\\"filePath\\\":\\\"{target_str}\\\"}}\"}}}}\
+            ]}}}}]}}\n\ndata: [DONE]\n\n"
+        )
+        .into_boxed_str(),
+    );
+    let glob_body = "data: {\"choices\":[{\"delta\":{\"tool_calls\":[\
+                        {\"index\":0,\"id\":\"c-glob\",\"function\":\
+                        {\"name\":\"glob\",\"arguments\":\"{\\\"pattern\\\":\\\"/tmp/x-*\\\"}\"}}\
+                    ]}}]}\n\ndata: [DONE]\n\n";
+    let final_body = "data: {\"choices\":[{\"delta\":{\"content\":\"all done\"}}]}\n\n\
+                      data: [DONE]\n\n";
+
+    let bodies = vec![read_body as &'static str, glob_body, final_body];
+    let mock_url = spawn_sse_mock_multi(bodies).await;
+
+    let mut config = AgentConfig::default();
+    config.base_url = mock_url;
+    config.api_key = Some("test-key".to_string());
+    config.is_subagent = true;
+    config.max_iterations = 5;
+
+    let agent = AgentLoop::new(config, create_default_registry());
+    let result = agent.run("read then glob then done", project.path()).await;
+
+    assert!(result.success, "multi-tool flow must converge; summary={:?}", result.summary);
+    assert_eq!(
+        result.iterations_used, 3,
+        "exactly three LLM iterations: read → glob → text"
+    );
+    assert_eq!(
+        result.tool_calls_total, 2,
+        "exactly two tool calls dispatched (read + glob)"
+    );
+}
+
+/// T0.1 scenario 5 — done-gate force-accept after MAX_DONE_ATTEMPTS.
+/// LLM repeatedly calls `done()`. Convergence Gate 1 blocks each
+/// attempt because no real edits were made (edits_succeeded=0 in
+/// AllOf mode → the GitDiff+EditSuccess pair never both resolve true).
+/// After MAX_DONE_ATTEMPTS=3 blocks, the 4th `done()` call's Gate 0
+/// (attempt limit) force-accepts with success=true and an
+/// "[accepted after 4 done attempts]" annotation.
+#[tokio::test]
+async fn agent_done_gate_force_accepts_after_max_attempts() {
+    let project = tempfile::tempdir().expect("tempdir");
+
+    let done_body = "data: {\"choices\":[{\"delta\":{\"tool_calls\":[\
+                        {\"index\":0,\"id\":\"c-done\",\"function\":\
+                        {\"name\":\"done\",\"arguments\":\"{\\\"summary\\\":\\\"finished\\\"}\"}}\
+                    ]}}]}\n\ndata: [DONE]\n\n";
+
+    // Single body — mock saturates so every LLM call returns done().
+    let bodies = vec![done_body];
+    let mock_url = spawn_sse_mock_multi(bodies).await;
+
+    let mut config = AgentConfig::default();
+    config.base_url = mock_url;
+    config.api_key = Some("test-key".to_string());
+    config.is_subagent = true;
+    // Plenty of iteration budget — the gate, not the budget, must
+    // be the terminator here.
+    config.max_iterations = 10;
+
+    let agent = AgentLoop::new(config, create_default_registry());
+    let result = agent.run("ask done repeatedly", project.path()).await;
+
+    assert!(
+        result.success,
+        "force-accept after MAX_DONE_ATTEMPTS must yield success=true; \
+         summary={:?}",
+        result.summary
+    );
+    assert!(
+        result.summary.contains("accepted after"),
+        "summary must carry the 'accepted after N done attempts' annotation; \
+         got {:?}",
+        result.summary
+    );
+    // 4 done() iterations consumed: 3 blocked + 1 force-accept.
+    // The first 3 don't end the run; the 4th does.
+    assert!(
+        result.iterations_used >= 4,
+        "force-accept needs at least 4 done() iterations (3 blocks + 1 force-accept); \
+         got {}",
+        result.iterations_used
+    );
+}

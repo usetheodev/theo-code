@@ -1639,3 +1639,14 @@ Objetivo pos-remediacao: **0 god-files, <10 unwraps (test-only), 0 silent-swallo
 **Cobertura T0.1 atual:** 3 dos cenarios canonicos do plano (happy-path single-tool, happy-path text-only, budget exhaustion iterations) cobertos via mock end-to-end. Restantes (context overflow recovery, LLM retry+success, done-gate Gate 2 LLM-driven, batch tool com LLM stream, skill InContext/SubAgent driven by LLM) seguem a mesma receita: stretch-goals para iteracoes futuras adicionando bodies SSE especificos para os scenarios.
 
 **Validacao:** 1302 tests passando entre `theo-agent-runtime` (+3 cenarios desta iteracao), 0 falhas. `cargo check -p theo-agent-runtime --lib` clean. `tests/llm_mock_smoke.rs` agora a 430 LOC.
+
+### Iteracao 69 (2026-04-25) — T0.1 mais 2 cenarios end-to-end (multi-tool + force-accept)
+
+| Task | Status | Notas |
+|---|---|---|
+| T0.1 cenario `agent_converges_after_two_tool_calls_then_text` | **DONE** | Three-turn flow: turn 1 LLM responde com `read` tool_call, turn 2 com `glob` tool_call, turn 3 com texto "all done" → converge. Asserts: `success=true`, `iterations_used=3` exatamente, `tool_calls_total=2` exatamente. Pin do contrato multi-turn dispatch. |
+| T0.1 cenario `agent_done_gate_force_accepts_after_max_attempts` | **DONE** | LLM sempre retorna `done()` tool_call (mock saturado). Cada iteracao: handle_done_call incrementa `done_attempts`; Gate 0 (attempt limit) passa enquanto attempts <= MAX_DONE_ATTEMPTS=3; Gate 1 (convergence) bloqueia porque `edits_succeeded=0` em modo `AllOf` (GitDiff + EditSuccess ambos precisam ser true). Apos 3 blocks, a 4a chamada de done() tem `done_attempts=4 > 3` → Gate 0 force-accepts. Asserts: `success=true`, `summary.contains("accepted after")` (annotation do force-accept), `iterations_used >= 4` (3 blocks + 1 force-accept). Pin do contrato MAX_DONE_ATTEMPTS escape-hatch. |
+
+**Cobertura T0.1 atual:** 5 dos cenarios canonicos do plano (text-only converge, single-tool dispatch round-trip, multi-tool happy path, budget exhaustion, done-gate force-accept). Restantes (context overflow recovery, LLM retry+success, done-gate Gate 2 LLM-driven com cargo test, batch tool com LLM stream, skill InContext/SubAgent driven by LLM) seguem a mesma receita SSE-canned-bodies.
+
+**Validacao:** 1304 tests passando entre `theo-agent-runtime`, 0 falhas. `cargo check -p theo-agent-runtime --lib` clean.
