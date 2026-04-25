@@ -357,3 +357,131 @@ fn forced_tool_choice(
     }
     Some(normalized)
 }
+
+#[cfg(test)]
+mod forced_tool_choice_tests {
+    //! T1.5 — verifies the migration from hand-rolled JSON to
+    //! `serde_json::json!` correctly escapes pathological tool names.
+    //! The legacy `format!(r#"{{"type":"function","name":"{}"}}"#, name)`
+    //! produced broken JSON if `name` contained a `"`; this guard
+    //! prevents future regressions.
+
+    use super::forced_tool_choice;
+
+    /// Process-wide env var lock — same pattern used in
+    /// `project_config::tests` and `observability::otel_exporter::tests`.
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        use std::sync::{Mutex, OnceLock};
+        static M: OnceLock<Mutex<()>> = OnceLock::new();
+        M.get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+    }
+
+    struct EnvSnapshot {
+        prior: Option<std::ffi::OsString>,
+    }
+    impl EnvSnapshot {
+        fn capture() -> Self {
+            let prior = std::env::var_os("THEO_FORCE_TOOL_CHOICE");
+            unsafe { std::env::remove_var("THEO_FORCE_TOOL_CHOICE") };
+            Self { prior }
+        }
+    }
+    impl Drop for EnvSnapshot {
+        fn drop(&mut self) {
+            unsafe {
+                match &self.prior {
+                    Some(v) => std::env::set_var("THEO_FORCE_TOOL_CHOICE", v),
+                    None => std::env::remove_var("THEO_FORCE_TOOL_CHOICE"),
+                }
+            }
+        }
+    }
+
+    /// Trivial tool-defs vec — `forced_tool_choice` returns `None` on
+    /// empty, so we provide a dummy with one entry to exercise every
+    /// branch.
+    fn tool_defs_with(name: &str) -> Vec<theo_infra_llm::types::ToolDefinition> {
+        vec![theo_infra_llm::types::ToolDefinition::new(
+            name,
+            "test",
+            serde_json::json!({}),
+        )]
+    }
+
+    #[test]
+    fn force_tool_choice_with_quote_in_name_serializes_correctly() {
+        let _l = env_lock();
+        let _s = EnvSnapshot::capture();
+        unsafe {
+            std::env::set_var("THEO_FORCE_TOOL_CHOICE", r#"function:weird"name"#);
+        }
+        let out = forced_tool_choice(&tool_defs_with("anything"))
+            .expect("env set ⇒ Some");
+        // Round-trip: must parse back into a JSON object with the
+        // exact name (escapes preserved). Hand-rolled format! would
+        // produce `{"name":"weird"name"}` — invalid JSON.
+        let parsed: serde_json::Value =
+            serde_json::from_str(&out).expect("forced_tool_choice produced invalid JSON");
+        assert_eq!(parsed["type"], "function");
+        assert_eq!(parsed["name"], r#"weird"name"#);
+    }
+
+    #[test]
+    fn force_tool_choice_with_backslash_in_name_serializes_correctly() {
+        let _l = env_lock();
+        let _s = EnvSnapshot::capture();
+        unsafe {
+            std::env::set_var("THEO_FORCE_TOOL_CHOICE", r#"function:back\slash"#);
+        }
+        let out = forced_tool_choice(&tool_defs_with("anything"))
+            .expect("env set ⇒ Some");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&out).expect("forced_tool_choice produced invalid JSON");
+        assert_eq!(parsed["name"], r#"back\slash"#);
+    }
+
+    #[test]
+    fn force_tool_choice_passes_through_verbatim_strings() {
+        let _l = env_lock();
+        let _s = EnvSnapshot::capture();
+        unsafe { std::env::set_var("THEO_FORCE_TOOL_CHOICE", "required") };
+        assert_eq!(
+            forced_tool_choice(&tool_defs_with("x")).as_deref(),
+            Some("required")
+        );
+        unsafe { std::env::set_var("THEO_FORCE_TOOL_CHOICE", "none") };
+        assert_eq!(
+            forced_tool_choice(&tool_defs_with("x")).as_deref(),
+            Some("none")
+        );
+    }
+
+    #[test]
+    fn force_tool_choice_normalizes_any_to_required() {
+        let _l = env_lock();
+        let _s = EnvSnapshot::capture();
+        unsafe { std::env::set_var("THEO_FORCE_TOOL_CHOICE", "any") };
+        assert_eq!(
+            forced_tool_choice(&tool_defs_with("x")).as_deref(),
+            Some("required")
+        );
+    }
+
+    #[test]
+    fn force_tool_choice_returns_none_when_no_tools_exposed() {
+        let _l = env_lock();
+        let _s = EnvSnapshot::capture();
+        unsafe { std::env::set_var("THEO_FORCE_TOOL_CHOICE", "required") };
+        // Empty tool_defs — early return before consulting env var.
+        assert!(forced_tool_choice(&[]).is_none());
+    }
+
+    #[test]
+    fn force_tool_choice_returns_none_when_env_unset() {
+        let _l = env_lock();
+        let _s = EnvSnapshot::capture(); // strips var
+        assert!(forced_tool_choice(&tool_defs_with("x")).is_none());
+    }
+}
