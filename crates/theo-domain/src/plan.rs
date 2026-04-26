@@ -282,6 +282,119 @@ impl Plan {
         self.phases.iter().find(|p| p.id == id)
     }
 
+    /// T6.1 / D4 — Apply a `PlanPatch` to mutate the plan in place.
+    ///
+    /// On `Err`, the plan is **left unchanged** (atomicity guarantee). The
+    /// operation works on a clone first, validates, and only swaps when the
+    /// post-validation passes.
+    pub fn apply_patch(
+        &mut self,
+        patch: &crate::plan_patch::PlanPatch,
+    ) -> Result<(), crate::plan_patch::PatchError> {
+        use crate::plan_patch::{InsertPosition, PatchError, PlanPatch};
+
+        let mut updated = self.clone();
+        match patch {
+            PlanPatch::AddTask {
+                phase,
+                task,
+                position,
+            } => {
+                let phase_obj = updated
+                    .phases
+                    .iter_mut()
+                    .find(|p| p.id == *phase)
+                    .ok_or(PatchError::PhaseNotFound(*phase))?;
+                let pos = match position {
+                    InsertPosition::End => phase_obj.tasks.len(),
+                    InsertPosition::Begin => 0,
+                    InsertPosition::AfterTask { id } => phase_obj
+                        .tasks
+                        .iter()
+                        .position(|t| t.id == *id)
+                        .map(|i| i + 1)
+                        .ok_or(PatchError::AnchorNotInPhase {
+                            anchor: *id,
+                            phase: *phase,
+                        })?,
+                };
+                phase_obj.tasks.insert(pos, task.clone());
+            }
+            PlanPatch::RemoveTask { id } => {
+                // Orphan check: no other task may depend on the removed one.
+                let dependents: Vec<PlanTaskId> = updated
+                    .phases
+                    .iter()
+                    .flat_map(|p| p.tasks.iter())
+                    .filter(|t| t.depends_on.contains(id))
+                    .map(|t| t.id)
+                    .collect();
+                if !dependents.is_empty() {
+                    return Err(PatchError::RemoveWouldOrphan(*id));
+                }
+                let mut removed = false;
+                for phase in updated.phases.iter_mut() {
+                    if let Some(idx) = phase.tasks.iter().position(|t| t.id == *id) {
+                        phase.tasks.remove(idx);
+                        removed = true;
+                        break;
+                    }
+                }
+                if !removed {
+                    return Err(PatchError::TaskNotFound(*id));
+                }
+            }
+            PlanPatch::EditTask { id, edits } => {
+                if edits.is_empty() {
+                    return Err(PatchError::Empty);
+                }
+                let task = updated
+                    .find_task_mut(*id)
+                    .ok_or(PatchError::TaskNotFound(*id))?;
+                if let Some(t) = &edits.title {
+                    task.title = t.clone();
+                }
+                if let Some(s) = edits.status {
+                    task.status = s;
+                }
+                if let Some(d) = &edits.description {
+                    task.description = d.clone();
+                }
+                if let Some(d) = &edits.dod {
+                    task.dod = d.clone();
+                }
+                if let Some(r) = &edits.rationale {
+                    task.rationale = r.clone();
+                }
+                if let Some(o) = &edits.outcome {
+                    task.outcome = o.clone();
+                }
+                if let Some(f) = &edits.files {
+                    task.files = f.clone();
+                }
+            }
+            PlanPatch::ReorderDeps { id, new_deps } => {
+                let task = updated
+                    .find_task_mut(*id)
+                    .ok_or(PatchError::TaskNotFound(*id))?;
+                task.depends_on = new_deps.clone();
+            }
+            PlanPatch::SkipTask { id, rationale } => {
+                let task = updated
+                    .find_task_mut(*id)
+                    .ok_or(PatchError::TaskNotFound(*id))?;
+                task.status = PlanTaskStatus::Skipped;
+                task.outcome = Some(rationale.clone());
+            }
+        }
+
+        // Re-validate the patched plan; reject if it broke any invariant
+        // (cycle introduced, orphan dep, duplicate id, etc.).
+        updated.validate()?;
+        *self = updated;
+        Ok(())
+    }
+
     /// Kahn's algorithm — yields task IDs in a valid execution order.
     ///
     /// Returns `Err(CycleDetected)` when the dependency graph contains a
@@ -883,5 +996,235 @@ mod tests {
         assert!(PlanTaskStatus::Skipped.satisfies_dependency());
         assert!(!PlanTaskStatus::Failed.satisfies_dependency());
         assert!(!PlanTaskStatus::Pending.satisfies_dependency());
+    }
+
+    // ---------------------------------------------------------------------
+    // T6.1 — PlanPatch + apply_patch
+    // ---------------------------------------------------------------------
+
+    use crate::plan_patch::{InsertPosition, PatchError, PlanPatch, TaskEdits};
+
+    #[test]
+    fn t61_apply_patch_skip_task_marks_skipped_with_outcome() {
+        let mut plan = make_plan(vec![phase(
+            1,
+            PhaseStatus::InProgress,
+            vec![task(1, PlanTaskStatus::Pending, vec![])],
+        )]);
+        plan.apply_patch(&PlanPatch::SkipTask {
+            id: PlanTaskId(1),
+            rationale: "Out of scope".into(),
+        })
+        .unwrap();
+        let t = plan.find_task(PlanTaskId(1)).unwrap();
+        assert_eq!(t.status, PlanTaskStatus::Skipped);
+        assert_eq!(t.outcome.as_deref(), Some("Out of scope"));
+    }
+
+    #[test]
+    fn t61_apply_patch_skip_unknown_id_returns_not_found() {
+        let mut plan = make_plan(vec![phase(
+            1,
+            PhaseStatus::InProgress,
+            vec![task(1, PlanTaskStatus::Pending, vec![])],
+        )]);
+        let err = plan
+            .apply_patch(&PlanPatch::SkipTask {
+                id: PlanTaskId(99),
+                rationale: "x".into(),
+            })
+            .unwrap_err();
+        assert_eq!(err, PatchError::TaskNotFound(PlanTaskId(99)));
+    }
+
+    #[test]
+    fn t61_apply_patch_remove_task_with_dependents_rejected() {
+        let mut plan = make_plan(vec![phase(
+            1,
+            PhaseStatus::InProgress,
+            vec![
+                task(1, PlanTaskStatus::Pending, vec![]),
+                task(2, PlanTaskStatus::Pending, vec![1]),
+            ],
+        )]);
+        let err = plan
+            .apply_patch(&PlanPatch::RemoveTask { id: PlanTaskId(1) })
+            .unwrap_err();
+        assert_eq!(err, PatchError::RemoveWouldOrphan(PlanTaskId(1)));
+        // Plan unchanged on error (atomicity).
+        assert_eq!(plan.all_tasks().len(), 2);
+    }
+
+    #[test]
+    fn t61_apply_patch_remove_leaf_task_succeeds() {
+        let mut plan = make_plan(vec![phase(
+            1,
+            PhaseStatus::InProgress,
+            vec![
+                task(1, PlanTaskStatus::Pending, vec![]),
+                task(2, PlanTaskStatus::Pending, vec![1]),
+            ],
+        )]);
+        plan.apply_patch(&PlanPatch::RemoveTask { id: PlanTaskId(2) })
+            .unwrap();
+        assert_eq!(plan.all_tasks().len(), 1);
+        assert!(plan.find_task(PlanTaskId(2)).is_none());
+    }
+
+    #[test]
+    fn t61_apply_patch_add_task_at_end_preserves_validity() {
+        let mut plan = make_plan(vec![phase(
+            1,
+            PhaseStatus::InProgress,
+            vec![task(1, PlanTaskStatus::Pending, vec![])],
+        )]);
+        let new_task = task(2, PlanTaskStatus::Pending, vec![1]);
+        plan.apply_patch(&PlanPatch::AddTask {
+            phase: PhaseId(1),
+            task: new_task,
+            position: InsertPosition::End,
+        })
+        .unwrap();
+        assert_eq!(plan.phases[0].tasks.len(), 2);
+        assert_eq!(plan.phases[0].tasks[1].id, PlanTaskId(2));
+    }
+
+    #[test]
+    fn t61_apply_patch_add_task_with_invalid_dep_rolls_back() {
+        let mut plan = make_plan(vec![phase(
+            1,
+            PhaseStatus::InProgress,
+            vec![task(1, PlanTaskStatus::Pending, vec![])],
+        )]);
+        let bad_task = task(2, PlanTaskStatus::Pending, vec![99]); // dep doesn't exist
+        let err = plan
+            .apply_patch(&PlanPatch::AddTask {
+                phase: PhaseId(1),
+                task: bad_task,
+                position: InsertPosition::End,
+            })
+            .unwrap_err();
+        match err {
+            PatchError::Validation(PlanValidationError::InvalidDependency { .. }) => {}
+            other => panic!("expected InvalidDependency: {other:?}"),
+        }
+        // Plan unchanged: only original task survives.
+        assert_eq!(plan.all_tasks().len(), 1);
+    }
+
+    #[test]
+    fn t61_apply_patch_add_task_unknown_phase_returns_phase_not_found() {
+        let mut plan = make_plan(vec![phase(
+            1,
+            PhaseStatus::InProgress,
+            vec![task(1, PlanTaskStatus::Pending, vec![])],
+        )]);
+        let err = plan
+            .apply_patch(&PlanPatch::AddTask {
+                phase: PhaseId(99),
+                task: task(2, PlanTaskStatus::Pending, vec![]),
+                position: InsertPosition::End,
+            })
+            .unwrap_err();
+        assert_eq!(err, PatchError::PhaseNotFound(PhaseId(99)));
+    }
+
+    #[test]
+    fn t61_apply_patch_add_task_after_anchor_inserts_correctly() {
+        let mut plan = make_plan(vec![phase(
+            1,
+            PhaseStatus::InProgress,
+            vec![
+                task(1, PlanTaskStatus::Pending, vec![]),
+                task(3, PlanTaskStatus::Pending, vec![1]),
+            ],
+        )]);
+        plan.apply_patch(&PlanPatch::AddTask {
+            phase: PhaseId(1),
+            task: task(2, PlanTaskStatus::Pending, vec![1]),
+            position: InsertPosition::AfterTask { id: PlanTaskId(1) },
+        })
+        .unwrap();
+        let ids: Vec<u32> = plan.phases[0].tasks.iter().map(|t| t.id.0).collect();
+        assert_eq!(ids, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn t61_apply_patch_edit_task_changes_only_specified_fields() {
+        let mut plan = make_plan(vec![phase(
+            1,
+            PhaseStatus::InProgress,
+            vec![task(1, PlanTaskStatus::Pending, vec![])],
+        )]);
+        plan.apply_patch(&PlanPatch::EditTask {
+            id: PlanTaskId(1),
+            edits: TaskEdits {
+                title: Some("Renamed".into()),
+                status: Some(PlanTaskStatus::Blocked),
+                ..Default::default()
+            },
+        })
+        .unwrap();
+        let t = plan.find_task(PlanTaskId(1)).unwrap();
+        assert_eq!(t.title, "Renamed");
+        assert_eq!(t.status, PlanTaskStatus::Blocked);
+        // Untouched fields preserved.
+        assert!(t.dod.is_empty());
+    }
+
+    #[test]
+    fn t61_apply_patch_edit_empty_returns_empty_error() {
+        let mut plan = make_plan(vec![phase(
+            1,
+            PhaseStatus::InProgress,
+            vec![task(1, PlanTaskStatus::Pending, vec![])],
+        )]);
+        let err = plan
+            .apply_patch(&PlanPatch::EditTask {
+                id: PlanTaskId(1),
+                edits: TaskEdits::default(),
+            })
+            .unwrap_err();
+        assert_eq!(err, PatchError::Empty);
+    }
+
+    #[test]
+    fn t61_apply_patch_reorder_deps_introducing_cycle_rolls_back() {
+        let mut plan = make_plan(vec![phase(
+            1,
+            PhaseStatus::InProgress,
+            vec![
+                task(1, PlanTaskStatus::Pending, vec![]),
+                task(2, PlanTaskStatus::Pending, vec![1]),
+            ],
+        )]);
+        let err = plan
+            .apply_patch(&PlanPatch::ReorderDeps {
+                id: PlanTaskId(1),
+                new_deps: vec![PlanTaskId(2)], // creates cycle 1→2→1
+            })
+            .unwrap_err();
+        assert_eq!(err, PatchError::Validation(PlanValidationError::CycleDetected));
+        // Plan unchanged.
+        let t1 = plan.find_task(PlanTaskId(1)).unwrap();
+        assert!(t1.depends_on.is_empty());
+    }
+
+    #[test]
+    fn t61_apply_patch_atomicity_rejected_patch_leaves_plan_intact() {
+        let mut plan = make_plan(vec![phase(
+            1,
+            PhaseStatus::InProgress,
+            vec![
+                task(1, PlanTaskStatus::Pending, vec![]),
+                task(2, PlanTaskStatus::Pending, vec![1]),
+            ],
+        )]);
+        let snapshot_before = plan.clone();
+        let _ = plan.apply_patch(&PlanPatch::ReorderDeps {
+            id: PlanTaskId(1),
+            new_deps: vec![PlanTaskId(2)],
+        });
+        assert_eq!(plan, snapshot_before);
     }
 }
