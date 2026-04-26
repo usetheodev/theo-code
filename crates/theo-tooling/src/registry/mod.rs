@@ -148,7 +148,8 @@ pub fn create_default_registry() -> ToolRegistry {
     use crate::glob::GlobTool;
     use crate::grep::GrepTool;
     use crate::lsp::{
-        LspDefinitionTool, LspHoverTool, LspReferencesTool, LspSessionManager,
+        LspDefinitionTool, LspHoverTool, LspReferencesTool, LspRenameTool,
+        LspSessionManager,
     };
     use crate::memory::MemoryTool;
     use crate::plan::{
@@ -248,6 +249,9 @@ pub fn create_default_registry() -> ToolRegistry {
         Box::new(LspHoverTool::new(std::sync::Arc::new(
             LspSessionManager::from_catalogue(std::collections::HashMap::new()),
         ))),
+        Box::new(LspRenameTool::new(std::sync::Arc::new(
+            LspSessionManager::from_catalogue(std::collections::HashMap::new()),
+        ))),
         // Builtin plugins — typed operations
         Box::new(crate::git::GitStatusTool),
         Box::new(crate::git::GitDiffTool),
@@ -290,7 +294,8 @@ pub fn create_default_registry_with_project(
 
     use crate::docs_search::{DocsSearchTool, bootstrap_docs_index};
     use crate::lsp::{
-        LspDefinitionTool, LspHoverTool, LspReferencesTool, LspSessionManager,
+        LspDefinitionTool, LspHoverTool, LspReferencesTool, LspRenameTool,
+        LspSessionManager,
     };
 
     let _ = project_dir; // silenced when no per-project state is wired
@@ -309,7 +314,7 @@ pub fn create_default_registry_with_project(
     // same spawned server processes (one rust-analyzer serves
     // both lsp_definition and lsp_references on `.rs` files).
     let lsp_manager = Arc::new(LspSessionManager::from_path());
-    for tool_id in ["lsp_definition", "lsp_references", "lsp_hover"] {
+    for tool_id in ["lsp_definition", "lsp_references", "lsp_hover", "lsp_rename"] {
         registry.unregister(tool_id);
     }
     registry
@@ -321,6 +326,9 @@ pub fn create_default_registry_with_project(
     registry
         .register(Box::new(LspHoverTool::new(lsp_manager.clone())))
         .expect("lsp_hover tool schema is valid");
+    registry
+        .register(Box::new(LspRenameTool::new(lsp_manager.clone())))
+        .expect("lsp_rename tool schema is valid");
 
     registry
 }

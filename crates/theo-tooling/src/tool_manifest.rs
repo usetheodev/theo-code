@@ -178,6 +178,13 @@ pub const TOOL_MANIFEST: &[ToolManifestEntry] = &[
         notes: "T3.1 — LSP `textDocument/hover` via LspSessionManager. Normalises MarkupContent / MarkedString / MarkedString[] into a flat doc string. Cheaper than reading whole files when the agent only needs a signature.",
     },
     ToolManifestEntry {
+        id: "lsp_rename",
+        exposure: ToolExposure::DefaultRegistry,
+        status: ToolStatus::Implemented,
+        owner: "theo-tooling",
+        notes: "T3.1 — LSP `textDocument/rename` PREVIEW via LspSessionManager. Returns the WorkspaceEdit (file → range → newText) for agent review. Does NOT write files — agent applies via `edit`/`apply_patch` after inspecting. Supports both LSP 3.16+ documentChanges and legacy changes shapes.",
+    },
+    ToolManifestEntry {
         id: "memory",
         exposure: ToolExposure::DefaultRegistry,
         status: ToolStatus::Implemented,
