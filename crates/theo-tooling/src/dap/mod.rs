@@ -9,6 +9,7 @@
 //! This module ships the protocol layer only. Server discovery + tool
 //! execution (`debug_set_breakpoint`, etc.) is the next iteration.
 
+pub mod operations;
 pub mod protocol;
 
 pub use protocol::{
