@@ -21,7 +21,7 @@ pub fn maybe_spawn_autodream(
     project_dir: &std::path::Path,
     run_id: &str,
 ) {
-    if !cfg.autodream_enabled {
+    if !cfg.evolution().autodream_enabled {
         return;
     }
     // Relaxed: this is a single-thread idempotency flag (no causal
@@ -31,7 +31,7 @@ pub fn maybe_spawn_autodream(
     if attempted.swap(true, std::sync::atomic::Ordering::Relaxed) {
         return;
     }
-    let Some(handle) = cfg.evolution().autodream.cloned() else {
+    let Some(handle) = cfg.evolution().autodream.clone() else {
         return;
     };
     let memory_dir = project_dir.join(".theo").join("memory");
@@ -139,7 +139,7 @@ pub fn maybe_spawn_reviewers(
             cfg.evolution().skill_reviewer.is_some(),
         ),
         crate::skill_reviewer::SkillReviewTrigger::ShouldSpawn
-    ) && let Some(reviewer) = cfg.evolution().skill_reviewer.cloned()
+    ) && let Some(reviewer) = cfg.evolution().skill_reviewer.clone()
     {
         let window = recent_review_window(messages, cfg.evolution().skill_review_nudge_interval.max(10));
         // Fire-and-forget: dropping the handle detaches intentionally.

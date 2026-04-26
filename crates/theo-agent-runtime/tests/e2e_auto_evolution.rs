@@ -115,9 +115,12 @@ fn base_cfg(
             ))),
             ..theo_agent_runtime::config::MemoryConfig::default()
         },
-        skill_reviewer: Some(SkillReviewerHandle::new(Arc::new(
-            RecordingSkillReviewer { calls: skill_calls },
-        ))),
+        evolution: theo_agent_runtime::config::EvolutionConfig {
+            skill_reviewer: Some(SkillReviewerHandle::new(Arc::new(
+                RecordingSkillReviewer { calls: skill_calls },
+            ))),
+            ..theo_agent_runtime::config::EvolutionConfig::default()
+        },
         ..AgentConfig::default()
     }
 }
@@ -262,10 +265,13 @@ async fn phase2_autodream_spawn_via_wiring_helper_respects_disable_flag() {
 
     let calls = Arc::new(AtomicUsize::new(0));
     let cfg = AgentConfig {
-        autodream_enabled: false,
-        autodream: Some(AutodreamHandle::new(Arc::new(RecordingAutodream {
-            calls: calls.clone(),
-        }))),
+        evolution: theo_agent_runtime::config::EvolutionConfig {
+            autodream_enabled: false,
+            autodream: Some(AutodreamHandle::new(Arc::new(RecordingAutodream {
+                calls: calls.clone(),
+            }))),
+            ..theo_agent_runtime::config::EvolutionConfig::default()
+        },
         ..AgentConfig::default()
     };
 

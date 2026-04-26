@@ -9,7 +9,7 @@ mod prompts;
 mod views;
 
 pub use views::{
-    EvolutionView, PluginView, RoutingView,
+    PluginView, RoutingView,
 };
 pub use prompts::system_prompt_for_mode;
 
@@ -318,6 +318,42 @@ impl Default for MemoryConfig {
     }
 }
 
+/// PLAN_AUTO_EVOLUTION_SOTA sub-config. T3.2 PR5 — owned nested
+/// sub-config that replaces the 5 flat evolution-related fields
+/// previously held on `AgentConfig` (find_p3_004).
+#[derive(Debug, Clone)]
+pub struct EvolutionConfig {
+    /// Enables post-session memory consolidation (autodream). The actual
+    /// run still respects 24h cooldown, lock file, and minimum file
+    /// count. Set to `false` to disable unconditionally.
+    pub autodream_enabled: bool,
+    /// Max wall time for a consolidation pass. Matches OpenDev's
+    /// bounded background work pattern.
+    pub autodream_timeout_secs: u64,
+    /// Optional executor that runs the LLM consolidation step. When
+    /// `None`, `run_autodream` becomes a no-op even if
+    /// `autodream_enabled == true`.
+    pub autodream: Option<crate::autodream::AutodreamHandle>,
+    /// Tool iterations between background skill-reviewer spawns,
+    /// provided no skill was created during the task. `0` disables.
+    pub skill_review_nudge_interval: usize,
+    /// Reviewer invoked when the skill nudge counter fires. `None`
+    /// disables the feature even with a positive interval.
+    pub skill_reviewer: Option<crate::skill_reviewer::SkillReviewerHandle>,
+}
+
+impl Default for EvolutionConfig {
+    fn default() -> Self {
+        Self {
+            autodream_enabled: true,
+            autodream_timeout_secs: 60,
+            autodream: None,
+            skill_review_nudge_interval: 10,
+            skill_reviewer: None,
+        }
+    }
+}
+
 /// Run-loop policy. T3.2 PR2 — owned sub-config grouping the 6
 /// run-loop fields previously held flat on AgentConfig.
 #[derive(Debug, Clone)]
@@ -355,6 +391,7 @@ impl Default for LoopConfig {
 /// T3.2 PR2 — `LoopConfig` extracted.
 /// T3.2 PR3 — `ContextConfig` extracted.
 /// T3.2 PR4 — `MemoryConfig` extracted.
+/// T3.2 PR5 — `EvolutionConfig` extracted.
 ///
 /// `Debug` is implemented manually so that `api_key` (now inside
 /// `LlmConfig`) renders as `Some("[REDACTED]")` / `None` instead of
@@ -380,28 +417,8 @@ pub struct AgentConfig {
     /// Wrapped in `RouterHandle` so `AgentConfig` can stay `Debug + Clone`
     /// without forcing the trait to require `Debug`.
     pub router: Option<RouterHandle>,
-    /// PLAN_AUTO_EVOLUTION_SOTA: enables post-session
-    /// memory consolidation (autodream). Default: `true` — the actual
-    /// run still respects 24h cooldown, lock file, and minimum file
-    /// count. Set to `false` to disable unconditionally.
-    pub autodream_enabled: bool,
-    /// PLAN_AUTO_EVOLUTION_SOTA: max wall time for a
-    /// consolidation pass. Default: 60s. Matches OpenDev's bounded
-    /// background work pattern.
-    pub autodream_timeout_secs: u64,
-    /// PLAN_AUTO_EVOLUTION_SOTA: optional executor that
-    /// runs the LLM consolidation step. When `None`, `run_autodream`
-    /// becomes a no-op even if `autodream_enabled == true`.
-    pub autodream: Option<crate::autodream::AutodreamHandle>,
-    /// PLAN_AUTO_EVOLUTION_SOTA: tool iterations between
-    /// background skill-reviewer spawns, provided no skill was
-    /// created during the task. `0` disables. Default: 10
-    /// (`referencias/hermes-agent/run_agent.py:1517-1520`).
-    pub skill_review_nudge_interval: usize,
-    /// PLAN_AUTO_EVOLUTION_SOTA: reviewer invoked when the
-    /// skill nudge counter fires. `None` disables the feature even
-    /// with a positive interval.
-    pub skill_reviewer: Option<crate::skill_reviewer::SkillReviewerHandle>,
+    /// PLAN_AUTO_EVOLUTION_SOTA sub-config. T3.2 PR5 / find_p3_004.
+    pub evolution: EvolutionConfig,
     /// T1.3 supply-chain: optional pinned set of plugin manifest
     /// SHA-256 hashes. When `Some`, a plugin is only loaded if its
     /// computed `manifest_sha256` is in the set — a typo in one
@@ -500,11 +517,7 @@ impl Default for AgentConfig {
             capability_set: None,
             memory: MemoryConfig::default(),
             router: None,
-            autodream_enabled: true,
-            autodream_timeout_secs: 60,
-            autodream: None,
-            skill_review_nudge_interval: 10,
-            skill_reviewer: None,
+            evolution: EvolutionConfig::default(),
             plugin_allowlist: None,
             // 7 days of shadow checkpoints. T3.5 / find_p5_005.
             checkpoint_ttl_seconds: 7 * 24 * 60 * 60,
@@ -592,8 +605,8 @@ mod tests {
         // T3.2 PR2 — LoopView removed (see LoopConfig in mod.rs).
         // T3.2 PR3 — ContextView removed (see ContextConfig in mod.rs).
         // T3.2 PR4 — MemoryView removed (see MemoryConfig in mod.rs).
+        // T3.2 PR5 — EvolutionView removed (see EvolutionConfig in mod.rs).
         for view in [
-            "EvolutionView",
             "RoutingView",
             "PluginView",
         ] {

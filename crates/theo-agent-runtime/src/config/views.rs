@@ -21,7 +21,7 @@
 //! trim toward the per-file 500-line target). Views and accessors are
 //! re-exported from `mod.rs` so the public path stays byte-identical.
 
-use super::{AgentConfig, ContextConfig, LlmConfig, LoopConfig, MemoryConfig, RouterHandle};
+use super::{AgentConfig, ContextConfig, EvolutionConfig, LlmConfig, LoopConfig, MemoryConfig, RouterHandle};
 
 // T3.2 PR1 — `LlmView` removed; `AgentConfig::llm()` now returns
 // `&LlmConfig` (the owned nested sub-config) directly. Field-access
@@ -38,15 +38,8 @@ use super::{AgentConfig, ContextConfig, LlmConfig, LoopConfig, MemoryConfig, Rou
 // T3.2 PR4 — `MemoryView` removed; `AgentConfig::memory()` now returns
 // `&MemoryConfig` (the owned nested sub-config) directly.
 
-/// PLAN_AUTO_EVOLUTION_SOTA. ≤5 fields.
-#[derive(Debug)]
-pub struct EvolutionView<'a> {
-    pub autodream_enabled: bool,
-    pub autodream_timeout_secs: u64,
-    pub autodream: Option<&'a crate::autodream::AutodreamHandle>,
-    pub skill_review_nudge_interval: usize,
-    pub skill_reviewer: Option<&'a crate::skill_reviewer::SkillReviewerHandle>,
-}
+// T3.2 PR5 — `EvolutionView` removed; `AgentConfig::evolution()` now
+// returns `&EvolutionConfig` (the owned nested sub-config) directly.
 
 /// Routing layer. ≤1 field.
 #[derive(Debug)]
@@ -85,15 +78,10 @@ impl AgentConfig {
         &self.memory
     }
 
-    /// PLAN_AUTO_EVOLUTION_SOTA view.
-    pub fn evolution(&self) -> EvolutionView<'_> {
-        EvolutionView {
-            autodream_enabled: self.autodream_enabled,
-            autodream_timeout_secs: self.autodream_timeout_secs,
-            autodream: self.autodream.as_ref(),
-            skill_review_nudge_interval: self.skill_review_nudge_interval,
-            skill_reviewer: self.skill_reviewer.as_ref(),
-        }
+    /// PLAN_AUTO_EVOLUTION_SOTA accessor. T3.2 PR5 — returns the owned
+    /// nested `EvolutionConfig` directly instead of a borrowed view.
+    pub fn evolution(&self) -> &EvolutionConfig {
+        &self.evolution
     }
 
     /// Routing view.
