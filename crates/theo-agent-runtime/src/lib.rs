@@ -39,6 +39,7 @@ pub mod roadmap;
 pub mod run_engine;
 pub mod session_tree;
 pub mod skill;
+pub mod streaming;
 pub mod subagent;
 pub mod subagent_runs;
 pub mod trajectory_export;
