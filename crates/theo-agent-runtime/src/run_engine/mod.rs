@@ -35,15 +35,13 @@ use theo_tooling::registry::ToolRegistry;
 #[cfg(test)]
 use crate::agent_loop::AgentResult;
 use crate::budget_enforcer::BudgetEnforcer;
-use crate::config::{AgentConfig, MessageQueues};
-use crate::context_metrics::ContextMetrics;
+use crate::config::AgentConfig;
 use crate::convergence::{
     ConvergenceEvaluator, ConvergenceMode, EditSuccessConvergence, GitDiffConvergence,
 };
 use crate::event_bus::EventBus;
 use crate::loop_state::ContextLoopState;
 use crate::metrics::{MetricsCollector, RuntimeMetrics};
-use crate::persistence::SnapshotStore;
 use crate::task_manager::TaskManager;
 use crate::tool_call_manager::ToolCallManager;
 
