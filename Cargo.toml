@@ -91,6 +91,9 @@ sha2 = "0.10"
 tokio-util = { version = "0.7", features = ["rt"] }
 dashmap = "6"
 parking_lot = "0.12"
+# T4.6 / find_p4_010 / find_p5_008 — UUID v4 backs `random_u64()` so
+# concurrent `*Id::generate()` calls cannot collide on fast hardware.
+uuid = { version = "1", features = ["v4"] }
 notify = "6"
 notify-debouncer-mini = "0.4"
 # Phase 40 (otlp-exporter-plan) — OpenTelemetry SDK, opt-in via feature `otel`.

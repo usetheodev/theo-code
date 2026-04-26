@@ -79,6 +79,67 @@ fn t38_persisted_message_is_scrubbed_of_secrets() {
     assert!(raw.contains("END"));
 }
 
+/// T4.5 AC reinforcement — every documented secret pattern (sk-ant,
+/// ghp_, AKIA, PEM block) must be redacted by the persistence path.
+/// Without this test the audit cannot independently confirm that all
+/// 4 ACs hold; the previous regression only proved the sk-ant case.
+#[test]
+fn t45_all_documented_secret_patterns_are_scrubbed() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut sm = fresh_state(dir.path(), "all-secrets");
+
+    // One realistic exemplar per AC pattern, all in a single payload
+    // so we cover the multi-secret-per-message case too.
+    let payload = format!(
+        "Anthropic key sk-ant-api03-{anth}, GitHub token ghp_{gh}, AWS key AKIA{aws}, and an RSA block\n-----BEGIN RSA PRIVATE KEY-----\n{pem}\n-----END RSA PRIVATE KEY-----\nthat ends here.",
+        anth = "A".repeat(95),
+        gh = "B".repeat(36),
+        aws = "C".repeat(16),
+        pem = "PEMBODY1234567890+/=".repeat(4),
+    );
+    sm.append_message("tool", &payload).unwrap();
+
+    let session_path = dir
+        .path()
+        .join(".theo")
+        .join("state")
+        .join("all-secrets")
+        .join("session.jsonl");
+    let raw = std::fs::read_to_string(session_path).unwrap();
+
+    // Each raw secret body MUST NOT appear on disk.
+    assert!(
+        !raw.contains(&"A".repeat(95)),
+        "sk-ant-api03 secret leaked to JSONL"
+    );
+    assert!(
+        !raw.contains(&"B".repeat(36)),
+        "ghp_ token leaked to JSONL"
+    );
+    assert!(
+        !raw.contains(&"C".repeat(16)),
+        "AKIA AWS key leaked to JSONL"
+    );
+    assert!(
+        !raw.contains("PEMBODY1234567890+/="),
+        "PEM body leaked to JSONL"
+    );
+
+    // The redaction marker must show up at least once for each pattern
+    // family so callers can audit redaction visually.
+    let redaction_count = raw.matches("[REDACTED]").count();
+    assert!(
+        redaction_count >= 4,
+        "expected ≥4 [REDACTED] markers (one per pattern), found {redaction_count}: {raw}"
+    );
+
+    // Surrounding narrative context preserved — only secrets removed.
+    assert!(raw.contains("Anthropic key"));
+    assert!(raw.contains("GitHub token"));
+    assert!(raw.contains("AWS key"));
+    assert!(raw.contains("that ends here."));
+}
+
 /// Cenário 3 — sequential appends preserve order (the JSONL on disk
 /// keeps insertion order). This is a sanity test guarding against
 /// future torn-write or buffer-shuffle regressions.
