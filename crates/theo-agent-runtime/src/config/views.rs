@@ -21,7 +21,7 @@
 //! trim toward the per-file 500-line target). Views and accessors are
 //! re-exported from `mod.rs` so the public path stays byte-identical.
 
-use super::{AgentConfig, ContextConfig, EvolutionConfig, LlmConfig, LoopConfig, MemoryConfig, RouterHandle};
+use super::{AgentConfig, ContextConfig, EvolutionConfig, LlmConfig, LoopConfig, MemoryConfig, RoutingConfig};
 
 // T3.2 PR1 — `LlmView` removed; `AgentConfig::llm()` now returns
 // `&LlmConfig` (the owned nested sub-config) directly. Field-access
@@ -41,11 +41,8 @@ use super::{AgentConfig, ContextConfig, EvolutionConfig, LlmConfig, LoopConfig, 
 // T3.2 PR5 — `EvolutionView` removed; `AgentConfig::evolution()` now
 // returns `&EvolutionConfig` (the owned nested sub-config) directly.
 
-/// Routing layer. ≤1 field.
-#[derive(Debug)]
-pub struct RoutingView<'a> {
-    pub router: Option<&'a RouterHandle>,
-}
+// T3.2 PR6 — `RoutingView` removed; `AgentConfig::routing()` now returns
+// `&RoutingConfig` (the owned nested sub-config) directly.
 
 /// Plugin / capability gate. ≤2 fields.
 #[derive(Debug)]
@@ -84,11 +81,10 @@ impl AgentConfig {
         &self.evolution
     }
 
-    /// Routing view.
-    pub fn routing(&self) -> RoutingView<'_> {
-        RoutingView {
-            router: self.router.as_ref(),
-        }
+    /// Routing accessor. T3.2 PR6 — returns the owned nested
+    /// `RoutingConfig` directly instead of a borrowed view.
+    pub fn routing(&self) -> &RoutingConfig {
+        &self.routing
     }
 
     /// Plugin / capability gate view.

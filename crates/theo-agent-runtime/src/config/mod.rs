@@ -8,9 +8,7 @@ use theo_infra_llm::types::Message;
 mod prompts;
 mod views;
 
-pub use views::{
-    PluginView, RoutingView,
-};
+pub use views::PluginView;
 pub use prompts::system_prompt_for_mode;
 
 // ---------------------------------------------------------------------------
@@ -318,6 +316,17 @@ impl Default for MemoryConfig {
     }
 }
 
+/// Routing layer sub-config. T3.2 PR6 — owned nested sub-config that
+/// replaces the single flat router field previously held on
+/// `AgentConfig` (find_p3_004).
+#[derive(Debug, Clone, Default)]
+pub struct RoutingConfig {
+    /// Optional model router. When `Some`, every ChatRequest consults
+    /// the router for its model + reasoning effort. When `None`, the
+    /// session uses `model` / `reasoning_effort` verbatim.
+    pub router: Option<RouterHandle>,
+}
+
 /// PLAN_AUTO_EVOLUTION_SOTA sub-config. T3.2 PR5 — owned nested
 /// sub-config that replaces the 5 flat evolution-related fields
 /// previously held on `AgentConfig` (find_p3_004).
@@ -392,6 +401,7 @@ impl Default for LoopConfig {
 /// T3.2 PR3 — `ContextConfig` extracted.
 /// T3.2 PR4 — `MemoryConfig` extracted.
 /// T3.2 PR5 — `EvolutionConfig` extracted.
+/// T3.2 PR6 — `RoutingConfig` extracted.
 ///
 /// `Debug` is implemented manually so that `api_key` (now inside
 /// `LlmConfig`) renders as `Some("[REDACTED]")` / `None` instead of
@@ -409,14 +419,8 @@ pub struct AgentConfig {
     pub capability_set: Option<theo_domain::capability::CapabilitySet>,
     /// Memory subsystem sub-config. T3.2 PR4 / find_p3_004.
     pub memory: MemoryConfig,
-    /// Optional model router. When `Some`, every ChatRequest consults the
-    /// router for its model + reasoning effort. When `None`, the session
-    /// uses `model` / `reasoning_effort` verbatim — preserving pre-R3
-    /// behaviour. Plan ref: outputs/smart-model-routing-plan.md §R3.
-    ///
-    /// Wrapped in `RouterHandle` so `AgentConfig` can stay `Debug + Clone`
-    /// without forcing the trait to require `Debug`.
-    pub router: Option<RouterHandle>,
+    /// Routing layer sub-config. T3.2 PR6 / find_p3_004.
+    pub routing: RoutingConfig,
     /// PLAN_AUTO_EVOLUTION_SOTA sub-config. T3.2 PR5 / find_p3_004.
     pub evolution: EvolutionConfig,
     /// T1.3 supply-chain: optional pinned set of plugin manifest
@@ -516,7 +520,7 @@ impl Default for AgentConfig {
             context: ContextConfig::default(),
             capability_set: None,
             memory: MemoryConfig::default(),
-            router: None,
+            routing: RoutingConfig::default(),
             evolution: EvolutionConfig::default(),
             plugin_allowlist: None,
             // 7 days of shadow checkpoints. T3.5 / find_p5_005.
@@ -606,8 +610,8 @@ mod tests {
         // T3.2 PR3 — ContextView removed (see ContextConfig in mod.rs).
         // T3.2 PR4 — MemoryView removed (see MemoryConfig in mod.rs).
         // T3.2 PR5 — EvolutionView removed (see EvolutionConfig in mod.rs).
+        // T3.2 PR6 — RoutingView removed (see RoutingConfig in mod.rs).
         for view in [
-            "RoutingView",
             "PluginView",
         ] {
             let n = count_struct_fields(src, view);

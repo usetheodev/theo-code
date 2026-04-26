@@ -50,7 +50,7 @@ impl AgentRunEngine {
         routing_ctx.iteration = iteration;
         routing_ctx.requires_tool_use = requires_tool_use;
 
-        match self.config.routing().router {
+        match self.config.routing().router.as_ref() {
             Some(handle) => {
                 let choice = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     handle.as_router().route(&routing_ctx)

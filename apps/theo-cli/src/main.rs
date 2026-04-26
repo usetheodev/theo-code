@@ -823,7 +823,7 @@ tool, time pressure), say so honestly — don't claim success.\n";
         // sees `config.router.is_some()` instead of falling back to
         // "no_router".
         if let Some(router) = injections.router_clone() {
-            config.router = Some(theo_application::facade::agent::config::RouterHandle::new(router));
+            config.routing.router = Some(theo_application::facade::agent::config::RouterHandle::new(router));
         }
 
         let mut agent = theo_application::facade::agent::AgentLoop::new(config, registry);
