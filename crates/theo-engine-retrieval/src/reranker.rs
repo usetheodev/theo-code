@@ -5,8 +5,11 @@
 //!
 //! Model: Jina Reranker v2 Base Multilingual (supports EN, PT, ZH, etc.)
 //! via fastembed TextRerank (ONNX, CPU-only, ~10ms/doc).
+//!
+//! T8.1 — Always compiled (fastembed is a non-optional dep). Whether to
+//! USE the reranker at runtime is gated by `RetrievalConfig.use_reranker`,
+//! NOT by a build feature.
 
-#[cfg(feature = "reranker")]
 mod inner {
     use std::collections::HashMap;
 
@@ -94,7 +97,7 @@ mod inner {
     ///
     /// Includes: file path + top symbol names + signatures + first-line docs.
     /// Kept short (<200 tokens) for fast cross-encoder inference.
-    fn build_rerank_document(graph: &CodeGraph, file_path: &str) -> String {
+    pub(super) fn build_rerank_document(graph: &CodeGraph, file_path: &str) -> String {
         let file_id = format!("file:{}", file_path);
         let mut parts = vec![file_path.to_string()];
 
@@ -128,14 +131,21 @@ mod inner {
     }
 }
 
-#[cfg(feature = "reranker")]
 pub use inner::CrossEncoderReranker;
+
+// Re-export the private helper for tests so we can verify behaviour
+// without spinning up the cross-encoder model.
+#[cfg(test)]
+use inner::build_rerank_document;
 
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
-#[cfg(all(test, feature = "reranker"))]
+// T8.1 — Tests run on default build (no feature flag required).
+// Heavy tests that download the Jina model from HuggingFace are
+// gated by --ignored to keep `cargo test` fast.
+#[cfg(test)]
 mod tests {
     use super::*;
     use theo_engine_graph::model::{CodeGraph, Edge, EdgeType, Node, NodeType, SymbolKind};
@@ -208,13 +218,18 @@ mod tests {
         graph
     }
 
+    // T8.1 — Heavy tests that pull the Jina model from HuggingFace
+    // are gated behind --ignored so default `cargo test` runs fast
+    // and works offline.
     #[test]
+    #[ignore]
     fn reranker_init_succeeds() {
         let reranker = CrossEncoderReranker::new();
         assert!(reranker.is_ok(), "reranker should initialize successfully");
     }
 
     #[test]
+    #[ignore]
     fn reranker_empty_input() {
         let reranker = match CrossEncoderReranker::new() {
             Ok(r) => r,
@@ -226,6 +241,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn reranker_empty_query() {
         let reranker = match CrossEncoderReranker::new() {
             Ok(r) => r,
@@ -238,6 +254,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn reranker_ranks_relevant_higher() {
         let reranker = match CrossEncoderReranker::new() {
             Ok(r) => r,
@@ -259,7 +276,96 @@ mod tests {
         );
     }
 
+    // Offline tests — verify the module surface without downloading
+    // any model. Document the always-compiled invariant so a future
+    // PR adding a build-time gate would be caught here.
+
     #[test]
+    fn t81_reranker_module_compiles_without_feature_flag() {
+        // Pure type-system smoke test: if T8.1 regressed by re-adding
+        // a `#[cfg(feature = "reranker")]` gate to `inner`, this
+        // would not compile in the default build.
+        let _build_doc = build_rerank_document(&build_test_graph(), "auth/oauth.rs");
+        // build_rerank_document is a helper exposed inside `inner`; if
+        // T8.1's "always compiled" property holds, importing `super::*`
+        // brings it into scope without any feature flag.
+    }
+
+    #[test]
+    fn t81_build_rerank_document_includes_path_and_top_symbols() {
+        // Pure function test — no model download required. Verifies
+        // the document the reranker would feed to the cross-encoder
+        // includes the file path + symbol names + signatures + first
+        // doc line.
+        let graph = build_test_graph();
+        let doc = build_rerank_document(&graph, "auth/oauth.rs");
+        assert!(doc.contains("auth/oauth.rs"));
+        assert!(doc.contains("verify_jwt_token"));
+        assert!(doc.contains("Result<Claims>"));
+        assert!(doc.contains("Verify JWT authentication token"));
+    }
+
+    #[test]
+    fn t81_build_rerank_document_for_unknown_file_returns_just_path() {
+        let graph = build_test_graph();
+        let doc = build_rerank_document(&graph, "nonexistent/file.rs");
+        // Falls back to just the path (no node in graph).
+        assert!(doc.contains("nonexistent/file.rs"));
+    }
+
+    #[test]
+    fn t81_build_rerank_document_caps_symbols_at_five() {
+        // Build a graph with 10 symbols in one file — only 5 should
+        // make it into the document (token-budget guard inside
+        // build_rerank_document).
+        use theo_engine_graph::model::{CodeGraph, Edge, EdgeType, Node, NodeType, SymbolKind};
+        let mut graph = CodeGraph::new();
+        graph.add_node(Node {
+            id: "file:big.rs".into(),
+            name: "big.rs".into(),
+            node_type: NodeType::File,
+            file_path: Some("big.rs".into()),
+            line_start: None,
+            line_end: None,
+            signature: None,
+            doc: None,
+            kind: None,
+            last_modified: 0.0,
+        });
+        for i in 0..10 {
+            let sym_id = format!("sym:f{i}");
+            let unique_name = format!("FUNC_NAME_{i}_VERY_DISTINCT");
+            graph.add_node(Node {
+                id: sym_id.clone(),
+                name: unique_name,
+                node_type: NodeType::Symbol,
+                file_path: Some("big.rs".into()),
+                line_start: Some(i),
+                line_end: Some(i + 1),
+                signature: Some(format!("pub fn f{i}()")),
+                doc: None,
+                kind: Some(SymbolKind::Function),
+                last_modified: 0.0,
+            });
+            graph.add_edge(Edge {
+                source: "file:big.rs".into(),
+                target: sym_id,
+                edge_type: EdgeType::Contains,
+                weight: 1.0,
+            });
+        }
+        let doc = build_rerank_document(&graph, "big.rs");
+        let included = (0..10)
+            .filter(|i| doc.contains(&format!("FUNC_NAME_{i}_VERY_DISTINCT")))
+            .count();
+        assert_eq!(
+            included, 5,
+            "build_rerank_document must cap symbols at 5; included {included}"
+        );
+    }
+
+    #[test]
+    #[ignore]
     fn reranker_respects_top_k() {
         let reranker = match CrossEncoderReranker::new() {
             Ok(r) => r,

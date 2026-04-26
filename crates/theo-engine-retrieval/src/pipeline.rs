@@ -4,8 +4,12 @@
 //! Stage 2: Cross-encoder reranker → top-20
 //!
 //! Returns file_path → score map for assembly.
+//!
+//! T8.1 — Whole module gated by `dense-retrieval` because RRF needs
+//! the tantivy index. The reranker itself is always compiled (see
+//! `reranker` module). Whether to invoke this pipeline vs. plain RRF
+//! is a runtime config choice, not a build feature.
 
-#[cfg(feature = "reranker")]
 mod inner {
     use std::collections::HashMap;
 
@@ -52,5 +56,4 @@ mod inner {
     }
 }
 
-#[cfg(feature = "reranker")]
 pub use inner::retrieve_and_rerank;

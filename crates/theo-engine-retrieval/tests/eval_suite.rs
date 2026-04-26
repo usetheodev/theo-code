@@ -768,10 +768,13 @@ fn eval_rrf_dense() {
 
 /// Full pipeline eval: RRF + Cross-Encoder Reranker (Jina multilingual).
 ///
-/// Run: cargo test -p theo-engine-retrieval --features reranker --test eval_suite -- --ignored --nocapture eval_full_pipeline
+/// T8.1 — Pipeline gate is now `dense-retrieval` (RRF requires
+/// tantivy); the reranker itself is always compiled.
+///
+/// Run: cargo test -p theo-engine-retrieval --features dense-retrieval --test eval_suite -- --ignored --nocapture eval_full_pipeline
 #[test]
 #[ignore]
-#[cfg(feature = "reranker")]
+#[cfg(feature = "dense-retrieval")]
 fn eval_full_pipeline() {
     use theo_engine_graph::bridge;
     use theo_engine_retrieval::embedding::cache::EmbeddingCache;

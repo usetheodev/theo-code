@@ -24,6 +24,10 @@ bincode = { workspace = true, optional = true }
 scip = ["theo-engine-graph/scip"]
 tantivy-backend = ["tantivy"]
 dense-retrieval = ["tantivy-backend", "bincode"]
+# T8.1 — `reranker` is always compiled (fastembed is non-optional);
+# whether to USE it at runtime is gated by config (RetrievalConfig.use_reranker),
+# not by build features. The legacy `reranker` feature is retained as an
+# alias of `dense-retrieval` so existing crate consumers don't break.
 reranker = ["dense-retrieval"]
 
 [dev-dependencies]
