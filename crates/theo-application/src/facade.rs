@@ -59,8 +59,8 @@ pub mod llm {
     /// `AgentConfig.router` without breaking ADR-016.
     pub mod routing {
         pub use theo_infra_llm::routing::{
-            AutomaticModelRouter, RoutingConfig, RuleBasedRouter,
-            env_disables_routing,
+            env_disables_cost_aware, env_disables_routing, AutomaticModelRouter,
+            RoutingConfig, RuleBasedRouter,
         };
         pub use theo_infra_llm::routing::auto::RoutingMetricsRecorder;
     }
