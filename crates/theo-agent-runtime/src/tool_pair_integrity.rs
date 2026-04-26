@@ -189,6 +189,7 @@ mod tests {
             Message {
                 role: Role::Tool,
                 content: Some("dangling".to_string()),
+                content_blocks: None,
                 tool_calls: None,
                 tool_call_id: None,
                 name: None,
