@@ -9,7 +9,7 @@ mod prompts;
 mod views;
 
 pub use views::{
-    ContextView, EvolutionView, MemoryView, PluginView, RoutingView,
+    EvolutionView, MemoryView, PluginView, RoutingView,
 };
 pub use prompts::system_prompt_for_mode;
 
@@ -250,6 +250,32 @@ impl std::fmt::Debug for LlmConfig {
     }
 }
 
+/// Context window / compaction sub-config. T3.2 PR3 — owned nested
+/// sub-config that replaces the 4 flat context-related fields previously
+/// held on `AgentConfig` (find_p3_004).
+#[derive(Debug, Clone)]
+pub struct ContextConfig {
+    /// System prompt prepended to every conversation.
+    pub system_prompt: String,
+    /// Interval (in iterations) for context loop injection.
+    pub context_loop_interval: usize,
+    /// Context window size in tokens for the target model.
+    pub context_window_tokens: usize,
+    /// Compaction policy — centralized parameters for context compaction.
+    pub compaction_policy: CompactionPolicy,
+}
+
+impl Default for ContextConfig {
+    fn default() -> Self {
+        Self {
+            system_prompt: prompts::default_system_prompt().to_string(),
+            context_loop_interval: 5,
+            context_window_tokens: 128_000,
+            compaction_policy: CompactionPolicy::default(),
+        }
+    }
+}
+
 /// Run-loop policy. T3.2 PR2 — owned sub-config grouping the 6
 /// run-loop fields previously held flat on AgentConfig.
 #[derive(Debug, Clone)]
@@ -285,6 +311,7 @@ impl Default for LoopConfig {
 ///
 /// T3.2 PR1 — `LlmConfig` extracted.
 /// T3.2 PR2 — `LoopConfig` extracted.
+/// T3.2 PR3 — `ContextConfig` extracted.
 ///
 /// `Debug` is implemented manually so that `api_key` (now inside
 /// `LlmConfig`) renders as `Some("[REDACTED]")` / `None` instead of
@@ -295,18 +322,11 @@ pub struct AgentConfig {
     pub llm: LlmConfig,
     /// Run-loop policy sub-config. T3.2 PR2 / find_p3_004.
     pub loop_cfg: LoopConfig,
-    /// System prompt prepended to every conversation.
-    pub system_prompt: String,
-    /// Interval (in iterations) for context loop injection.
-    pub context_loop_interval: usize,
+    /// Context window / compaction sub-config. T3.2 PR3 / find_p3_004.
+    pub context: ContextConfig,
     /// Capability set for this agent. Controls which tools are allowed.
     /// None = unrestricted (all tools allowed). Set by SubAgentManager for sub-agents.
     pub capability_set: Option<theo_domain::capability::CapabilitySet>,
-    /// Context window size in tokens for the target model.
-    pub context_window_tokens: usize,
-    /// Compaction policy — centralized parameters for context compaction.
-    /// Default matches the previously hardcoded constants.
-    pub compaction_policy: CompactionPolicy,
     /// Master switch for the agent-memory subsystem. When `false`, every
     /// memory lifecycle hook (`prefetch`, `sync_turn`, `on_pre_compress`,
     /// `on_session_end`) short-circuits to the NullMemoryProvider — runtime
@@ -393,10 +413,11 @@ pub struct AgentConfig {
 impl std::fmt::Debug for AgentConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AgentConfig")
-            // T3.2 PR1+PR2 — LLM connection + run-loop policy moved to
+            // T3.2 PR1+PR2+PR3 — LLM, run-loop, and context moved to
             // nested sub-configs. LlmConfig's own Debug impl redacts api_key.
             .field("llm", &self.llm)
             .field("loop_cfg", &self.loop_cfg)
+            .field("context", &self.context)
             // The remaining fields are large and not security-sensitive;
             // we render them via a single non-exhaustive marker so this
             // Debug impl does not need to track every future field
@@ -460,11 +481,8 @@ impl Default for AgentConfig {
         Self {
             llm: LlmConfig::default(),
             loop_cfg: LoopConfig::default(),
-            system_prompt: prompts::default_system_prompt().to_string(),
-            context_loop_interval: 5,
+            context: ContextConfig::default(),
             capability_set: None,
-            context_window_tokens: 128_000,
-            compaction_policy: CompactionPolicy::default(),
             memory_enabled: false,
             memory_provider: None,
             router: None,
@@ -561,8 +579,8 @@ mod tests {
 
         // T3.2 PR1 — LlmView removed (see LlmConfig in mod.rs).
         // T3.2 PR2 — LoopView removed (see LoopConfig in mod.rs).
+        // T3.2 PR3 — ContextView removed (see ContextConfig in mod.rs).
         for view in [
-            "ContextView",
             "MemoryView",
             "EvolutionView",
             "RoutingView",
@@ -582,7 +600,7 @@ mod tests {
         let config = AgentConfig::default();
         assert_eq!(config.loop_cfg.max_iterations, 200);
         assert_eq!(config.llm.temperature, 0.1);
-        assert_eq!(config.context_loop_interval, 5);
+        assert_eq!(config.context.context_loop_interval, 5);
         assert!(config.llm.endpoint_override.is_none());
         assert!(config.llm.extra_headers.is_empty());
     }
@@ -659,7 +677,7 @@ mod tests {
     #[test]
     fn agent_mode_prompt_is_default() {
         let prompt = system_prompt_for_mode(AgentMode::Agent);
-        assert_eq!(prompt, AgentConfig::default().system_prompt);
+        assert_eq!(prompt, AgentConfig::default().context.system_prompt);
     }
 
     #[test]

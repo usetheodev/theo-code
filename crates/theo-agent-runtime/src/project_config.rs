@@ -166,7 +166,7 @@ impl ProjectConfig {
             config.loop_cfg.doom_loop_threshold = Some(threshold);
         }
         if let Some(interval) = self.context_loop_interval {
-            config.context_loop_interval = interval;
+            config.context.context_loop_interval = interval;
         }
     }
 }

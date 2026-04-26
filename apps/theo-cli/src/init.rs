@@ -355,8 +355,8 @@ pub async fn run_init_with_agent(
 
     let registry = theo_application::facade::tooling::create_default_registry();
     let mut agent_config = config;
-    agent_config.max_iterations = 30; // Cap for init task
-    agent_config.system_prompt = "You are a project analyzer. Read the codebase and generate configuration files. Be thorough but concise. Always use tools, never guess.".to_string();
+    agent_config.loop_cfg.max_iterations = 30; // Cap for init task
+    agent_config.context.system_prompt = "You are a project analyzer. Read the codebase and generate configuration files. Be thorough but concise. Always use tools, never guess.".to_string();
 
     let agent = theo_application::facade::agent::AgentLoop::new(agent_config, registry);
 

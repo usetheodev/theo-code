@@ -21,9 +21,7 @@
 //! trim toward the per-file 500-line target). Views and accessors are
 //! re-exported from `mod.rs` so the public path stays byte-identical.
 
-use std::collections::HashMap;
-
-use super::{AgentConfig, CompactionPolicy, LlmConfig, LoopConfig, MemoryHandle, RouterHandle};
+use super::{AgentConfig, ContextConfig, LlmConfig, LoopConfig, MemoryHandle, RouterHandle};
 
 // T3.2 PR1 — `LlmView` removed; `AgentConfig::llm()` now returns
 // `&LlmConfig` (the owned nested sub-config) directly. Field-access
@@ -34,14 +32,8 @@ use super::{AgentConfig, CompactionPolicy, LlmConfig, LoopConfig, MemoryHandle, 
 // T3.2 PR2 — `LoopView` removed; `AgentConfig::loop_cfg()` now returns
 // `&LoopConfig` (the owned nested sub-config) directly.
 
-/// Context window / compaction. ≤4 fields.
-#[derive(Debug)]
-pub struct ContextView<'a> {
-    pub system_prompt: &'a str,
-    pub context_loop_interval: usize,
-    pub context_window_tokens: usize,
-    pub compaction_policy: &'a CompactionPolicy,
-}
+// T3.2 PR3 — `ContextView` removed; `AgentConfig::context()` now returns
+// `&ContextConfig` (the owned nested sub-config) directly.
 
 /// Memory subsystem. ≤5 fields.
 #[derive(Debug)]
@@ -88,14 +80,10 @@ impl AgentConfig {
         &self.loop_cfg
     }
 
-    /// Context / compaction view.
-    pub fn context(&self) -> ContextView<'_> {
-        ContextView {
-            system_prompt: &self.system_prompt,
-            context_loop_interval: self.context_loop_interval,
-            context_window_tokens: self.context_window_tokens,
-            compaction_policy: &self.compaction_policy,
-        }
+    /// Context / compaction accessor. T3.2 PR3 — returns the owned nested
+    /// `ContextConfig` directly instead of a borrowed view.
+    pub fn context(&self) -> &ContextConfig {
+        &self.context
     }
 
     /// Memory subsystem view.

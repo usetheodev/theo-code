@@ -425,7 +425,7 @@ impl SubAgentManager {
         has_worktree: bool,
     ) -> AgentConfig {
         let mut sub_config = self.config.clone();
-        sub_config.system_prompt = spec.system_prompt.clone();
+        sub_config.context.system_prompt = spec.system_prompt.clone();
         sub_config.loop_cfg.max_iterations = spec.max_iterations;
         sub_config.loop_cfg.is_subagent = true;
         sub_config.capability_set = Some(spec.capability_set.clone());
@@ -433,12 +433,12 @@ impl SubAgentManager {
             sub_config.llm.model = m.clone();
         }
 
-        sub_config.system_prompt = if has_worktree {
+        sub_config.context.system_prompt = if has_worktree {
             format!(
                 "[{}] {}\n\nIMPORTANT: You MUST only operate within the worktree directory: {}. \
                  Do NOT search, read, or access files outside this directory.\n\n{}",
                 spec.name,
-                sub_config.system_prompt,
+                sub_config.context.system_prompt,
                 agent_cwd.display(),
                 theo_isolation::safety_rules(),
             )
@@ -447,7 +447,7 @@ impl SubAgentManager {
                 "[{}] {}\n\nIMPORTANT: You MUST only operate within the project directory: {}. \
                  Do NOT search, read, or access files outside this directory.",
                 spec.name,
-                sub_config.system_prompt,
+                sub_config.context.system_prompt,
                 agent_cwd.display(),
             )
         };
@@ -467,8 +467,8 @@ impl SubAgentManager {
                 hint = filtered.render_prompt_hint();
             }
             if !hint.is_empty() {
-                sub_config.system_prompt =
-                    format!("{}\n\n{}", sub_config.system_prompt, hint);
+                sub_config.context.system_prompt =
+                    format!("{}\n\n{}", sub_config.context.system_prompt, hint);
             }
         }
 

@@ -114,7 +114,7 @@ impl AgentRunEngine {
             messages,
             self.config.context().context_window_tokens,
             Some(&compaction_ctx),
-            self.config.context().compaction_policy,
+            &self.config.context().compaction_policy,
         );
 
         // Record context size for metrics (estimated tokens ≈ chars/4).

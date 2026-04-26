@@ -719,14 +719,14 @@ fn cmd_headless(
         let mode_str = mode.as_deref().unwrap_or("agent");
         let agent_mode = theo_application::facade::agent::AgentMode::from_str(mode_str)
             .unwrap_or(theo_application::facade::agent::AgentMode::Agent);
-        config.mode = agent_mode;
-        config.system_prompt = theo_application::facade::agent::system_prompt_for_mode(agent_mode);
+        config.loop_cfg.mode = agent_mode;
+        config.context.system_prompt = theo_application::facade::agent::system_prompt_for_mode(agent_mode);
 
         // Phase 52 (prompt-ab-testing-plan) — when THEO_SYSTEM_PROMPT_FILE is
         // set and readable, replace the prompt verbatim and skip downstream
         // mutations (the variant file is the single source of truth).
         let prompt_overridden = if let Some(custom) = prompt_override::override_from_env() {
-            config.system_prompt = custom;
+            config.context.system_prompt = custom;
             true
         } else {
             false
@@ -737,8 +737,8 @@ fn cmd_headless(
 
         // In headless mode, trim the system prompt to reduce per-call token overhead.
         // Remove verbose sections that don't help a single-shot benchmark task.
-        if !prompt_overridden && config.system_prompt.contains("## Task Management") {
-            let lean = config.system_prompt
+        if !prompt_overridden && config.context.system_prompt.contains("## Task Management") {
+            let lean = config.context.system_prompt
                 .lines()
                 .filter(|l| {
                     // Remove verbose sections that waste tokens in benchmark mode
@@ -750,7 +750,7 @@ fn cmd_headless(
                 })
                 .collect::<Vec<_>>()
                 .join("\n");
-            config.system_prompt = lean;
+            config.context.system_prompt = lean;
         }
 
         // Bug #2 + #3 fix (benchmark-validation): when THEO_BENCHMARK_MODE=1
@@ -789,11 +789,11 @@ by EXECUTING the deliverable yourself, not by inspection alone:\n\
 Your `done` summary MUST explicitly list what you executed and what \
 output you observed. If you couldn't execute (sandbox denial, missing \
 tool, time pressure), say so honestly — don't claim success.\n";
-            config.system_prompt.push_str(BENCHMARK_CONTEXT_NOTE);
+            config.context.system_prompt.push_str(BENCHMARK_CONTEXT_NOTE);
         }
 
         // Headless mode: use aggressive retry to survive rate limits
-        config.aggressive_retry = true;
+        config.loop_cfg.aggressive_retry = true;
 
         // Phase 0 T0.2: attach the MemoryEngine if memory_enabled=true.
         // run_agent_session does this for the interactive path; headless
@@ -1308,7 +1308,7 @@ async fn resolve_agent_config(
     }
 
     if let Some(n) = max_iter {
-        config.max_iterations = n;
+        config.loop_cfg.max_iterations = n;
     }
 
     if config.llm.reasoning_effort.is_none() {
