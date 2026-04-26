@@ -2,21 +2,21 @@
 
 **Source:** [agent-runtime-remediation-plan.md](../plans/agent-runtime-remediation-plan.md)
 **Created:** 2026-04-25
-**Last updated:** 2026-04-26 (iter 9 — T3.1 COMPLETO 5/5 PRs)
+**Last updated:** 2026-04-26 (iter 10 — T3.2 COMPLETO 8/8 PRs — PLANO 100%)
 
 ## Progress
 
 ```
-[=============================================·] 97% (30/31 done)
+[==============================================] 100% (31/31 done)
 ```
 
 | Column | Count | Cards |
 |---|---|---|
-| backlog | 1 | T3.2 |
+| backlog | 0 | — |
 | ready | 0 | — |
 | doing | 0 | — |
 | review | 0 | — |
-| done | 30 | T0.1, T0.2, T0.3, T0.4, T1.1, T1.2, T1.3, T1.4, T2.1, T2.2, T2.3, T2.4, T2.5, T3.1, T3.3, T3.4, T3.5, T3.6, T3.7, T3.8, T4.1, T4.2, T4.3, T4.4, T4.5, T4.6, T4.7, T4.8, T4.9, T4.10* |
+| done | 31 | T0.1, T0.2, T0.3, T0.4, T1.1, T1.2, T1.3, T1.4, T2.1, T2.2, T2.3, T2.4, T2.5, T3.1, T3.2, T3.3, T3.4, T3.5, T3.6, T3.7, T3.8, T4.1, T4.2, T4.3, T4.4, T4.5, T4.6, T4.7, T4.8, T4.9, T4.10* |
 
 ## Phase Summary
 
@@ -319,25 +319,24 @@ Status annotations: `[done]`, `[review]`, `[doing]`, `[ready]`, `[backlog]`
 - `crates/theo-agent-runtime/src/run_engine/mod.rs` — split fields
 - 5 PRs incrementais (uma struct por PR)
 
-#### T3.2 — Completar migração `AgentConfig` para owned sub-configs
+#### T3.2 — Completar migração `AgentConfig` para owned sub-configs ✅
 
 | Field | Value |
 |---|---|
 | **Phase** | 3: Refactor Arquitetural |
-| **Status** | backlog |
+| **Status** | **done** |
 | **Complexity** | L |
 | **Dependencies** | T2.3 |
 | **Blocks** | — |
 | **Files** | múltiplos call-sites |
-| **Tests** | 2 RED tests |
-| **Acceptance Criteria** | 3 criteria |
+| **Tests** | 1204 lib + 19 integration + 124 application + 7 routing — todos verde |
+| **Acceptance Criteria** | 3/3 atendidos: cada sub-config ≤10 fields, views.rs deletado, manual Debug redacta api_key |
 | **Plan ref** | [T3.2](../plans/agent-runtime-remediation-plan.md#t32--completar-migrao-agentconfig-para-owned-sub-configs) |
 
-**Objective:** Substituir `views/*` temporárias por sub-configs owned.
-
-**Key deliverables:**
-- `crates/theo-agent-runtime/src/config/mod.rs` — promover para nested
-- `crates/theo-agent-runtime/src/config/views.rs` — remover ou deprecated
+**Implemented:** 8 PRs sequenciais — `LlmConfig`, `LoopConfig`,
+`ContextConfig`, `MemoryConfig`, `EvolutionConfig`, `RoutingConfig`,
+`PluginConfig` extraídos como owned nested sub-configs; `views.rs`
+(138 LOC) deletado; sub-config accessors inlined em `mod.rs`.
 
 #### T3.3 — Encapsular `theo-agent-runtime` na CLI via `theo-application`
 
@@ -808,3 +807,10 @@ Status annotations: `[done]`, `[review]`, `[doing]`, `[ready]`, `[backlog]`
 | 2026-04-26 | T3.1 PR4 | (deferred) | done | `RuntimeContext` — bundle de 10 fields (`snapshot_store`, `graph_context`, `context_loop_state`, `message_queues`, `session_token_usage`, `memory_nudge_counter`, `skill_nudge_counter`, `skill_created_this_task`, `autodream_attempted`, `resume_context`) extraídos para `run_engine/contexts/runtime.rs`. ~40 call sites migrados via sed. 1204 lib tests verde. |
 | 2026-04-26 | T3.1 PR5 | (deferred) | done | `LlmContext` — bundle de 4 fields (`client`, `registry`, `convergence`, `budget_enforcer`) extraídos para `run_engine/contexts/llm.rs`. ~40 call sites migrados via sed. 1204 lib tests verde. **T3.1 COMPLETO**: AgentRunEngine reduzido de 44 fields para 9 top-level (5 contexts + 4 utility). |
 | 2026-04-26 | T3.1 | backlog | done | **TODOS 5 PRs implementadas no Ralph loop**. find_p3_001 fechado. AgentRunEngine god-object resolvido. |
+| 2026-04-26 | T3.2 PR1 | (deferred) | done | `LlmConfig` — bundle de 8 LLM-related fields (`base_url`, `api_key`, `model`, `endpoint_override`, `extra_headers`, `max_tokens`, `temperature`, `reasoning_effort`) extraídos para `LlmConfig` owned. View removida. Manual `Debug` impl redacta `api_key` (T4.3). 1204 lib tests verde. |
+| 2026-04-26 | T3.2 PR2 | (deferred) | done | `LoopConfig` — bundle de 6 run-loop fields (`max_iterations`, `mode`, `is_subagent`, `doom_loop_threshold`, `aggressive_retry`, `tool_execution_mode`) extraídos para `LoopConfig` owned. LoopView removida. ~25 call sites migrados via sed. 1204 lib tests verde. |
+| 2026-04-26 | T3.2 PR3 | (deferred) | done | `ContextConfig` — bundle de 4 context fields (`system_prompt`, `context_loop_interval`, `context_window_tokens`, `compaction_policy`) extraídos para `ContextConfig` owned. ContextView removida. 9 prod + 6 CLI call sites migrados. 1204 lib tests verde. |
+| 2026-04-26 | T3.2 PR4 | (deferred) | done | `MemoryConfig` — bundle de 5 memory fields (`memory_enabled`→`enabled`, `memory_provider`→`provider`, `memory_review_nudge_interval`→`review_nudge_interval`, `memory_reviewer`→`reviewer`, `transcript_indexer`) extraídos para `MemoryConfig` owned com nomes normalizados. MemoryView removida. 24 call sites migrados (agent-runtime + theo-application + CLI). 1204 lib + 124 application tests verde. |
+| 2026-04-26 | T3.2 PR5 | (deferred) | done | `EvolutionConfig` — bundle de 5 PLAN_AUTO_EVOLUTION_SOTA fields (`autodream_enabled`, `autodream_timeout_secs`, `autodream`, `skill_review_nudge_interval`, `skill_reviewer`) extraídos para `EvolutionConfig` owned. EvolutionView removida. 1204 lib + integration tests verde. |
+| 2026-04-26 | T3.2 PR6 | (deferred) | done | `RoutingConfig` — bundle do field `router` extraído para `RoutingConfig` owned. RoutingView removida. 8 call sites migrados (agent-runtime + tests + CLI). 1204 lib + 7 routing tests verde. |
+| 2026-04-26 | T3.2 PR7+PR8 | (deferred) | done | `PluginConfig` (PR7: `plugin_allowlist`→`allowlist`, `capability_set`) extraído + **`views.rs` (138 LOC) DELETADO** (PR8). Sub-config accessors inlined em `mod.rs`. Meta-test reescrito para owned structs. **T3.2 COMPLETO 8/8 PRs**: AgentConfig agora 7 owned sub-configs + 2 leaf fields. find_p3_004 fechado. |
