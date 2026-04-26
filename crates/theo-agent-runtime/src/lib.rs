@@ -45,6 +45,8 @@ pub mod reflector;
 pub mod retry;
 pub mod roadmap;
 pub mod tool_pair_integrity;
+/// PII / API-key redaction (T4.5 / FIND-P6-008 part 2).
+pub mod secret_scrubber;
 /// Legacy alias for `tool_pair_integrity` (renamed in T1.2 / FIND-P6-008).
 /// The original name `sanitizer` was misleading because the module never
 /// scrubbed PII or secrets — it only repairs orphaned tool pairs after

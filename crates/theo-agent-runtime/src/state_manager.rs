@@ -64,8 +64,14 @@ impl StateManager {
     }
 
     /// Append a message to the session tree (persisted immediately to disk).
+    ///
+    /// The `content` is run through [`crate::secret_scrubber::scrub_secrets`]
+    /// before persistence so well-known credentials (Anthropic API keys,
+    /// GitHub PATs, AWS access key IDs, PEM private keys) do not land
+    /// in the JSONL crash-recovery file. T4.5 / FIND-P6-008.
     pub fn append_message(&mut self, role: &str, content: &str) -> Result<(), SessionTreeError> {
-        self.session_tree.append_message(role, content)?;
+        let scrubbed = crate::secret_scrubber::scrub_secrets(content);
+        self.session_tree.append_message(role, &scrubbed)?;
         Ok(())
     }
 

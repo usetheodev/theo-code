@@ -48,24 +48,33 @@ pub struct HookConfig {
     /// Timeout per hook execution in seconds. Default: 5, max: 30.
     #[serde(default = "default_hook_timeout")]
     pub timeout_secs: u64,
-    /// Whether to load hooks from .theo/hooks/ (project-level).
-    /// Set to false to disable project hooks (security).
-    #[serde(default = "default_true")]
+    /// Whether to load hooks from `.theo/hooks/` (project-level).
+    ///
+    /// **Default changed from `true` → `false` in T4.1 / find_p6_006.**
+    /// Project-level hooks are arbitrary shell scripts in the cloned
+    /// repo and execute with parent-process privileges (no sandbox at
+    /// present). Cloning a malicious repo and running `theo` would
+    /// execute the attacker's hook on the user's machine. The default
+    /// is now opt-in: users that depend on project hooks must set
+    /// `project_hooks_enabled = true` in their `.theo/config.toml`
+    /// after auditing the hook scripts.
+    #[serde(default = "default_false")]
     pub project_hooks_enabled: bool,
 }
 
 fn default_hook_timeout() -> u64 {
     5
 }
-fn default_true() -> bool {
-    true
+fn default_false() -> bool {
+    false
 }
 
 impl Default for HookConfig {
     fn default() -> Self {
         Self {
             timeout_secs: 5,
-            project_hooks_enabled: true,
+            // T4.1 / find_p6_006: opt-in by default.
+            project_hooks_enabled: false,
         }
     }
 }
@@ -311,11 +320,40 @@ pub fn tool_hook_event(
 mod tests {
     use super::*;
 
+    /// Tests that exercise the project-hooks path explicitly opt in,
+    /// since `HookConfig::default()` is now safe-by-default
+    /// (`project_hooks_enabled = false`) per T4.1 / find_p6_006.
+    fn enabled_config() -> HookConfig {
+        HookConfig {
+            project_hooks_enabled: true,
+            ..HookConfig::default()
+        }
+    }
+
     #[test]
     fn hook_config_defaults() {
+        // T4.1 / find_p6_006 — `project_hooks_enabled` defaults to
+        // `false`. Cloning a malicious repo and running `theo` must
+        // NOT auto-execute the project's hooks. Users opt in
+        // explicitly after auditing the script set.
         let config = HookConfig::default();
         assert_eq!(config.timeout_secs, 5);
-        assert!(config.project_hooks_enabled);
+        assert!(
+            !config.project_hooks_enabled,
+            "project hooks must be opt-in (find_p6_006)"
+        );
+    }
+
+    #[test]
+    fn t41_hook_config_serde_default_is_false_when_field_omitted() {
+        // Round-trip via TOML to confirm the `#[serde(default)]` of
+        // `project_hooks_enabled` resolves to `false` when not set.
+        let toml = "timeout_secs = 5";
+        let cfg: HookConfig = toml::from_str(toml).expect("parse");
+        assert!(
+            !cfg.project_hooks_enabled,
+            "missing `project_hooks_enabled` in TOML must default to false"
+        );
     }
 
     #[test]
@@ -356,7 +394,7 @@ mod tests {
             .unwrap();
         }
 
-        let runner = HookRunner::new(dir.path(), HookConfig::default());
+        let runner = HookRunner::new(dir.path(), enabled_config());
         let event = HookEvent {
             hook_type: "tool.before".into(),
             tool_name: Some("bash".into()),
@@ -390,7 +428,7 @@ mod tests {
             .unwrap();
         }
 
-        let runner = HookRunner::new(dir.path(), HookConfig::default());
+        let runner = HookRunner::new(dir.path(), enabled_config());
         let event = HookEvent {
             hook_type: "tool.before".into(),
             tool_name: Some("read".into()),
@@ -422,7 +460,7 @@ mod tests {
 
         let config = HookConfig {
             timeout_secs: 1, // 1 second timeout
-            ..HookConfig::default()
+            ..enabled_config() // T4.1 — opt in to project hooks for this test
         };
 
         let runner = HookRunner::new(dir.path(), config);
@@ -446,7 +484,7 @@ mod tests {
         std::fs::write(hooks_dir.join("run.start.sh"), "#!/bin/sh\n").unwrap();
         std::fs::write(hooks_dir.join("not-a-hook.txt"), "ignore\n").unwrap();
 
-        let runner = HookRunner::new(dir.path(), HookConfig::default());
+        let runner = HookRunner::new(dir.path(), enabled_config());
         let hooks = runner.list_hooks();
         assert_eq!(hooks.len(), 2);
     }

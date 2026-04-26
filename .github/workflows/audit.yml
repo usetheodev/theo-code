@@ -100,6 +100,21 @@ jobs:
         run: cargo deny check
       - name: cargo audit (T3.1)
         run: cargo audit --deny warnings
+      # T4.9 / find_p5_007 — SBOM generation for supply-chain
+      # observability. CycloneDX is the standard format consumed by
+      # Dependency-Track / OWASP tooling. The artifact is uploaded so
+      # downstream releases can publish it alongside the binaries.
+      - name: install cargo-cyclonedx (T4.9)
+        run: cargo install --locked cargo-cyclonedx
+      - name: generate SBOM (T4.9 / find_p5_007)
+        run: cargo cyclonedx --format json --output-pattern bom
+      - name: upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-cyclonedx
+          path: '**/bom.json'
+          if-no-files-found: error
+          retention-days: 30
 
   # ── SAST gates (semgrep + gitleaks) ─────────────────────────────────────
   sast:

@@ -2,21 +2,21 @@
 
 **Source:** [agent-runtime-remediation-plan.md](../plans/agent-runtime-remediation-plan.md)
 **Created:** 2026-04-25
-**Last updated:** 2026-04-26 (iter 4 — Phase 3 partial + Phase 4 quick-wins)
+**Last updated:** 2026-04-26 (iter 5 — T4.1, T4.5, T4.9 done)
 
 ## Progress
 
 ```
-[==============================···············] 71% (22/31 done)
+[====================================··········] 81% (25/31 done)
 ```
 
 | Column | Count | Cards |
 |---|---|---|
-| backlog | 6 | T3.1, T3.2, T3.7, T4.1, T4.5, T4.9, T4.10 |
-| ready | 3 | T3.3, T3.8 |
+| backlog | 4 | T3.1, T3.2, T3.7, T4.10 |
+| ready | 2 | T3.3, T3.8 |
 | doing | 0 | — |
 | review | 0 | — |
-| done | 22 | T0.1, T0.2, T0.3, T0.4, T1.1, T1.2, T1.3, T1.4, T2.1, T2.2, T2.3, T2.4, T2.5, T3.4, T3.5, T3.6, T4.2, T4.3, T4.4, T4.6, T4.7, T4.8 |
+| done | 25 | T0.1, T0.2, T0.3, T0.4, T1.1, T1.2, T1.3, T1.4, T2.1, T2.2, T2.3, T2.4, T2.5, T3.4, T3.5, T3.6, T4.1, T4.2, T4.3, T4.4, T4.5, T4.6, T4.7, T4.8, T4.9 |
 
 ## Phase Summary
 
@@ -26,8 +26,8 @@
 | 1 | Correção P1 Crítica | 4 | 4 | 100% |
 | 2 | Defesas Wired | 5 | 5 | 100% |
 | 3 | Refactor Arquitetural | 8 | 3 | 38% |
-| 4 | Hardening Backlog | 10 | 6 | 60% |
-| **Total** | — | **31** | **22** | **71%** |
+| 4 | Hardening Backlog | 10 | 9 | 90% |
+| **Total** | — | **31** | **25** | **81%** |
 
 ## Dependency Graph (Live)
 
@@ -783,3 +783,6 @@ Status annotations: `[done]`, `[review]`, `[doing]`, `[ready]`, `[backlog]`
 | 2026-04-26 | T4.4 | backlog | done | `spawn_semaphore` field + `with_max_concurrent_spawns(n)` builder + permit acquire em `spawn_with_spec_with_override` + 3 testes |
 | 2026-04-26 | T3.5 | backlog | done | `checkpoint_ttl_seconds` config field (default 7d) + cleanup hook em `record_session_exit` |
 | 2026-04-26 | T3.4 | backlog | done | `find_boundary_idx` avança forward para nunca splittar pares tool_use/tool_result + 3 testes |
+| 2026-04-26 | T4.9 | backlog | done | `cargo cyclonedx` step + upload SBOM artifact em audit.yml SCA job |
+| 2026-04-26 | T4.1 | backlog | done | `project_hooks_enabled` default `true` → `false`; SensorRunner stores config (production bug fix) |
+| 2026-04-26 | T4.5 | backlog | done | `secret_scrubber.rs` (4 patterns: sk-ant, ghp_, AKIA, PEM) + wire em `StateManager::append_message` + 7 testes |
