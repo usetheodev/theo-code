@@ -361,7 +361,7 @@ impl AgentLoop {
             .config
             .plugin()
             .capability_set
-            .cloned()
+            .clone()
             .unwrap_or_else(theo_domain::capability::CapabilitySet::unrestricted);
         let gate = Arc::new(CapabilityGate::new(caps, event_bus.clone()));
         let tool_call_manager = Arc::new(tcm.with_capability_gate(gate));
@@ -415,7 +415,7 @@ impl AgentLoop {
         load_plugin_tools(
             &mut registry,
             project_dir,
-            self.config.plugin().allowlist,
+            self.config.plugin().allowlist.as_ref(),
             event_bus,
         );
         registry

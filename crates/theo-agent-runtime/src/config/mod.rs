@@ -6,9 +6,7 @@ use std::sync::Arc;
 use theo_infra_llm::types::Message;
 
 mod prompts;
-mod views;
 
-pub use views::PluginView;
 pub use prompts::system_prompt_for_mode;
 
 // ---------------------------------------------------------------------------
@@ -316,6 +314,24 @@ impl Default for MemoryConfig {
     }
 }
 
+/// Plugin / capability gate sub-config. T3.2 PR7 — owned nested
+/// sub-config that replaces the 2 flat plugin/capability fields
+/// previously held on `AgentConfig` (find_p3_004).
+#[derive(Debug, Clone, Default)]
+pub struct PluginConfig {
+    /// Optional pinned set of plugin manifest SHA-256 hashes. When
+    /// `Some`, a plugin is only loaded if its computed `manifest_sha256`
+    /// is in the set. When `None`, every ownership-verified plugin is
+    /// accepted. T1.3 supply-chain.
+    ///
+    /// Stored as `BTreeSet<String>` so serialization and diffing remain
+    /// deterministic across reproducibility audits.
+    pub allowlist: Option<std::collections::BTreeSet<String>>,
+    /// Capability set for this agent. Controls which tools are allowed.
+    /// `None` = unrestricted. Set by SubAgentManager for sub-agents.
+    pub capability_set: Option<theo_domain::capability::CapabilitySet>,
+}
+
 /// Routing layer sub-config. T3.2 PR6 — owned nested sub-config that
 /// replaces the single flat router field previously held on
 /// `AgentConfig` (find_p3_004).
@@ -402,6 +418,7 @@ impl Default for LoopConfig {
 /// T3.2 PR4 — `MemoryConfig` extracted.
 /// T3.2 PR5 — `EvolutionConfig` extracted.
 /// T3.2 PR6 — `RoutingConfig` extracted.
+/// T3.2 PR7 — `PluginConfig` extracted (final PR — `views.rs` deleted).
 ///
 /// `Debug` is implemented manually so that `api_key` (now inside
 /// `LlmConfig`) renders as `Some("[REDACTED]")` / `None` instead of
@@ -414,25 +431,14 @@ pub struct AgentConfig {
     pub loop_cfg: LoopConfig,
     /// Context window / compaction sub-config. T3.2 PR3 / find_p3_004.
     pub context: ContextConfig,
-    /// Capability set for this agent. Controls which tools are allowed.
-    /// None = unrestricted (all tools allowed). Set by SubAgentManager for sub-agents.
-    pub capability_set: Option<theo_domain::capability::CapabilitySet>,
+    /// Plugin / capability gate sub-config. T3.2 PR7 / find_p3_004.
+    pub plugin: PluginConfig,
     /// Memory subsystem sub-config. T3.2 PR4 / find_p3_004.
     pub memory: MemoryConfig,
     /// Routing layer sub-config. T3.2 PR6 / find_p3_004.
     pub routing: RoutingConfig,
     /// PLAN_AUTO_EVOLUTION_SOTA sub-config. T3.2 PR5 / find_p3_004.
     pub evolution: EvolutionConfig,
-    /// T1.3 supply-chain: optional pinned set of plugin manifest
-    /// SHA-256 hashes. When `Some`, a plugin is only loaded if its
-    /// computed `manifest_sha256` is in the set — a typo in one
-    /// plugin.toml byte fails the load. When `None`, every ownership-
-    /// verified plugin is accepted (backward-compatible default).
-    ///
-    /// Stored as `BTreeSet<String>` rather than `HashSet` so
-    /// serialization and diffing remain deterministic across
-    /// reproducibility audits.
-    pub plugin_allowlist: Option<std::collections::BTreeSet<String>>,
     /// TTL (in seconds) applied to shadow-git checkpoints by
     /// `CheckpointManager::cleanup` at session shutdown. Default is
     /// 7 days (604800). Set to `0` to disable cleanup entirely.
@@ -512,17 +518,43 @@ impl std::fmt::Debug for RouterHandle {
     }
 }
 
+/// Sub-config accessors. After T3.2 PR1-PR7 every logical group lives in
+/// its own owned struct under `AgentConfig`; these accessors return
+/// `&XConfig` so call sites can use `cfg.x().field` syntax uniformly.
+impl AgentConfig {
+    pub fn llm(&self) -> &LlmConfig {
+        &self.llm
+    }
+    pub fn loop_cfg(&self) -> &LoopConfig {
+        &self.loop_cfg
+    }
+    pub fn context(&self) -> &ContextConfig {
+        &self.context
+    }
+    pub fn memory(&self) -> &MemoryConfig {
+        &self.memory
+    }
+    pub fn evolution(&self) -> &EvolutionConfig {
+        &self.evolution
+    }
+    pub fn routing(&self) -> &RoutingConfig {
+        &self.routing
+    }
+    pub fn plugin(&self) -> &PluginConfig {
+        &self.plugin
+    }
+}
+
 impl Default for AgentConfig {
     fn default() -> Self {
         Self {
             llm: LlmConfig::default(),
             loop_cfg: LoopConfig::default(),
             context: ContextConfig::default(),
-            capability_set: None,
+            plugin: PluginConfig::default(),
             memory: MemoryConfig::default(),
             routing: RoutingConfig::default(),
             evolution: EvolutionConfig::default(),
-            plugin_allowlist: None,
             // 7 days of shadow checkpoints. T3.5 / find_p5_005.
             checkpoint_ttl_seconds: 7 * 24 * 60 * 60,
         }
@@ -577,26 +609,25 @@ mod tests {
         );
     }
 
-    /// T4.1 AC literal: each sub-config view exposes ≤ 10 fields. The
-    /// AC stays satisfied as long as no future PR overgrows a view.
-    /// Counts via reflection-on-source — no runtime field count exists.
+    /// T4.1 AC literal: each sub-config exposes ≤ 10 fields. After
+    /// T3.2 PR1-PR8 the borrowed views are gone and the owned
+    /// sub-config structs in `mod.rs` are the source of truth. The AC
+    /// stays satisfied as long as no future PR overgrows a sub-config.
     #[test]
-    fn each_sub_config_view_has_at_most_10_fields() {
-        let src = include_str!("views.rs");
+    fn each_sub_config_has_at_most_10_fields() {
+        let src = include_str!("mod.rs");
 
         fn count_struct_fields(src: &str, struct_name: &str) -> usize {
-            let needle = format!("pub struct {} ", struct_name);
-            let alt = format!("pub struct {}<", struct_name);
+            let needle = format!("pub struct {} {{", struct_name);
             let start = src
                 .find(&needle)
-                .or_else(|| src.find(&alt))
                 .unwrap_or_else(|| panic!("struct {struct_name} not found"));
             let body_start = src[start..]
                 .find('{')
                 .expect("struct body missing")
                 + start;
             let body_end = src[body_start..]
-                .find('}')
+                .find("\n}")
                 .expect("struct close missing")
                 + body_start;
             src[body_start..body_end]
@@ -605,21 +636,18 @@ mod tests {
                 .count()
         }
 
-        // T3.2 PR1 — LlmView removed (see LlmConfig in mod.rs).
-        // T3.2 PR2 — LoopView removed (see LoopConfig in mod.rs).
-        // T3.2 PR3 — ContextView removed (see ContextConfig in mod.rs).
-        // T3.2 PR4 — MemoryView removed (see MemoryConfig in mod.rs).
-        // T3.2 PR5 — EvolutionView removed (see EvolutionConfig in mod.rs).
-        // T3.2 PR6 — RoutingView removed (see RoutingConfig in mod.rs).
-        for view in [
-            "PluginView",
+        for cfg in [
+            "LlmConfig",
+            "LoopConfig",
+            "ContextConfig",
+            "MemoryConfig",
+            "EvolutionConfig",
+            "RoutingConfig",
+            "PluginConfig",
         ] {
-            let n = count_struct_fields(src, view);
-            assert!(
-                n <= 10,
-                "{view} has {n} fields — T4.1 AC requires <=10"
-            );
-            assert!(n >= 1, "{view} should expose at least one field");
+            let n = count_struct_fields(src, cfg);
+            assert!(n <= 10, "{cfg} has {n} fields — T4.1 AC requires <=10");
+            assert!(n >= 1, "{cfg} should expose at least one field");
         }
     }
 

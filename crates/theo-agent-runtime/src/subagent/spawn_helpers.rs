@@ -428,7 +428,7 @@ impl SubAgentManager {
         sub_config.context.system_prompt = spec.system_prompt.clone();
         sub_config.loop_cfg.max_iterations = spec.max_iterations;
         sub_config.loop_cfg.is_subagent = true;
-        sub_config.capability_set = Some(spec.capability_set.clone());
+        sub_config.plugin.capability_set = Some(spec.capability_set.clone());
         if let Some(m) = &spec.model_override {
             sub_config.llm.model = m.clone();
         }
