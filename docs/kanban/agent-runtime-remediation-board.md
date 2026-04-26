@@ -799,3 +799,4 @@ Status annotations: `[done]`, `[review]`, `[doing]`, `[ready]`, `[backlog]`
 | 2026-04-26 | T4.10h | (composite) | done | `lib.rs` reorganizado: 28 módulos `pub mod` (consumidos externamente), 32 `pub(crate) mod` (internos por grep audit); deprecated `pub use sanitizer` removido (zero consumers externos); 73 dead-code warnings novas reveladas (positivo) |
 | 2026-04-26 | T3.1 | (deferred) | docs | Roadmap 5-PR escrito em `docs/plans/T3.1-god-object-split-roadmap.md` — refactor multi-PR fora do escopo do loop |
 | 2026-04-26 | T3.2 | (deferred) | docs | Roadmap 8-PR escrito em `docs/plans/T3.2-agent-config-nested-roadmap.md` — refactor multi-PR fora do escopo do loop |
+| 2026-04-26 | T4.10w | (composite) | done | Audit cross-crate em `docs/plans/T4.10w-let-discard-audit.md`: 234 sites categorisados (50 best-effort, 30 channel sends, 40 fire-and-forget, 14 já fixados, 26 cross-crate follow-ups). Critical-risk sites em theo-agent-runtime todos fechados. |
