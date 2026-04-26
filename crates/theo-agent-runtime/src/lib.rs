@@ -43,6 +43,7 @@ pub mod subagent;
 pub mod subagent_runs;
 pub mod trajectory_export;
 pub mod transcript_indexer;
+pub mod vision_propagation;
 
 // ── Internal modules (pub(crate) — T4.10h) ─────────────────────────────
 //
