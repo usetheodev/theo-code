@@ -4,6 +4,7 @@ import { AssistantPage } from "../features/assistant/pages/AssistantPage";
 import { CodePage } from "../features/code/pages/CodePage";
 import { DeploysPage } from "../features/deploys/pages/DeploysPage";
 import { MonitoringPage } from "../features/monitoring/pages/MonitoringPage";
+import { AgentsPage } from "../features/observability/pages/AgentsPage";
 import { ObservabilityDashboard } from "../features/observability/pages/ObservabilityDashboard";
 import { DatabasePage } from "../features/database/pages/DatabasePage";
 import { SettingsPage } from "../features/settings/pages/SettingsPage";
@@ -22,6 +23,7 @@ export const router = createHashRouter([
       { path: "deploys", element: <DeploysPage /> },
       { path: "monitoring", element: <MonitoringPage /> },
       { path: "observability", element: <ObservabilityDashboard /> },
+      { path: "agents", element: <AgentsPage /> },
       { path: "database", element: <DatabasePage /> },
       { path: "settings", element: <SettingsPage /> },
       { path: "memory/episodes", element: <EpisodesPage /> },

@@ -1,0 +1,96 @@
+# Semgrep ruleset for theo-code (T6.1).
+#
+# Focus: defensive-logging rules that block sensitive values from being
+# emitted through `log::*!`, `tracing::*!`, `println!`, `eprintln!`, or
+# direct writer calls. Over time this file can grow to cover other
+# classes of Rust footguns (unsanitised command composition, TOCTOU,
+# uncheck-unwrap-in-branch, etc.).
+#
+# How to run:
+#
+#   semgrep --config .semgrep/theo.yaml --error
+#
+# CI should run with `--error` so any match fails the pipeline.
+#
+# Allowlisting: either restructure the code so the secret is never in
+# scope of the log call, or wrap the secret in a `SecretString` newtype
+# whose `Display` impl redacts (preferred). Ad-hoc `# nosemgrep: …`
+# comments are discouraged — if you need one, justify in code review.
+
+rules:
+  # ─────────────────────────────────────────────────────────────────
+  # R.SEC-001 — Direct interpolation of *token-like* variables in logs
+  # ─────────────────────────────────────────────────────────────────
+  - id: theo.log-no-token-interpolation
+    languages: [rust]
+    severity: ERROR
+    message: >
+      Do not emit a token/password/api_key/secret/bearer value through a
+      logging macro. Wrap the value in a `SecretString`-style redacting
+      newtype, or restructure the log call so the secret is absent.
+    patterns:
+      - pattern-either:
+          - pattern: log::trace!($MSG, ..., $NAME, ...)
+          - pattern: log::debug!($MSG, ..., $NAME, ...)
+          - pattern: log::info!($MSG, ..., $NAME, ...)
+          - pattern: log::warn!($MSG, ..., $NAME, ...)
+          - pattern: log::error!($MSG, ..., $NAME, ...)
+          - pattern: tracing::trace!($MSG, ..., $NAME, ...)
+          - pattern: tracing::debug!($MSG, ..., $NAME, ...)
+          - pattern: tracing::info!($MSG, ..., $NAME, ...)
+          - pattern: tracing::warn!($MSG, ..., $NAME, ...)
+          - pattern: tracing::error!($MSG, ..., $NAME, ...)
+          - pattern: println!($MSG, ..., $NAME, ...)
+          - pattern: eprintln!($MSG, ..., $NAME, ...)
+      - metavariable-regex:
+          metavariable: $NAME
+          regex: (?i)^[a-z_]*(token|password|passwd|api_key|apikey|secret|bearer|session_key|private_key)[a-z_]*$
+
+  # ─────────────────────────────────────────────────────────────────
+  # R.SEC-002 — Literal secret-like format-string keys
+  # ─────────────────────────────────────────────────────────────────
+  # Rust 2021/2024 allows `info!("token={token}")` where `token` is a local
+  # variable captured by name. The regex catches these inline interpolations
+  # even when the variable is otherwise invisible to the macro matchers.
+  - id: theo.log-no-inline-secret-field
+    languages: [rust]
+    severity: ERROR
+    message: >
+      Inline interpolation of a secret-like identifier in a log/print macro.
+      Refactor to avoid the secret, or redact via a wrapper type.
+    patterns:
+      - pattern-either:
+          - pattern-regex: 'log::(trace|debug|info|warn|error)!\([^)]*\{\s*(token|password|passwd|api_key|apikey|secret|bearer|session_key|private_key)\s*(?:=|:|\s*\})'
+          - pattern-regex: 'tracing::(trace|debug|info|warn|error)!\([^)]*\{\s*(token|password|passwd|api_key|apikey|secret|bearer|session_key|private_key)\s*(?:=|:|\s*\})'
+          - pattern-regex: 'eprintln!\([^)]*\{\s*(token|password|passwd|api_key|apikey|secret|bearer|session_key|private_key)\s*(?:=|\s*\})'
+          - pattern-regex: 'println!\([^)]*\{\s*(token|password|passwd|api_key|apikey|secret|bearer|session_key|private_key)\s*(?:=|\s*\})'
+
+  # ─────────────────────────────────────────────────────────────────
+  # R.SEC-003 — .unwrap() on a `Result` from sandbox construction
+  # ─────────────────────────────────────────────────────────────────
+  # Safety net for T2.2: if someone undoes the decide_backend / fallback
+  # machinery and calls `create_executor(…).unwrap()`, catch it here.
+  - id: theo.sandbox-no-unwrap-on-create-executor
+    languages: [rust]
+    severity: WARNING
+    message: >
+      Calling `.unwrap()` on `create_executor(…)` defeats the structured
+      fallback path. Pattern-match the Result and handle
+      `SandboxError::Unavailable` explicitly.
+    pattern: create_executor($CFG).unwrap()
+
+  # ─────────────────────────────────────────────────────────────────
+  # R.SEC-004 — Shell command built from untrusted format!
+  # ─────────────────────────────────────────────────────────────────
+  # Flags `Command::new("sh").arg("-c").arg(format!(...))` where the
+  # format string has more than a literal — a heuristic for command
+  # injection surfaces in tools that wrap shell.
+  - id: theo.shell-no-format-in-arg
+    languages: [rust]
+    severity: WARNING
+    message: >
+      Passing a `format!(...)` result as `-c` argument to `sh` is a
+      command-injection vector. Pass user-controlled values via argv
+      (`.arg(user_input)`) or quote explicitly with shlex.
+    pattern: |
+      Command::new("sh").arg("-c").arg(format!($...))

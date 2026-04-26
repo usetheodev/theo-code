@@ -249,7 +249,7 @@ fn e2e_observability_pipeline_full_flow() {
         initial_context_files: &initial_ctx,
         pre_compaction_hot_files: &pre_compaction,
     };
-    let detected = finalize_trajectory_summary(&file_path, &inputs);
+    let (detected, _run_report) = finalize_trajectory_summary(&file_path, &inputs);
 
     // No failure modes should trip on a well-formed run (edit + verification).
     assert!(!detected.premature_termination, "run had edits — not premature");
@@ -331,7 +331,7 @@ fn e2e_detects_premature_termination() {
         initial_context_files: &empty,
         pre_compaction_hot_files: &empty,
     };
-    let detected = finalize_trajectory_summary(&file_path, &inputs);
+    let (detected, _run_report) = finalize_trajectory_summary(&file_path, &inputs);
     assert!(
         detected.premature_termination,
         "3 iterations + 0 edits + converged = premature termination"
@@ -383,7 +383,7 @@ fn e2e_detects_weak_verification() {
         initial_context_files: &empty,
         pre_compaction_hot_files: &empty,
     };
-    let detected = finalize_trajectory_summary(&file_path, &inputs);
+    let (detected, _run_report) = finalize_trajectory_summary(&file_path, &inputs);
     assert!(detected.weak_verification, "edit + no bash/sensor = weak verification");
 }
 
@@ -440,7 +440,7 @@ fn e2e_detects_conversation_history_loss() {
         initial_context_files: &empty,
         pre_compaction_hot_files: &hot,
     };
-    let detected = finalize_trajectory_summary(&file_path, &inputs);
+    let (detected, _run_report) = finalize_trajectory_summary(&file_path, &inputs);
     assert!(detected.conversation_history_loss, "re-read hot file after compaction = history loss");
 }
 

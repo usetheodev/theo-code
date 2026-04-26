@@ -36,6 +36,13 @@ pub struct SensorResult {
 /// a pending queue. The agent loop drains pending results before each LLM call.
 pub struct SensorRunner {
     hook_runner: HookRunner,
+    /// Config remembered so `fire()` can spin up a fresh HookRunner
+    /// (HookRunner is not Send across `await`) with the SAME settings
+    /// instead of `HookConfig::default()`. T4.1 follow-up:
+    /// after `project_hooks_enabled` defaulted to `false` (find_p6_006),
+    /// using the default in `fire()` would stop sensors firing in
+    /// production for any user that opted-in via their `.theo/config.toml`.
+    config: HookConfig,
     pending: Arc<Mutex<Vec<SensorResult>>>,
 }
 
@@ -51,7 +58,8 @@ impl SensorRunner {
     /// Create a new SensorRunner for the given project directory.
     pub fn new(project_dir: &Path, config: HookConfig) -> Self {
         Self {
-            hook_runner: HookRunner::new(project_dir, config),
+            hook_runner: HookRunner::new(project_dir, config.clone()),
+            config,
             pending: Arc::new(Mutex::new(Vec::new())),
         }
     }
@@ -85,7 +93,10 @@ impl SensorRunner {
 
         // Create a new HookRunner for the spawned task (HookRunner is not Send-safe
         // across await points due to internal state, so we create fresh).
-        let hook_runner = HookRunner::new(&project_dir, HookConfig::default());
+        // Carries the user's config (T4.1 follow-up — default is now
+        // `project_hooks_enabled = false`, so an explicit user opt-in
+        // must be honoured here).
+        let hook_runner = HookRunner::new(&project_dir, self.config.clone());
 
         tokio::spawn(async move {
             let start = Instant::now();
@@ -121,6 +132,15 @@ impl SensorRunner {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// T4.1 follow-up — sensor tests must explicitly opt into project
+    /// hooks (the default became `false` to plug find_p6_006).
+    fn enabled_config() -> HookConfig {
+        HookConfig {
+            project_hooks_enabled: true,
+            ..HookConfig::default()
+        }
+    }
 
     #[test]
     fn is_write_tool_recognizes_edit_write_apply_patch() {
@@ -207,7 +227,7 @@ mod tests {
             .unwrap();
         }
 
-        let runner = SensorRunner::new(dir.path(), HookConfig::default());
+        let runner = SensorRunner::new(dir.path(), enabled_config());
         assert!(runner.has_sensors());
 
         runner.fire("edit", "src/main.rs", dir.path());
@@ -245,7 +265,7 @@ mod tests {
             .unwrap();
         }
 
-        let runner = SensorRunner::new(dir.path(), HookConfig::default());
+        let runner = SensorRunner::new(dir.path(), enabled_config());
         runner.fire("write", "lib.rs", dir.path());
 
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;

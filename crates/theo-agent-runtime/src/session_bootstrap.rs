@@ -90,8 +90,10 @@ pub fn save_progress(project_dir: &Path, progress: &SessionProgress) {
     let path = progress_file_path(project_dir);
 
     // Ensure .theo/ directory exists.
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
+    if let Some(parent) = path.parent()
+        && let Err(e) = std::fs::create_dir_all(parent)
+    {
+        crate::fs_errors::warn_fs_error("session_bootstrap/mkdir", parent, &e);
     }
 
     // Serialize and write atomically (write to temp, then rename).
@@ -101,8 +103,19 @@ pub fn save_progress(project_dir: &Path, progress: &SessionProgress) {
     };
 
     let tmp_path = path.with_extension("json.tmp");
-    if std::fs::write(&tmp_path, &content).is_ok() {
-        let _ = std::fs::rename(&tmp_path, &path);
+    match std::fs::write(&tmp_path, &content) {
+        Ok(()) => {
+            if let Err(e) = std::fs::rename(&tmp_path, &path) {
+                crate::fs_errors::warn_fs_error(
+                    "session_bootstrap/rename",
+                    &path,
+                    &e,
+                );
+            }
+        }
+        Err(e) => {
+            crate::fs_errors::warn_fs_error("session_bootstrap/write", &tmp_path, &e);
+        }
     }
 }
 

@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use std::path::PathBuf;
 use theo_domain::error::ToolError;
+use theo_domain::permission::{PermissionRequest, PermissionType};
 use theo_domain::tool::{
     PermissionCollector, Tool, ToolCategory, ToolContext, ToolOutput, ToolParam, ToolSchema,
     optional_string,
@@ -50,11 +51,32 @@ impl Tool for LsTool {
         &self,
         args: serde_json::Value,
         ctx: &ToolContext,
-        _permissions: &mut PermissionCollector,
+        permissions: &mut PermissionCollector,
     ) -> Result<ToolOutput, ToolError> {
-        let path = optional_string(&args, "path")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| ctx.project_dir.clone());
+        // T2.3: canonicalise the user-supplied path against the project
+        // directory before touching the filesystem. Prevents a `..`-based
+        // escape from reading arbitrary directories without an
+        // `ExternalDirectory` permission.
+        let raw = optional_string(&args, "path");
+        let path: PathBuf = match raw {
+            Some(p) => match crate::path::absolutize(&ctx.project_dir, &p) {
+                Ok(canonical) => canonical,
+                Err(_) => PathBuf::from(p),
+            },
+            None => ctx.project_dir.clone(),
+        };
+
+        let inside = crate::path::is_contained(&path, &ctx.project_dir)
+            .unwrap_or_else(|_| path.starts_with(&ctx.project_dir));
+        if !inside {
+            let pattern = format!("{}/*", path.display()).replace('\\', "/");
+            permissions.record(PermissionRequest {
+                permission: PermissionType::ExternalDirectory,
+                patterns: vec![pattern.clone()],
+                always: vec![pattern],
+                metadata: serde_json::json!({}),
+            });
+        }
 
         let mut entries = Vec::new();
         let mut dir = tokio::fs::read_dir(&path)

@@ -85,10 +85,7 @@ impl RunSnapshot {
         messages: Vec<serde_json::Value>,
         dlq: Vec<DeadLetter>,
     ) -> Self {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("system clock before UNIX epoch")
-            .as_millis() as u64;
+        let now = theo_domain::clock::now_millis();
 
         let mut snapshot = Self {
             run,

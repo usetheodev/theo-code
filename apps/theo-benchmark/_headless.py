@@ -75,8 +75,14 @@ def _resolve_bin() -> Path:
 
 @dataclass
 class HeadlessResult:
-    """Parsed output from `theo --headless`."""
+    """Parsed output from `theo --headless`.
 
+    v4 fields: when the JSON contains a `report` object (RunReport from
+    the Rust runtime), all extended metrics are populated. For v3 JSON
+    (no `report` field), extended fields use safe defaults (0 / 0.0 / []).
+    """
+
+    # --- Core fields (v1-v3) ---
     success: bool = False
     summary: str = ""
     iterations: int = 0
@@ -97,6 +103,76 @@ class HeadlessResult:
     cost_usd: float = 0.0
     raw_json: Optional[dict] = None
 
+    # --- Extended token metrics (v4 — from report.token_metrics) ---
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
+    reasoning_tokens: int = 0
+    cache_hit_rate: float = 0.0
+    tokens_per_successful_edit: float = 0.0
+
+    # --- Loop metrics (v4 — from report.loop_metrics) ---
+    convergence_rate: float = 0.0
+    budget_utilization_iterations_pct: float = 0.0
+    budget_utilization_tokens_pct: float = 0.0
+    budget_utilization_time_pct: float = 0.0
+    evolution_attempts: int = 0
+    evolution_success: bool = False
+    done_blocked_count: int = 0
+    phase_distribution: dict = field(default_factory=dict)
+
+    # --- Tool breakdown (v4 — from report.tool_breakdown) ---
+    tool_breakdown: list[dict] = field(default_factory=list)
+
+    # --- Context health (v4 — from report.context_health) ---
+    context_avg_size_tokens: float = 0.0
+    context_max_size_tokens: int = 0
+    context_growth_rate: float = 0.0
+    context_compaction_count: int = 0
+    context_compaction_savings_ratio: float = 0.0
+    context_refetch_rate: float = 0.0
+    context_action_repetition_rate: float = 0.0
+    context_usefulness_avg: float = 0.0
+
+    # --- Memory metrics (v4 — from report.memory_metrics) ---
+    memory_episodes_injected: int = 0
+    memory_episodes_created: int = 0
+    memory_hypotheses_formed: int = 0
+    memory_hypotheses_invalidated: int = 0
+    memory_hypotheses_active: int = 0
+    memory_constraints_learned: int = 0
+    memory_failure_fingerprints_new: int = 0
+    memory_failure_fingerprints_recurrent: int = 0
+
+    # --- Subagent metrics (v4 — from report.subagent_metrics) ---
+    subagent_spawned: int = 0
+    subagent_succeeded: int = 0
+    subagent_failed: int = 0
+    subagent_avg_duration_ms: float = 0.0
+    subagent_success_rate: float = 0.0
+
+    # --- Error taxonomy (v4 — from report.error_taxonomy) ---
+    error_total: int = 0
+    error_network: int = 0
+    error_llm: int = 0
+    error_tool: int = 0
+    error_sandbox: int = 0
+    error_budget: int = 0
+    error_validation: int = 0
+
+    # --- Derived/surrogate metrics (v4 — from report.surrogate_metrics) ---
+    doom_loop_frequency: float = 0.0
+    llm_efficiency: float = 0.0
+    context_waste_ratio: float = 0.0
+    hypothesis_churn_rate: float = 0.0
+    time_to_first_tool_ms: float = 0.0
+
+    # --- Integrity (v4 — from report.integrity) ---
+    trajectory_complete: bool = True
+    trajectory_confidence: float = 1.0
+
+    # --- Error class (v3+) ---
+    error_class: str = ""
+
     @classmethod
     def from_json(cls, data: dict, exit_code: int = 0) -> HeadlessResult:
         tokens = data.get("tokens") or {}
@@ -110,7 +186,7 @@ class HeadlessResult:
         tok_out = tokens.get("output", 0) or 0
         model_name = data.get("model", "")
 
-        return cls(
+        result = cls(
             success=data.get("success", False),
             summary=data.get("summary", ""),
             iterations=data.get("iterations", 0),
@@ -129,16 +205,113 @@ class HeadlessResult:
             exit_code=exit_code,
             cost_usd=estimate_cost(model_name, tok_in, tok_out),
             raw_json=data,
+            error_class=data.get("error_class", ""),
         )
+
+        # v4: parse RunReport from "report" field
+        report = data.get("report")
+        if report and isinstance(report, dict):
+            result._parse_report(report)
+
+        return result
+
+    def _parse_report(self, report: dict) -> None:
+        """Extract all RunReport sections into flat fields."""
+        # Token metrics
+        tm = report.get("token_metrics") or {}
+        self.cache_read_tokens = tm.get("cache_read_tokens", 0)
+        self.cache_write_tokens = tm.get("cache_write_tokens", 0)
+        self.reasoning_tokens = tm.get("reasoning_tokens", 0)
+        self.cache_hit_rate = tm.get("cache_hit_rate", 0.0)
+        self.tokens_per_successful_edit = tm.get("tokens_per_successful_edit", 0.0)
+
+        # Loop metrics
+        lm = report.get("loop_metrics") or {}
+        self.convergence_rate = lm.get("convergence_rate", 0.0)
+        self.done_blocked_count = lm.get("done_blocked_count", 0)
+        self.evolution_attempts = lm.get("evolution_attempts", 0)
+        self.evolution_success = lm.get("evolution_success", False)
+        self.phase_distribution = lm.get("phase_distribution") or {}
+        bu = lm.get("budget_utilization") or {}
+        self.budget_utilization_iterations_pct = bu.get("iterations_pct", 0.0)
+        self.budget_utilization_tokens_pct = bu.get("tokens_pct", 0.0)
+        self.budget_utilization_time_pct = bu.get("time_pct", 0.0)
+
+        # Tool breakdown
+        self.tool_breakdown = report.get("tool_breakdown") or []
+
+        # Context health
+        ch = report.get("context_health") or {}
+        self.context_avg_size_tokens = ch.get("avg_context_size_tokens", 0.0)
+        self.context_max_size_tokens = ch.get("max_context_size_tokens", 0)
+        self.context_growth_rate = ch.get("context_growth_rate", 0.0)
+        self.context_compaction_count = ch.get("compaction_count", 0)
+        self.context_compaction_savings_ratio = ch.get("compaction_savings_ratio", 0.0)
+        self.context_refetch_rate = ch.get("refetch_rate", 0.0)
+        self.context_action_repetition_rate = ch.get("action_repetition_rate", 0.0)
+        self.context_usefulness_avg = ch.get("usefulness_avg", 0.0)
+
+        # Memory metrics
+        mm = report.get("memory_metrics") or {}
+        self.memory_episodes_injected = mm.get("episodes_injected", 0)
+        self.memory_episodes_created = mm.get("episodes_created", 0)
+        self.memory_hypotheses_formed = mm.get("hypotheses_formed", 0)
+        self.memory_hypotheses_invalidated = mm.get("hypotheses_invalidated", 0)
+        self.memory_hypotheses_active = mm.get("hypotheses_active", 0)
+        self.memory_constraints_learned = mm.get("constraints_learned", 0)
+        self.memory_failure_fingerprints_new = mm.get("failure_fingerprints_new", 0)
+        self.memory_failure_fingerprints_recurrent = mm.get("failure_fingerprints_recurrent", 0)
+
+        # Subagent metrics
+        sm = report.get("subagent_metrics") or {}
+        self.subagent_spawned = sm.get("spawned", 0)
+        self.subagent_succeeded = sm.get("succeeded", 0)
+        self.subagent_failed = sm.get("failed", 0)
+        self.subagent_avg_duration_ms = sm.get("avg_duration_ms", 0.0)
+        self.subagent_success_rate = sm.get("success_rate", 0.0)
+
+        # Error taxonomy
+        et = report.get("error_taxonomy") or {}
+        self.error_total = et.get("total_errors", 0)
+        self.error_network = et.get("network_errors", 0)
+        self.error_llm = et.get("llm_errors", 0)
+        self.error_tool = et.get("tool_errors", 0)
+        self.error_sandbox = et.get("sandbox_errors", 0)
+        self.error_budget = et.get("budget_errors", 0)
+        self.error_validation = et.get("validation_errors", 0)
+
+        # Derived/surrogate metrics
+        dm = report.get("surrogate_metrics") or {}
+        self.doom_loop_frequency = _surrogate_value(dm, "doom_loop_frequency")
+        self.llm_efficiency = _surrogate_value(dm, "llm_efficiency")
+        self.context_waste_ratio = _surrogate_value(dm, "context_waste_ratio")
+        self.hypothesis_churn_rate = _surrogate_value(dm, "hypothesis_churn_rate")
+        self.time_to_first_tool_ms = _surrogate_value(dm, "time_to_first_tool_ms")
+
+        # Integrity
+        integrity = report.get("integrity") or {}
+        self.trajectory_complete = integrity.get("complete", True)
+        self.trajectory_confidence = integrity.get("confidence", 1.0)
 
     @classmethod
     def from_error(cls, error: str, exit_code: int = -1) -> HeadlessResult:
         return cls(success=False, error=error, exit_code=exit_code)
 
 
+def _surrogate_value(parent: dict, key: str) -> float:
+    """Extract .value from a SurrogateMetric dict, defaulting to 0.0."""
+    entry = parent.get(key)
+    if isinstance(entry, dict):
+        return entry.get("value", 0.0)
+    return 0.0
+
+
 @dataclass
 class AggregatedResult:
-    """Statistics across multiple runs of the same task."""
+    """Statistics across multiple runs of the same task.
+
+    v4 fields aggregate the extended HeadlessResult metrics with mean values.
+    """
 
     task_id: str
     n_runs: int
@@ -152,6 +325,19 @@ class AggregatedResult:
     ci_95_lower: float  # 95% CI for success rate
     ci_95_upper: float
     runs: list[HeadlessResult] = field(default_factory=list)
+    # --- v4 extended aggregates ---
+    mean_cache_hit_rate: float = 0.0
+    mean_convergence_rate: float = 0.0
+    mean_budget_utilization_pct: float = 0.0
+    mean_context_max_size: float = 0.0
+    mean_context_growth_rate: float = 0.0
+    mean_doom_loop_frequency: float = 0.0
+    mean_llm_efficiency: float = 0.0
+    mean_context_waste_ratio: float = 0.0
+    mean_time_to_first_tool_ms: float = 0.0
+    total_subagent_spawned: int = 0
+    total_errors: int = 0
+    tool_breakdown_aggregate: dict = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -312,6 +498,34 @@ def run_headless_multi(
 
     ci_lo, ci_hi = _wilson_ci(successes, n)
 
+    # v4 extended aggregates
+    def _mean_field(attr: str) -> float:
+        vals = [getattr(r, attr, 0.0) for r in runs]
+        return sum(vals) / n if n > 0 else 0.0
+
+    # Tool breakdown: merge per-tool stats across runs
+    tool_agg: dict[str, dict] = {}
+    for r in runs:
+        for tb in r.tool_breakdown:
+            name = tb.get("tool_name", "unknown")
+            if name not in tool_agg:
+                tool_agg[name] = {"call_count": 0, "success_count": 0, "failure_count": 0, "latency_sum": 0.0, "latency_n": 0}
+            tool_agg[name]["call_count"] += tb.get("call_count", 0)
+            tool_agg[name]["success_count"] += tb.get("success_count", 0)
+            tool_agg[name]["failure_count"] += tb.get("failure_count", 0)
+            avg_lat = tb.get("avg_latency_ms", 0.0)
+            cc = tb.get("call_count", 0)
+            if avg_lat > 0 and cc > 0:
+                tool_agg[name]["latency_sum"] += avg_lat * cc
+                tool_agg[name]["latency_n"] += cc
+    # Finalize tool aggregates
+    for ta in tool_agg.values():
+        total = ta["call_count"]
+        ta["success_rate"] = ta["success_count"] / total if total > 0 else 0.0
+        ta["avg_latency_ms"] = ta["latency_sum"] / ta["latency_n"] if ta["latency_n"] > 0 else 0.0
+        del ta["latency_sum"]
+        del ta["latency_n"]
+
     return AggregatedResult(
         task_id=task_id,
         n_runs=n,
@@ -325,6 +539,18 @@ def run_headless_multi(
         ci_95_lower=round(ci_lo, 3),
         ci_95_upper=round(ci_hi, 3),
         runs=runs,
+        mean_cache_hit_rate=round(_mean_field("cache_hit_rate"), 4),
+        mean_convergence_rate=round(_mean_field("convergence_rate"), 4),
+        mean_budget_utilization_pct=round(_mean_field("budget_utilization_iterations_pct"), 4),
+        mean_context_max_size=round(_mean_field("context_max_size_tokens"), 1),
+        mean_context_growth_rate=round(_mean_field("context_growth_rate"), 4),
+        mean_doom_loop_frequency=round(_mean_field("doom_loop_frequency"), 4),
+        mean_llm_efficiency=round(_mean_field("llm_efficiency"), 4),
+        mean_context_waste_ratio=round(_mean_field("context_waste_ratio"), 4),
+        mean_time_to_first_tool_ms=round(_mean_field("time_to_first_tool_ms"), 1),
+        total_subagent_spawned=sum(r.subagent_spawned for r in runs),
+        total_errors=sum(r.error_total for r in runs),
+        tool_breakdown_aggregate=tool_agg,
     )
 
 

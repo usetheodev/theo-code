@@ -1,5 +1,6 @@
 use tauri::State;
-use theo_infra_auth::{CopilotAuth, CopilotConfig};
+// T1.3: facade re-export.
+use theo_application::facade::auth::{CopilotAuth, CopilotConfig};
 
 use crate::state::AppState;
 
@@ -61,7 +62,7 @@ pub async fn copilot_poll_device_flow(
     enterprise_url: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let auth = make_auth(enterprise_url);
-    let dc = theo_infra_auth::copilot::CopilotDeviceCode {
+    let dc = theo_application::facade::auth::copilot::CopilotDeviceCode {
         user_code: String::new(),
         verification_uri: String::new(),
         device_code,
@@ -167,7 +168,7 @@ pub async fn provider_models(provider: String) -> Result<serde_json::Value, Stri
 fn make_auth(enterprise_url: Option<String>) -> CopilotAuth {
     if let Some(url) = enterprise_url {
         CopilotAuth::with_config(
-            theo_infra_auth::AuthStore::open(),
+            theo_application::facade::auth::AuthStore::open(),
             CopilotConfig::enterprise(url),
         )
     } else {

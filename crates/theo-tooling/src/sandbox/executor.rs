@@ -337,46 +337,130 @@ fn apply_landlock_in_child(
     Ok(())
 }
 
+/// Result of the backend-selection decision — pure data, no side effects.
+///
+/// Extracted so `decide_backend` can be unit-tested without touching the
+/// real kernel probes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum BackendDecision {
+    /// Sandbox disabled by configuration.
+    Disabled,
+    /// Use bwrap (preferred on Linux).
+    Bwrap,
+    /// Use landlock (Linux fallback when bwrap missing).
+    Landlock,
+    /// No backend available; user opted into running without isolation.
+    /// The reason is preserved so the wrapper can log it.
+    NoopFallback { reason: &'static str },
+}
+
+/// Input to the decision function — presence of kernel-level capabilities.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct BackendProbe {
+    pub is_linux: bool,
+    pub bwrap_ok: bool,
+    pub landlock_ok: bool,
+}
+
+/// Pure decision function — given config + probed capabilities, pick a backend.
+///
+/// Keeping this pure lets us test every branch cross-platform, including the
+/// "no backend available" fallback path which is otherwise unreachable on a
+/// Linux CI host that has landlock.
+pub(crate) fn decide_backend(
+    config: &SandboxConfig,
+    probe: BackendProbe,
+) -> Result<BackendDecision, SandboxError> {
+    if !config.enabled {
+        return Ok(BackendDecision::Disabled);
+    }
+
+    if probe.is_linux {
+        if probe.bwrap_ok {
+            return Ok(BackendDecision::Bwrap);
+        }
+        if probe.landlock_ok {
+            return Ok(BackendDecision::Landlock);
+        }
+        if config.fail_if_unavailable {
+            return Err(SandboxError::Unavailable(
+                "neither bwrap nor landlock available".to_string(),
+            ));
+        }
+        return Ok(BackendDecision::NoopFallback {
+            reason: "no linux sandbox backend available (neither bwrap nor landlock)",
+        });
+    }
+
+    if config.fail_if_unavailable {
+        return Err(SandboxError::Unavailable(
+            "sandbox not supported on this platform".to_string(),
+        ));
+    }
+    Ok(BackendDecision::NoopFallback {
+        reason: "sandbox not supported on this platform",
+    })
+}
+
 /// Create the appropriate SandboxExecutor for the current platform.
 ///
 /// Cascading preference: bwrap > landlock > noop.
 /// - bwrap: Full isolation (PID ns, net ns, mount ns, capabilities) — preferred
 /// - landlock: Filesystem isolation only — fallback on Linux without bwrap
-/// - noop: No isolation — last resort or when sandbox disabled
+/// - noop: No isolation — last resort (only when `fail_if_unavailable=false`)
+///
+/// Safety-critical: when falling back to `NoopExecutor`, emits a structured
+/// WARN log so the operator is never silently left without isolation.
 pub fn create_executor(config: &SandboxConfig) -> Result<Box<dyn SandboxExecutor>, SandboxError> {
-    if !config.enabled {
-        return Ok(Box::new(NoopExecutor));
-    }
+    // Probe once, then defer to the pure decision function.
+    let is_linux = cfg!(target_os = "linux");
 
     #[cfg(target_os = "linux")]
-    {
-        // Try bwrap first (best isolation)
-        if let Ok(executor) = super::bwrap::BwrapExecutor::new() {
-            return Ok(Box::new(executor));
-        }
-
-        // Fallback to landlock (filesystem only)
-        if let Ok(executor) = LandlockExecutor::new() {
-            return Ok(Box::new(executor));
-        }
-
-        // Neither available
-        if config.fail_if_unavailable {
-            Err(SandboxError::Unavailable(
-                "neither bwrap nor landlock available".to_string(),
-            ))
+    let (bwrap_candidate, landlock_candidate) = {
+        // Constructing the executor IS the probe — the constructor returns
+        // Err when the kernel feature is missing. We hold onto the successful
+        // instance to avoid a second construction when it is selected.
+        let bwrap = super::bwrap::BwrapExecutor::new().ok();
+        let landlock = if bwrap.is_none() {
+            LandlockExecutor::new().ok()
         } else {
-            Ok(Box::new(NoopExecutor))
-        }
-    }
-
+            None
+        };
+        (bwrap, landlock)
+    };
     #[cfg(not(target_os = "linux"))]
-    {
-        if config.fail_if_unavailable {
-            Err(SandboxError::Unavailable(
-                "sandbox not supported on this platform".to_string(),
-            ))
-        } else {
+    let (bwrap_candidate, landlock_candidate): (Option<NoopExecutor>, Option<NoopExecutor>) =
+        (None, None);
+
+    let probe = BackendProbe {
+        is_linux,
+        bwrap_ok: bwrap_candidate.is_some(),
+        landlock_ok: landlock_candidate.is_some(),
+    };
+
+    match decide_backend(config, probe)? {
+        BackendDecision::Disabled => Ok(Box::new(NoopExecutor)),
+        #[cfg(target_os = "linux")]
+        BackendDecision::Bwrap => {
+            // unwrap is sound — decide_backend only yields Bwrap when probe.bwrap_ok is true
+            Ok(Box::new(bwrap_candidate.expect(
+                "decide_backend returned Bwrap but bwrap_candidate is None",
+            )))
+        }
+        #[cfg(target_os = "linux")]
+        BackendDecision::Landlock => Ok(Box::new(landlock_candidate.expect(
+            "decide_backend returned Landlock but landlock_candidate is None",
+        ))),
+        #[cfg(not(target_os = "linux"))]
+        BackendDecision::Bwrap | BackendDecision::Landlock => {
+            // Unreachable on non-linux because probe.is_linux == false.
+            unreachable!("linux-only branch reached on non-linux target");
+        }
+        BackendDecision::NoopFallback { reason } => {
+            log::warn!(
+                target: "theo_tooling::sandbox",
+                "sandbox backend unavailable ({reason}); falling back to NoopExecutor — bash tools will execute WITHOUT isolation. Set SandboxConfig::fail_if_unavailable=true to refuse this fallback."
+            );
             Ok(Box::new(NoopExecutor))
         }
     }
@@ -452,6 +536,169 @@ mod tests {
             .execute_sandboxed("echo test", Path::new("/tmp"), &config)
             .unwrap();
         assert!(result.success);
+    }
+
+    // ── decide_backend tests (pure, cross-platform) ─────────────
+    //
+    // Every branch of the backend selection is tested here without
+    // touching the real kernel. This is the only way to cover the
+    // "no linux backend available" path on a Linux host that actually
+    // has landlock.
+
+    #[test]
+    fn decide_backend_disabled_when_config_off() {
+        let config = SandboxConfig {
+            enabled: false,
+            ..SandboxConfig::default()
+        };
+        let probe = BackendProbe {
+            is_linux: true,
+            bwrap_ok: true,
+            landlock_ok: true,
+        };
+        assert_eq!(
+            decide_backend(&config, probe).unwrap(),
+            BackendDecision::Disabled
+        );
+    }
+
+    #[test]
+    fn decide_backend_prefers_bwrap_on_linux() {
+        let config = SandboxConfig {
+            enabled: true,
+            fail_if_unavailable: true,
+            ..SandboxConfig::default()
+        };
+        let probe = BackendProbe {
+            is_linux: true,
+            bwrap_ok: true,
+            landlock_ok: true,
+        };
+        assert_eq!(
+            decide_backend(&config, probe).unwrap(),
+            BackendDecision::Bwrap
+        );
+    }
+
+    #[test]
+    fn decide_backend_falls_back_to_landlock_without_bwrap() {
+        let config = SandboxConfig {
+            enabled: true,
+            fail_if_unavailable: true,
+            ..SandboxConfig::default()
+        };
+        let probe = BackendProbe {
+            is_linux: true,
+            bwrap_ok: false,
+            landlock_ok: true,
+        };
+        assert_eq!(
+            decide_backend(&config, probe).unwrap(),
+            BackendDecision::Landlock
+        );
+    }
+
+    #[test]
+    fn decide_backend_errors_on_linux_when_strict_and_no_backend() {
+        let config = SandboxConfig {
+            enabled: true,
+            fail_if_unavailable: true,
+            ..SandboxConfig::default()
+        };
+        let probe = BackendProbe {
+            is_linux: true,
+            bwrap_ok: false,
+            landlock_ok: false,
+        };
+        let result = decide_backend(&config, probe);
+        assert!(
+            matches!(result, Err(SandboxError::Unavailable(_))),
+            "expected Unavailable, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn decide_backend_noop_fallback_when_linux_no_backend_permissive() {
+        let config = SandboxConfig {
+            enabled: true,
+            fail_if_unavailable: false,
+            ..SandboxConfig::default()
+        };
+        let probe = BackendProbe {
+            is_linux: true,
+            bwrap_ok: false,
+            landlock_ok: false,
+        };
+        match decide_backend(&config, probe).unwrap() {
+            BackendDecision::NoopFallback { reason } => {
+                assert!(
+                    reason.contains("linux"),
+                    "reason should mention linux: {reason}"
+                );
+                assert!(!reason.is_empty());
+            }
+            other => panic!("expected NoopFallback, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decide_backend_errors_on_non_linux_when_strict() {
+        let config = SandboxConfig {
+            enabled: true,
+            fail_if_unavailable: true,
+            ..SandboxConfig::default()
+        };
+        let probe = BackendProbe {
+            is_linux: false,
+            bwrap_ok: false,
+            landlock_ok: false,
+        };
+        assert!(matches!(
+            decide_backend(&config, probe),
+            Err(SandboxError::Unavailable(_))
+        ));
+    }
+
+    #[test]
+    fn decide_backend_noop_fallback_when_non_linux_permissive() {
+        let config = SandboxConfig {
+            enabled: true,
+            fail_if_unavailable: false,
+            ..SandboxConfig::default()
+        };
+        let probe = BackendProbe {
+            is_linux: false,
+            bwrap_ok: false,
+            landlock_ok: false,
+        };
+        match decide_backend(&config, probe).unwrap() {
+            BackendDecision::NoopFallback { reason } => {
+                assert!(
+                    reason.contains("platform"),
+                    "reason should mention platform: {reason}"
+                );
+            }
+            other => panic!("expected NoopFallback, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decide_backend_ignores_probes_when_disabled() {
+        // Even with no sandbox available, disabled config → Disabled (not error).
+        let config = SandboxConfig {
+            enabled: false,
+            fail_if_unavailable: true,
+            ..SandboxConfig::default()
+        };
+        let probe = BackendProbe {
+            is_linux: true,
+            bwrap_ok: false,
+            landlock_ok: false,
+        };
+        assert_eq!(
+            decide_backend(&config, probe).unwrap(),
+            BackendDecision::Disabled
+        );
     }
 
     // ── LandlockExecutor tests (Linux only, may need #[ignore]) ─

@@ -1,0 +1,26 @@
+# Phase 45 (otlp-exporter-plan) — collector config for the smoke test.
+#
+# Listens on gRPC :4317 + HTTP :4318, prints all received traces and
+# metrics to stdout via the `debug` exporter (verbose). The smoke
+# script greps the container logs for span attributes.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+exporters:
+  debug:
+    verbosity: detailed
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [debug]
+    metrics:
+      receivers: [otlp]
+      exporters: [debug]

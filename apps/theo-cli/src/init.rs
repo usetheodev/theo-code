@@ -308,7 +308,7 @@ IMPORTANT:
 /// If LLM is not available or fails, the template files remain as-is (fallback).
 pub async fn run_init_with_agent(
     project_dir: &std::path::Path,
-    config: theo_agent_runtime::AgentConfig,
+    config: theo_application::facade::agent::AgentConfig,
 ) -> Result<bool, String> {
     if !project_dir.exists() {
         return Err(format!(
@@ -349,16 +349,16 @@ pub async fn run_init_with_agent(
     // Run agent to generate real content
     eprintln!("  Analyzing project with AI...");
 
-    let event_bus = std::sync::Arc::new(theo_agent_runtime::event_bus::EventBus::new());
+    let event_bus = std::sync::Arc::new(theo_application::facade::agent::EventBus::new());
     let renderer = std::sync::Arc::new(crate::renderer::CliRenderer::new());
     event_bus.subscribe(renderer);
 
-    let registry = theo_tooling::registry::create_default_registry();
+    let registry = theo_application::facade::tooling::create_default_registry();
     let mut agent_config = config;
     agent_config.max_iterations = 30; // Cap for init task
     agent_config.system_prompt = "You are a project analyzer. Read the codebase and generate configuration files. Be thorough but concise. Always use tools, never guess.".to_string();
 
-    let agent = theo_agent_runtime::AgentLoop::new(agent_config, registry);
+    let agent = theo_application::facade::agent::AgentLoop::new(agent_config, registry);
 
     let result = agent
         .run_with_history(ENRICH_PROMPT, project_dir, Vec::new(), Some(event_bus))

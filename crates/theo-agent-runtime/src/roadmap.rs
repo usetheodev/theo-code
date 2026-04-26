@@ -146,10 +146,24 @@ pub fn mark_task_completed(path: &Path, task_number: usize) -> Result<(), Roadma
                 // Already marked — idempotent
                 new_lines.push(line.to_string());
             } else {
-                // Insert ✅ after "### Task N: "
-                let after_marker = &line[line.find(&marker).unwrap() + marker.len()..];
-                let title = after_marker.trim();
-                new_lines.push(format!("### Task {}: ✅ {}", task_number, title));
+                // T4.10p / find_p2_002 — replaces `line.find(&marker).unwrap()`
+                // (logically safe but unallowlisted unwrap) with an
+                // `if let Some(...)` so the gate sees no unwrap and a
+                // future malformed marker just falls through to the
+                // unmodified-line branch instead of panicking.
+                if let Some(pos) = line.find(&marker) {
+                    let after_marker = &line[pos + marker.len()..];
+                    let title = after_marker.trim();
+                    new_lines.push(format!(
+                        "### Task {}: ✅ {}",
+                        task_number, title
+                    ));
+                } else {
+                    // Should be unreachable because we matched the
+                    // outer `starts_with(&marker)` predicate above;
+                    // preserve the line verbatim if we ever get here.
+                    new_lines.push(line.to_string());
+                }
             }
         } else {
             new_lines.push(line.to_string());

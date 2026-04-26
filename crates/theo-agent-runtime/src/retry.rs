@@ -30,23 +30,29 @@ impl RetryExecutor {
         Fut: Future<Output = Result<T, E>>,
         E: Display,
     {
-        let mut last_error: Option<E> = None;
-
-        for attempt in 0..=policy.max_retries {
+        // T2.5: explicit `loop {}` so every exit path is a `return`.
+        // The previous `for attempt in 0..=max_retries` form needed an
+        // `unreachable!()` after the loop (the compiler couldn't see
+        // that the last iteration always returns) — that's a panic
+        // landmine for any future refactor.
+        let mut attempt: u32 = 0;
+        loop {
             match f().await {
                 Ok(value) => return Ok(value),
                 Err(e) => {
-                    // Check if the error is retryable
+                    // Non-retryable: bail immediately.
                     if !is_retryable(&e) {
                         return Err(e);
                     }
-
-                    // Last attempt — don't sleep, just return error
+                    // Final attempt: don't sleep, just surface the error.
                     if attempt == policy.max_retries {
                         return Err(e);
                     }
-
-                    // Publish retry event
+                    // Publish retry event. `delay_ms` is included so
+                    // dashboards can track backoff pressure over time
+                    // (T3.4 — previously the inline retry in run_engine
+                    // emitted this field; the executor now does too).
+                    let delay = policy.delay_for_attempt(attempt);
                     event_bus.publish(DomainEvent::new(
                         EventType::Error,
                         operation_name,
@@ -55,17 +61,14 @@ impl RetryExecutor {
                             "attempt": attempt + 1,
                             "max_retries": policy.max_retries,
                             "error": format!("{}", e),
+                            "delay_ms": delay.as_millis() as u64,
                         }),
                     ));
-
-                    let delay = policy.delay_for_attempt(attempt);
                     tokio::time::sleep(delay).await;
-                    last_error = Some(e);
+                    attempt += 1;
                 }
             }
         }
-
-        Err(last_error.expect("retry loop should have returned"))
     }
 }
 

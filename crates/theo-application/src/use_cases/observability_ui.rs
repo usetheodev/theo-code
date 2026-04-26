@@ -258,7 +258,7 @@ pub fn get_system_stats(project_dir: &Path) -> SystemStats {
     }
 
     let mut tools_by_usage: Vec<(String, u64)> = tool_calls_map.into_iter().collect();
-    tools_by_usage.sort_by(|a, b| b.1.cmp(&a.1));
+    tools_by_usage.sort_by_key(|x| std::cmp::Reverse(x.1));
     stats.tools_by_usage = tools_by_usage;
 
     let mut tools_by_failure_rate: Vec<(String, f64)> = tool_failures_map

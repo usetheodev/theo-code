@@ -44,6 +44,9 @@ pub struct SystemPromptComposer {
     mcps: Option<String>,
     subdir: Option<String>,
     skills: Option<String>,
+    /// / D2 + D5: heurísticas de delegate_task — quando delegar e
+    /// como reagir a falhas. Renderizado quando subagents estão disponíveis.
+    delegation: Option<String>,
 }
 
 impl SystemPromptComposer {
@@ -94,6 +97,47 @@ impl SystemPromptComposer {
         self
     }
 
+    /// / D2 + D5: attach delegation heuristics — when to use
+    /// `delegate_task` vs do work inline, and how to react when sub-agents fail.
+    pub fn with_delegation(mut self, enabled: bool, body: impl Into<String>) -> Self {
+        if enabled {
+            self.delegation = Some(body.into());
+        }
+        self
+    }
+
+    /// Default delegation heuristics body (D2 + D5 from agents-plan.md v3.0).
+    pub fn default_delegation_heuristics() -> &'static str {
+        "## When to use delegate_task\n\n\
+         DELEGATE when:\n\
+         - The task requires exploring MORE than 5 files to understand context.\n\
+           → delegate to `explorer` first, then act on findings.\n\
+         - The task has independent sub-problems that can run in parallel.\n\
+           → use delegate_task with a `parallel` array.\n\
+         - The task requires code review or security analysis.\n\
+           → delegate to `reviewer` or a custom security agent.\n\
+         - The user explicitly asks for parallel work or agent delegation.\n\
+         \n\
+         DO NOT delegate when:\n\
+         - The task is a single file edit or simple question.\n\
+         - You already have enough context from previous tool calls.\n\
+         - The task requires sequential decisions where each step depends on the previous.\n\
+         \n\
+         COST AWARENESS:\n\
+         - Each sub-agent consumes a full agent loop (iterations + tokens).\n\
+         - On-demand agents are limited to 10 iterations and read-only access.\n\
+         - Prefer named agents (explorer, implementer, verifier, reviewer) over on-demand.\n\
+         - Use parallel delegation only when tasks are truly independent.\n\
+         \n\
+         ## When a sub-agent fails (D5)\n\n\
+         If `delegate_task` returns success=false:\n\
+         1. READ the summary to understand WHY it failed.\n\
+         2. If timeout: re-delegate with a more focused objective or smaller scope.\n\
+         3. If max_iterations: the task may be too complex — break it into smaller sub-tasks.\n\
+         4. If error: investigate the error, fix the issue, then re-delegate.\n\
+         5. Do NOT blindly retry the same delegation — diagnose first."
+    }
+
     /// Render the composed prompt to a single string.
     pub fn render(&self) -> String {
         let mut out = String::new();
@@ -108,6 +152,7 @@ impl SystemPromptComposer {
             self.subdir.as_deref(),
         );
         self.append_section(&mut out, "Skills", self.skills.as_deref());
+        self.append_section(&mut out, "Delegation", self.delegation.as_deref());
         out
     }
 
@@ -142,6 +187,37 @@ mod tests {
     fn empty_composer_renders_only_preamble() {
         let p = SystemPromptComposer::new("You are Theo.");
         assert_eq!(p.render(), "You are Theo.");
+    }
+
+    #[test]
+    fn delegation_section_omitted_when_disabled() {
+        let p = SystemPromptComposer::new("pre")
+            .with_delegation(false, "anything");
+        assert!(!p.render().contains("Delegation"));
+    }
+
+    #[test]
+    fn delegation_section_renders_when_enabled() {
+        let p = SystemPromptComposer::new("pre")
+            .with_delegation(true, SystemPromptComposer::default_delegation_heuristics());
+        let out = p.render();
+        assert!(out.contains("Delegation"));
+        assert!(out.contains("DELEGATE when:"));
+        assert!(out.contains("DO NOT delegate when:"));
+        assert!(out.contains("COST AWARENESS"));
+        assert!(out.contains("When a sub-agent fails")); // D5
+    }
+
+    #[test]
+    fn default_delegation_heuristics_mentions_d2_d5() {
+        let body = SystemPromptComposer::default_delegation_heuristics();
+        // D2 — when to delegate
+        assert!(body.contains("DELEGATE when"));
+        assert!(body.contains("DO NOT delegate"));
+        // D5 — failure handling
+        assert!(body.contains("If timeout"));
+        assert!(body.contains("If max_iterations"));
+        assert!(body.contains("Do NOT blindly retry"));
     }
 
     #[test]

@@ -1,3 +1,5 @@
+#![allow(clippy::field_reassign_with_default)] // Tests tweak individual fields for readability.
+
 //! Live probe: spins up a minimal OpenAI-compatible HTTP stub, runs a real
 //! `AgentRunEngine` against it, and asserts on the resulting JSONL trajectory.
 //!

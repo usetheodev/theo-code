@@ -40,9 +40,17 @@ DEFAULT_BIN = ROOT / "target" / "release" / "theo"
 
 
 def load_scenarios(filter_substr: str | None) -> list[dict]:
+    """Load scenarios, optionally filtered.
+
+    `filter_substr` accepts:
+      - single substring: "01"
+      - comma-separated list of substrings: "01,02,03"
+      - any scenario whose filename contains ANY substring matches
+    """
     scenarios = []
+    filters = [s.strip() for s in (filter_substr or "").split(",") if s.strip()]
     for path in sorted(SCENARIOS_DIR.glob("*.toml")):
-        if filter_substr and filter_substr not in path.name:
+        if filters and not any(f in path.name for f in filters):
             continue
         with path.open("rb") as fp:
             data = tomllib.load(fp)
@@ -130,6 +138,28 @@ def run_scenario(scenario: dict, theo_bin: Path, keep_tmp: bool, temperature: fl
         else:
             error = "no JSON line on stdout"
 
+        # Phase 46 (benchmark-validation-plan): attach cost_usd from pricing.toml
+        if headless and "tokens" in headless:
+            try:
+                # Lazy import to avoid hard dep when adapter unavailable
+                import sys as _sys
+                from pathlib import Path as _Path
+                _root = _Path(__file__).resolve().parents[1]
+                if str(_root) not in _sys.path:
+                    _sys.path.insert(0, str(_root))
+                from pricing import compute_cost as _cost
+                tokens = headless.get("tokens", {}) or {}
+                model = headless.get("model", "") or os.environ.get("THEO_MODEL", "")
+                headless["cost_usd"] = _cost(
+                    int(tokens.get("input", 0) or 0),
+                    int(tokens.get("output", 0) or 0),
+                    model,
+                )
+            except Exception as _e:
+                # Pricing failure must NOT abort the smoke run.
+                headless["cost_usd"] = 0.0
+                headless["cost_error"] = str(_e)
+
         # Run success_check
         check_passed = False
         check_stderr = ""
@@ -186,6 +216,7 @@ def aggregate(results: list[dict]) -> dict:
     total_input = total_output = total_iter = total_tools = 0
     total_llm_calls = total_retries = 0
     total_duration_ms = 0
+    total_cost_usd = 0.0
     for r in results:
         cat = r["category"]
         slot = by_cat.setdefault(cat, {"total": 0, "passed": 0})
@@ -203,9 +234,10 @@ def aggregate(results: list[dict]) -> dict:
         total_llm_calls += llm.get("calls", 0) or 0
         total_retries += llm.get("retries", 0) or 0
         total_duration_ms += h.get("duration_ms", 0) or 0
+        total_cost_usd += float(h.get("cost_usd", 0.0) or 0.0)
 
     return {
-        "schema": "theo.smoke.v1",
+        "schema": "theo.smoke.v2",  # v2 bumps for cost_usd
         "scenarios_total": total,
         "scenarios_passed": passed,
         "pass_rate": round(passed / total, 3) if total else 0.0,
@@ -217,6 +249,7 @@ def aggregate(results: list[dict]) -> dict:
             "llm_calls": total_llm_calls,
             "retries": total_retries,
             "duration_ms": total_duration_ms,
+            "cost_usd": round(total_cost_usd, 6),
         },
         "by_category": by_cat,
     }
@@ -293,6 +326,30 @@ def main() -> int:
         REPORTS_DIR / f"smoke-{int(time.time())}.json"
     )
     out_path.write_text(json.dumps(report, indent=2))
+
+    # SOTA report (Phase 64) — build_report integration
+    try:
+        _bench_root = Path(__file__).resolve().parents[1]
+        if str(_bench_root) not in sys.path:
+            sys.path.insert(0, str(_bench_root))
+        from analysis.report_builder import build_report, report_to_markdown
+
+        # Extract headless dicts from results — the raw JSON parsed from
+        # theo --headless stdout, stored under the "headless" key.
+        sota_results = [
+            r["headless"] for r in results
+            if r.get("headless") is not None
+        ]
+        if sota_results:
+            sota_report = build_report(sota_results, "smoke", manifest=None)
+            sota_json_path = out_path.with_suffix(".sota.json")
+            sota_md_path = out_path.with_suffix(".sota.md")
+            sota_json_path.write_text(json.dumps(sota_report, indent=2))
+            sota_md_path.write_text(report_to_markdown(sota_report))
+            print(f"  SOTA report → {sota_json_path}")
+            print(f"  SOTA report → {sota_md_path}")
+    except Exception as _sota_err:
+        print(f"  SOTA report SKIPPED: {_sota_err}", file=sys.stderr)
 
     print_summary(report, results)
     print(f"  report → {out_path}")

@@ -11,6 +11,13 @@ use std::path::{Path, PathBuf};
 
 use crate::session_tree::{SessionEntry, SessionTree, SessionTreeError};
 
+/// Sunset date (YYYY-MM-DD) for the `.theo/wiki/episodes/` legacy read
+/// fallback. After this date the dual-path merge logic in
+/// [`StateManager::load_episode_summaries`] should be removed — the
+/// memory/wiki namespace split (decision: meeting 20260420-221947 #4)
+/// will have had a full year of migration runway.
+pub const WIKI_LEGACY_DEPRECATION_DATE: &str = "2026-10-20";
+
 /// Orchestrates file-backed state persistence.
 ///
 /// Wraps `SessionTree` and provides a higher-level interface for the agent
@@ -57,8 +64,14 @@ impl StateManager {
     }
 
     /// Append a message to the session tree (persisted immediately to disk).
+    ///
+    /// The `content` is run through [`crate::secret_scrubber::scrub_secrets`]
+    /// before persistence so well-known credentials (Anthropic API keys,
+    /// GitHub PATs, AWS access key IDs, PEM private keys) do not land
+    /// in the JSONL crash-recovery file. T4.5 / FIND-P6-008.
     pub fn append_message(&mut self, role: &str, content: &str) -> Result<(), SessionTreeError> {
-        self.session_tree.append_message(role, content)?;
+        let scrubbed = crate::secret_scrubber::scrub_secrets(content);
+        self.session_tree.append_message(role, &scrubbed)?;
         Ok(())
     }
 
@@ -103,6 +116,13 @@ impl StateManager {
     /// Legacy fallback: `.theo/wiki/episodes/` (earlier location). Both are scanned
     /// and merged; the memory path wins on duplicate `summary_id`. Returns an
     /// empty vec if no episodes exist or on any error.
+    ///
+    /// **T8.2 — legacy wiki/ deprecation schedule:** the `.theo/wiki/episodes/`
+    /// fallback is retained for backward compatibility with workspaces that
+    /// predate the memory/wiki split. Remove the legacy read path on or
+    /// after [`WIKI_LEGACY_DEPRECATION_DATE`]. At removal time, also delete
+    /// the dual-path dedup logic below and the `test_p1_legacy_wiki_*` /
+    /// `test_p1_memory_path_wins_*` tests.
     pub fn load_episode_summaries(
         project_dir: &Path,
     ) -> Vec<theo_domain::episode::EpisodeSummary> {
@@ -143,6 +163,54 @@ impl StateManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// T4.10c / find_p2_008 — calendar-deadline assertion that fires
+    /// after the documented sunset for the legacy
+    /// `.theo/wiki/episodes/` read-fallback. Once `today >`
+    /// `WIKI_LEGACY_DEPRECATION_DATE`, the test fails so the
+    /// dead-fallback can no longer slip through code review unnoticed.
+    /// Static-only check: no I/O, no state.
+    #[test]
+    fn t410c_wiki_legacy_fallback_must_be_removed_after_sunset() {
+        // Format: "YYYY-MM-DD".
+        let parts: Vec<&str> = WIKI_LEGACY_DEPRECATION_DATE
+            .split('-')
+            .collect();
+        assert_eq!(parts.len(), 3, "deprecation date must be ISO YYYY-MM-DD");
+
+        let yy: u32 = parts[0].parse().expect("year is numeric");
+        let mm: u32 = parts[1].parse().expect("month is numeric");
+        let dd: u32 = parts[2].parse().expect("day is numeric");
+
+        // Compute "today" as days since UNIX epoch (rough, calendar
+        // approximation OK because we only need monotonic ordering).
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock OK")
+            .as_secs();
+        let today_days = now_secs / 86400;
+        // Convert deprecation date to days-since-epoch via the
+        // standard "days from 1970-01-01" formula. Borrowed from the
+        // public-domain "Howard Hinnant" date algorithm.
+        let y = if mm <= 2 { yy - 1 } else { yy };
+        let era = (if y >= 400 { y } else { y + 400 }) / 400;
+        let yoe = y.wrapping_sub(era * 400);
+        let m = mm as i64;
+        let doy: i64 = (153 * (m + if mm > 2 { -3 } else { 9 }) + 2) / 5 + dd as i64 - 1;
+        let doe: i64 = (yoe as i64) * 365
+            + (yoe as i64) / 4
+            - (yoe as i64) / 100
+            + doy;
+        let dep_days: i64 = (era as i64) * 146097 + doe - 719_468;
+
+        assert!(
+            (today_days as i64) <= dep_days,
+            "WIKI_LEGACY_DEPRECATION_DATE ({}) has passed — \
+             remove the legacy fallback in load_episode_summaries() and \
+             delete this test",
+            WIKI_LEGACY_DEPRECATION_DATE
+        );
+    }
 
     #[test]
     fn test_state_manager_creates_session_tree_on_disk() {

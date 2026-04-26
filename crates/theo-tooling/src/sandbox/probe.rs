@@ -66,6 +66,12 @@ fn detect_landlock_abi() -> i32 {
     //
     // We use libc directly here because the landlock crate doesn't expose
     // a simple "what ABI is available?" function.
+    //
+    // SAFETY: `libc::syscall` is FFI. Arguments match the
+    // landlock_create_ruleset kernel signature (nullable pointer + 0 size +
+    // flag). Kernels that do not implement the syscall return -1/ENOSYS;
+    // we map every negative return to 0 ("landlock unavailable"), so no
+    // unchecked return value propagates.
     unsafe {
         let ret = libc::syscall(
             libc::SYS_landlock_create_ruleset,

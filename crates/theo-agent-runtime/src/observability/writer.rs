@@ -141,9 +141,8 @@ fn run_writer_loop(
         write_errors: &Arc<AtomicU64>,
         bytes: &[u8],
     ) -> Result<(), std::io::Error> {
-        writer.write_all(bytes).and_then(|_| writer.write_all(b"\n")).map_err(|e| {
+        writer.write_all(bytes).and_then(|_| writer.write_all(b"\n")).inspect_err(|_e| {
             write_errors.fetch_add(1, Ordering::Relaxed);
-            e
         })
     }
 
@@ -312,7 +311,7 @@ mod tests {
         let f = File::open(path).unwrap();
         let r = BufReader::new(f);
         r.lines()
-            .filter_map(|l| l.ok())
+            .map_while(Result::ok)
             .filter(|l| !l.is_empty())
             .filter_map(|l| serde_json::from_str(&l).ok())
             .collect()

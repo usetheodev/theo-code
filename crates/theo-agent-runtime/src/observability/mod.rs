@@ -17,6 +17,13 @@ pub mod derived_metrics;
 pub mod normalizer;
 pub mod loop_detector;
 pub mod failure_sensors;
+pub mod otel;
+// -42 (otlp-exporter-plan) — gated by feature `otel`. Default
+// builds skip these modules entirely (zero compile-time/runtime cost).
+#[cfg(feature = "otel")]
+pub mod otel_exporter;
+#[cfg(feature = "otel")]
+pub mod otel_listener;
 pub mod report;
 
 pub use envelope::{TrajectoryEnvelope, ENVELOPE_SCHEMA_VERSION};
@@ -46,9 +53,9 @@ use std::sync::Arc;
 
 use crate::event_bus::EventBus;
 
-/// Convenience pipeline bundling: ObservabilityListener + background writer
-/// + trajectory file path. Holds the writer join-handle so the caller can
-/// drain and fsync at shutdown.
+/// Convenience pipeline bundling: ObservabilityListener, the background
+/// writer, and the trajectory file path. Holds the writer join-handle
+/// so the caller can drain and fsync at shutdown.
 pub struct ObservabilityPipeline {
     pub run_id: String,
     pub file_path: PathBuf,
@@ -121,6 +128,11 @@ impl ObservabilityPipeline {
 
 /// One-shot installer: subscribes both the `ObservabilityListener` and the
 /// `LoopDetectingListener` to the event bus and returns the pipeline handle.
+///
+/// when the `otel` feature is active AND
+/// the global TracerProvider has been installed , also
+/// subscribes an `OtelExportingListener` so DomainEvents reach the OTLP
+/// collector in addition to the local trajectory JSONL (D5).
 pub fn install_observability(
     event_bus: &EventBus,
     run_id: &str,
@@ -129,6 +141,12 @@ pub fn install_observability(
     let pipeline = ObservabilityPipeline::install(event_bus, run_id, base_path);
     let detector = Arc::new(std::sync::Mutex::new(LoopDetector::new()));
     event_bus.subscribe(Arc::new(loop_detector::LoopDetectingListener::new(detector)));
+    #[cfg(feature = "otel")]
+    {
+        let svc = theo_domain::environment::theo_var("OTLP_SERVICE_NAME")
+            .unwrap_or_else(|| "theo".to_string());
+        event_bus.subscribe(Arc::new(otel_listener::OtelExportingListener::new(svc)));
+    }
     pipeline
 }
 
@@ -160,7 +178,7 @@ pub fn finalize_run_observability(
     fp_recurrent: u32,
     initial_context_files: &std::collections::HashSet<String>,
     pre_compaction_hot_files: &std::collections::HashSet<String>,
-) -> DetectedFailureModes {
+) -> (DetectedFailureModes, Option<report::RunReport>) {
     let budget = theo_domain::budget::Budget {
         max_iterations,
         ..theo_domain::budget::Budget::default()
@@ -246,10 +264,10 @@ pub struct FinalizeInputs<'a> {
 pub fn finalize_trajectory_summary(
     file_path: &std::path::Path,
     inputs: &FinalizeInputs<'_>,
-) -> DetectedFailureModes {
+) -> (DetectedFailureModes, Option<report::RunReport>) {
     let (envelopes, integrity) = match reader::read_trajectory(file_path) {
         Ok(v) => v,
-        Err(_) => return DetectedFailureModes::default(),
+        Err(_) => return (DetectedFailureModes::default(), None),
     };
     let projection = projection::project(inputs.run_id, envelopes, integrity.clone());
 
@@ -329,7 +347,7 @@ pub fn finalize_trajectory_summary(
         summary_seq,
         serde_json::to_value(&report_payload).unwrap_or_default(),
     );
-    detected
+    (detected, Some(report_payload))
 }
 
 /// Event listener that writes structured JSON lines to a writer.

@@ -1,4 +1,4 @@
-//! Autodream — post-session memory consolidation (Phase 2 of
+//! Autodream — post-session memory consolidation (of
 //! `PLAN_AUTO_EVOLUTION_SOTA`).
 //!
 //! Pattern ported from `referencias/opendev/crates/opendev-agents/src/
@@ -21,8 +21,8 @@
 //! before persistence (delegated to the `AutodreamExecutor` impl so
 //! this module stays free of the `theo-infra-memory` dep).
 //!
-//! Errors are logged via `eprintln!` and never propagate to the main
-//! loop — autodream is best-effort.
+//! Errors are logged via `tracing` (T3.7 migration) and never
+//! propagate to the main loop — autodream is best-effort.
 
 use std::path::{Path, PathBuf};
 
@@ -296,7 +296,13 @@ pub fn acquire_lock(memory_dir: &Path) -> Result<LockGuard, AutodreamError> {
             // Stale lock recovery — if the file is older than 2×
             // cooldown_hours, treat as orphan from a crashed run.
             if lock_is_stale(&path, COOLDOWN_HOURS * 2) {
-                let _ = std::fs::remove_file(&path);
+                if let Err(e) = std::fs::remove_file(&path) {
+                    crate::fs_errors::warn_fs_error(
+                        "autodream/stale_lock_rm",
+                        &path,
+                        &e,
+                    );
+                }
                 return acquire_lock(memory_dir);
             }
             Err(AutodreamError::LockHeld)
@@ -326,7 +332,10 @@ pub struct LockGuard {
 
 impl Drop for LockGuard {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.path);
+        // Stderr log on drop — never panic inside Drop.
+        if let Err(e) = std::fs::remove_file(&self.path) {
+            crate::fs_errors::warn_fs_error("autodream/lock_release", &self.path, &e);
+        }
     }
 }
 
@@ -421,10 +430,13 @@ mod tests {
     use super::*;
 
     fn now_secs() -> u64 {
+        // T2.2: never `.expect()` on system-clock arithmetic — a clock
+        // skew before UNIX_EPOCH yields 0 seconds (matches the unified
+        // `theo_domain::clock::now_millis()` helper's policy).
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .expect("system time before UNIX epoch")
-            .as_secs()
+            .map(|d| d.as_secs())
+            .unwrap_or(0)
     }
 
     // ── AC-2.6 & AC-2.8 ────────────────────────────────────────────

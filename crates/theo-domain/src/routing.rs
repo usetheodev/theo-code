@@ -77,6 +77,15 @@ pub enum RoutingFailureHint {
     BudgetExhausted,
 }
 
+/// Tier hint produced by `ComplexityClassifier`. Routers consume this
+/// when present (Phase 14 — cost-aware automatic routing).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ComplexityTier {
+    Cheap,
+    Default,
+    Strong,
+}
+
 /// All inputs the router needs to choose a model for the next call.
 ///
 /// Built fresh on every turn. The lifetime parameter lets the caller pass
@@ -91,6 +100,12 @@ pub struct RoutingContext<'a> {
     pub requires_vision: bool,
     pub requires_tool_use: bool,
     pub previous_failure: Option<RoutingFailureHint>,
+    /// Phase 14: explicit model override from `AgentSpec.model_override`.
+    /// When `Some(_)`, automatic routing MUST be skipped.
+    pub model_override: Option<&'a str>,
+    /// Phase 14: tier hint from `ComplexityClassifier`. When `Some(_)`,
+    /// rule-based routers prefer this over keyword matching.
+    pub complexity_hint: Option<ComplexityTier>,
 }
 
 impl<'a> RoutingContext<'a> {
@@ -105,6 +120,8 @@ impl<'a> RoutingContext<'a> {
             requires_vision: false,
             requires_tool_use: false,
             previous_failure: None,
+            model_override: None,
+            complexity_hint: None,
         }
     }
 }
@@ -157,6 +174,13 @@ pub trait ModelRouter: Send + Sync {
         previous: &ModelChoice,
         hint: RoutingFailureHint,
     ) -> Option<ModelChoice>;
+
+    /// Human-readable identifier for debug/log output. Defaults to the
+    /// Rust type name; concrete routers should override when the type
+    /// name is not self-explanatory.
+    fn name(&self) -> &str {
+        std::any::type_name::<Self>()
+    }
 }
 
 /// Behaviour-preserving router: always returns its injected default and

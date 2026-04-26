@@ -1,6 +1,7 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
+use parking_lot::Mutex;
 use theo_domain::error::TransitionError;
 use theo_domain::event::{DomainEvent, EventType};
 use theo_domain::identifiers::TaskId;
@@ -39,10 +40,7 @@ impl TaskManager {
         objective: String,
     ) -> TaskId {
         let task_id = TaskId::generate();
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("system clock before UNIX epoch")
-            .as_millis() as u64;
+        let now = theo_domain::clock::now_millis();
 
         let task = Task {
             task_id: task_id.clone(),
@@ -58,7 +56,6 @@ impl TaskManager {
 
         self.tasks
             .lock()
-            .expect("tasks lock poisoned")
             .insert(task_id.clone(), task);
 
         // Invariant 5: publish TaskCreated event
@@ -78,7 +75,7 @@ impl TaskManager {
     /// - Invariant 4: Terminal states reject all transitions (enforced by TaskState).
     /// - Invariant 5: Publishes `DomainEvent::TaskStateChanged` with from/to payload.
     pub fn transition(&self, task_id: &TaskId, target: TaskState) -> Result<(), TaskManagerError> {
-        let mut tasks = self.tasks.lock().expect("tasks lock poisoned");
+        let mut tasks = self.tasks.lock();
         let task = tasks
             .get_mut(task_id)
             .ok_or_else(|| TaskManagerError::TaskNotFound(task_id.as_str().to_string()))?;
@@ -103,7 +100,6 @@ impl TaskManager {
     pub fn get(&self, task_id: &TaskId) -> Option<Task> {
         self.tasks
             .lock()
-            .expect("tasks lock poisoned")
             .get(task_id)
             .cloned()
     }
@@ -112,7 +108,6 @@ impl TaskManager {
     pub fn tasks_by_session(&self, session_id: &SessionId) -> Vec<Task> {
         self.tasks
             .lock()
-            .expect("tasks lock poisoned")
             .values()
             .filter(|t| t.session_id == *session_id)
             .cloned()
@@ -123,7 +118,6 @@ impl TaskManager {
     pub fn active_tasks(&self) -> Vec<Task> {
         self.tasks
             .lock()
-            .expect("tasks lock poisoned")
             .values()
             .filter(|t| !t.state.is_terminal())
             .cloned()
@@ -136,7 +130,7 @@ impl TaskManager {
         task_id: &TaskId,
         artifact: Artifact,
     ) -> Result<(), TaskManagerError> {
-        let mut tasks = self.tasks.lock().expect("tasks lock poisoned");
+        let mut tasks = self.tasks.lock();
         let task = tasks
             .get_mut(task_id)
             .ok_or_else(|| TaskManagerError::TaskNotFound(task_id.as_str().to_string()))?;
@@ -152,6 +146,18 @@ pub enum TaskManagerError {
 
     #[error("transition error: {0}")]
     Transition(#[from] TransitionError),
+}
+
+impl TaskManagerError {
+    /// Forwards to [`TransitionError::is_already_in_state`] when the
+    /// underlying error is a `Transition`. Returns `false` for any
+    /// other variant (e.g. `TaskNotFound`).
+    ///
+    /// Added in T1.4 so call sites in the run engine can use a single
+    /// idempotency check without unwrapping the variant manually.
+    pub fn is_already_in_state(&self) -> bool {
+        matches!(self, TaskManagerError::Transition(t) if t.is_already_in_state())
+    }
 }
 
 #[cfg(test)]

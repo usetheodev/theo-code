@@ -5,6 +5,8 @@ members = [
     "crates/theo-engine-retrieval",
     "crates/theo-governance",
     "crates/theo-engine-parser",
+    "crates/theo-isolation",
+    "crates/theo-infra-mcp",
     "crates/theo-tooling",
     "crates/theo-infra-llm",
     "crates/theo-agent-runtime",
@@ -30,6 +32,8 @@ theo-engine-graph = { path = "crates/theo-engine-graph" }
 theo-engine-retrieval = { path = "crates/theo-engine-retrieval" }
 theo-governance = { path = "crates/theo-governance" }
 theo-engine-parser = { path = "crates/theo-engine-parser" }
+theo-isolation = { path = "crates/theo-isolation" }
+theo-infra-mcp = { path = "crates/theo-infra-mcp" }
 theo-tooling = { path = "crates/theo-tooling" }
 theo-infra-llm = { path = "crates/theo-infra-llm" }
 theo-agent-runtime = { path = "crates/theo-agent-runtime" }
@@ -53,6 +57,8 @@ walkdir = "2"
 clap = { version = "4", features = ["derive"] }
 ignore = "0.4"
 log = "0.4"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 landlock = "0.4"
 libc = "0.2"
 rustyline = "15"
@@ -73,9 +79,23 @@ criterion = { version = "0.5", features = ["html_reports"] }
 toml = "0.8"
 rayon = "1"
 bincode = "1"
-scip = "0.5"
+scip = "0.7"
 protobuf = "3"
 tantivy = "0.22"
 blake3 = "1"
 axum = "0.7"
 tower-http = { version = "0.5", features = ["fs", "cors"] }
+indexmap = { version = "2", features = ["serde"] }
+serde_yaml = "0.9"
+sha2 = "0.10"
+tokio-util = { version = "0.7", features = ["rt"] }
+dashmap = "6"
+parking_lot = "0.12"
+notify = "6"
+notify-debouncer-mini = "0.4"
+# Phase 40 (otlp-exporter-plan) — OpenTelemetry SDK, opt-in via feature `otel`.
+# Pin major.minor to avoid breaking changes between 0.x bumps.
+opentelemetry = "0.27"
+opentelemetry_sdk = { version = "0.27", features = ["rt-tokio"] }
+opentelemetry-otlp = { version = "0.27", features = ["grpc-tonic", "http-proto", "reqwest-client"] }
+opentelemetry-semantic-conventions = "0.27"

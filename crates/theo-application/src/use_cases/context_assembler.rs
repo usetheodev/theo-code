@@ -142,10 +142,19 @@ impl ContextAssembler {
     }
 
     /// Load feedback scores from a JSON file.
+    ///
+    /// T2.7: uses the bounded deserialization helper so a corrupt or
+    /// malicious feedback file cannot force unbounded allocation.
     pub fn load_feedback(path: &std::path::Path) -> std::collections::HashMap<String, f64> {
         std::fs::read_to_string(path)
             .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
+            .and_then(|s| {
+                theo_domain::safe_json::from_str_bounded(
+                    &s,
+                    theo_domain::safe_json::DEFAULT_JSON_LIMIT,
+                )
+                .ok()
+            })
             .unwrap_or_default()
     }
 

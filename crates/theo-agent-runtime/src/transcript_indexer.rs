@@ -1,4 +1,4 @@
-//! Transcript indexer trait — Phase 4 wiring of
+//! Transcript indexer trait — wiring of
 //! `PLAN_AUTO_EVOLUTION_SOTA`.
 //!
 //! The concrete implementation lives in `theo-application` so this

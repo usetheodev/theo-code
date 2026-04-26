@@ -677,8 +677,11 @@ pub fn update(state: &mut TuiState, msg: Msg) {
             ));
         }
         Msg::LoginWithKey(key) => {
-            // Store API key directly — works via SSH, no browser needed
-            // Safety: single-threaded access at this point in the render loop
+            // Store API key directly — works via SSH, no browser needed.
+            // SAFETY: single-threaded render-loop context; no other task
+            // observes env vars during this update frame. Rust 2024 marks
+            // `set_var` unsafe for the general multi-threaded case, which
+            // does not apply here.
             unsafe { std::env::set_var("OPENAI_API_KEY", &key); }
             let masked = if key.len() > 8 {
                 format!("{}...{}", &key[..6], &key[key.len()-4..])

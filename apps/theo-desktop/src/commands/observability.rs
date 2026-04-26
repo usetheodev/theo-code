@@ -6,7 +6,8 @@
 
 use std::path::PathBuf;
 
-use theo_agent_runtime::observability::{DerivedMetrics, TrajectoryProjection};
+// T1.3: facade re-export.
+use theo_application::facade::agent::observability::{DerivedMetrics, TrajectoryProjection};
 use theo_application::use_cases::observability_ui::{self, RunSummary};
 
 use crate::state::AppState;

@@ -78,6 +78,52 @@ pub enum EventType {
     /// Computational sensor executed after a write tool (e.g., clippy, cargo test).
     /// Payload contains "file", "exit_code", "output_preview".
     SensorExecuted,
+
+    // Sub-agent lifecycle (Track A — Phase 3)
+    /// Emitted when a sub-agent starts. Payload:
+    /// {
+    ///   "agent_name": String,
+    ///   "agent_source": "builtin|project|global|on_demand",
+    ///   "objective": String,
+    /// }
+    SubagentStarted,
+    /// Emitted when a sub-agent finishes. Payload includes per-agent cost metrics (D4):
+    /// {
+    ///   "agent_name": String,
+    ///   "agent_source": String,
+    ///   "success": bool,
+    ///   "summary": String,
+    ///   "duration_ms": u64,
+    ///   "tokens_used": u64,
+    ///   "input_tokens": u64,
+    ///   "output_tokens": u64,
+    ///   "llm_calls": u64,
+    ///   "iterations_used": u64,
+    /// }
+    SubagentCompleted,
+    /// Phase 18 (sota-gaps-plan): emitted by the parent right BEFORE the
+    /// sub-agent spawn happens, after the handoff guardrails have run.
+    /// Provides full audit trail of what was allowed/blocked and by whom.
+    /// Payload: {
+    ///   "source_agent": String,           // parent agent name (or "main")
+    ///   "target_agent": String,           // requested agent name
+    ///   "objective": String,              // the objective string
+    ///   "decision": "allow|block|warn",   // overall outcome
+    ///   "reason": Option<String>,         // present when decision != allow
+    ///   "guardrails_evaluated": Vec<String>,  // ids of guardrails run
+    ///   "blocked_by": Option<String>,     // first blocker id (if any)
+    /// }
+    HandoffEvaluated,
+
+    /// T1.3 supply-chain audit: emitted when a plugin directory is loaded.
+    /// Payload: {
+    ///   "name": String,           // manifest.name
+    ///   "dir": String,             // plugin directory (display-only)
+    ///   "manifest_sha256": String, // sha256 hex of plugin.toml
+    ///   "tool_count": u64,
+    ///   "hook_count": u64,
+    /// }
+    PluginLoaded,
 }
 
 /// Scope of a learned constraint.
@@ -231,6 +277,14 @@ impl EventType {
             // Streaming — partial output (excluded from trajectories)
             EventType::ReasoningDelta => EventKind::Streaming,
             EventType::ContentDelta => EventKind::Streaming,
+
+            // Sub-agent lifecycle (Phase 3)
+            EventType::SubagentStarted => EventKind::Lifecycle,
+            EventType::SubagentCompleted => EventKind::Lifecycle,
+            // Phase 18 (sota-gaps): handoff guardrail audit trail
+            EventType::HandoffEvaluated => EventKind::Lifecycle,
+            // T1.3 supply-chain audit: plugin load with sha256 hash
+            EventType::PluginLoaded => EventKind::Lifecycle,
         }
     }
 }
@@ -260,12 +314,16 @@ impl std::fmt::Display for EventType {
             EventType::DecisionMade => write!(f, "DecisionMade"),
             EventType::ConstraintLearned => write!(f, "ConstraintLearned"),
             EventType::SensorExecuted => write!(f, "SensorExecuted"),
+            EventType::SubagentStarted => write!(f, "SubagentStarted"),
+            EventType::SubagentCompleted => write!(f, "SubagentCompleted"),
+            EventType::HandoffEvaluated => write!(f, "HandoffEvaluated"),
+            EventType::PluginLoaded => write!(f, "PluginLoaded"),
         }
     }
 }
 
 /// All EventType variants for iteration in tests.
-pub const ALL_EVENT_TYPES: [EventType; 22] = [
+pub const ALL_EVENT_TYPES: [EventType; 26] = [
     EventType::TaskCreated,
     EventType::TaskStateChanged,
     EventType::ToolCallQueued,
@@ -288,6 +346,10 @@ pub const ALL_EVENT_TYPES: [EventType; 22] = [
     EventType::DecisionMade,
     EventType::ConstraintLearned,
     EventType::SensorExecuted,
+    EventType::SubagentStarted,
+    EventType::SubagentCompleted,
+    EventType::HandoffEvaluated,
+    EventType::PluginLoaded,
 ];
 
 /// A domain event representing a significant occurrence in the system.
@@ -618,8 +680,12 @@ mod tests {
         assert!(ALL_EVENT_TYPES.contains(&EventType::HypothesisInvalidated));
         assert!(ALL_EVENT_TYPES.contains(&EventType::DecisionMade));
         assert!(ALL_EVENT_TYPES.contains(&EventType::ConstraintLearned));
-        // 22 since PLAN_CONTEXT_WIRING Phase 4 added RetrievalExecuted.
-        assert_eq!(ALL_EVENT_TYPES.len(), 22);
+        // Track A — Phase 3 added SubagentStarted + SubagentCompleted (was 22).
+        // sota-gaps Phase 18 added HandoffEvaluated → 25.
+        // T1.3 added PluginLoaded → 26.
+        assert_eq!(ALL_EVENT_TYPES.len(), 26);
+        assert!(ALL_EVENT_TYPES.contains(&EventType::HandoffEvaluated));
+        assert!(ALL_EVENT_TYPES.contains(&EventType::PluginLoaded));
     }
 
     // --- P-1 BF2: Contextual validation tests ---

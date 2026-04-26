@@ -3,9 +3,10 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use theo_agent_runtime::AgentConfig;
-use theo_agent_runtime::event_bus::EventBus;
-use theo_agent_runtime::pilot::{PilotConfig, PilotLoop, PilotResult, load_promise};
+// T1.2: route runtime types through the theo-application facade.
+use theo_application::facade::agent::{
+    AgentConfig, EventBus, PilotConfig, PilotLoop, PilotResult, load_promise,
+};
 use theo_domain::graph_context::GraphContextProvider;
 
 use crate::render::style::{StyleCaps, accent, bold, dim, error, success, warn};
@@ -46,7 +47,7 @@ pub async fn run_pilot(
     event_bus.subscribe(cli_renderer);
 
     // Check if there's a roadmap to execute from (before moving project_dir)
-    let roadmap_path = theo_agent_runtime::roadmap::find_latest_roadmap(&project_dir);
+    let roadmap_path = theo_application::facade::agent::find_latest_roadmap(&project_dir);
 
     // Initialize GRAPHCTX — fire-and-forget background build.
     // Disabled entirely when THEO_NO_GRAPHCTX=1.
@@ -89,7 +90,8 @@ pub async fn run_pilot(
 
     // Execute from roadmap if available, otherwise normal loop
     let result = if let Some(ref rmap) = roadmap_path {
-        let tasks = theo_agent_runtime::roadmap::parse_roadmap(rmap).unwrap_or_default();
+        let tasks =
+            theo_application::facade::agent::parse_roadmap(rmap).unwrap_or_default();
         let pending = tasks.iter().filter(|t| !t.completed).count();
         if pending > 0 {
             eprintln!(
@@ -177,7 +179,7 @@ fn truncate(s: &str, max: usize) -> String {
 // PilotRenderer — loop-level events
 // ---------------------------------------------------------------------------
 
-use theo_agent_runtime::event_bus::EventListener;
+use theo_application::facade::agent::EventListener;
 use theo_domain::event::{DomainEvent, EventType};
 
 struct PilotRenderer {

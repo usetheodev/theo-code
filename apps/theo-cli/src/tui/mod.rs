@@ -29,12 +29,13 @@ use futures::FutureExt;
 use ratatui::prelude::*;
 use tokio::sync::mpsc;
 
-use theo_agent_runtime::config::{AgentConfig, AgentMode, system_prompt_for_mode};
-use theo_agent_runtime::event_bus::EventBus;
+// T1.2: route runtime types through the theo-application facade.
+use theo_application::facade::agent::config::{AgentConfig, AgentMode, system_prompt_for_mode};
+use theo_application::facade::agent::EventBus;
 #[allow(deprecated)]
-use theo_agent_runtime::AgentLoop;
-use theo_infra_llm::types::Message;
-use theo_tooling::registry::create_default_registry;
+use theo_application::facade::agent::AgentLoop;
+use theo_application::facade::llm::Message;
+use theo_application::facade::tooling::create_default_registry;
 
 use app::{Msg, TuiState};
 
@@ -62,6 +63,7 @@ pub async fn run(
     project_dir: PathBuf,
     provider_name: String,
     initial_prompt: Option<String>,
+    injections: theo_application::use_cases::run_agent_session::SubagentInjections,
 ) -> anyhow::Result<()> {
     // Ensure log directory exists
     let _ = std::fs::create_dir_all(dirs_path());
@@ -223,7 +225,7 @@ pub async fn run(
                                     // Login must run inline (not via app::update)
                                     // because it needs async IO + force draw
                                     app::update(&mut state, cmd_msg); // shows "Starting..."
-                                    let auth = theo_infra_auth::OpenAIAuth::with_default_store();
+                                    let auth = theo_application::facade::auth::OpenAIAuth::with_default_store();
 
                                     if let Ok(Some(tokens)) = auth.get_tokens()
                                         && !tokens.is_expired() {
@@ -288,12 +290,12 @@ pub async fn run(
                                     let server_url = if let Msg::LoginServer(ref u) = cmd_msg { u.clone() } else { unreachable!() };
                                     app::update(&mut state, cmd_msg);
                                     let http = reqwest::Client::new();
-                                    let config = theo_infra_auth::device_flow::DeviceFlowConfig::new(&server_url);
+                                    let config = theo_application::facade::auth::device_flow::DeviceFlowConfig::new(&server_url);
 
                                     app::update(&mut state, Msg::Notify("Requesting device code...".into()));
                                     terminal.draw(|frame| view::draw(frame, &state))?;
 
-                                    match theo_infra_auth::device_flow::start_device_flow(&http, &config).await {
+                                    match theo_application::facade::auth::device_flow::start_device_flow(&http, &config).await {
                                         Ok(code) => {
                                             app::update(&mut state, Msg::Notify("─────────────────────────────────────".into()));
                                             app::update(&mut state, Msg::Notify(format!("1. Open: {}", code.verification_url)));
@@ -316,9 +318,12 @@ pub async fn run(
                                             let poll_code = code.clone();
                                             tokio::spawn(async move {
                                                 let http = reqwest::Client::new();
-                                                match theo_infra_auth::device_flow::poll_device_flow(&http, &poll_config, &poll_code).await {
+                                                match theo_application::facade::auth::device_flow::poll_device_flow(&http, &poll_config, &poll_code).await {
                                                     Ok(tokens) => {
-                                                        // Set the access token as env var for the agent
+                                                        // Set the access token as env var for the agent.
+                                                        // SAFETY: the TUI runtime owns the process-wide env table
+                                                        // and this call happens on the single render-loop task;
+                                                        // no other thread reads/writes env vars concurrently.
                                                         unsafe { std::env::set_var("OPENAI_API_KEY", &tokens.access_token); }
                                                         let _ = poll_tx.send(Msg::LoginComplete("✓ Authenticated! Provider ready.".into())).await;
                                                     }
@@ -355,7 +360,7 @@ pub async fn run(
                     let arg = arg.clone();
                     tokio::spawn(async move {
                         let memory_root = dirs_path().join("memory");
-                        let store = theo_tooling::memory::FileMemoryStore::for_project(&memory_root, &project_dir);
+                        let store = theo_application::facade::tooling::memory::FileMemoryStore::for_project(&memory_root, &project_dir);
                         let result = if arg.is_empty() || arg == "list" {
                             match store.list().await {
                                 Ok(memories) if memories.is_empty() => "No memories for this project.".to_string(),
@@ -392,7 +397,7 @@ pub async fn run(
                 }
                 Msg::SkillsCommand => {
                     let project_dir = project_dir.clone();
-                    let mut registry = theo_agent_runtime::skill::SkillRegistry::new();
+                    let mut registry = theo_application::facade::agent::skill::SkillRegistry::new();
                     registry.load_bundled();
                     let skills_dir = project_dir.join(".theo").join("skills");
                     if skills_dir.exists() {
@@ -468,6 +473,7 @@ pub async fn run(
                 let task_messages = session_messages.clone();
                 let task_prompt = prompt.clone();
                 let task_msg_tx = msg_tx.clone();
+                let injections_for_task = injections.clone();
 
                 // Record in session
                 session_messages.push(Message::user(&prompt));
@@ -476,11 +482,16 @@ pub async fn run(
                     tui_log("Agent task spawned");
                     let mut cfg = task_config;
                     cfg.system_prompt = system_prompt_for_mode(AgentMode::Agent);
+                    // Phase 52 (prompt-ab): allow operator to override system
+                    // prompt via THEO_SYSTEM_PROMPT_FILE for interactive runs
+                    // too. Same fallback semantics as headless.
+                    if let Some(custom) = crate::prompt_override::override_from_env() {
+                        cfg.system_prompt = custom;
+                    }
                     cfg.mode = AgentMode::Agent;
 
                     let registry = create_default_registry();
-                    #[allow(deprecated)]
-                    let agent = AgentLoop::new(cfg.clone(), registry);
+                    let agent = injections_for_task.apply_to(AgentLoop::new(cfg.clone(), registry));
 
                     tui_log("AgentLoop created, calling run_with_history...");
                     tui_log(&format!("  api_key len: {}", cfg.api_key.as_ref().map(|k| k.len()).unwrap_or(0)));
@@ -511,6 +522,8 @@ pub async fn run(
         // Toggle mouse capture for copy mode
         // When copy_mode is on, disable mouse capture so terminal handles selection
         static mut LAST_COPY_MODE: bool = false;
+        // SAFETY: `LAST_COPY_MODE` is read and written from exactly one task —
+        // the single render-loop future. No concurrent access possible.
         unsafe {
             if state.copy_mode != LAST_COPY_MODE {
                 if state.copy_mode {

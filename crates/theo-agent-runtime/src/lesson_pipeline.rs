@@ -1,4 +1,4 @@
-//! Lesson extraction and persistence (Phase 2 T2.1, G5).
+//! Lesson extraction and persistence .
 //!
 //! Plan: `docs/plans/PLAN_MEMORY_SUPERIORITY.md` §Task 2.1.
 //!
@@ -119,7 +119,9 @@ pub fn run_gates_and_persist(
     }
     let existing = load_existing_lessons(project_dir);
     let dir = project_dir.join(".theo/memory/lessons");
-    let _ = std::fs::create_dir_all(&dir);
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        crate::fs_errors::warn_fs_error("lesson_pipeline/mkdir", &dir, &e);
+    }
     let mut approved = 0usize;
     let mut rejected = 0usize;
     for candidate in candidates {
@@ -134,17 +136,20 @@ pub fn run_gates_and_persist(
                         }
                     }
                     Err(e) => {
-                        eprintln!(
-                            "[theo-agent-runtime::lesson_pipeline] serialize {id} failed: {e}"
+                        tracing::warn!(
+                            id = %id,
+                            error = %e,
+                            "lesson_pipeline: serialize lesson failed"
                         );
                     }
                 }
             }
             Err(reject) => {
                 rejected += 1;
-                eprintln!(
-                    "[theo-agent-runtime::lesson_pipeline] {id} rejected: {}",
-                    reject.describe()
+                tracing::debug!(
+                    id = %id,
+                    reason = %reject.describe(),
+                    "lesson_pipeline: lesson rejected by quality filter"
                 );
             }
         }

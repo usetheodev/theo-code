@@ -1,0 +1,117 @@
+# cargo-deny policy for the theo-code workspace (T3.2).
+#
+# Four policy sections, listed in increasing strictness:
+#   advisories  — block known CVEs (RustSec advisory DB)
+#   bans        — flag duplicate major versions and banned crates
+#   licenses    — whitelist of acceptable licenses
+#   sources     — only crates.io and the workspace itself
+#
+# Baseline posture: WARN on new issues so `cargo deny check` is useful but
+# non-blocking until the team sweeps the pre-existing debt (T3.1 baseline
+# shows 2 vulnerabilities + 25 unmaintained warnings). Once the baseline is
+# green the `warn` knobs can be flipped to `deny`.
+
+[graph]
+# Only check the default platform triples. Avoids false positives from
+# rarely-used targets.
+targets = []
+all-features = false
+no-default-features = false
+
+# ── Advisories ──────────────────────────────────────────────────────────────
+[advisories]
+version = 2
+# "workspace" = only direct workspace deps trigger unmaintained errors.
+# Transitive unmaintained warnings still show in output but don't fail CI.
+# Upgrade to "all" once the Tauri / syntect / idna deps are migrated.
+unmaintained = "workspace"
+ignore = [
+  # Pre-existing baseline (2026-04-23 `cargo audit` + `cargo deny check`).
+  # Document each ignore with a reason + remediation plan.
+  # RUSTSEC-2024-0437 (protobuf) is only pulled in under the optional `scip`
+  # feature and therefore does not appear in `cargo deny check` default
+  # graph. Keep it documented in the T3.1 baseline instead.
+  "RUSTSEC-2026-0104",  # rustls-webpki reachable panic (awaiting upstream fix propagation)
+  # ── Transitive unmaintained crates (no in-workspace fix available) ──
+  # These are dragged in by Tauri / syntect / ratatui; replacing the
+  # toplevel dep is out of scope for the audit remediation.
+  "RUSTSEC-2024-0320",  # yaml-rust (via syntect)
+  "RUSTSEC-2025-0141",  # bincode 1.x (scheduled to move off per T3.4)
+  "RUSTSEC-2025-0057",  # fxhash (via indirect deps)
+  "RUSTSEC-2024-0384",  # instant (via indirect deps)
+  "RUSTSEC-2024-0436",  # paste (via indirect deps)
+  "RUSTSEC-2024-0370",  # proc-macro-error (via legacy proc macros)
+  "RUSTSEC-2024-0388",  # number_prefix (via indicatif ecosystem)
+  "RUSTSEC-2024-0411",  # gdkwayland-sys (Tauri GTK3)
+  "RUSTSEC-2024-0412",  # gdk (Tauri GTK3)
+  "RUSTSEC-2024-0413",  # atk (Tauri GTK3)
+  "RUSTSEC-2024-0414",  # gtk (Tauri GTK3)
+  "RUSTSEC-2024-0415",  # gtk-sys (Tauri GTK3)
+  "RUSTSEC-2024-0416",  # atk-sys (Tauri GTK3)
+  "RUSTSEC-2024-0417",  # gdkx11 (Tauri GTK3)
+  "RUSTSEC-2024-0418",  # gdk-sys (Tauri GTK3)
+  "RUSTSEC-2024-0419",  # gdkx11-sys (Tauri GTK3)
+  "RUSTSEC-2024-0420",  # gtk3-macros (Tauri GTK3)
+  "RUSTSEC-2024-0429",  # glib (ecosystem)
+  "RUSTSEC-2024-0458",  # unic-char-property (via idna)
+  "RUSTSEC-2024-0459",  # unic-char-range (via idna)
+  "RUSTSEC-2024-0460",  # unic-common (via idna)
+  "RUSTSEC-2024-0461",  # unic-ucd-ident (via idna)
+  "RUSTSEC-2024-0462",  # unic-ucd-version (via idna)
+]
+
+# ── Bans ────────────────────────────────────────────────────────────────────
+[bans]
+multiple-versions     = "warn"   # Tauri brings multiple old deps; flip to deny later
+# Our workspace uses `theo-* = { path = "…" }` internal deps, which cargo-deny
+# treats as wildcard. `allow-wildcard-paths` only helps for PRIVATE crates
+# (publish = false). Baseline posture is "warn" so CI is green; migrate to
+# "deny" once every crate either carries a version= field or is marked
+# publish = false.
+wildcards             = "warn"
+allow-wildcard-paths  = true
+highlight             = "all"
+# Crates explicitly disallowed (empty baseline).
+deny = []
+# Crates that appear multiple times are listed here to avoid repeat noise.
+# Populate after `cargo deny check bans` to triage.
+skip = []
+skip-tree = []
+
+# ── Licenses ────────────────────────────────────────────────────────────────
+[licenses]
+version = 2
+# Permissive licenses we accept without question.
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Unicode-DFS-2016",
+  "Unicode-3.0",
+  "Zlib",
+  "CC0-1.0",
+  "MPL-2.0",
+  "Unlicense",
+  "0BSD",
+  "CDLA-Permissive-2.0",
+  # Boost Software License 1.0 — permissive, OSI + FSF approved.
+  # Brought in by clipboard-win (transitive: rustyline → theo-cli).
+  "BSL-1.0",
+  # University of Illinois/NCSA — permissive, OSI + FSF approved.
+  # Brought in by libfuzzer-sys (transitive: fastembed → retrieval), compound
+  # license "(MIT OR Apache-2.0) AND NCSA". SPDX allows the NCSA disjunct.
+  "NCSA",
+]
+confidence-threshold = 0.8
+# Clarifications for crates whose license is recognised manually.
+exceptions = []
+
+# ── Sources ─────────────────────────────────────────────────────────────────
+[sources]
+unknown-registry = "deny"
+unknown-git      = "warn"      # some deps pull from git; audit and allowlist as they appear
+allow-registry   = ["https://github.com/rust-lang/crates.io-index"]
+allow-git        = []

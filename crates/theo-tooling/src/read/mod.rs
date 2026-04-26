@@ -70,17 +70,48 @@ impl ReadTool {
         false
     }
 
+    /// Canonicalize the user-supplied path against `project_dir`.
+    ///
+    /// We do **not** reject paths that escape the project here — the caller
+    /// still checks [`is_inside_project`] and may require an
+    /// `ExternalDirectory` permission. What we *do* is canonicalize, so
+    /// `..` traversal, symlinks, and redundant separators cannot fool the
+    /// `is_inside_project` comparison (T2.3 defence against confused-deputy
+    /// path-traversal).
+    ///
+    /// Returns the raw join when canonicalization fails (e.g. the path
+    /// does not exist yet); the downstream `is_inside_project` check will
+    /// still use the canonical root.
     fn resolve_path(file_path: &str, project_dir: &Path) -> PathBuf {
-        let path = PathBuf::from(file_path);
-        if path.is_absolute() {
-            path
-        } else {
-            project_dir.join(path)
+        match crate::path::absolutize(project_dir, file_path) {
+            Ok(canonical) => canonical,
+            Err(_) => {
+                // Fallback to the simple join — the downstream I/O call
+                // will fail explicitly if the path truly is invalid, and
+                // is_inside_project still works with the best-effort path.
+                let path = PathBuf::from(file_path);
+                if path.is_absolute() {
+                    path
+                } else {
+                    project_dir.join(path)
+                }
+            }
         }
     }
 
+    /// Check whether a (canonical) path is inside the project directory.
+    ///
+    /// Uses canonical-root comparison via [`crate::path::is_contained`] so
+    /// symlink + `..` attacks cannot make an out-of-root path appear to be
+    /// inside the project.
     fn is_inside_project(path: &Path, project_dir: &Path) -> bool {
-        path.starts_with(project_dir)
+        // If either side cannot be canonicalized, fall back to the simple
+        // prefix check. Canonicalization failure is rare and means the path
+        // does not exist — in which case the textual comparison is still
+        // the best we can do.
+        crate::path::is_contained(path, project_dir).unwrap_or_else(|_| {
+            path.starts_with(project_dir)
+        })
     }
 
     fn format_lines_with_numbers(content: &str, offset: usize) -> String {

@@ -68,7 +68,12 @@ define_identifier!(
 );
 
 /// Simple random u64 using system entropy without external crates.
-fn random_u64() -> u64 {
+///
+/// Exposed as `pub` so other crates (notably `theo-agent-runtime`'s
+/// `subagent::generate_run_id` and `session_tree::EntryId::generate`)
+/// can reuse the same collision-safe entropy source instead of relying
+/// on wall-clock XOR (T4.6 / find_p4_010 / find_p5_008).
+pub fn random_u64() -> u64 {
     use std::collections::hash_map::DefaultHasher;
 
     let seed = std::time::SystemTime::now()

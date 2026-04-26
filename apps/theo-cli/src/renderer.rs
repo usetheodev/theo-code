@@ -11,7 +11,10 @@
 #![allow(dead_code)] // Scaffolded helpers — kept for upcoming TUI features.
 use std::sync::Mutex;
 
-use theo_agent_runtime::event_bus::EventListener;
+// T1.2: route the event-bus types through the theo-application facade
+// so `apps/theo-cli` respects the "apps → theo-application" contract
+// without needing a direct theo-agent-runtime dependency.
+use theo_application::facade::agent::EventListener;
 use theo_domain::event::{DomainEvent, EventType};
 
 use crate::render::streaming::StreamingMarkdownRenderer;

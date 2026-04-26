@@ -376,7 +376,17 @@ impl Pipeline {
 
         // Build scorer on first context assembly (lazy — avoids 20s fastembed in stats/cluster-only paths)
         self.ensure_scorer();
-        let scorer = self.cached_scorer.as_ref().unwrap();
+        // T2.5: prefer `let Some` over `.as_ref().unwrap()`; the early-return
+        // above already handled the empty-communities case, but the `let Some`
+        // reads honestly instead of relying on a silent invariant.
+        let Some(scorer) = self.cached_scorer.as_ref() else {
+            return ContextPayload {
+                items: vec![],
+                total_tokens: 0,
+                budget_tokens: self.config.token_budget,
+                exploration_hints: String::new(),
+            };
+        };
 
         // Score communities
         let scored = scorer.score(query, &self.communities, &self.graph);
@@ -409,7 +419,14 @@ impl Pipeline {
         }
 
         self.ensure_scorer();
-        let scorer = self.cached_scorer.as_ref().unwrap();
+        let Some(scorer) = self.cached_scorer.as_ref() else {
+            return ContextPayload {
+                items: vec![],
+                total_tokens: 0,
+                budget_tokens: self.config.token_budget,
+                exploration_hints: String::new(),
+            };
+        };
         let scored = scorer.score(query, &self.communities, &self.graph);
 
         let budget = BudgetConfig::default_16k();

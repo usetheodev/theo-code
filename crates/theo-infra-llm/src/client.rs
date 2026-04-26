@@ -195,6 +195,15 @@ impl LlmClient {
             .await
             .map_err(|e| LlmError::Parse(format!("read stream: {e}")))?;
 
+        // Phase 29 follow-up debug: when THEO_DEBUG_CODEX=1, dump first
+        // 4KB of the SSE body to stderr so we can see what the model
+        // actually returned (helps diagnose tool_choice issues).
+        if std::env::var("THEO_DEBUG_CODEX").is_ok() {
+            eprintln!(
+                "[theo:codex] raw SSE body (first 4KB):\n{}\n[theo:codex] --- end ---",
+                &full_body[..full_body.len().min(4096)]
+            );
+        }
         codex::from_codex_stream(&full_body).ok_or_else(|| {
             LlmError::Parse(format!(
                 "failed to parse Codex stream response. Body start: {}",
@@ -245,6 +254,17 @@ impl LlmClient {
             use futures::StreamExt;
 
             let body = codex::to_codex_body(request);
+            // THEO_DEBUG_CODEX=1 dumps outgoing tool_choice + raw SSE
+            // function_call extracts to stderr. Used during gap #7
+            // diagnostics; left in for future operator debugging.
+            if std::env::var("THEO_DEBUG_CODEX").is_ok() {
+                eprintln!(
+                    "[theo:codex] outgoing tool_choice = {}",
+                    body.get("tool_choice")
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| "<absent>".into())
+                );
+            }
             let resolved_key = self.resolve_api_key().await;
             let builder = self.apply_auth_with_key(self.http.post(&url).json(&body), &resolved_key);
             let response = builder.send().await?;
@@ -271,8 +291,13 @@ impl LlmClient {
                     let line = buffer[..newline_pos].to_string();
                     buffer = buffer[newline_pos + 1..].to_string();
 
+                    // T2.7: bound each SSE chunk to the default 10 MiB limit
+                    // before serde allocates.
                     if let Some(data) = line.strip_prefix("data: ")
-                        && let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
+                        && let Ok(json) = theo_domain::safe_json::from_str_bounded::<serde_json::Value>(
+                            data,
+                            theo_domain::safe_json::DEFAULT_JSON_LIMIT,
+                        ) {
                             let event_type =
                                 json.get("type").and_then(|v| v.as_str()).unwrap_or("");
 
@@ -304,8 +329,64 @@ impl LlmClient {
             }
 
             // Build ChatResponse from the accumulated SSE body
-            codex::from_codex_stream(&full_body)
-                .ok_or_else(|| LlmError::Parse("failed to parse Codex stream".to_string()))
+            if std::env::var("THEO_DEBUG_CODEX").is_ok() {
+                // Dump entire SSE body to /tmp/codex-last.sse for offline analysis
+                if let Ok(p) = std::env::var("THEO_DUMP_SSE") {
+                    // Append a counter so each call dumps to a unique file.
+                    use std::sync::atomic::{AtomicU32, Ordering};
+                    static COUNTER: AtomicU32 = AtomicU32::new(0);
+                    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+                    let path = format!("{}.{}", p, n);
+                    let _ = std::fs::write(&path, full_body.as_bytes());
+                    eprintln!("[theo:codex] dumped full SSE to {}", path);
+                }
+                let chunk_count = full_body.matches("\n\n").count();
+                let function_count = full_body.matches("\"function_call\"").count();
+                eprintln!(
+                    "[theo:codex] streaming completed: {} chunks, {} function_call mentions, {} bytes",
+                    chunk_count,
+                    function_count,
+                    full_body.len()
+                );
+                if function_count > 0 {
+                    // Surface every function_call event for inspection
+                    let mut search_start = 0;
+                    let mut occurrence = 0;
+                    while let Some(idx) = full_body[search_start..].find("\"function_call\"") {
+                        occurrence += 1;
+                        let abs = search_start + idx;
+                        let start = abs.saturating_sub(50);
+                        let end = (abs + 400).min(full_body.len());
+                        eprintln!(
+                            "[theo:codex] fc#{}: {}",
+                            occurrence,
+                            &full_body[start..end].replace('\n', " ")
+                        );
+                        search_start = abs + 1;
+                    }
+                }
+            }
+            let parsed = codex::from_codex_stream(&full_body)
+                .ok_or_else(|| LlmError::Parse("failed to parse Codex stream".to_string()))?;
+            if std::env::var("THEO_DEBUG_CODEX").is_ok() {
+                let tc_count = parsed
+                    .choices
+                    .first()
+                    .and_then(|c| c.message.tool_calls.as_ref())
+                    .map(|v| v.len())
+                    .unwrap_or(0);
+                let content_len = parsed
+                    .choices
+                    .first()
+                    .and_then(|c| c.message.content.as_deref())
+                    .map(|s| s.len())
+                    .unwrap_or(0);
+                eprintln!(
+                    "[theo:codex] parsed: tool_calls={} content_len={}",
+                    tc_count, content_len
+                );
+            }
+            Ok(parsed)
         } else {
             // OA-compatible: use SseStream
             use futures::StreamExt;

@@ -2,14 +2,17 @@
 name = "theo"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [dependencies]
+# T1.2: apps depend only on theo-application + theo-api-contracts + theo-domain
+# per the architecture contract (ADR-010). Lower-layer crates reach apps
+# through the `theo_application::facade` module.
 theo-domain.workspace = true
 theo-application.workspace = true
-theo-agent-runtime.workspace = true
-theo-tooling.workspace = true
-theo-infra-auth = { path = "../../crates/theo-infra-auth" }
-theo-infra-llm = { path = "../../crates/theo-infra-llm" }
+# T3.3 / find_p3_009 / ADR-023 SUNSET: `theo-agent-runtime` is no longer
+# a direct CLI dependency. Admin commands access runtime types via
+# `theo_application::cli_runtime::*` re-exports.
 tokio.workspace = true
 async-trait.workspace = true
 clap.workspace = true
@@ -36,12 +39,20 @@ chrono = "0.4"
 reqwest.workspace = true
 axum.workspace = true
 tower-http.workspace = true
+# sota-gaps Phase 15: SSE stream for /api/agents/events.
+async-stream = "0.3"
 
 [dev-dependencies]
 insta.workspace = true
 proptest.workspace = true
 tempfile.workspace = true
 criterion.workspace = true
+# T5.5 — CLI smoke tests
+assert_cmd = "2"
+predicates = "3"
+# sota-gaps Phase 15: axum endpoint tests use tower::ServiceExt::oneshot
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
 
 [[bench]]
 name = "streaming_markdown"
@@ -55,3 +66,7 @@ harness = false
 default = ["tantivy-backend"]
 tantivy-backend = ["theo-application/tantivy-backend"]
 dense-retrieval = ["theo-application/dense-retrieval"]
+# Phase 40 (otlp-exporter-plan) — passthrough to theo-application/otel.
+# When active, theo-cli main() initializes the OTLP exporter at startup
+# (only if OTLP_ENDPOINT env var is set; absent → no-op).
+otel = ["theo-application/otel"]

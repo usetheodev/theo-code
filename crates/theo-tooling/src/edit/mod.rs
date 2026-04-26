@@ -20,13 +20,29 @@ impl EditTool {
         Self
     }
 
+    /// Canonicalize the user-supplied path against `project_dir`.
+    ///
+    /// Mirrors `ReadTool::resolve_path` and `WriteTool::resolve_path`:
+    /// uses `crate::path::absolutize` so `..` traversal and symlinks are
+    /// resolved before downstream path checks (T2.3).
     fn resolve_path(file_path: &str, project_dir: &Path) -> PathBuf {
-        let path = PathBuf::from(file_path);
-        if path.is_absolute() {
-            path
-        } else {
-            project_dir.join(path)
+        match crate::path::absolutize(project_dir, file_path) {
+            Ok(canonical) => canonical,
+            Err(_) => {
+                let path = PathBuf::from(file_path);
+                if path.is_absolute() {
+                    path
+                } else {
+                    project_dir.join(path)
+                }
+            }
         }
+    }
+
+    /// Canonical-root containment check; see `crate::path::is_contained`.
+    fn is_inside_project(path: &Path, project_dir: &Path) -> bool {
+        crate::path::is_contained(path, project_dir)
+            .unwrap_or_else(|_| path.starts_with(project_dir))
     }
 
     /// Detect the dominant line ending in content
@@ -223,6 +239,21 @@ impl Tool for EditTool {
         }
 
         let resolved = Self::resolve_path(&file_path_str, &ctx.project_dir);
+
+        // Permission gate when the resolved path escapes the workspace.
+        // Mirrors ReadTool / WriteTool behaviour (T2.3) so that `edit`
+        // cannot silently touch files outside the project via `..` or
+        // symlink traversal.
+        if !Self::is_inside_project(&resolved, &ctx.project_dir) {
+            let dir = resolved.parent().unwrap_or(&resolved);
+            let pattern = format!("{}/*", dir.display()).replace('\\', "/");
+            permissions.record(PermissionRequest {
+                permission: PermissionType::ExternalDirectory,
+                patterns: vec![pattern.clone()],
+                always: vec![pattern],
+                metadata: serde_json::json!({}),
+            });
+        }
 
         // Creating new file when old_string is empty
         if old_string.is_empty() {

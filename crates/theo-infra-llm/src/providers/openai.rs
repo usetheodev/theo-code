@@ -612,7 +612,12 @@ pub fn from_chunk(chunk: &str) -> Result<CommonChunk, String> {
         .find(|l| l.starts_with("data: "))
         .ok_or_else(|| chunk.to_string())?;
 
-    let json: Value = serde_json::from_str(&data_line[6..]).map_err(|_| chunk.to_string())?;
+    // T2.7: bound the SSE chunk to 10 MiB.
+    let json: Value = theo_domain::safe_json::from_str_bounded(
+        &data_line[6..],
+        theo_domain::safe_json::DEFAULT_JSON_LIMIT,
+    )
+    .map_err(|_| chunk.to_string())?;
     let resp_obj = json
         .get("response")
         .cloned()

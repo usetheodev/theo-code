@@ -203,6 +203,23 @@ impl ChatRequest {
         self
     }
 
+    /// Phase 29 follow-up (sota-gaps-followup) — closes gap #7.
+    /// Override the `tool_choice` field with an arbitrary string so the
+    /// caller can force the model to invoke a tool:
+    ///
+    /// - `"auto"` (default) — model decides
+    /// - `"required"` — model MUST call a tool
+    /// - `"none"` — model MUST NOT call a tool
+    ///
+    /// Per-tool forcing (`{"type":"function","function":{"name":"X"}}`)
+    /// requires switching the field to a JSON value, which is a future
+    /// breaking change; for now we cover the OpenAI/Anthropic-compatible
+    /// string variants which fix gap #7 (Codex bypassing delegate_task).
+    pub fn with_tool_choice(mut self, choice: impl Into<String>) -> Self {
+        self.tool_choice = Some(choice.into());
+        self
+    }
+
     pub fn with_max_tokens(mut self, max_tokens: u32) -> Self {
         self.max_tokens = Some(max_tokens);
         self
@@ -268,5 +285,45 @@ impl ChatResponse {
     /// Get the finish reason of the first choice.
     pub fn finish_reason(&self) -> Option<&str> {
         self.choices.first()?.finish_reason.as_deref()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dummy_tool() -> ToolDefinition {
+        ToolDefinition::new("foo", "desc", serde_json::json!({"type": "object"}))
+    }
+
+    #[test]
+    fn with_tools_defaults_tool_choice_to_auto() {
+        let req = ChatRequest::new("m", vec![]).with_tools(vec![dummy_tool()]);
+        assert_eq!(req.tool_choice.as_deref(), Some("auto"));
+    }
+
+    #[test]
+    fn with_tool_choice_overrides_to_required() {
+        let req = ChatRequest::new("m", vec![])
+            .with_tools(vec![dummy_tool()])
+            .with_tool_choice("required");
+        assert_eq!(req.tool_choice.as_deref(), Some("required"));
+    }
+
+    #[test]
+    fn with_tool_choice_overrides_to_none() {
+        let req = ChatRequest::new("m", vec![])
+            .with_tools(vec![dummy_tool()])
+            .with_tool_choice("none");
+        assert_eq!(req.tool_choice.as_deref(), Some("none"));
+    }
+
+    #[test]
+    fn with_tool_choice_serializes_in_request_json() {
+        let req = ChatRequest::new("m", vec![])
+            .with_tools(vec![dummy_tool()])
+            .with_tool_choice("required");
+        let json = serde_json::to_string(&req).unwrap();
+        assert!(json.contains("\"tool_choice\":\"required\""));
     }
 }

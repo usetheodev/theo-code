@@ -1,5 +1,8 @@
+pub mod agents_dashboard;
 pub mod auth;
 pub mod context_assembler;
+pub mod guardrail_loader;
+pub mod router_loader;
 pub mod conversion;
 pub mod extraction;
 pub mod graph_context_service;

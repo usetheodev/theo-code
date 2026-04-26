@@ -7,9 +7,35 @@
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use std::sync::OnceLock;
 
 use regex::Regex;
 use serde_json::Value;
+
+/// Compiled-once regex helpers (T2.5): moving from per-call `Regex::new(…).unwrap()`
+/// removes panics from the hot path and avoids re-parsing the same literal on every
+/// normalization call.
+///
+/// Each pattern is a compile-time literal with no dynamic input; `Regex::new` is
+/// therefore guaranteed to succeed. The explicit `expect` documents the invariant.
+fn cached(slot: &'static OnceLock<Regex>, pattern: &'static str) -> &'static Regex {
+    slot.get_or_init(|| {
+        Regex::new(pattern).unwrap_or_else(|e| {
+            // This branch is unreachable for a valid compile-time literal;
+            // if it ever fires we want the regex pattern in the message.
+            panic!("static normalizer regex {pattern:?} failed to compile: {e}")
+        })
+    })
+}
+
+static ANSI_RE: OnceLock<Regex> = OnceLock::new();
+static TMP_RE: OnceLock<Regex> = OnceLock::new();
+static ISO_TS_RE: OnceLock<Regex> = OnceLock::new();
+static UNIX_TS_RE: OnceLock<Regex> = OnceLock::new();
+static PID_RE: OnceLock<Regex> = OnceLock::new();
+static HEX_HASH_RE: OnceLock<Regex> = OnceLock::new();
+static ADDR_RE: OnceLock<Regex> = OnceLock::new();
+static UUID_RE: OnceLock<Regex> = OnceLock::new();
 
 /// Trait implemented by all tool-specific normalizers.
 pub trait ToolNormalizer: Send + Sync {
@@ -39,19 +65,23 @@ pub struct BashNormalizer;
 
 impl BashNormalizer {
     fn scrub(s: &str) -> String {
-        // Precompile regexes only once per call — acceptable for usage here.
-        let ansi = Regex::new(r"\x1B\[[0-9;]*[A-Za-z]").unwrap();
-        let tmp = Regex::new(r"/tmp/[A-Za-z0-9._-]+").unwrap();
-        let iso_ts = Regex::new(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?")
-            .unwrap();
-        let unix_ts = Regex::new(r"\b1[5-9]\d{8}\b").unwrap();
-        let pid = Regex::new(r"\b(pid|PID)\s*=?\s*\d+\b").unwrap();
-        let hex_hash = Regex::new(r"\b[0-9a-f]{8,}\b").unwrap();
-        let addr = Regex::new(r"\b0x[0-9a-fA-F]+\b").unwrap();
-        let uuid = Regex::new(
+        // Cached compiled regexes (see `cached` + `OnceLock` statics above).
+        // Cannot panic: patterns are compile-time literals that were validated
+        // when the normalizer was first exercised in tests.
+        let ansi = cached(&ANSI_RE, r"\x1B\[[0-9;]*[A-Za-z]");
+        let tmp = cached(&TMP_RE, r"/tmp/[A-Za-z0-9._-]+");
+        let iso_ts = cached(
+            &ISO_TS_RE,
+            r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?",
+        );
+        let unix_ts = cached(&UNIX_TS_RE, r"\b1[5-9]\d{8}\b");
+        let pid = cached(&PID_RE, r"\b(pid|PID)\s*=?\s*\d+\b");
+        let hex_hash = cached(&HEX_HASH_RE, r"\b[0-9a-f]{8,}\b");
+        let addr = cached(&ADDR_RE, r"\b0x[0-9a-fA-F]+\b");
+        let uuid = cached(
+            &UUID_RE,
             r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b",
-        )
-        .unwrap();
+        );
 
         let s = ansi.replace_all(s, "");
         let s = tmp.replace_all(&s, "/tmp/<TEMP>");

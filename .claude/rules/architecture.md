@@ -25,16 +25,25 @@ paths:
 
 ## Dependency Direction (INVIOLABLE)
 
+Each line below gives the **upper bound** of workspace crates a target may
+depend on (ADR-010 — a crate may declare fewer deps than listed, but never
+more). `check-arch-contract.sh` enforces the bound.
+
 ```
-theo-domain         → (nothing)
-theo-engine-*       → theo-domain only
-theo-governance     → theo-domain only
-theo-infra-*        → theo-domain only
-theo-tooling        → theo-domain only
-theo-agent-runtime  → theo-domain, theo-governance
-theo-api-contracts  → theo-domain only
-theo-application    → all crates above
-apps/*              → theo-application, theo-api-contracts
+theo-domain              → (nothing)
+theo-engine-graph        → theo-domain
+theo-engine-parser       → theo-domain
+theo-engine-retrieval    → theo-domain, theo-engine-graph, theo-engine-parser   (ADR-011)
+theo-governance          → theo-domain
+theo-infra-llm           → theo-domain
+theo-infra-auth          → theo-domain
+theo-infra-memory        → theo-domain, theo-engine-retrieval (optional, feature-gated)   (ADR-011)
+theo-tooling             → theo-domain
+theo-agent-runtime       → theo-domain, theo-governance,
+                            theo-infra-llm, theo-infra-auth, theo-tooling   (ADR-016)
+theo-api-contracts       → theo-domain
+theo-application         → all crates above
+apps/*                   → theo-application, theo-api-contracts
 ```
 
 ## Prohibitions

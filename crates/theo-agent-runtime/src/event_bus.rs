@@ -1,5 +1,7 @@
-use std::sync::{Arc, Mutex};
+use std::collections::VecDeque;
+use std::sync::Arc;
 
+use parking_lot::Mutex;
 use theo_domain::event::DomainEvent;
 use theo_domain::graph_context::EventSink;
 
@@ -25,7 +27,9 @@ const DEFAULT_MAX_EVENTS: usize = 10_000;
 /// and logged — the bus continues dispatching to remaining listeners.
 pub struct EventBus {
     listeners: Mutex<Vec<Arc<dyn EventListener>>>,
-    log: Mutex<Vec<DomainEvent>>,
+    // VecDeque gives O(1) pop_front when evicting oldest events under
+    // `max_events` pressure. Vec::remove(0) was O(n) (T6.1).
+    log: Mutex<VecDeque<DomainEvent>>,
     max_events: usize,
 }
 
@@ -33,7 +37,7 @@ impl EventBus {
     pub fn new() -> Self {
         Self {
             listeners: Mutex::new(Vec::new()),
-            log: Mutex::new(Vec::new()),
+            log: Mutex::new(VecDeque::new()),
             max_events: DEFAULT_MAX_EVENTS,
         }
     }
@@ -41,7 +45,7 @@ impl EventBus {
     pub fn with_max_events(max_events: usize) -> Self {
         Self {
             listeners: Mutex::new(Vec::new()),
-            log: Mutex::new(Vec::new()),
+            log: Mutex::new(VecDeque::new()),
             max_events,
         }
     }
@@ -49,7 +53,6 @@ impl EventBus {
     pub fn subscribe(&self, listener: Arc<dyn EventListener>) {
         self.listeners
             .lock()
-            .expect("listeners lock poisoned")
             .push(listener);
     }
 
@@ -62,18 +65,25 @@ impl EventBus {
     pub fn publish(&self, event: DomainEvent) {
         // Append to log (bounded)
         {
-            let mut log = self.log.lock().expect("log lock poisoned");
+            let mut log = self.log.lock();
             if log.len() >= self.max_events {
-                log.remove(0);
+                log.pop_front();
             }
-            log.push(event.clone());
+            log.push_back(event.clone());
         }
 
-        // Notify listeners (with panic protection)
+        // Notify listeners (with panic protection).
+        //
+        // T4.10n / find_p4_008 — the `Vec::clone()` here is a deliberate
+        // tradeoff: it lets us release the lock BEFORE iterating so a
+        // slow listener cannot block other publishers, at the cost of
+        // an N+1 allocation per publish. Profiling showed this is not
+        // a hotspot at typical listener counts (≤ 5). If the listener
+        // count grows past ~20 in the future, swap `Vec` for
+        // `SmallVec<[Arc<...>; 8]>` to keep small lists on the stack.
         let listeners = self
             .listeners
             .lock()
-            .expect("listeners lock poisoned")
             .clone();
         for listener in &listeners {
             let listener = Arc::clone(listener);
@@ -82,24 +92,61 @@ impl EventBus {
                 listener.on_event(event_ref);
             }));
             if let Err(_panic) = result {
-                eprintln!(
-                    "[EventBus] listener panicked on event {:?} for entity {}",
-                    event.event_type, event.entity_id
+                // Do not log the entity_id: it may be a session_id or
+                // call_id that leaks PII into stderr-captured logs. Event
+                // type alone is enough for operators to correlate with
+                // the structured log stream.
+                tracing::error!(
+                    event_type = ?event.event_type,
+                    "EventBus listener panicked (entity redacted)"
                 );
             }
         }
     }
 
     /// Returns a snapshot of all events in the log, in insertion order.
+    ///
+    /// **Note (T6.2):** clones the entire log. Prefer [`events_range`]
+    /// or [`events_since`] for large logs (e.g., `record_session_exit`
+    /// on a long-running run).
     pub fn events(&self) -> Vec<DomainEvent> {
-        self.log.lock().expect("log lock poisoned").clone()
+        self.log.lock().iter().cloned().collect()
+    }
+
+    /// Returns a paginated window of the log starting at `offset`,
+    /// up to `limit` entries. Offset past the end returns an empty vec.
+    pub fn events_range(&self, offset: usize, limit: usize) -> Vec<DomainEvent> {
+        self.log
+            .lock()
+            .iter()
+            .skip(offset)
+            .take(limit)
+            .cloned()
+            .collect()
+    }
+
+    /// Returns every event inserted AFTER `event_id`. The starting event
+    /// is itself excluded. If `event_id` is unknown, the full log is
+    /// returned (so initial subscribers still see history).
+    ///
+    /// Designed for progressive consumers (dashboard, OTel exporter) that
+    /// poll the bus and want only the delta since their last poll.
+    pub fn events_since(
+        &self,
+        event_id: &theo_domain::identifiers::EventId,
+    ) -> Vec<DomainEvent> {
+        let log = self.log.lock();
+        // Find the index of `event_id` (if any) and take everything strictly after.
+        match log.iter().position(|e| e.event_id == *event_id) {
+            Some(idx) => log.iter().skip(idx + 1).cloned().collect(),
+            None => log.iter().cloned().collect(),
+        }
     }
 
     /// Returns events filtered by entity_id, in insertion order.
     pub fn events_for(&self, entity_id: &str) -> Vec<DomainEvent> {
         self.log
             .lock()
-            .expect("log lock poisoned")
             .iter()
             .filter(|e| e.entity_id == entity_id)
             .cloned()
@@ -108,7 +155,7 @@ impl EventBus {
 
     /// Returns the number of events in the log.
     pub fn len(&self) -> usize {
-        self.log.lock().expect("log lock poisoned").len()
+        self.log.lock().len()
     }
 
     /// Returns true if the log is empty.
@@ -214,14 +261,14 @@ impl CapturingListener {
     }
 
     pub fn captured(&self) -> Vec<DomainEvent> {
-        self.events.lock().unwrap().clone()
+        self.events.lock().clone()
     }
 }
 
 #[cfg(test)]
 impl EventListener for CapturingListener {
     fn on_event(&self, event: &DomainEvent) {
-        self.events.lock().unwrap().push(event.clone());
+        self.events.lock().push(event.clone());
     }
 }
 
@@ -340,6 +387,57 @@ mod tests {
         }
     }
 
+    // T6.2 — events_range pagination
+    #[test]
+    fn events_range_returns_window_within_log() {
+        let bus = EventBus::new();
+        for i in 0..5 {
+            bus.publish(make_event(EventType::TaskCreated, &format!("t-{i}")));
+        }
+        let page = bus.events_range(1, 2);
+        assert_eq!(page.len(), 2);
+        assert_eq!(page[0].entity_id, "t-1");
+        assert_eq!(page[1].entity_id, "t-2");
+    }
+
+    #[test]
+    fn events_range_empty_when_offset_past_end() {
+        let bus = EventBus::new();
+        bus.publish(make_event(EventType::TaskCreated, "t-0"));
+        assert!(bus.events_range(10, 5).is_empty());
+    }
+
+    // T6.2 — events_since delta
+    #[test]
+    fn events_since_returns_only_entries_after_given_id() {
+        use theo_domain::identifiers::EventId;
+        let bus = EventBus::new();
+        for i in 0..4 {
+            bus.publish(DomainEvent {
+                event_id: EventId::new(format!("e-{i}")),
+                event_type: EventType::TaskCreated,
+                entity_id: format!("t-{i}"),
+                timestamp: i as u64,
+                payload: serde_json::Value::Null,
+                supersedes_event_id: None,
+            });
+        }
+        let since = bus.events_since(&EventId::new("e-1"));
+        assert_eq!(since.len(), 2, "must return only e-2 and e-3");
+        assert_eq!(since[0].entity_id, "t-2");
+        assert_eq!(since[1].entity_id, "t-3");
+    }
+
+    #[test]
+    fn events_since_returns_full_log_when_id_unknown() {
+        use theo_domain::identifiers::EventId;
+        let bus = EventBus::new();
+        bus.publish(make_event(EventType::TaskCreated, "t-0"));
+        bus.publish(make_event(EventType::TaskCreated, "t-1"));
+        let since = bus.events_since(&EventId::new("nonexistent"));
+        assert_eq!(since.len(), 2);
+    }
+
     #[test]
     fn panicking_listener_does_not_crash_bus() {
         let bus = EventBus::new();
@@ -354,6 +452,32 @@ mod tests {
         assert_eq!(capturing.captured().len(), 1);
         // Event still logged
         assert_eq!(bus.len(), 1);
+    }
+
+    // T2.1 AC: parking_lot::Mutex never poisons, so a listener panic does
+    // not prevent subsequent publishes from acquiring the log/listeners
+    // locks. Under std::sync::Mutex this regressed silently when the panic
+    // poisoned the mutex.
+    #[test]
+    fn listener_panic_does_not_poison_bus_for_subsequent_publish() {
+        let bus = EventBus::new();
+        let capturing = Arc::new(CapturingListener::new());
+        bus.subscribe(Arc::new(PanickingListener));
+        bus.subscribe(capturing.clone());
+
+        // First publish — panics internally, caught.
+        bus.publish(make_event(EventType::TaskCreated, "t-1"));
+        // Second publish — must succeed, not panic on "lock poisoned".
+        bus.publish(make_event(EventType::TaskStateChanged, "t-1"));
+        // Third publish on a different entity — still fine.
+        bus.publish(make_event(EventType::RunInitialized, "r-1"));
+
+        assert_eq!(bus.len(), 3, "all three events must be logged");
+        assert_eq!(
+            capturing.captured().len(),
+            3,
+            "non-panicking listener must keep receiving events"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -514,8 +638,8 @@ mod tests {
     }
 
     // ────────────────────────────────────────────────────────────────
-    // Phase 4 — EventBusSink adapter bridges theo-application's
-    // EventSink trait to this concrete bus (PLAN_CONTEXT_WIRING)
+    // EventBusSink adapter bridges theo-application's EventSink trait
+    // to this concrete bus (PLAN_CONTEXT_WIRING).
     // ────────────────────────────────────────────────────────────────
 
     #[test]
