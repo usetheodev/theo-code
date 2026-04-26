@@ -95,13 +95,16 @@ impl AgentRunEngine {
             };
 
             futures.push(async move {
-                let (msg, success) = tool_bridge::execute_tool_call(
+                // T1.2/T0.1 — collect tool metadata so vision blocks can
+                // be propagated as user followup messages after the batch
+                // tool_result is pushed.
+                let (msg, success, metadata) = tool_bridge::execute_tool_call_with_metadata(
                     &reg,
                     &batch_tool_call,
                     &batch_ctx,
                 )
                 .await;
-                (i, tool_name, tool_args, msg, success)
+                (i, tool_name, tool_args, msg, success, metadata)
             });
         }
 
@@ -110,10 +113,13 @@ impl AgentRunEngine {
 
         // Combine blocked + executed results, sorted by index.
         let mut all_results: Vec<(usize, String, String, bool)> = Vec::new();
+        // T1.2/T0.1 — collect (tool_name, metadata) pairs so we can push
+        // image followups AFTER the combined tool_result message.
+        let mut vision_followups: Vec<(String, serde_json::Value)> = Vec::new();
         for (i, name, err) in blocked_results {
             all_results.push((i, name, format!("error — {}", err), false));
         }
-        for (i, tool_name, tool_args, msg, success) in results {
+        for (i, tool_name, tool_args, msg, success, metadata) in results {
             let output = msg.content.unwrap_or_default();
             let status = if success { "ok" } else { "error" };
             let preview = theo_domain::prompt_sanitizer::char_boundary_truncate(
@@ -149,6 +155,13 @@ impl AgentRunEngine {
                     self.rt.context_loop_state
                         .record_edit_attempt(file, true, None);
                 }
+            }
+
+            // T1.2/T0.1 — capture metadata that carries vision blocks
+            // (e.g., `read_image` output). Pushed as user followups
+            // after the combined batch tool_result below.
+            if success && let Some(m) = metadata {
+                vision_followups.push((tool_name.clone(), m));
             }
         }
 
@@ -188,5 +201,17 @@ impl AgentRunEngine {
         ));
 
         messages.push(Message::tool_result(&call.id, "batch", &batch_output));
+
+        // T1.2/T0.1 — push image follow-ups (one per tool that emitted
+        // vision content). Order preserved from the parallel join_all
+        // (already sorted by index for `all_results`; vision_followups
+        // is in completion order which is also stable per `join_all`).
+        for (tool_name, metadata) in &vision_followups {
+            crate::vision_propagation::push_image_followup(
+                messages,
+                metadata,
+                tool_name,
+            );
+        }
     }
 }
