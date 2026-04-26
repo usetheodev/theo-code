@@ -2,8 +2,11 @@
 // T3.1 partial: protocol layer (JSON-RPC framing) implemented in
 // `protocol.rs`; full client + server discovery is the next iteration.
 
+pub mod client;
 pub mod operations;
 pub mod protocol;
+
+pub use client::{LspClient, LspClientError};
 
 pub use protocol::{
     encode_frame, encode_message, try_decode_frame, InboundMessage, JsonRpcErrorObj,

@@ -129,6 +129,102 @@ where
     pub fn buffered_len(&self) -> usize {
         self.accumulator.buffered_len()
     }
+
+    /// Split the session into independent writer + reader halves.
+    /// Lets the LSP/DAP client own the writer while a spawned task
+    /// drives the reader loop — no shared lock required.
+    pub fn split(self) -> (SessionWriter<W>, SessionReader<R>) {
+        (
+            SessionWriter::new(self.writer),
+            SessionReader::from_parts(self.reader, self.accumulator, self.read_buf),
+        )
+    }
+}
+
+/// Owned writer half — produced by `StdioSession::split`. The client
+/// task holds this to send framed requests; it never blocks on the
+/// reader.
+pub struct SessionWriter<W> {
+    writer: W,
+}
+
+impl<W: AsyncWrite + Unpin> SessionWriter<W> {
+    /// Wrap an arbitrary writer (typically a child stdin).
+    pub fn new(writer: W) -> Self {
+        Self { writer }
+    }
+
+    /// Write one framed message — `Content-Length: N\r\n\r\n<body>`.
+    pub async fn write_frame(&mut self, body: &[u8]) -> Result<(), SessionError> {
+        let bytes = encode_frame(body);
+        self.writer.write_all(&bytes).await?;
+        self.writer.flush().await?;
+        Ok(())
+    }
+
+    /// Consume the wrapper and return the underlying writer (for
+    /// callers who want to close stdin explicitly to signal shutdown).
+    pub fn into_inner(self) -> W {
+        self.writer
+    }
+}
+
+/// Owned reader half — produced by `StdioSession::split`. The reader
+/// task drives `read_frame_or_eof` in a loop and dispatches frames to
+/// the correlator/notification channel.
+pub struct SessionReader<R> {
+    reader: R,
+    accumulator: FrameAccumulator,
+    read_buf: Vec<u8>,
+}
+
+impl<R: AsyncRead + Unpin> SessionReader<R> {
+    /// Build a reader half with default 16 MiB body cap.
+    pub fn new(reader: R) -> Self {
+        Self {
+            reader,
+            accumulator: FrameAccumulator::new(),
+            read_buf: vec![0u8; 8 * 1024],
+        }
+    }
+
+    pub(crate) fn from_parts(
+        reader: R,
+        accumulator: FrameAccumulator,
+        read_buf: Vec<u8>,
+    ) -> Self {
+        Self {
+            reader,
+            accumulator,
+            read_buf,
+        }
+    }
+
+    /// Same semantics as `StdioSession::read_frame_or_eof` — reads
+    /// until the next complete frame, returning `Ok(None)` on graceful
+    /// peer EOF.
+    pub async fn read_frame_or_eof(&mut self) -> Result<Option<Vec<u8>>, SessionError> {
+        loop {
+            if let Some(body) = self.accumulator.next_frame()? {
+                return Ok(Some(body));
+            }
+            let n = self.reader.read(&mut self.read_buf).await?;
+            if n == 0 {
+                if self.accumulator.buffered_len() == 0 {
+                    return Ok(None);
+                }
+                return Err(SessionError::UnexpectedEof {
+                    leftover_bytes: self.accumulator.buffered_len(),
+                });
+            }
+            self.accumulator.feed(&self.read_buf[..n]);
+        }
+    }
+
+    /// Number of bytes buffered (diagnostic).
+    pub fn buffered_len(&self) -> usize {
+        self.accumulator.buffered_len()
+    }
 }
 
 #[cfg(test)]
@@ -316,5 +412,92 @@ mod tests {
             }
             _ => {}
         }
+    }
+
+    // ---- split() — independent writer/reader halves -----------------
+
+    #[tokio::test]
+    async fn t31sess_split_writer_can_emit_frames_independently() {
+        let (sut, _harness_writer, mut harness_reader) = dup();
+        let (mut writer, _reader) = sut.split();
+        writer.write_frame(b"{\"hello\":1}").await.unwrap();
+        let mut got = vec![0u8; 256];
+        let n = harness_reader.read(&mut got).await.unwrap();
+        let s = std::str::from_utf8(&got[..n]).unwrap();
+        assert!(s.starts_with("Content-Length: 11\r\n\r\n"));
+        assert!(s.ends_with("{\"hello\":1}"));
+    }
+
+    #[tokio::test]
+    async fn t31sess_split_reader_can_decode_frames_independently() {
+        let (sut, mut harness_writer, _) = dup();
+        let (_writer, mut reader) = sut.split();
+        let body = b"{\"k\":2}";
+        harness_writer.write_all(&encode_frame(body)).await.unwrap();
+        harness_writer.flush().await.unwrap();
+        let got = reader.read_frame_or_eof().await.unwrap().unwrap();
+        assert_eq!(got, body);
+    }
+
+    #[tokio::test]
+    async fn t31sess_split_halves_run_concurrently_in_separate_tasks() {
+        // Proves the split is truly independent: writer and reader
+        // can run on different tasks at the same time without
+        // synchronisation.
+        let (sut, mut harness_writer, mut harness_reader) = dup();
+        let (mut writer, mut reader) = sut.split();
+
+        let writer_task = tokio::spawn(async move {
+            writer.write_frame(b"{\"req\":1}").await.unwrap();
+            writer
+        });
+        let reader_task = tokio::spawn(async move {
+            // Wait for the harness to push a frame.
+            reader.read_frame_or_eof().await
+        });
+
+        // Harness reads the request that writer_task sent.
+        let mut buf = vec![0u8; 64];
+        let n = harness_reader.read(&mut buf).await.unwrap();
+        assert!(std::str::from_utf8(&buf[..n]).unwrap().contains("\"req\":1"));
+
+        // Harness pushes a response back into the reader half.
+        let resp = b"{\"resp\":1}";
+        harness_writer.write_all(&encode_frame(resp)).await.unwrap();
+        harness_writer.flush().await.unwrap();
+
+        let _writer = writer_task.await.unwrap();
+        let got = reader_task.await.unwrap().unwrap().unwrap();
+        assert_eq!(got, resp);
+    }
+
+    #[tokio::test]
+    async fn t31sess_session_reader_new_starts_with_zero_buffered() {
+        let (_, sut_reader) = duplex(1024);
+        let r = SessionReader::new(sut_reader);
+        assert_eq!(r.buffered_len(), 0);
+    }
+
+    #[tokio::test]
+    async fn t31sess_split_preserves_buffered_state_for_subsequent_frame() {
+        // If the harness sends two back-to-back frames, the SUT may
+        // buffer both during a single read. The split() reader must
+        // inherit any buffered state so the second frame is still
+        // decodable.
+        let (mut sut, mut harness_writer, _harness_reader) = dup();
+        let mut bytes = encode_frame(b"{\"a\":1}");
+        bytes.extend(encode_frame(b"{\"b\":2}"));
+        harness_writer.write_all(&bytes).await.unwrap();
+        harness_writer.flush().await.unwrap();
+
+        // Drain the first frame BEFORE split — the second frame is
+        // now buffered inside the accumulator.
+        let f1 = sut.read_frame().await.unwrap();
+        assert_eq!(f1, b"{\"a\":1}");
+
+        // Split: the second frame must still come out via the reader.
+        let (_writer, mut reader) = sut.split();
+        let f2 = reader.read_frame_or_eof().await.unwrap().unwrap();
+        assert_eq!(f2, b"{\"b\":2}");
     }
 }

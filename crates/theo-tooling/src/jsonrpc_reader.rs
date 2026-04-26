@@ -16,7 +16,7 @@ use tokio::io::AsyncRead;
 use tokio::sync::mpsc;
 
 use crate::jsonrpc_correlator::{Correlator, CorrelatorError};
-use crate::jsonrpc_session::{SessionError, StdioSession};
+use crate::jsonrpc_session::{SessionError, SessionReader};
 
 /// Errors the reader loop can encounter.
 #[derive(Debug, thiserror::Error)]
@@ -54,20 +54,19 @@ pub enum DecodedMessage<K, R, N> {
 /// On `NoPendingRequest` from the correlator (server replied to a
 /// key we never sent), the loop logs but does NOT exit — a
 /// misbehaving server shouldn't crash the client.
-pub async fn run_reader_loop<W, R, K, Resp, Notif, F>(
-    session: &mut StdioSession<W, R>,
+pub async fn run_reader_loop<R, K, Resp, Notif, F>(
+    reader: &mut SessionReader<R>,
     correlator: Arc<Correlator<K, Resp>>,
     notif_tx: mpsc::Sender<Notif>,
     mut decode: F,
 ) -> Result<(), ReaderError>
 where
-    W: tokio::io::AsyncWrite + Unpin,
     R: AsyncRead + Unpin,
     K: Eq + std::hash::Hash,
     F: FnMut(&[u8]) -> Result<DecodedMessage<K, Resp, Notif>, String>,
 {
     loop {
-        let body = match session.read_frame_or_eof().await? {
+        let body = match reader.read_frame_or_eof().await? {
             Some(b) => b,
             None => return Ok(()), // graceful peer close
         };
@@ -138,21 +137,17 @@ mod tests {
         }
     }
 
-    /// Build a session whose read-side is fed by a tokio duplex.
-    /// Returns the session + the test-controlled writer half so the
+    /// Build a reader half whose stream is fed by a tokio duplex.
+    /// Returns the reader + the test-controlled writer half so the
     /// test can push frames into the SUT.
-    fn duplex_session() -> (
-        StdioSession<tokio::io::DuplexStream, tokio::io::DuplexStream>,
-        tokio::io::DuplexStream,
-    ) {
-        let (sut_writer, _harness_reader) = duplex(64 * 1024);
+    fn duplex_reader() -> (SessionReader<tokio::io::DuplexStream>, tokio::io::DuplexStream) {
         let (harness_writer, sut_reader) = duplex(64 * 1024);
-        (StdioSession::new(sut_writer, sut_reader), harness_writer)
+        (SessionReader::new(sut_reader), harness_writer)
     }
 
     #[tokio::test]
     async fn t31rdr_response_dispatched_to_correlator_waiter() {
-        let (mut session, mut harness) = duplex_session();
+        let (mut reader, mut harness) = duplex_reader();
         let cor: Arc<Correlator<u64, JsonRpcResponse>> = Arc::new(Correlator::new());
         let (tx, _rx) = mpsc::channel::<JsonRpcNotification>(8);
 
@@ -160,8 +155,8 @@ mod tests {
         let rx_resp = cor.register(42).await.unwrap();
 
         let cor_clone = cor.clone();
-        let reader = tokio::spawn(async move {
-            run_reader_loop(&mut session, cor_clone, tx, lsp_decode).await
+        let reader_handle = tokio::spawn(async move {
+            run_reader_loop(&mut reader, cor_clone, tx, lsp_decode).await
         });
 
         // Push the response into the duplex.
@@ -178,18 +173,18 @@ mod tests {
 
         // Clean shutdown: drop the harness writer so reader exits Ok.
         drop(harness);
-        let _ = reader.await.unwrap(); // either Ok(()) or NotificationClosed if no rx
+        let _ = reader_handle.await.unwrap(); // either Ok(()) or NotificationClosed if no rx
     }
 
     #[tokio::test]
     async fn t31rdr_notification_routed_to_channel() {
-        let (mut session, mut harness) = duplex_session();
+        let (mut reader, mut harness) = duplex_reader();
         let cor: Arc<Correlator<u64, JsonRpcResponse>> = Arc::new(Correlator::new());
         let (tx, mut notif_rx) = mpsc::channel::<JsonRpcNotification>(8);
 
         let cor_clone = cor.clone();
-        let reader = tokio::spawn(async move {
-            run_reader_loop(&mut session, cor_clone, tx, lsp_decode).await
+        let reader_handle = tokio::spawn(async move {
+            run_reader_loop(&mut reader, cor_clone, tx, lsp_decode).await
         });
 
         let body = json!({"jsonrpc":"2.0","method":"window/logMessage","params":{"type":3,"message":"hi"}});
@@ -203,7 +198,7 @@ mod tests {
         assert_eq!(notif.method, "window/logMessage");
 
         drop(harness);
-        let _ = reader.await.unwrap();
+        let _ = reader_handle.await.unwrap();
     }
 
     #[tokio::test]
@@ -211,13 +206,13 @@ mod tests {
         // Server replies with id=99 we never registered. Reader
         // logs + continues. Then a notification proves the loop
         // didn't die.
-        let (mut session, mut harness) = duplex_session();
+        let (mut reader, mut harness) = duplex_reader();
         let cor: Arc<Correlator<u64, JsonRpcResponse>> = Arc::new(Correlator::new());
         let (tx, mut notif_rx) = mpsc::channel::<JsonRpcNotification>(8);
 
         let cor_clone = cor.clone();
-        let reader = tokio::spawn(async move {
-            run_reader_loop(&mut session, cor_clone, tx, lsp_decode).await
+        let reader_handle = tokio::spawn(async move {
+            run_reader_loop(&mut reader, cor_clone, tx, lsp_decode).await
         });
 
         // Bad response (no waiter for id=99).
@@ -239,35 +234,35 @@ mod tests {
         assert_eq!(notif.method, "x");
 
         drop(harness);
-        let _ = reader.await.unwrap();
+        let _ = reader_handle.await.unwrap();
     }
 
     #[tokio::test]
     async fn t31rdr_clean_eof_returns_ok() {
-        let (mut session, harness) = duplex_session();
+        let (mut reader, harness) = duplex_reader();
         let cor: Arc<Correlator<u64, JsonRpcResponse>> = Arc::new(Correlator::new());
         let (tx, _rx) = mpsc::channel::<JsonRpcNotification>(8);
 
         let cor_clone = cor.clone();
-        let reader = tokio::spawn(async move {
-            run_reader_loop(&mut session, cor_clone, tx, lsp_decode).await
+        let reader_handle = tokio::spawn(async move {
+            run_reader_loop(&mut reader, cor_clone, tx, lsp_decode).await
         });
 
         // Drop harness immediately — clean EOF.
         drop(harness);
-        let result = reader.await.unwrap();
+        let result = reader_handle.await.unwrap();
         assert!(result.is_ok());
     }
 
     #[tokio::test]
     async fn t31rdr_decode_error_terminates_loop_with_typed_error() {
-        let (mut session, mut harness) = duplex_session();
+        let (mut reader, mut harness) = duplex_reader();
         let cor: Arc<Correlator<u64, JsonRpcResponse>> = Arc::new(Correlator::new());
         let (tx, _rx) = mpsc::channel::<JsonRpcNotification>(8);
 
         let cor_clone = cor.clone();
-        let reader = tokio::spawn(async move {
-            run_reader_loop(&mut session, cor_clone, tx, lsp_decode).await
+        let reader_handle = tokio::spawn(async move {
+            run_reader_loop(&mut reader, cor_clone, tx, lsp_decode).await
         });
 
         // Send non-JSON inside a valid frame envelope.
@@ -277,7 +272,7 @@ mod tests {
             .unwrap();
         harness.flush().await.unwrap();
 
-        let result = reader.await.unwrap();
+        let result = reader_handle.await.unwrap();
         match result {
             Err(ReaderError::Decode(_)) => {}
             other => panic!("expected Decode error, got {other:?}"),
@@ -286,7 +281,7 @@ mod tests {
 
     #[tokio::test]
     async fn t31rdr_notification_channel_closed_terminates_loop() {
-        let (mut session, mut harness) = duplex_session();
+        let (mut reader, mut harness) = duplex_reader();
         let cor: Arc<Correlator<u64, JsonRpcResponse>> = Arc::new(Correlator::new());
         let (tx, rx) = mpsc::channel::<JsonRpcNotification>(8);
 
@@ -295,8 +290,8 @@ mod tests {
         drop(rx);
 
         let cor_clone = cor.clone();
-        let reader = tokio::spawn(async move {
-            run_reader_loop(&mut session, cor_clone, tx, lsp_decode).await
+        let reader_handle = tokio::spawn(async move {
+            run_reader_loop(&mut reader, cor_clone, tx, lsp_decode).await
         });
 
         let n = json!({"jsonrpc":"2.0","method":"x","params":null});
@@ -306,13 +301,13 @@ mod tests {
             .unwrap();
         harness.flush().await.unwrap();
 
-        let result = reader.await.unwrap();
+        let result = reader_handle.await.unwrap();
         assert!(matches!(result, Err(ReaderError::NotificationClosed)));
     }
 
     #[tokio::test]
     async fn t31rdr_two_responses_dispatched_in_order() {
-        let (mut session, mut harness) = duplex_session();
+        let (mut reader, mut harness) = duplex_reader();
         let cor: Arc<Correlator<u64, JsonRpcResponse>> = Arc::new(Correlator::new());
         let (tx, _rx) = mpsc::channel::<JsonRpcNotification>(8);
 
@@ -320,8 +315,8 @@ mod tests {
         let rx2 = cor.register(2).await.unwrap();
 
         let cor_clone = cor.clone();
-        let reader = tokio::spawn(async move {
-            run_reader_loop(&mut session, cor_clone, tx, lsp_decode).await
+        let reader_handle = tokio::spawn(async move {
+            run_reader_loop(&mut reader, cor_clone, tx, lsp_decode).await
         });
 
         for id in [1u64, 2u64] {
@@ -341,12 +336,12 @@ mod tests {
         assert_eq!(r2.result.as_ref().unwrap(), 20);
 
         drop(harness);
-        let _ = reader.await.unwrap();
+        let _ = reader_handle.await.unwrap();
     }
 
     #[tokio::test]
     async fn t31rdr_out_of_order_responses_pair_correctly() {
-        let (mut session, mut harness) = duplex_session();
+        let (mut reader, mut harness) = duplex_reader();
         let cor: Arc<Correlator<u64, JsonRpcResponse>> = Arc::new(Correlator::new());
         let (tx, _rx) = mpsc::channel::<JsonRpcNotification>(8);
 
@@ -354,8 +349,8 @@ mod tests {
         let rx2 = cor.register(2).await.unwrap();
 
         let cor_clone = cor.clone();
-        let reader = tokio::spawn(async move {
-            run_reader_loop(&mut session, cor_clone, tx, lsp_decode).await
+        let reader_handle = tokio::spawn(async move {
+            run_reader_loop(&mut reader, cor_clone, tx, lsp_decode).await
         });
 
         // Server replies in REVERSE order — id 2 then id 1.
@@ -376,6 +371,6 @@ mod tests {
         assert_eq!(r2.result.as_ref().unwrap(), "second");
 
         drop(harness);
-        let _ = reader.await.unwrap();
+        let _ = reader_handle.await.unwrap();
     }
 }
