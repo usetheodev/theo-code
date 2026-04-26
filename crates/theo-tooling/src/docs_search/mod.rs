@@ -16,11 +16,13 @@
 //!
 //! See `docs/plans/sota-tier1-tier2-plan.md` §T15.1.
 
+pub mod bootstrap;
 pub mod index;
 pub mod markdown_source;
 pub mod source;
 pub mod tool;
 
+pub use bootstrap::{bootstrap_docs_index, well_known_locations};
 pub use index::{DocEntry, DocsIndex, ScoredDoc};
 pub use markdown_source::MarkdownDirSource;
 pub use source::{DocSource, StaticDocSource};

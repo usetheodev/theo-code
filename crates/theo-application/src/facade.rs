@@ -62,7 +62,9 @@ pub mod llm {
 
 /// Types that apps pulled in from `theo-tooling` before T1.2.
 pub mod tooling {
-    pub use theo_tooling::registry::create_default_registry;
+    pub use theo_tooling::registry::{
+        create_default_registry, create_default_registry_with_project,
+    };
     // File-backed memory store — theo-cli TUI persists session memory via this.
     pub use theo_tooling::memory;
 }
