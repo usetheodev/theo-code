@@ -177,15 +177,14 @@ impl SubAgentManager {
     /// Consume (take) the pending resume context — resume-runtime-wiring.
     /// resume context set by `Resumer` right before this spawn. When `Some`,
     /// the spawned `AgentLoop` runs in replay-mode: known call_ids return
-    /// cached tool_results instead of re-executing the tool. Returns `None`
-    /// when no resume is pending or the mutex is poisoned.
+    /// cached tool_results instead of re-executing the tool. Returns
+    /// `None` when no resume is pending. T4.10j: parking_lot::Mutex
+    /// never poisons, so the previous `.lock().ok()` (which masked
+    /// poison failures by silently disabling resume mode) is gone.
     pub(super) fn take_pending_resume_context(
         &self,
     ) -> Option<std::sync::Arc<crate::subagent::resume::ResumeContext>> {
-        self.pending_resume_context
-            .lock()
-            .ok()
-            .and_then(|mut g| g.take())
+        self.pending_resume_context.lock().take()
     }
 
     /// Register McpToolAdapter instances for
@@ -388,14 +387,27 @@ impl SubAgentManager {
         let (Ok(handle), Some(hooks)) = (result.as_ref(), &self.hook_manager) else {
             return;
         };
-        use crate::lifecycle_hooks::{HookContext, HookEvent};
-        let _ = hooks.dispatch(
+        use crate::lifecycle_hooks::{HookContext, HookEvent, HookResponse};
+        // T4.10e / find_p2_011 — surface non-Allow hook responses via
+        // tracing instead of silently dropping them. Block on a
+        // worktree-lifecycle event is informational (the worktree was
+        // already created/removed by the runtime), but the user
+        // configured the hook for visibility — log it.
+        let resp = hooks.dispatch(
             HookEvent::WorktreeCreate,
             &HookContext {
                 tool_name: Some(handle.path.to_string_lossy().to_string()),
                 ..Default::default()
             },
         );
+        if !matches!(resp, HookResponse::Allow) {
+            tracing::debug!(
+                event = "WorktreeCreate",
+                response = ?resp,
+                worktree = %handle.path.display(),
+                "non-Allow hook response (informational)"
+            );
+        }
     }
 
     /// Build the sub-agent's `AgentConfig` from the parent config + `AgentSpec`.

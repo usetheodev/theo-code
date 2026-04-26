@@ -83,15 +83,32 @@ impl AgentRunEngine {
                 usage.recompute_cost(&c);
             }
             summary.token_usage = Some(usage);
-            let _ = crate::lesson_pipeline::extract_and_persist_for_outcome(
-                &self.project_dir,
-                summary.machine_summary.outcome,
-                &events,
-            );
-            let _ = crate::hypothesis_pipeline::persist_unresolved(
+            // T4.10a / find_p2_005 — surface persistence counts via
+            // tracing instead of silently dropping them. Both
+            // pipelines return `usize` (count of records persisted) —
+            // not Result — so there is no error to handle, but the
+            // count IS useful operational signal during shutdown.
+            let (lessons_persisted, lessons_attempted) =
+                crate::lesson_pipeline::extract_and_persist_for_outcome(
+                    &self.project_dir,
+                    summary.machine_summary.outcome,
+                    &events,
+                );
+            let hypotheses_persisted = crate::hypothesis_pipeline::persist_unresolved(
                 &self.project_dir,
                 &summary,
             );
+            if lessons_persisted > 0
+                || lessons_attempted > 0
+                || hypotheses_persisted > 0
+            {
+                tracing::info!(
+                    lessons_persisted = lessons_persisted,
+                    lessons_attempted = lessons_attempted,
+                    hypotheses_persisted = hypotheses_persisted,
+                    "session shutdown: persisted learning artifacts"
+                );
+            }
             let episodes_dir = self
                 .project_dir
                 .join(".theo")

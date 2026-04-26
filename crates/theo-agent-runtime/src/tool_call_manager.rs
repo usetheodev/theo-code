@@ -275,6 +275,17 @@ impl ToolCallManager {
     /// T6.3: prevents unbounded `HashMap` growth in long-running sessions
     /// (e.g., a REPL that issues 10k+ tool calls). Typical call site is
     /// `record_session_exit` or periodic maintenance in the main loop.
+    ///
+    /// **TOCTOU note (T4.10k / find_p4_003):** the function acquires
+    /// `records` twice — once read-only to compute `to_remove`, then
+    /// again exclusively to delete. A concurrent dispatch could
+    /// transition a record from terminal → terminal-but-newer in the
+    /// gap (impossible in practice — terminal states are sinks) or a
+    /// new record could be enqueued under the same `CallId` (impossible
+    /// because `CallId::generate` is collision-resistant per T4.6).
+    /// Conservative usage is at session shutdown where there is no
+    /// concurrent dispatch; concurrent maintenance is supported but
+    /// callers should not over-invoke this from the hot path.
     pub fn purge_completed(&self, now_ms: u64, older_than_ms: u64) -> usize {
         let cutoff = now_ms.saturating_sub(older_than_ms);
         let to_remove: Vec<CallId> = {

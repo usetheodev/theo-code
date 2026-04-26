@@ -58,6 +58,19 @@ pub const DEFAULT_EXCLUDES: &[&str] = &[
     "venv/",
     ".git/",
     "target/",  // Rust
+    // T4.10q / find_p6_010 — credentials commonly stored in repos
+    // that should NEVER be checkpointed (would persist them in the
+    // shadow git history forever).
+    "*.pem",
+    "*.key",
+    "*secret*",
+    "*secrets*",
+    "*credentials*",
+    "id_rsa",
+    "id_rsa.pub",
+    "id_ed25519",
+    "id_ed25519.pub",
+    "*.kubeconfig",
 ];
 
 /// Maximum number of files to snapshot (safety against runaway dirs).
@@ -133,6 +146,18 @@ impl CheckpointManager {
 
     /// Snapshot the current state of the workdir. Returns the new commit SHA.
     /// Skips if file count exceeds `max_files` (safety guard).
+    ///
+    /// **Atomicity (T4.10l / find_p4_004):** the operation runs
+    /// `git add -A` followed by `git commit`. A crash between the two
+    /// leaves the shadow repo with staged-but-uncommitted files —
+    /// `restore()` will then read whatever the previous HEAD was, NOT
+    /// the in-progress index. Callers that read the returned SHA and
+    /// later call `restore()` are responsible for revalidating the
+    /// SHA exists (`self.git(&["rev-parse", sha])`) before relying on
+    /// it; see [`Self::restore`] for the validation guard. A future
+    /// improvement could batch the two commands via `git commit -a -m`
+    /// (single fork) — left as follow-up because the current crash
+    /// window is sub-millisecond in practice.
     pub fn snapshot(&self, label: &str) -> Result<String, CheckpointError> {
         // File-count safety check
         let count = count_workdir_files(&self.workdir, self.max_files + 1)?;

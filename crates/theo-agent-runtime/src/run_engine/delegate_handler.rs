@@ -84,11 +84,25 @@ impl AgentRunEngine {
             r.clone()
         } else {
             let mut reg = crate::subagent::SubAgentRegistry::with_builtins();
-            let _ = reg.load_all(
+            // T4.10r / find_p2_003 — surface warnings (e.g. malformed
+            // `.theo/agents/*.toml`) via tracing instead of dropping
+            // the entire `LoadOutcome`. Custom-agent loading was
+            // architecturally invisible before this fix — users had
+            // no way to detect that their `.theo/agents/` directory
+            // failed to parse.
+            let outcome = reg.load_all(
                 Some(&self.project_dir),
                 None,
                 crate::subagent::ApprovalMode::TrustAll,
             );
+            for w in &outcome.warnings {
+                tracing::warn!(
+                    kind = ?w.kind,
+                    path = ?w.path,
+                    "subagent registry load warning: {}",
+                    w.message
+                );
+            }
             Arc::new(reg)
         };
 

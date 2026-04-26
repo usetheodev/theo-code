@@ -108,8 +108,12 @@ pub struct SubAgentManager {
     /// Wrapped in `Mutex` to allow `Resumer` to set without owning
     /// `&mut self`. Sequential usage is the contract — concurrent resume
     /// against the same manager is undefined behavior (would race).
+    /// `parking_lot::Mutex` (T4.10j / find_p4_001) — std::sync::Mutex
+    /// can poison on a panicked holder, after which `.lock().ok()`
+    /// silently degraded resume mode. parking_lot does not poison and
+    /// is consistent with the rest of the runtime's locking primitives.
     pending_resume_context:
-        std::sync::Mutex<Option<Arc<crate::subagent::resume::ResumeContext>>>,
+        parking_lot::Mutex<Option<Arc<crate::subagent::resume::ResumeContext>>>,
     /// Optional concurrency cap on `spawn_with_spec`. When `Some(n)`,
     /// at most `n` spawns can run in parallel — additional requests
     /// await a permit. `None` means unbounded (legacy behaviour).
@@ -558,7 +562,7 @@ mod tests {
             metrics: None,
             mcp_registry: None,
             mcp_discovery: None,
-            pending_resume_context: std::sync::Mutex::new(None),
+            pending_resume_context: parking_lot::Mutex::new(None),
             spawn_semaphore: None,
         };
 
@@ -641,7 +645,7 @@ mod tests {
             metrics: None,
             mcp_registry: None,
             mcp_discovery: None,
-            pending_resume_context: std::sync::Mutex::new(None),
+            pending_resume_context: parking_lot::Mutex::new(None),
             spawn_semaphore: None,
         };
 
@@ -698,7 +702,7 @@ mod tests {
             metrics: None,
             mcp_registry: None,
             mcp_discovery: None,
-            pending_resume_context: std::sync::Mutex::new(None),
+            pending_resume_context: parking_lot::Mutex::new(None),
             spawn_semaphore: None,
         };
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("x", "y");
@@ -732,7 +736,7 @@ mod tests {
             metrics: None,
             mcp_registry: None,
             mcp_discovery: None,
-            pending_resume_context: std::sync::Mutex::new(None),
+            pending_resume_context: parking_lot::Mutex::new(None),
             spawn_semaphore: None,
         };
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("persisted", "test");
@@ -766,7 +770,7 @@ mod tests {
             metrics: None,
             mcp_registry: None,
             mcp_discovery: None,
-            pending_resume_context: std::sync::Mutex::new(None),
+            pending_resume_context: parking_lot::Mutex::new(None),
             spawn_semaphore: None,
         };
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("x", "y");
@@ -847,7 +851,7 @@ mod tests {
             metrics: None,
             mcp_registry: None,
             mcp_discovery: None,
-            pending_resume_context: std::sync::Mutex::new(None),
+            pending_resume_context: parking_lot::Mutex::new(None),
             spawn_semaphore: None,
         };
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("x", "y");
@@ -878,7 +882,7 @@ mod tests {
             metrics: None,
             mcp_registry: None,
             mcp_discovery: None,
-            pending_resume_context: std::sync::Mutex::new(None),
+            pending_resume_context: parking_lot::Mutex::new(None),
             spawn_semaphore: None,
         };
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("x", "y");
@@ -967,7 +971,7 @@ mod tests {
             metrics: None,
             mcp_registry: Some(Arc::new(reg)),
             mcp_discovery: Some(Arc::new(cache)),
-            pending_resume_context: std::sync::Mutex::new(None),
+            pending_resume_context: parking_lot::Mutex::new(None),
             spawn_semaphore: None,
         };
 
@@ -1054,7 +1058,7 @@ mod tests {
             metrics: None,
             mcp_registry: Some(Arc::new(reg)),
             mcp_discovery: Some(cache.clone()),
-            pending_resume_context: std::sync::Mutex::new(None),
+            pending_resume_context: parking_lot::Mutex::new(None),
             spawn_semaphore: None,
         };
 
@@ -1118,7 +1122,7 @@ mod tests {
             metrics: None,
             mcp_registry: Some(Arc::new(reg)),
             mcp_discovery: Some(cache.clone()),
-            pending_resume_context: std::sync::Mutex::new(None),
+            pending_resume_context: parking_lot::Mutex::new(None),
             spawn_semaphore: None,
         };
 
@@ -1153,7 +1157,7 @@ mod tests {
             metrics: None,
             mcp_registry: Some(reg),
             mcp_discovery: Some(cache.clone()),
-            pending_resume_context: std::sync::Mutex::new(None),
+            pending_resume_context: parking_lot::Mutex::new(None),
             spawn_semaphore: None,
         };
         let spec = AgentSpec::on_demand("x", "y"); // mcp_servers empty by default
@@ -1181,7 +1185,7 @@ mod tests {
             metrics: None,
             mcp_registry: None,
             mcp_discovery: Some(cache.clone()),
-            pending_resume_context: std::sync::Mutex::new(None),
+            pending_resume_context: parking_lot::Mutex::new(None),
             spawn_semaphore: None,
         };
         let mut spec = AgentSpec::on_demand("x", "y");
@@ -1219,7 +1223,7 @@ mod tests {
             metrics: None,
             mcp_registry: Some(Arc::new(reg)),
             mcp_discovery: Some(cache.clone()),
-            pending_resume_context: std::sync::Mutex::new(None),
+            pending_resume_context: parking_lot::Mutex::new(None),
             spawn_semaphore: None,
         };
         let mut spec = AgentSpec::on_demand("x", "y");
@@ -1261,7 +1265,7 @@ mod tests {
             metrics: None,
             mcp_registry: Some(Arc::new(reg)),
             mcp_discovery: Some(cache.clone()),
-            pending_resume_context: std::sync::Mutex::new(None),
+            pending_resume_context: parking_lot::Mutex::new(None),
             spawn_semaphore: None,
         };
         let mut spec = AgentSpec::on_demand("x", "y");
@@ -1290,7 +1294,7 @@ mod tests {
             metrics: None,
             mcp_registry: None,
             mcp_discovery: None,
-            pending_resume_context: std::sync::Mutex::new(None),
+            pending_resume_context: parking_lot::Mutex::new(None),
             spawn_semaphore: None,
         };
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("y", "z");
@@ -1322,7 +1326,7 @@ mod tests {
                 metrics: None,
                 mcp_registry: None,
                 mcp_discovery: None,
-                pending_resume_context: std::sync::Mutex::new(None),
+                pending_resume_context: parking_lot::Mutex::new(None),
                 spawn_semaphore: None,
             }
         }

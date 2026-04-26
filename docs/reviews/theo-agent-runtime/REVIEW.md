@@ -22,7 +22,7 @@
 | 10 | `compaction_summary` | Geracao e persistencia de sumarios pos-compactacao. | Revisado |
 | 11 | `config` | `AgentConfig`, `CompactionPolicy`, `MessageQueues`, `ToolExecutionMode`. | Revisado |
 | 12 | `convergence` | Detecao de convergencia (parar quando objetivo alcancado). | Revisado |
-| 13 | `correction` | Correcao automatica apos erro detectado (`#[doc(hidden)]`, dead code). | Revisado |
+| 13 | _(removido)_ | T4.10b / find_p2_006: o módulo `correction` não existe no crate atual. Linha mantida para preservar a numeração histórica. | N/A |
 | 14 | `dlq` | Dead-letter queue de tool-calls/events que falharam definitivamente. | Revisado |
 | 15 | `doom_loop` | Detector de loops improdutivos (mesmo erro/tool repetido). | Revisado |
 | 16 | `event_bus` | Barramento pub/sub de eventos de runtime (`EventBus`, `EventListener`). | Revisado |
@@ -50,8 +50,8 @@
 | 38 | `retry` | Politicas de retry com backoff exponencial. | Revisado |
 | 39 | `roadmap` | Roadmap de execucao (passos planejados). | Revisado |
 | 40 | `run_engine` | `AgentRunEngine` — orquestrador de runs multi-fase. | Revisado |
-| 41 | `sanitizer` | Sanitizacao de inputs/outputs (PII, secrets, injection). | Revisado |
-| 42 | `scheduler` | Scheduler de tarefas (`#[doc(hidden)]`, dead code). | Revisado |
+| 41 | `tool_pair_integrity` (was `sanitizer`) | T1.2 / FIND-P6-008: nome migrado; reparo estrutural de pares tool após compactação. **NÃO scrubba PII/segredos** — isso é responsabilidade de `secret_scrubber` (T4.5). | Revisado |
+| 42 | _(removido)_ | T4.10b / find_p2_013: o módulo `scheduler` não existe no crate atual. Linha mantida para preservar a numeração histórica. | N/A |
 | 43 | `sensor` | Sensores ambientais (file changes, clock, signals). | Revisado |
 | 44 | `session_bootstrap` | Bootstrap de sessao (load context, init state). | Revisado |
 | 45 | `session_tree` | Arvore de sessoes pai/filho (sub-agents). | Revisado |
@@ -110,8 +110,8 @@ Apos Iters 55, 58, 60, 86: 7 view structs (`LlmView`, `LoopView`, `ContextView`,
 ### 12. convergence (~)
 `GitDiffConvergence` + `EditSuccessConvergence` em `AllOf` mode. Pure-function `is_converged(ctx)` com unit tests. AC `agent_done_gate_1_blocks_then_recovers_with_text` (T0.1 cenario 12) cobre o block path; force-accept (cenario 5) cobre o escape hatch.
 
-### 13. correction
-Correction engine usado pelo `evolution::EvolutionLoop`. Modulo legacy mantido com docstring deprecando `#[doc(hidden)]` (T5.1 AC literal: 0 hits).
+### 13. correction _(REMOVIDO)_
+T4.10b / find_p2_006: o módulo `correction` não existe na árvore de fontes atual (`grep -r "mod correction" crates/theo-agent-runtime/src/` retorna vazio). O texto histórico foi removido para evitar drift de documentação. A funcionalidade de correção pós-erro vive hoje no `evolution::EvolutionLoop` diretamente.
 
 ### 14. dlq (55 LOC)
 Dead-letter queue. T8.3 documentado: caller wraps em `Mutex<DeadLetterQueue>` (compile-time check via `assert_send_sync<Arc<Mutex<DeadLetterQueue>>>`).
@@ -197,8 +197,8 @@ Iter 56-61: split god-file 4230 LOC → mod.rs 357 + 19 children, todos ≤625 L
 ### 41. sanitizer (73 LOC)
 `prompt_sanitizer` re-export wrapper. Real impl em theo-domain. AC T1.2 cobertura em security_t7_1: strip_injection_tokens, fence_untrusted, char_boundary_truncate.
 
-### 42. scheduler
-Legacy `#[doc(hidden)]` — T5.3 dead code marcacao. T5.1 AC: zero `#[doc(hidden)]` hits, scheduler ja foi removido ou marcado.
+### 42. scheduler _(REMOVIDO)_
+T4.10b / find_p2_013: o módulo `scheduler` não existe na árvore de fontes atual (`grep -r "mod scheduler" crates/theo-agent-runtime/src/` retorna vazio). O texto histórico foi removido para evitar drift de documentação. As decisões de scheduling vivem hoje em `task_manager` + `tool_call_manager`.
 
 ### 43. sensor (103 LOC)
 SensorRunner dreina pending results para system messages no LLM (`drain_sensor_messages` em iteration_prelude.rs). T0.1 underpinning para Gate 2 fixture.

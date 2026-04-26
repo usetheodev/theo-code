@@ -212,7 +212,13 @@ fn validate_skill_name(name: &str) -> Result<(), SkillCatalogError> {
         });
     }
     let mut chars = name.chars();
-    let first = chars.next().unwrap();
+    // T4.10o / find_p2_001 — `expect` with the explicit invariant
+    // (the `name.is_empty()` check on line 205 above guarantees at
+    // least one char). Replaces the bare `unwrap` that the unwrap-gate
+    // would otherwise have to keep on its allowlist.
+    let first = chars
+        .next()
+        .expect("invariant: name is non-empty (checked above)");
     let first_ok = first.is_ascii_lowercase() || first.is_ascii_digit();
     if !first_ok {
         return Err(SkillCatalogError::InvalidName {

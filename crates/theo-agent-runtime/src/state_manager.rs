@@ -164,6 +164,54 @@ impl StateManager {
 mod tests {
     use super::*;
 
+    /// T4.10c / find_p2_008 — calendar-deadline assertion that fires
+    /// after the documented sunset for the legacy
+    /// `.theo/wiki/episodes/` read-fallback. Once `today >`
+    /// `WIKI_LEGACY_DEPRECATION_DATE`, the test fails so the
+    /// dead-fallback can no longer slip through code review unnoticed.
+    /// Static-only check: no I/O, no state.
+    #[test]
+    fn t410c_wiki_legacy_fallback_must_be_removed_after_sunset() {
+        // Format: "YYYY-MM-DD".
+        let parts: Vec<&str> = WIKI_LEGACY_DEPRECATION_DATE
+            .split('-')
+            .collect();
+        assert_eq!(parts.len(), 3, "deprecation date must be ISO YYYY-MM-DD");
+
+        let yy: u32 = parts[0].parse().expect("year is numeric");
+        let mm: u32 = parts[1].parse().expect("month is numeric");
+        let dd: u32 = parts[2].parse().expect("day is numeric");
+
+        // Compute "today" as days since UNIX epoch (rough, calendar
+        // approximation OK because we only need monotonic ordering).
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock OK")
+            .as_secs();
+        let today_days = now_secs / 86400;
+        // Convert deprecation date to days-since-epoch via the
+        // standard "days from 1970-01-01" formula. Borrowed from the
+        // public-domain "Howard Hinnant" date algorithm.
+        let y = if mm <= 2 { yy - 1 } else { yy };
+        let era = (if y >= 400 { y } else { y + 400 }) / 400;
+        let yoe = y.wrapping_sub(era * 400);
+        let m = mm as i64;
+        let doy: i64 = (153 * (m + if mm > 2 { -3 } else { 9 }) + 2) / 5 + dd as i64 - 1;
+        let doe: i64 = (yoe as i64) * 365
+            + (yoe as i64) / 4
+            - (yoe as i64) / 100
+            + doy;
+        let dep_days: i64 = (era as i64) * 146097 + doe - 719_468;
+
+        assert!(
+            (today_days as i64) <= dep_days,
+            "WIKI_LEGACY_DEPRECATION_DATE ({}) has passed — \
+             remove the legacy fallback in load_episode_summaries() and \
+             delete this test",
+            WIKI_LEGACY_DEPRECATION_DATE
+        );
+    }
+
     #[test]
     fn test_state_manager_creates_session_tree_on_disk() {
         // Arrange

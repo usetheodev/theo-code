@@ -35,7 +35,7 @@ impl SubAgentManager {
             metrics: None,
             mcp_registry: None,
             mcp_discovery: None,
-            pending_resume_context: std::sync::Mutex::new(None),
+            pending_resume_context: parking_lot::Mutex::new(None),
             spawn_semaphore: None,
         }
     }
@@ -174,9 +174,10 @@ impl SubAgentManager {
         &self,
         ctx: Arc<crate::subagent::resume::ResumeContext>,
     ) {
-        if let Ok(mut g) = self.pending_resume_context.lock() {
-            *g = Some(ctx);
-        }
+        // T4.10j — parking_lot::Mutex never poisons, so the previous
+        // `if let Ok(mut g) = ...` (silent on poison) is now a direct
+        // assignment.
+        *self.pending_resume_context.lock() = Some(ctx);
     }
 
     /// Access the registry, if any.

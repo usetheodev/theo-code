@@ -137,6 +137,14 @@ impl<'a> Resumer<'a> {
         }
         let events = self.store.list_events(run_id)?;
         let history = reconstruct_history(&events);
+        // T4.10m / find_p4_006 — `start_iteration` is the COUNT of
+        // completed iterations (zero-based when empty, becomes the
+        // index of the next iteration to run because iterations are
+        // 1-based downstream). H3 from the deep-review (off-by-one
+        // in resume replay) was REFUTED here: the next-iteration
+        // index equals the count of completed iterations exactly,
+        // and `executed_tool_results` is keyed by tool_call_id (not
+        // by index), so re-execution detection is index-free.
         let start_iteration = events
             .iter()
             .filter(|e| e.event_type == "iteration_completed")

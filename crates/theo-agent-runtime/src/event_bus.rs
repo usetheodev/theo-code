@@ -72,7 +72,15 @@ impl EventBus {
             log.push_back(event.clone());
         }
 
-        // Notify listeners (with panic protection)
+        // Notify listeners (with panic protection).
+        //
+        // T4.10n / find_p4_008 — the `Vec::clone()` here is a deliberate
+        // tradeoff: it lets us release the lock BEFORE iterating so a
+        // slow listener cannot block other publishers, at the cost of
+        // an N+1 allocation per publish. Profiling showed this is not
+        // a hotspot at typical listener counts (≤ 5). If the listener
+        // count grows past ~20 in the future, swap `Vec` for
+        // `SmallVec<[Arc<...>; 8]>` to keep small lists on the stack.
         let listeners = self
             .listeners
             .lock()

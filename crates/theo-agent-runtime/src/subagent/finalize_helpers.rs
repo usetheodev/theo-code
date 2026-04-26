@@ -118,14 +118,24 @@ impl SubAgentManager {
         if removed
             && let Some(hooks) = &self.hook_manager
         {
-            use crate::lifecycle_hooks::{HookContext, HookEvent};
-            let _ = hooks.dispatch(
+            use crate::lifecycle_hooks::{HookContext, HookEvent, HookResponse};
+            // T4.10e / find_p2_011 — log non-Allow responses (idem
+            // WorktreeCreate side in spawn_helpers).
+            let resp = hooks.dispatch(
                 HookEvent::WorktreeRemove,
                 &HookContext {
                     tool_name: Some(handle.path.to_string_lossy().to_string()),
                     ..Default::default()
                 },
             );
+            if !matches!(resp, HookResponse::Allow) {
+                tracing::debug!(
+                    event = "WorktreeRemove",
+                    response = ?resp,
+                    worktree = %handle.path.display(),
+                    "non-Allow hook response (informational)"
+                );
+            }
         }
     }
 }
