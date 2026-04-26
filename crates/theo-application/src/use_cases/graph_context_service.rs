@@ -35,6 +35,14 @@ use theo_engine_retrieval::tantivy_search::FileTantivyIndex;
 use theo_engine_retrieval::embedding::cache::EmbeddingCache;
 #[cfg(feature = "dense-retrieval")]
 use theo_engine_retrieval::embedding::neural::NeuralEmbedder;
+#[cfg(feature = "dense-retrieval")]
+use theo_engine_retrieval::pipeline::retrieve_with_config;
+// T8.1 — `CrossEncoderConfig` + `CrossEncoderReranker` are always
+// compiled by the retrieval crate, but we only consume them on the
+// dense-retrieval path because that's where the RRF candidate set
+// originates.
+#[cfg(feature = "dense-retrieval")]
+use theo_engine_retrieval::reranker::{CrossEncoderConfig, CrossEncoderReranker};
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -77,6 +85,18 @@ struct GraphState {
     /// Pre-computed file embeddings (Tier 2). Cached to .theo/embeddings.bin.
     #[cfg(feature = "dense-retrieval")]
     embedding_cache: Option<EmbeddingCache>,
+    /// T8.1 — Cross-encoder reranker (Stage 2). When `Some`, the
+    /// retrieval pipeline runs RRF → rerank; when `None`, falls back
+    /// to RRF top-K (current behaviour). Initialised lazily — model
+    /// download (~200 MB Jina v2) happens on first construction so
+    /// quick `theo init` runs that don't query never pay the cost.
+    #[cfg(feature = "dense-retrieval")]
+    reranker: Option<Arc<CrossEncoderReranker>>,
+    /// T8.1 — Runtime config for the reranker stage (`use_reranker`,
+    /// `top_k`, `max_candidates`). Always present; defaults are SOTA
+    /// (use_reranker=true, top_k=20, max_candidates=50).
+    #[cfg(feature = "dense-retrieval")]
+    cross_encoder_config: CrossEncoderConfig,
 }
 
 /// Explicit state machine for background graph build lifecycle.
@@ -186,6 +206,13 @@ impl GraphContextProvider for GraphContextService {
                 embedder,
                 #[cfg(feature = "dense-retrieval")]
                 embedding_cache,
+                // T8.1 — reranker model is heavy to construct
+                // (~200 MB Jina v2 download); start as None and
+                // populate lazily on first query that needs it.
+                #[cfg(feature = "dense-retrieval")]
+                reranker: None,
+                #[cfg(feature = "dense-retrieval")]
+                cross_encoder_config: CrossEncoderConfig::default(),
             });
             return Ok(());
         }
@@ -254,6 +281,11 @@ impl GraphContextProvider for GraphContextService {
                         embedder,
                         #[cfg(feature = "dense-retrieval")]
                         embedding_cache,
+                        // T8.1 — see fast-path branch above for rationale.
+                        #[cfg(feature = "dense-retrieval")]
+                        reranker: None,
+                        #[cfg(feature = "dense-retrieval")]
+                        cross_encoder_config: CrossEncoderConfig::default(),
                     });
                 }
                 Ok(Ok(Err(_panic))) => {
@@ -410,13 +442,23 @@ impl GraphContextProvider for GraphContextService {
                     && let Some(embedder) = graph_state.embedder.as_ref()
                     && let Some(cache) = graph_state.embedding_cache.as_ref()
                 {
-                    theo_engine_retrieval::tantivy_search::hybrid_rrf_search(
+                    // T8.1 — Run the runtime-gated pipeline. When
+                    // `cross_encoder_config.use_reranker` is true AND
+                    // a reranker model is loaded, this includes Stage
+                    // 2 cross-encoder reranking; otherwise it returns
+                    // the RRF top-K (identical shape to the legacy
+                    // `hybrid_rrf_search` call). The reranker field
+                    // starts as None — first query that needs it can
+                    // construct the model lazily in a future change.
+                    retrieve_with_config(
                         &graph_state.graph,
                         idx,
                         embedder,
                         cache,
+                        graph_state.reranker.as_deref(),
                         query,
                         20.0, // RRF k parameter (empirically optimal)
+                        &graph_state.cross_encoder_config,
                     )
                 } else if let Some(idx) = graph_state.tantivy_index.as_ref() {
                     theo_engine_retrieval::tantivy_search::hybrid_search(
@@ -1749,5 +1791,46 @@ mod tests {
         std::fs::remove_file(tmp.path().join("src/b.rs")).unwrap();
         let h2 = compute_project_hash(tmp.path());
         assert_ne!(h1, h2, "Deleted file must change hash");
+    }
+
+    // ── T8.1 part 3 — reranker plumbing in graph_context_service ──
+
+    #[cfg(feature = "dense-retrieval")]
+    #[tokio::test]
+    async fn t81gcs_initialised_state_starts_with_default_cross_encoder_config() {
+        // After the service finishes building, the GraphState carries
+        // the SOTA-default CrossEncoderConfig (use_reranker=true,
+        // top_k=20, max_candidates=50). The reranker model itself is
+        // None until lazily loaded. This test pins the invariant so a
+        // future refactor that drops the field would fail loudly.
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("src")).unwrap();
+        std::fs::write(tmp.path().join("src/a.rs"), "fn a() {}").unwrap();
+
+        let svc = GraphContextService::new();
+        svc.initialize(tmp.path()).await.unwrap();
+        assert!(wait_ready(&svc, 30).await, "service should become ready");
+
+        let state = svc.state.read().await;
+        match &*state {
+            GraphBuildState::Ready(gs) => {
+                let cfg = &gs.cross_encoder_config;
+                assert!(cfg.use_reranker, "SOTA-default invariant: use_reranker=true");
+                assert_eq!(cfg.top_k, 20);
+                assert_eq!(cfg.max_candidates, 50);
+                // Reranker model is unloaded until first use that
+                // needs it (lazy init in a future iteration).
+                assert!(gs.reranker.is_none(), "reranker model starts unloaded");
+            }
+            other => panic!(
+                "expected Ready state after initialize, got {}",
+                match other {
+                    GraphBuildState::Uninitialized => "Uninitialized",
+                    GraphBuildState::Building { .. } => "Building",
+                    GraphBuildState::Failed(_) => "Failed",
+                    GraphBuildState::Ready(_) => unreachable!(),
+                }
+            ),
+        }
     }
 }
