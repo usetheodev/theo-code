@@ -2,21 +2,21 @@
 
 **Source:** [agent-runtime-remediation-plan.md](../plans/agent-runtime-remediation-plan.md)
 **Created:** 2026-04-25
-**Last updated:** 2026-04-25 (iter 3 — Phase 2 done)
+**Last updated:** 2026-04-26 (iter 4 — Phase 3 partial + Phase 4 quick-wins)
 
 ## Progress
 
 ```
-[=====================························] 48% (15/31 done)
+[==============================···············] 71% (22/31 done)
 ```
 
 | Column | Count | Cards |
 |---|---|---|
-| backlog | 12 | T3.1, T3.2, T3.5, T3.6, T3.7, T4.1, T4.2, T4.3, T4.4, T4.5, T4.6, T4.9, T4.10 |
-| ready | 4 | T3.3, T3.4, T3.6, T3.8 |
+| backlog | 6 | T3.1, T3.2, T3.7, T4.1, T4.5, T4.9, T4.10 |
+| ready | 3 | T3.3, T3.8 |
 | doing | 0 | — |
 | review | 0 | — |
-| done | 15 | T0.1, T0.2, T0.3, T0.4, T1.1, T1.2, T1.3, T1.4, T2.1, T2.2, T2.3, T2.4, T2.5, T4.7, T4.8 |
+| done | 22 | T0.1, T0.2, T0.3, T0.4, T1.1, T1.2, T1.3, T1.4, T2.1, T2.2, T2.3, T2.4, T2.5, T3.4, T3.5, T3.6, T4.2, T4.3, T4.4, T4.6, T4.7, T4.8 |
 
 ## Phase Summary
 
@@ -25,9 +25,9 @@
 | 0 | Foundation / Unblockers | 4 | 4 | 100% |
 | 1 | Correção P1 Crítica | 4 | 4 | 100% |
 | 2 | Defesas Wired | 5 | 5 | 100% |
-| 3 | Refactor Arquitetural | 8 | 0 | 0% |
-| 4 | Hardening Backlog | 10 | 2 | 20% |
-| **Total** | — | **31** | **15** | **48%** |
+| 3 | Refactor Arquitetural | 8 | 3 | 38% |
+| 4 | Hardening Backlog | 10 | 6 | 60% |
+| **Total** | — | **31** | **22** | **71%** |
 
 ## Dependency Graph (Live)
 
@@ -776,3 +776,10 @@ Status annotations: `[done]`, `[review]`, `[doing]`, `[ready]`, `[backlog]`
 | 2026-04-25 | T2.3 | backlog | done | CapabilityGate sempre instalado (default `unrestricted()`) + structural test |
 | 2026-04-25 | T2.4 | backlog | done | `HookResponse::inject_context_sanitized()` helper + doc + 3 unit tests |
 | 2026-04-25 | T2.5 | backlog | done | `load_promise()` faz strip + cap 8KB; `MAX_PROMPT_MD_BYTES` constant + 2 unit tests |
+| 2026-04-26 | T3.6 | backlog | done | `file.sync_data()` após `flush()` em SessionTree append (header + entries) |
+| 2026-04-26 | T4.6 | backlog | done | `random_u64()` exposed em theo-domain; `generate_run_id` + `EntryId::generate` ambos migrados |
+| 2026-04-26 | T4.3 | backlog | done | Manual Debug em AgentConfig redige `api_key: Some("[REDACTED]")` + 3 unit tests |
+| 2026-04-26 | T4.2 | backlog | done | `HookManager::validate_regexes()` + `HookRegexError` thiserror + tracing log no fail-open |
+| 2026-04-26 | T4.4 | backlog | done | `spawn_semaphore` field + `with_max_concurrent_spawns(n)` builder + permit acquire em `spawn_with_spec_with_override` + 3 testes |
+| 2026-04-26 | T3.5 | backlog | done | `checkpoint_ttl_seconds` config field (default 7d) + cleanup hook em `record_session_exit` |
+| 2026-04-26 | T3.4 | backlog | done | `find_boundary_idx` avança forward para nunca splittar pares tool_use/tool_result + 3 testes |

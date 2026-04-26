@@ -227,6 +227,21 @@ impl HookMatcher {
     }
 }
 
+/// Returned by [`HookManager::validate_regexes`] when a registered hook
+/// matcher contains a syntactically invalid regex.
+///
+/// `event` and `index` pinpoint the offending matcher so the caller can
+/// surface the problem to the user verbatim. T4.2 / find_p6_007.
+#[derive(Debug, thiserror::Error)]
+#[error("invalid hook regex for event {event} matcher #{index}: {pattern} ({source})")]
+pub struct HookRegexError {
+    pub event: String,
+    pub index: usize,
+    pub pattern: String,
+    #[source]
+    pub source: regex::Error,
+}
+
 // ---------------------------------------------------------------------------
 // HookManager — registry of hooks per event
 // ---------------------------------------------------------------------------
@@ -252,6 +267,30 @@ impl HookManager {
             .push(matcher);
     }
 
+    /// Pre-compile every matcher's regex and return the first compile
+    /// error (along with which event + index it affects). Callers that
+    /// load `HookManager` from user-supplied YAML/JSON SHOULD invoke
+    /// this immediately after `serde` deserialization so a malformed
+    /// regex fails loud at startup instead of being silently treated as
+    /// "allow" at dispatch time (T4.2 / find_p6_007).
+    pub fn validate_regexes(&self) -> Result<(), HookRegexError> {
+        for (event, matchers) in &self.by_event {
+            for (idx, m) in matchers.iter().enumerate() {
+                if let Some(pattern) = &m.matcher {
+                    if let Err(e) = Regex::new(pattern) {
+                        return Err(HookRegexError {
+                            event: event.clone(),
+                            index: idx,
+                            pattern: pattern.clone(),
+                            source: e,
+                        });
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Get all matchers registered for an event (deterministic order).
     pub fn get(&self, event: HookEvent) -> &[HookMatcher] {
         self.by_event
@@ -273,7 +312,21 @@ impl HookManager {
                     other => return other.clone(),
                 },
                 Ok(false) => continue,
-                Err(_) => continue, // fail-open on regex error
+                Err(e) => {
+                    // T4.2 / find_p6_007 — Previously this arm
+                    // silently fail-open. Now it emits a structured
+                    // log so a broken regex is at least observable in
+                    // tracing output. Callers SHOULD also invoke
+                    // `HookManager::validate_regexes()` at load time
+                    // to surface the failure even earlier.
+                    tracing::error!(
+                        event = ?event,
+                        pattern = ?m.matcher,
+                        error = %e,
+                        "hook matcher regex compile failed; treating as no-match (fail-open)"
+                    );
+                    continue;
+                }
             }
         }
         HookResponse::Allow
@@ -412,6 +465,62 @@ mod tests {
     // before joining the LLM prompt. The helper
     // `inject_context_sanitized` is the supported integration point.
     // ---------------------------------------------------------------
+
+    // ---------------------------------------------------------------
+    // T4.2 / find_p6_007 — regex compile failures must be detectable
+    // at load time, not silently fail-open at dispatch.
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn t42_validate_regexes_passes_for_valid_patterns() {
+        let mut mgr = HookManager::new();
+        mgr.add(
+            HookEvent::PreToolUse,
+            HookMatcher {
+                matcher: Some("^bash$".into()),
+                response: HookResponse::Allow,
+                timeout_secs: 60,
+            },
+        );
+        mgr.add(
+            HookEvent::PreToolUse,
+            HookMatcher {
+                matcher: None,
+                response: HookResponse::Allow,
+                timeout_secs: 60,
+            },
+        );
+        assert!(mgr.validate_regexes().is_ok());
+    }
+
+    #[test]
+    fn t42_validate_regexes_fails_for_invalid_pattern_and_pinpoints_it() {
+        let mut mgr = HookManager::new();
+        mgr.add(
+            HookEvent::PreToolUse,
+            HookMatcher {
+                matcher: Some("^bash$".into()),
+                response: HookResponse::Allow,
+                timeout_secs: 60,
+            },
+        );
+        mgr.add(
+            HookEvent::PreToolUse,
+            HookMatcher {
+                // Unclosed group — guaranteed regex compile error.
+                matcher: Some("(unclosed".into()),
+                response: HookResponse::Block {
+                    reason: "x".into(),
+                },
+                timeout_secs: 60,
+            },
+        );
+
+        let err = mgr.validate_regexes().expect_err("must fail");
+        assert_eq!(err.event, HookEvent::PreToolUse.as_str());
+        assert_eq!(err.index, 1);
+        assert!(err.pattern.contains("(unclosed"));
+    }
 
     #[test]
     fn t24_inject_context_sanitized_strips_injection_tokens() {

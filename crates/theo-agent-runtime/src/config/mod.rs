@@ -194,7 +194,12 @@ impl Default for CompactionPolicy {
 // ---------------------------------------------------------------------------
 
 /// Configuration for the agent loop.
-#[derive(Debug, Clone)]
+///
+/// `Debug` is implemented manually so that the `api_key` field renders
+/// as `Some("[REDACTED]")` / `None` instead of the actual secret. This
+/// blocks accidental leaks via `tracing::debug!`, `dbg!`, panic
+/// backtraces, or `println!("{:#?}", config)`. T4.3 / find_p6_009.
+#[derive(Clone)]
 pub struct AgentConfig {
     /// Maximum number of iterations before stopping.
     pub max_iterations: usize,
@@ -318,6 +323,37 @@ pub struct AgentConfig {
     /// serialization and diffing remain deterministic across
     /// reproducibility audits.
     pub plugin_allowlist: Option<std::collections::BTreeSet<String>>,
+    /// TTL (in seconds) applied to shadow-git checkpoints by
+    /// `CheckpointManager::cleanup` at session shutdown. Default is
+    /// 7 days (604800). Set to `0` to disable cleanup entirely.
+    /// T3.5 / find_p5_005.
+    pub checkpoint_ttl_seconds: u64,
+}
+
+/// Manual `Debug` impl that redacts `api_key`. T4.3 / find_p6_009.
+///
+/// The redaction preserves *presence* (`Some("[REDACTED]")` vs `None`)
+/// because that signal is sometimes diagnostic ("did the user actually
+/// configure a key?") without leaking the actual bytes. Every other
+/// field uses its native Debug.
+impl std::fmt::Debug for AgentConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AgentConfig")
+            .field("max_iterations", &self.max_iterations)
+            .field("base_url", &self.base_url)
+            .field(
+                "api_key",
+                &self.api_key.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field("model", &self.model)
+            // The remaining fields are large and not security-sensitive;
+            // we render them via a single non-exhaustive marker so this
+            // Debug impl does not need to track every future field
+            // addition. If `tracing::debug!(?config)` is needed for
+            // detailed troubleshooting, the caller already has access
+            // to the typed fields directly.
+            .finish_non_exhaustive()
+    }
 }
 
 /// Debug-friendly wrapper around `Arc<dyn MemoryProvider>` so `AgentConfig`
@@ -402,6 +438,8 @@ impl Default for AgentConfig {
             skill_reviewer: None,
             transcript_indexer: None,
             plugin_allowlist: None,
+            // 7 days of shadow checkpoints. T3.5 / find_p5_005.
+            checkpoint_ttl_seconds: 7 * 24 * 60 * 60,
         }
     }
 }
@@ -411,6 +449,48 @@ impl Default for AgentConfig {
 mod tests {
     use super::*;
     use super::prompts::default_system_prompt;
+
+    // -----------------------------------------------------------------
+    // T4.3 / find_p6_009 — `api_key` must NEVER appear in Debug output.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn t43_debug_redacts_api_key_when_present() {
+        let mut cfg = AgentConfig::default();
+        cfg.api_key = Some("sk-ant-real-secret-do-not-leak".into());
+        let dbg = format!("{:?}", cfg);
+        assert!(
+            !dbg.contains("sk-ant-real-secret-do-not-leak"),
+            "raw api_key value leaked into Debug output: {dbg}"
+        );
+        assert!(
+            dbg.contains("[REDACTED]"),
+            "expected `[REDACTED]` marker in Debug output: {dbg}"
+        );
+    }
+
+    #[test]
+    fn t43_debug_shows_none_when_api_key_absent() {
+        let cfg = AgentConfig::default();
+        let dbg = format!("{:?}", cfg);
+        // `api_key: None` should still be visible — presence/absence
+        // is a useful diagnostic signal.
+        assert!(
+            dbg.contains("api_key: None"),
+            "expected `api_key: None` in Debug output: {dbg}"
+        );
+    }
+
+    #[test]
+    fn t43_debug_pretty_print_does_not_leak_api_key() {
+        let mut cfg = AgentConfig::default();
+        cfg.api_key = Some("sk-ant-pretty-print-secret".into());
+        let pretty = format!("{:#?}", cfg);
+        assert!(
+            !pretty.contains("sk-ant-pretty-print-secret"),
+            "raw api_key value leaked into Debug pretty output: {pretty}"
+        );
+    }
 
     /// T4.1 AC literal: each sub-config view exposes ≤ 10 fields. The
     /// AC stays satisfied as long as no future PR overgrows a view.

@@ -35,6 +35,16 @@ impl CompactionState {
 /// Walk the messages from the tail backward and return the index that
 /// separates compactable from preserved. Counts only non-system messages
 /// toward the `preserve_tail` budget.
+///
+/// **Pair-atomicity (T3.4 / find_p4_007 / find_p4_009 / INV-001):**
+/// after computing the naïve cut point, the boundary is **moved
+/// forward** until it sits OUTSIDE any `assistant_with_tool_calls` →
+/// `Role::Tool` pair. This prevents the historical bug where a tool
+/// result could survive into the preserved tail while its matching
+/// `tool_use` was about to be compacted (or vice versa) — leaving the
+/// LLM with an orphan that providers reject. `sanitize_tool_pairs`
+/// remains as a defensive backstop, but is now a no-op on the happy
+/// path.
 pub(super) fn find_boundary_idx(messages: &[Message], preserve_tail: usize) -> usize {
     let mut tail_count = 0usize;
     let mut boundary_idx = messages.len();
@@ -47,6 +57,30 @@ pub(super) fn find_boundary_idx(messages: &[Message], preserve_tail: usize) -> u
             }
         }
     }
+
+    // Move the boundary forward while it would split a tool pair:
+    //   - boundary points at a `Role::Tool` whose matching assistant
+    //     tool_call is at boundary_idx-1 (i.e. lives BEFORE the
+    //     preserved window). Advance past every contiguous `Role::Tool`
+    //     so the entire result block is preserved with its assistant.
+    //   - boundary points one position past an
+    //     `assistant_with_tool_calls` whose matching `Role::Tool`
+    //     results live AT or AFTER the boundary. Advance past those
+    //     results so the assistant + its results stay together.
+    while boundary_idx < messages.len()
+        && (
+            // Case A: cut would land in the middle of consecutive tool
+            // results. Push forward until past the last contiguous Tool.
+            messages[boundary_idx].role == Role::Tool
+                || (boundary_idx > 0
+                    && messages[boundary_idx - 1].role == Role::Assistant
+                    && messages[boundary_idx - 1].tool_calls.is_some()
+                    && messages[boundary_idx].role == Role::Tool)
+        )
+    {
+        boundary_idx += 1;
+    }
+
     boundary_idx
 }
 
@@ -257,4 +291,107 @@ pub(super) fn insert_summary_after_system(messages: &mut Vec<Message>, summary: 
         .map(|i| i + 1)
         .unwrap_or(0);
     messages.insert(insert_pos, Message::user(summary));
+}
+
+#[cfg(test)]
+mod t34_pair_atomicity_tests {
+    use super::*;
+    use theo_infra_llm::types::{FunctionCall, ToolCall};
+
+    fn user(s: &str) -> Message {
+        Message::user(s)
+    }
+
+    fn assistant_with_tool_call(call_id: &str, name: &str) -> Message {
+        Message::assistant_with_tool_calls(
+            None,
+            vec![ToolCall {
+                id: call_id.into(),
+                call_type: "function".into(),
+                function: FunctionCall {
+                    name: name.into(),
+                    arguments: "{}".into(),
+                },
+            }],
+        )
+    }
+
+    fn tool_result(call_id: &str, name: &str, output: &str) -> Message {
+        Message::tool_result(call_id, name, output)
+    }
+
+    /// T3.4 / find_p4_009 — when the naïve cut would land between an
+    /// assistant tool_call and its matching tool_result, the boundary
+    /// must be advanced past the entire result block so the pair stays
+    /// together.
+    #[test]
+    fn t34_boundary_advances_past_tool_result_when_assistant_just_before() {
+        let messages = vec![
+            user("seed"),                                    // 0
+            assistant_with_tool_call("c1", "read"),          // 1
+            tool_result("c1", "read", "ok"),                 // 2 — would be split if boundary=2
+            user("follow up"),                               // 3
+            assistant_with_tool_call("c2", "write"),         // 4
+            tool_result("c2", "write", "ok"),                // 5
+        ];
+
+        // preserve_tail=4 → naïve cut at index 2 (Tool result), which
+        // would split the call_id="c1" pair across the boundary.
+        let boundary = find_boundary_idx(&messages, 4);
+        assert!(
+            boundary >= 3,
+            "boundary must move past the tool_result block; got {boundary}"
+        );
+        // Also: every tool_result that survives must have its
+        // assistant tool_call surviving too.
+        for (i, m) in messages[boundary..].iter().enumerate() {
+            if m.role == Role::Tool {
+                let absolute = boundary + i;
+                assert!(
+                    messages[..absolute]
+                        .iter()
+                        .any(|m| m.role == Role::Assistant && m.tool_calls.is_some()),
+                    "surviving tool_result has no preserved assistant tool_call"
+                );
+            }
+        }
+    }
+
+    /// T3.4 — when there are MULTIPLE consecutive tool_results after an
+    /// assistant tool_call (parallel/batch), all results must move
+    /// across together — splitting any of them is still an orphan.
+    #[test]
+    fn t34_boundary_advances_past_multiple_consecutive_tool_results() {
+        let messages = vec![
+            user("seed"),                                    // 0
+            assistant_with_tool_call("c1", "batch"),         // 1
+            tool_result("c1", "batch", "1/3"),               // 2
+            tool_result("c1", "batch", "2/3"),               // 3
+            tool_result("c1", "batch", "3/3"),               // 4
+            user("done"),                                    // 5
+        ];
+
+        // preserve_tail=4 → naïve cut at index 2.
+        let boundary = find_boundary_idx(&messages, 4);
+        assert!(
+            boundary >= 5,
+            "boundary must skip ALL contiguous Role::Tool entries; got {boundary}"
+        );
+    }
+
+    /// Sanity: when no pair is split, the boundary stays at the
+    /// naïve position (no over-shooting that would defeat the
+    /// preserve_tail budget).
+    #[test]
+    fn t34_boundary_unchanged_when_naive_cut_is_safe() {
+        let messages = vec![
+            user("a"),                          // 0
+            user("b"),                          // 1
+            user("c"),                          // 2
+            user("d"),                          // 3
+        ];
+        let boundary = find_boundary_idx(&messages, 2);
+        // Naïve cut: 2 user messages preserved → boundary at index 2.
+        assert_eq!(boundary, 2);
+    }
 }

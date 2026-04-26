@@ -73,6 +73,12 @@ impl SessionTree {
         let line = serde_json::to_string(&header)?;
         writeln!(file, "{line}")?;
         file.flush()?;
+        // T3.6 / find_p5_004 — `flush()` only drains userspace buffers
+        // to the kernel page cache. `sync_data()` issues `fdatasync(2)`
+        // so a host crash does not lose appended entries that resume
+        // logic depends on. Cost: ~1-5 ms per append on rotational
+        // disks; negligible on SSDs.
+        file.sync_data()?;
 
         let mut index = HashMap::new();
         index.insert(header.id().to_string(), 0);
@@ -158,6 +164,8 @@ impl SessionTree {
             .open(&self.file_path)?;
         writeln!(file, "{line}")?;
         file.flush()?;
+        // T3.6 / find_p5_004 — see header creation comment above.
+        file.sync_data()?;
 
         // Update in-memory state.
         let pos = self.entries.len();

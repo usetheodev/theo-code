@@ -20,15 +20,19 @@ use serde::{Deserialize, Serialize};
 pub struct EntryId(String);
 
 impl EntryId {
-    /// Generate a new random-ish 8-char hex ID.
+    /// Generate a new random ID (16-hex form derived from
+    /// `theo_domain::identifiers::random_u64`).
     ///
-    /// Uses nanosecond XOR seconds to produce a short unique value.
-    /// For stronger uniqueness in production, swap in a proper UUID crate.
+    /// T4.6 / find_p5_008 — replaces the previous 32-bit nanosecond-XOR
+    /// form which could collide on fast hardware in parallel spawns.
+    /// `random_u64` mixes wall-clock nanoseconds, thread id, and a
+    /// stack-pointer-derived value for collision-resistance equivalent
+    /// to the other identifiers in `theo-domain`.
     pub fn generate() -> Self {
-        let t = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default();
-        Self(format!("{:08x}", t.subsec_nanos() ^ (t.as_secs() as u32)))
+        Self(format!(
+            "{:016x}",
+            theo_domain::identifiers::random_u64()
+        ))
     }
 
     /// Generate an ID that does not collide with existing entries.

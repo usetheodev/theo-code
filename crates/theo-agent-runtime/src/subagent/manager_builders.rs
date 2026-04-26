@@ -36,7 +36,27 @@ impl SubAgentManager {
             mcp_registry: None,
             mcp_discovery: None,
             pending_resume_context: std::sync::Mutex::new(None),
+            spawn_semaphore: None,
         }
+    }
+
+    /// Cap the number of concurrent `spawn_with_spec` calls (T4.4 /
+    /// find_p6_011). Each spawn acquires a permit before doing any
+    /// work and releases it on completion (success, failure, or
+    /// cancellation).
+    ///
+    /// When unset (the default), spawning is unbounded — preserves
+    /// legacy behaviour for callers that haven't opted in yet.
+    pub fn with_max_concurrent_spawns(mut self, max: usize) -> Self {
+        self.spawn_semaphore = Some(Arc::new(tokio::sync::Semaphore::new(max)));
+        self
+    }
+
+    /// Test-only accessor for the spawn semaphore (used by T4.4 unit
+    /// tests to verify the field is populated by the builder).
+    #[cfg(test)]
+    pub fn spawn_semaphore_for_test(&self) -> Option<Arc<tokio::sync::Semaphore>> {
+        self.spawn_semaphore.clone()
     }
 
     /// Convenience — builds a default registry (with the 4 builtins).
@@ -184,5 +204,54 @@ impl SubAgentManager {
         &self,
     ) -> Option<&crate::checkpoint::CheckpointManager> {
         self.checkpoint_manager.as_deref()
+    }
+}
+
+#[cfg(test)]
+mod t44_tests {
+    use super::*;
+    use crate::event_bus::EventBus;
+
+    fn empty_manager() -> SubAgentManager {
+        SubAgentManager::with_builtins(
+            AgentConfig::default(),
+            Arc::new(EventBus::new()),
+            PathBuf::from("/tmp"),
+        )
+    }
+
+    #[test]
+    fn t44_default_construction_has_no_spawn_semaphore() {
+        let mgr = empty_manager();
+        assert!(
+            mgr.spawn_semaphore_for_test().is_none(),
+            "default builder must leave spawn_semaphore unset (legacy: unbounded)"
+        );
+    }
+
+    #[test]
+    fn t44_with_max_concurrent_spawns_installs_semaphore() {
+        let mgr = empty_manager().with_max_concurrent_spawns(5);
+        let sem = mgr
+            .spawn_semaphore_for_test()
+            .expect("with_max_concurrent_spawns must populate the field");
+        assert_eq!(sem.available_permits(), 5);
+    }
+
+    #[test]
+    fn t44_semaphore_actually_backpressures_excess_acquisitions() {
+        // Property: if `n` permits exist, the (n+1)-th acquire MUST
+        // block. We use try_acquire on a freshly drained semaphore to
+        // assert the bound — equivalent to the production wiring's
+        // `acquire_owned().await`.
+        let mgr = empty_manager().with_max_concurrent_spawns(2);
+        let sem = mgr.spawn_semaphore_for_test().unwrap();
+
+        let _p1 = sem.clone().try_acquire_owned().expect("permit 1");
+        let _p2 = sem.clone().try_acquire_owned().expect("permit 2");
+        assert!(
+            sem.try_acquire_owned().is_err(),
+            "3rd acquire must fail when only 2 permits configured"
+        );
     }
 }

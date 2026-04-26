@@ -72,18 +72,18 @@ where
 }
 
 /// Build a deterministic-unique run_id for a sub-agent invocation using
-/// `spec.name` + wall-clock micros. Collisions require sub-microsecond
-/// spawns of the *same* spec within the same parent — unlikely in practice
-/// and would only affect persistence de-dup.
+/// `spec.name` + (wall-clock millis) + 16 hex of `random_u64`. Same
+/// collision-resistance as the rest of `theo-domain::identifiers` —
+/// far stronger than the previous wall-clock-micros-only form which
+/// could collide on parallel spawns of the same spec on fast hardware
+/// (T4.6 / find_p4_010).
 pub(super) fn generate_run_id(spec: &AgentSpec) -> String {
-    format!(
-        "subagent-{}-{}",
-        spec.name,
-        SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_micros())
-            .unwrap_or(0)
-    )
+    let ts_ms = SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let entropy = theo_domain::identifiers::random_u64();
+    format!("subagent-{}-{:013x}-{:016x}", spec.name, ts_ms, entropy)
 }
 
 impl SubAgentManager {

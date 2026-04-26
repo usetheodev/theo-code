@@ -110,6 +110,14 @@ pub struct SubAgentManager {
     /// against the same manager is undefined behavior (would race).
     pending_resume_context:
         std::sync::Mutex<Option<Arc<crate::subagent::resume::ResumeContext>>>,
+    /// Optional concurrency cap on `spawn_with_spec`. When `Some(n)`,
+    /// at most `n` spawns can run in parallel — additional requests
+    /// await a permit. `None` means unbounded (legacy behaviour).
+    ///
+    /// T4.4 / find_p6_011 — without this cap a malicious or buggy
+    /// parent agent could fan out an unbounded number of sub-agents
+    /// (DoS via runaway spawn).
+    spawn_semaphore: Option<Arc<tokio::sync::Semaphore>>,
 }
 
 impl SubAgentManager {
@@ -162,6 +170,21 @@ impl SubAgentManager {
         });
 
         Box::pin(async move {
+            // T4.4 / find_p6_011 — Acquire a spawn permit BEFORE doing
+            // any work so a concurrency cap (when configured via
+            // `with_max_concurrent_spawns`) actually backpressures
+            // runaway spawns. Permit lives for the entire spawn and is
+            // released automatically when `_permit` is dropped.
+            let _permit = match self.spawn_semaphore.as_ref() {
+                Some(sem) => Some(
+                    sem.clone()
+                        .acquire_owned()
+                        .await
+                        .expect("spawn_semaphore is never closed during runtime"),
+                ),
+                None => None,
+            };
+
             // Resolve worktree honoring override.
             let worktree_handle = self.resolve_worktree(&spec, &worktree_override);
             // The CWD the sub-agent will use: worktree path if isolated, else parent's project_dir
@@ -536,6 +559,7 @@ mod tests {
             mcp_registry: None,
             mcp_discovery: None,
             pending_resume_context: std::sync::Mutex::new(None),
+            spawn_semaphore: None,
         };
 
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("test", "test obj");
@@ -618,6 +642,7 @@ mod tests {
             mcp_registry: None,
             mcp_discovery: None,
             pending_resume_context: std::sync::Mutex::new(None),
+            spawn_semaphore: None,
         };
 
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("scout", "check x");
@@ -674,6 +699,7 @@ mod tests {
             mcp_registry: None,
             mcp_discovery: None,
             pending_resume_context: std::sync::Mutex::new(None),
+            spawn_semaphore: None,
         };
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("x", "y");
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -707,6 +733,7 @@ mod tests {
             mcp_registry: None,
             mcp_discovery: None,
             pending_resume_context: std::sync::Mutex::new(None),
+            spawn_semaphore: None,
         };
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("persisted", "test");
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -740,6 +767,7 @@ mod tests {
             mcp_registry: None,
             mcp_discovery: None,
             pending_resume_context: std::sync::Mutex::new(None),
+            spawn_semaphore: None,
         };
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("x", "y");
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -820,6 +848,7 @@ mod tests {
             mcp_registry: None,
             mcp_discovery: None,
             pending_resume_context: std::sync::Mutex::new(None),
+            spawn_semaphore: None,
         };
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("x", "y");
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -850,6 +879,7 @@ mod tests {
             mcp_registry: None,
             mcp_discovery: None,
             pending_resume_context: std::sync::Mutex::new(None),
+            spawn_semaphore: None,
         };
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("x", "y");
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -938,6 +968,7 @@ mod tests {
             mcp_registry: Some(Arc::new(reg)),
             mcp_discovery: Some(Arc::new(cache)),
             pending_resume_context: std::sync::Mutex::new(None),
+            spawn_semaphore: None,
         };
 
         // We cannot directly inspect sub_config.system_prompt without
@@ -1024,6 +1055,7 @@ mod tests {
             mcp_registry: Some(Arc::new(reg)),
             mcp_discovery: Some(cache.clone()),
             pending_resume_context: std::sync::Mutex::new(None),
+            spawn_semaphore: None,
         };
 
         let mut spec = AgentSpec::on_demand("x", "y");
@@ -1087,6 +1119,7 @@ mod tests {
             mcp_registry: Some(Arc::new(reg)),
             mcp_discovery: Some(cache.clone()),
             pending_resume_context: std::sync::Mutex::new(None),
+            spawn_semaphore: None,
         };
 
         let mut spec = AgentSpec::on_demand("x", "y");
@@ -1121,6 +1154,7 @@ mod tests {
             mcp_registry: Some(reg),
             mcp_discovery: Some(cache.clone()),
             pending_resume_context: std::sync::Mutex::new(None),
+            spawn_semaphore: None,
         };
         let spec = AgentSpec::on_demand("x", "y"); // mcp_servers empty by default
         let _ = manager.spawn_with_spec(&spec, "y", None).await;
@@ -1148,6 +1182,7 @@ mod tests {
             mcp_registry: None,
             mcp_discovery: Some(cache.clone()),
             pending_resume_context: std::sync::Mutex::new(None),
+            spawn_semaphore: None,
         };
         let mut spec = AgentSpec::on_demand("x", "y");
         spec.mcp_servers = vec!["github".to_string()];
@@ -1185,6 +1220,7 @@ mod tests {
             mcp_registry: Some(Arc::new(reg)),
             mcp_discovery: Some(cache.clone()),
             pending_resume_context: std::sync::Mutex::new(None),
+            spawn_semaphore: None,
         };
         let mut spec = AgentSpec::on_demand("x", "y");
         spec.mcp_servers = vec!["dead".to_string()];
@@ -1226,6 +1262,7 @@ mod tests {
             mcp_registry: Some(Arc::new(reg)),
             mcp_discovery: Some(cache.clone()),
             pending_resume_context: std::sync::Mutex::new(None),
+            spawn_semaphore: None,
         };
         let mut spec = AgentSpec::on_demand("x", "y");
         spec.mcp_servers = vec!["would-be-discovered".to_string()];
@@ -1254,6 +1291,7 @@ mod tests {
             mcp_registry: None,
             mcp_discovery: None,
             pending_resume_context: std::sync::Mutex::new(None),
+            spawn_semaphore: None,
         };
         let spec = theo_domain::agent_spec::AgentSpec::on_demand("y", "z");
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -1285,6 +1323,7 @@ mod tests {
                 mcp_registry: None,
                 mcp_discovery: None,
                 pending_resume_context: std::sync::Mutex::new(None),
+                spawn_semaphore: None,
             }
         }
 

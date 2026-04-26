@@ -169,6 +169,35 @@ impl AgentRunEngine {
             );
         }
 
+        // T3.5 / find_p5_005 — Prune old shadow-git checkpoints so the
+        // `.theo/checkpoints/` directory does not grow unbounded across
+        // sessions. `cleanup` was implemented but never invoked in
+        // production; this hook closes the gap. Best-effort: any
+        // failure is logged via tracing but does NOT block shutdown.
+        if !self.config.loop_cfg().is_subagent {
+            if let Some(ckpt) = self.subagent_checkpoint.as_deref() {
+                let ttl = self.config.checkpoint_ttl_seconds as i64;
+                if ttl > 0 {
+                    match ckpt.cleanup(ttl) {
+                        Ok(pruned) if pruned > 0 => {
+                            tracing::info!(
+                                pruned = pruned,
+                                ttl_seconds = ttl,
+                                "checkpoint cleanup pruned stale entries"
+                            );
+                        }
+                        Ok(_) => {}
+                        Err(e) => {
+                            tracing::warn!(
+                                error = %e,
+                                "checkpoint cleanup failed at session shutdown"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
         // Observability: drain writer, compute RunReport, append summary line.
         self.last_run_report = self.finalize_observability(result, !events.is_empty());
     }
