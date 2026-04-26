@@ -171,6 +171,13 @@ pub struct CompactionPolicy {
     /// How many recent tool observations to preserve during masking.
     /// Used by `apply_observation_mask` (Fase 1).
     pub observation_mask_window: usize,
+    /// T11.1 — When `true`, the runtime uses the staged compaction
+    /// pipeline (`compact_staged_with_policy`) which dispatches across
+    /// Mask / Prune / Aggressive / Compact stages based on usage
+    /// pressure. When `false` (default), the legacy single-stage Mask
+    /// path is preserved — keeps existing behavior for users who don't
+    /// opt in.
+    pub staged_compaction: bool,
 }
 
 impl Default for CompactionPolicy {
@@ -181,6 +188,7 @@ impl Default for CompactionPolicy {
             compact_threshold: 0.80,
             prune_keep_recent: 3,
             observation_mask_window: 10,
+            staged_compaction: false,
         }
     }
 }

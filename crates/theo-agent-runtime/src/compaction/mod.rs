@@ -102,6 +102,36 @@ pub fn compact_if_needed_with_context(
     compact_with_policy(messages, context_window_tokens, context, &policy);
 }
 
+/// T11.1 — Compaction entry point that respects `policy.staged_compaction`.
+///
+/// When `staged_compaction = true`, dispatches via
+/// [`crate::compaction_stages::compact_staged_with_policy`] which selects
+/// between Mask / Prune / Aggressive / Compact based on usage pressure.
+/// Otherwise delegates to the legacy single-stage Mask path
+/// ([`compact_with_policy`]).
+///
+/// Returns the [`crate::compaction_stages::OptimizationLevel`] that was
+/// applied (always `None` when `staged_compaction=false` and the legacy
+/// path is taken — caller can ignore).
+pub fn compact_with_staging_if_enabled(
+    messages: &mut Vec<Message>,
+    context_window_tokens: usize,
+    context: Option<&CompactionContext>,
+    policy: &CompactionPolicy,
+) -> crate::compaction_stages::OptimizationLevel {
+    if policy.staged_compaction {
+        crate::compaction_stages::compact_staged_with_policy(
+            messages,
+            context_window_tokens,
+            context,
+            policy,
+        )
+    } else {
+        compact_with_policy(messages, context_window_tokens, context, policy);
+        crate::compaction_stages::OptimizationLevel::None
+    }
+}
+
 /// Compact with explicit policy and optional semantic context.
 ///
 /// This is the canonical implementation — all other `compact_*` variants delegate here.
@@ -643,5 +673,100 @@ mod tests {
         // Nothing should be truncated — all messages well below cap.
         assert_eq!(msgs[1].content.as_deref(), Some("small message 1"));
         assert_eq!(msgs[2].content.as_deref(), Some("small reply"));
+    }
+
+    // -----------------------------------------------------------------
+    // T11.1 — staged compaction entry point
+    // -----------------------------------------------------------------
+
+    use crate::compaction_stages::OptimizationLevel;
+    use theo_infra_llm::types::ToolCall;
+
+    /// Build a noisy message vector that pushes context above any
+    /// reasonable threshold so the staged dispatcher will pick a
+    /// non-`None` `OptimizationLevel`.
+    fn many_tool_results(n: usize) -> Vec<Message> {
+        let mut msgs = vec![Message::system("you are an agent")];
+        // big_payload is 1_000 chars per tool result.
+        let big_payload = "x".repeat(1_000);
+        for i in 0..n {
+            msgs.push(Message::assistant_with_tool_calls(
+                None,
+                vec![ToolCall::new(format!("c{i}"), "bash", "{}")],
+            ));
+            msgs.push(Message::tool_result(format!("c{i}"), "bash", &big_payload));
+        }
+        // Final user/assistant pair so the tail isn't pure tool results.
+        msgs.push(Message::user("ok"));
+        msgs.push(Message::assistant("noted"));
+        msgs
+    }
+
+    #[test]
+    fn t111_staged_off_uses_legacy_path() {
+        let mut msgs = many_tool_results(10);
+        let policy = CompactionPolicy {
+            staged_compaction: false,
+            ..CompactionPolicy::default()
+        };
+        let level =
+            compact_with_staging_if_enabled(&mut msgs, 5_000, None, &policy);
+        // Legacy path always returns `None` regardless of pressure.
+        assert_eq!(level, OptimizationLevel::None);
+    }
+
+    #[test]
+    fn t111_staged_on_returns_non_none_under_pressure() {
+        let mut msgs = many_tool_results(20);
+        let policy = CompactionPolicy {
+            staged_compaction: true,
+            ..CompactionPolicy::default()
+        };
+        // Tiny window forces the staged dispatcher into non-None branch.
+        let level = compact_with_staging_if_enabled(&mut msgs, 500, None, &policy);
+        assert_ne!(
+            level,
+            OptimizationLevel::None,
+            "staged compaction must escalate under heavy pressure"
+        );
+    }
+
+    #[test]
+    fn t111_staged_on_at_low_pressure_is_none() {
+        let mut msgs = vec![
+            Message::system("sys"),
+            Message::user("hello"),
+            Message::assistant("hi"),
+        ];
+        let policy = CompactionPolicy {
+            staged_compaction: true,
+            ..CompactionPolicy::default()
+        };
+        let level =
+            compact_with_staging_if_enabled(&mut msgs, 100_000, None, &policy);
+        assert_eq!(level, OptimizationLevel::None);
+    }
+
+    #[test]
+    fn t111_staged_on_reduces_tokens_under_pressure() {
+        let mut msgs = many_tool_results(15);
+        let before = estimate_total_tokens(&msgs);
+        let policy = CompactionPolicy {
+            staged_compaction: true,
+            ..CompactionPolicy::default()
+        };
+        let _level = compact_with_staging_if_enabled(&mut msgs, 1_000, None, &policy);
+        let after = estimate_total_tokens(&msgs);
+        assert!(
+            after < before,
+            "staged compaction should reduce tokens (before={before}, after={after})"
+        );
+    }
+
+    #[test]
+    fn t111_compaction_policy_staged_default_is_off() {
+        // T11.1 — opt-in. Default behavior unchanged for existing users.
+        let p = CompactionPolicy::default();
+        assert!(!p.staged_compaction);
     }
 }
