@@ -70,6 +70,38 @@ pub fn build_image_followup(metadata: &Value, tool_name: &str) -> Option<Message
     Some(Message::user_with_blocks(all))
 }
 
+/// T1.2 / T0.1 — Runtime integration helper.
+///
+/// Inspect the metadata returned by `execute_tool_call_with_metadata`
+/// and, when it carries vision content, append a user-role follow-up
+/// message to `messages`. Returns `true` when a followup was pushed.
+///
+/// Callers that want vision support invoke this RIGHT AFTER pushing
+/// the regular `Message::tool_result`:
+///
+/// ```ignore
+/// let (msg, ok, meta) = execute_tool_call_with_metadata(reg, call, ctx).await;
+/// messages.push(msg);
+/// if let Some(m) = meta.as_ref() {
+///     vision_propagation::push_image_followup(&mut messages, m, &call.function.name);
+/// }
+/// ```
+///
+/// Idempotent for empty metadata: returns `false` and pushes nothing.
+pub fn push_image_followup(
+    messages: &mut Vec<Message>,
+    metadata: &Value,
+    tool_name: &str,
+) -> bool {
+    match build_image_followup(metadata, tool_name) {
+        Some(msg) => {
+            messages.push(msg);
+            true
+        }
+        None => false,
+    }
+}
+
 fn parse_block(v: &Value) -> Option<ContentBlock> {
     let kind = v.get("type").and_then(Value::as_str)?;
     match kind {
@@ -249,6 +281,56 @@ mod tests {
         });
         let msg = build_image_followup(&m, "browser_screenshot").unwrap();
         assert!(msg.has_image());
+    }
+
+    #[test]
+    fn t12prop_push_followup_appends_when_vision_present() {
+        let mut msgs: Vec<Message> = vec![Message::user("orig")];
+        let m = json!({
+            "image_block": {
+                "type": "image_url",
+                "image_url": {"url": "u"}
+            }
+        });
+        let pushed = push_image_followup(&mut msgs, &m, "read_image");
+        assert!(pushed);
+        assert_eq!(msgs.len(), 2);
+        assert!(msgs[1].has_image());
+    }
+
+    #[test]
+    fn t12prop_push_followup_is_noop_for_empty_metadata() {
+        let mut msgs: Vec<Message> = vec![Message::user("orig")];
+        let m = json!({});
+        let pushed = push_image_followup(&mut msgs, &m, "any_tool");
+        assert!(!pushed);
+        assert_eq!(msgs.len(), 1);
+    }
+
+    #[test]
+    fn t12prop_push_followup_after_tool_result_preserves_order() {
+        // Simulates the actual integration site: tool_result first,
+        // followup second. Order matters because providers want the
+        // image to land AFTER the tool result it documents.
+        let mut msgs: Vec<Message> = vec![
+            Message::system("you are an agent"),
+            Message::user("describe this"),
+            Message::assistant("calling tool"),
+            Message::tool_result("call-1", "read_image", "Image loaded"),
+        ];
+        let n_before = msgs.len();
+
+        let metadata = json!({
+            "image_block": {"type":"image_url","image_url":{"url":"https://e.x/a.png"}}
+        });
+        push_image_followup(&mut msgs, &metadata, "read_image");
+
+        assert_eq!(msgs.len(), n_before + 1);
+        // The followup is the LAST message, and it's user-role with image.
+        assert_eq!(msgs[n_before].role, theo_infra_llm::types::Role::User);
+        assert!(msgs[n_before].has_image());
+        // The tool_result is still right before it (nothing inserted in between).
+        assert_eq!(msgs[n_before - 1].role, theo_infra_llm::types::Role::Tool);
     }
 
     #[test]
