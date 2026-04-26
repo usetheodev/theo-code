@@ -40,7 +40,7 @@ impl AgentRunEngine {
         messages: &mut Vec<Message>,
     ) -> DispatchOutcome {
         self.transition_run(RunState::Evaluating);
-        self.done_attempts += 1;
+        self.tracking.done_attempts += 1;
 
         let summary = call
             .parse_arguments()
@@ -71,7 +71,7 @@ impl AgentRunEngine {
     /// Emit an advisory user message when the diff touches > 3 files
     /// with > 100 lines changed. Purely informational — never blocks.
     async fn maybe_emit_large_diff_hint(&self, messages: &mut Vec<Message>) {
-        if self.context_loop_state.edits_files.len() <= 3 {
+        if self.rt.context_loop_state.edits_files.len() <= 3 {
             return;
         }
         let Ok(output) = tokio::process::Command::new("git")
@@ -100,7 +100,7 @@ impl AgentRunEngine {
             messages.push(Message::user(format!(
                 "Note: This change touches {} files with ~{} lines changed. \
                  Consider reviewing the diff carefully before finalizing.",
-                self.context_loop_state.edits_files.len(),
+                self.rt.context_loop_state.edits_files.len(),
                 lines_changed
             )));
         }

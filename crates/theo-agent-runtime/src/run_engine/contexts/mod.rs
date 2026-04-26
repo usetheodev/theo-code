@@ -6,8 +6,14 @@
 //! one context they need rather than reaching across the whole
 //! engine surface.
 
+pub mod llm;
 pub mod observability;
+pub mod runtime;
 pub mod subagent;
+pub mod tracking;
 
+pub use llm::LlmContext;
 pub use observability::ObservabilityContext;
+pub use runtime::RuntimeContext;
 pub use subagent::SubagentContext;
+pub use tracking::TrackingContext;

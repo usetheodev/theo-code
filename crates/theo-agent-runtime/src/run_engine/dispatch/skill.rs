@@ -164,12 +164,12 @@ impl AgentRunEngine {
 
         for file in &sub_result.files_edited {
             if !file.is_empty() {
-                self.context_loop_state
+                self.rt.context_loop_state
                     .record_edit_attempt(file, true, None);
             }
         }
 
-        self.budget_enforcer.record_tokens(sub_result.tokens_used);
+        self.llm.budget_enforcer.record_tokens(sub_result.tokens_used);
         self.obs.metrics.record_delegated_tokens(sub_result.tokens_used);
 
         messages.push(Message::tool_result(&call.id, "skill", &result_msg));

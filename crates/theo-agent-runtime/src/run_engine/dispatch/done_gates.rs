@@ -51,7 +51,7 @@ impl AgentRunEngine {
     /// entire budget on repeat `done` calls.
     pub(super) fn check_attempt_limit_gate(&mut self, summary: &str) -> GateOutcome {
         use crate::constants::MAX_DONE_ATTEMPTS;
-        if self.done_attempts <= MAX_DONE_ATTEMPTS {
+        if self.tracking.done_attempts <= MAX_DONE_ATTEMPTS {
             return GateOutcome::Pass;
         }
         self.transition_run(RunState::Converged);
@@ -59,7 +59,7 @@ impl AgentRunEngine {
         self.obs.metrics.record_run_complete(true);
         let annotated = format!(
             "{} [accepted after {} done attempts]",
-            summary, self.done_attempts
+            summary, self.tracking.done_attempts
         );
         GateOutcome::Return(DispatchOutcome::Converged(
             AgentResult::from_engine_state(self, true, annotated, false, ErrorClass::Solved),
@@ -79,15 +79,15 @@ impl AgentRunEngine {
         let has_changes = check_git_changes(&self.project_dir).await;
         let convergence_ctx = ConvergenceContext {
             has_git_changes: has_changes,
-            edits_succeeded: self.context_loop_state.edits_files.len(),
+            edits_succeeded: self.rt.context_loop_state.edits_files.len(),
             done_requested: true,
             iteration,
             max_iterations: self.config.loop_cfg().max_iterations,
         };
-        if self.convergence.evaluate(&convergence_ctx) {
+        if self.llm.convergence.evaluate(&convergence_ctx) {
             return GateOutcome::Pass;
         }
-        let pending = self.convergence.pending_criteria(&convergence_ctx);
+        let pending = self.llm.convergence.pending_criteria(&convergence_ctx);
         messages.push(Message::tool_result(
             &call.id,
             "done",
@@ -123,7 +123,7 @@ impl AgentRunEngine {
             "done",
             format!(
                 "BLOCKED: `cargo {}` failed (attempt {}/{}). Fix the errors before calling done.\n\n{}",
-                cmd_str, self.done_attempts, MAX_DONE_ATTEMPTS, error_preview
+                cmd_str, self.tracking.done_attempts, MAX_DONE_ATTEMPTS, error_preview
             ),
         ));
         self.transition_run(RunState::Replanning);
@@ -204,7 +204,7 @@ impl AgentRunEngine {
     /// free function so the dispatch matrix doesn't need an engine.
     pub(super) fn pick_done_gate_test_args(&self) -> Vec<String> {
         pick_done_gate_args_from_edit(
-            self.context_loop_state.edits_files.first().map(|s| s.as_str()),
+            self.rt.context_loop_state.edits_files.first().map(|s| s.as_str()),
         )
     }
 }

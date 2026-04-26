@@ -87,9 +87,9 @@ impl AgentRunEngine {
         // Layer 1: Schema stripping — sub-agents get filtered tool definitions
         // that exclude delegation meta-tools (subagent, subagent_parallel, skill).
         let tool_defs = if self.config.loop_cfg().is_subagent {
-            tool_bridge::registry_to_definitions_for_subagent(&self.registry)
+            tool_bridge::registry_to_definitions_for_subagent(&self.llm.registry)
         } else {
-            tool_bridge::registry_to_definitions(&self.registry)
+            tool_bridge::registry_to_definitions(&self.llm.registry)
         };
         // T1.1 / find_p7_001 / INV-008 — bridge user cancellation to the
         // tools' watch::Receiver.

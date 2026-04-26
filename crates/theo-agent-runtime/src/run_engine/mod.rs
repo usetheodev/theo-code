@@ -17,7 +17,9 @@ mod post_dispatch_updates;
 mod stream_batcher;
 mod text_response;
 
-pub use contexts::{ObservabilityContext, SubagentContext};
+pub use contexts::{
+    LlmContext, ObservabilityContext, RuntimeContext, SubagentContext, TrackingContext,
+};
 pub use handoff::HandoffOutcome;
 
 use std::path::PathBuf;
@@ -55,42 +57,20 @@ pub struct AgentRunEngine {
     task_manager: Arc<TaskManager>,
     tool_call_manager: Arc<ToolCallManager>,
     event_bus: Arc<EventBus>,
-    client: LlmClient,
-    registry: Arc<ToolRegistry>,
     config: AgentConfig,
     project_dir: PathBuf,
-    budget_enforcer: BudgetEnforcer,
-    convergence: ConvergenceEvaluator,
-    done_attempts: u32,
-    /// One-shot guard: in Plan mode, if the model converges with text only and
-    /// no plan file on disk, we inject a corrective reminder once. After that
-    /// we let it converge normally to avoid infinite reminder loops.
-    plan_mode_nudged: bool,
-    failure_tracker: crate::failure_tracker::FailurePatternTracker,
-    snapshot_store: Option<Arc<dyn SnapshotStore>>,
-    graph_context: Option<Arc<dyn theo_domain::graph_context::GraphContextProvider>>,
-    context_loop_state: ContextLoopState,
-    /// Steering and follow-up message queues for mid-run injection.
-    /// Pi-mono ref: `packages/agent/src/agent-loop.ts:165-229`
-    message_queues: MessageQueues,
-    /// Accumulated token usage across LLM calls in this session.
-    session_token_usage: theo_domain::budget::TokenUsage,
-    /// PLAN_AUTO_EVOLUTION_SOTA: turns since the last memory
-    /// reviewer spawn. `AtomicUsize` lets the counter survive fork
-    /// boundaries (eliminates Hermes Issue #8506).
-    memory_nudge_counter: Arc<crate::memory_lifecycle::MemoryNudgeCounter>,
-    /// PLAN_AUTO_EVOLUTION_SOTA: tool iterations since the
-    /// last skill reviewer spawn. Persists across task boundaries so
-    /// short tasks don't reset accumulation mid-stream.
-    skill_nudge_counter: Arc<crate::skill_reviewer::SkillNudgeCounter>,
-    /// PLAN_AUTO_EVOLUTION_SOTA: flipped to `true` whenever
-    /// `skill_manage.create` / `edit` / `patch` succeeds in the
-    /// current task, suppressing the reviewer for that task.
-    skill_created_this_task: std::sync::atomic::AtomicBool,
-    /// PLAN_AUTO_EVOLUTION_SOTA: flipped once autodream has
-    /// been attempted for this session so we don't retry on every
-    /// message in long-running sessions.
-    autodream_attempted: std::sync::atomic::AtomicBool,
+    /// T3.1 PR5 / find_p3_001 — LLM-execution bundle: client, registry,
+    /// convergence, budget_enforcer.
+    llm: contexts::LlmContext,
+    /// T3.1 PR3 / find_p3_001 — state-tracking bundle (done_attempts,
+    /// plan_mode_nudged, failure_tracker, checkpoint_taken_this_turn).
+    tracking: contexts::TrackingContext,
+    /// T3.1 PR4 / find_p3_001 — runtime helper handles bundle.
+    /// Replaces snapshot_store, graph_context, context_loop_state,
+    /// message_queues, session_token_usage, memory_nudge_counter,
+    /// skill_nudge_counter, skill_created_this_task,
+    /// autodream_attempted, resume_context.
+    rt: contexts::RuntimeContext,
     /// T3.1 PR2 / find_p3_001 — observability + working-set bundle.
     /// Replaces the previous flat fields:
     /// `metrics`, `working_set`, `context_metrics`, `observability`,
@@ -105,16 +85,6 @@ pub struct AgentRunEngine {
     /// previous 10 flat `subagent_*` fields. See
     /// `run_engine/contexts/subagent.rs`.
     subagent: contexts::SubagentContext,
-    /// Optional resume context. When present, the dispatch loop
-    /// consults `executed_tool_calls` before invoking each tool and
-    /// replays cached results from `executed_tool_results` to avoid
-    /// double side-effects. (Stays flat — not part of the subagent
-    /// integration bundle; used by the run loop for replay mode.)
-    resume_context: Option<Arc<crate::subagent::resume::ResumeContext>>,
-    /// Whether a checkpoint snapshot has already been taken this turn.
-    /// Reset at the start of every turn; set to `true` on first
-    /// mutating-tool dispatch. One snapshot per turn max.
-    checkpoint_taken_this_turn: std::sync::atomic::AtomicBool,
 }
 
 impl AgentRunEngine {
@@ -184,28 +154,13 @@ impl AgentRunEngine {
             task_manager,
             tool_call_manager,
             event_bus,
-            client,
-            registry,
             config,
             project_dir,
-            budget_enforcer,
-            convergence,
-            done_attempts: 0,
-            plan_mode_nudged: false,
-            failure_tracker,
-            snapshot_store: None,
-            graph_context: None,
-            context_loop_state,
-            message_queues: MessageQueues::default(),
-            session_token_usage: theo_domain::budget::TokenUsage::default(),
-            memory_nudge_counter: Arc::new(crate::memory_lifecycle::MemoryNudgeCounter::new()),
-            skill_nudge_counter: Arc::new(crate::skill_reviewer::SkillNudgeCounter::new()),
-            skill_created_this_task: std::sync::atomic::AtomicBool::new(false),
-            autodream_attempted: std::sync::atomic::AtomicBool::new(false),
+            llm: contexts::LlmContext::new(client, registry, convergence, budget_enforcer),
+            tracking: contexts::TrackingContext::new(failure_tracker),
+            rt: contexts::RuntimeContext::new(context_loop_state),
             obs: contexts::ObservabilityContext::new(metrics, observability),
             subagent: contexts::SubagentContext::default(),
-            resume_context: None,
-            checkpoint_taken_this_turn: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -259,7 +214,7 @@ impl AgentRunEngine {
         // Release: pairs with the Acquire failure-ordering in the CAS
         // below. Ensures any subsequent reads of checkpoint-related state
         // observe a fully-committed reset (T5.4).
-        self.checkpoint_taken_this_turn
+        self.tracking.checkpoint_taken_this_turn
             .store(false, std::sync::atomic::Ordering::Release);
     }
 
@@ -276,6 +231,7 @@ impl AgentRunEngine {
         // with the Release in `reset_turn_checkpoint` so the losing racer
         // observes a fully committed reset (T5.4).
         if self
+            .tracking
             .checkpoint_taken_this_turn
             .compare_exchange(
                 false,
@@ -311,7 +267,7 @@ impl AgentRunEngine {
 
     /// Accumulated token usage (for CLI display).
     pub fn session_token_usage(&self) -> &theo_domain::budget::TokenUsage {
-        &self.session_token_usage
+        &self.rt.session_token_usage
     }
 
     /// Returns the run_id.
@@ -340,7 +296,7 @@ impl AgentRunEngine {
     /// `AgentResult::from_engine_state`. Keeps internal fields private.
     pub fn run_result_context(&self) -> (Vec<String>, usize) {
         (
-            self.context_loop_state.edits_files.clone(),
+            self.rt.context_loop_state.edits_files.clone(),
             self.run.iteration,
         )
     }
@@ -1360,11 +1316,13 @@ mod tests {
         let engine = setup.create_engine("test");
         // Mark snapshot as taken
         engine
+            .tracking
             .checkpoint_taken_this_turn
             .store(true, std::sync::atomic::Ordering::Release);
         engine.reset_turn_checkpoint();
         assert!(
             !engine
+                .tracking
                 .checkpoint_taken_this_turn
                 .load(std::sync::atomic::Ordering::Acquire)
         );
@@ -1475,7 +1433,7 @@ mod tests {
             let setup = TestSetup::new();
             let engine = setup.create_engine("regression");
             assert!(
-                engine.resume_context.is_none(),
+                engine.rt.resume_context.is_none(),
                 "default engine must NOT have resume_context attached"
             );
         }
@@ -1495,6 +1453,7 @@ mod tests {
             let engine = setup.create_engine("with-context").with_resume_context(ctx.clone());
 
             let attached = engine
+                .rt
                 .resume_context
                 .as_ref()
                 .expect("resume_context must be attached");
@@ -1545,9 +1504,9 @@ mod tests {
             let ctx = build_resume_ctx(executed, cached);
             let engine = setup.create_engine("new-call").with_resume_context(ctx.clone());
 
-            assert!(engine.resume_context.is_some());
+            assert!(engine.rt.resume_context.is_some());
             // Predicate: brand-new call_id is NOT skipped → dispatcher runs.
-            let attached = engine.resume_context.as_ref().unwrap();
+            let attached = engine.rt.resume_context.as_ref().unwrap();
             assert!(!attached.should_skip_tool_call("brand-new-c1"));
         }
     }

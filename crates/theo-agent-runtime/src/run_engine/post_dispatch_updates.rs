@@ -70,10 +70,10 @@ impl AgentRunEngine {
                 if let Ok(args) = call.parse_arguments()
                     && let Some(path) = args.get("filePath").and_then(|p| p.as_str())
                 {
-                    self.context_loop_state.record_read(path);
+                    self.rt.context_loop_state.record_read(path);
                 }
             }
-            "grep" | "glob" => self.context_loop_state.record_search(),
+            "grep" | "glob" => self.rt.context_loop_state.record_search(),
             "edit" | "write" | "apply_patch" => {
                 let file = call
                     .parse_arguments()
@@ -100,7 +100,7 @@ impl AgentRunEngine {
                             })
                     })
                     .unwrap_or_default();
-                self.context_loop_state.record_edit_attempt(
+                self.rt.context_loop_state.record_edit_attempt(
                     &file,
                     success,
                     if success { None } else { Some(output.to_string()) },

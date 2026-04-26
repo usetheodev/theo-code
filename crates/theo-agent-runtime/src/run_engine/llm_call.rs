@@ -125,7 +125,7 @@ impl AgentRunEngine {
         };
         let run_id_str = self.run.run_id.as_str().to_string();
         let event_bus = self.event_bus.clone();
-        let client = &self.client;
+        let client = &self.llm.client;
 
         // Iter 71 finding follow-up — wire `MetricsCollector::record_retry`
         // through the with_retry path. The executor doesn't own the
@@ -214,10 +214,10 @@ impl AgentRunEngine {
             .map(|u| u.completion_tokens as u64)
             .unwrap_or(0);
         let total_tok = input_tok + output_tok;
-        self.budget_enforcer.record_tokens(total_tok);
+        self.llm.budget_enforcer.record_tokens(total_tok);
         self.obs.metrics
             .record_llm_call_detailed(llm_duration, input_tok, output_tok);
-        self.session_token_usage
+        self.rt.session_token_usage
             .accumulate(&theo_domain::budget::TokenUsage {
                 input_tokens: input_tok,
                 output_tokens: output_tok,

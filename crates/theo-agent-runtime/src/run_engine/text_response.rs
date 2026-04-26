@@ -38,7 +38,7 @@ impl AgentRunEngine {
         messages: &mut Vec<Message>,
     ) -> DispatchOutcome {
         // 1. Follow-up queue drain.
-        if let Some(ref follow_up_fn) = self.message_queues.follow_up {
+        if let Some(ref follow_up_fn) = self.rt.message_queues.follow_up {
             let follow_ups = follow_up_fn().await;
             if !follow_ups.is_empty() {
                 messages.push(Message::assistant(&content));
@@ -51,7 +51,7 @@ impl AgentRunEngine {
 
         // 2. Plan-mode nudge (one-shot).
         if self.config.loop_cfg().mode == crate::config::AgentMode::Plan
-            && !self.plan_mode_nudged
+            && !self.tracking.plan_mode_nudged
             && !content.is_empty()
         {
             let plans_dir = self.project_dir.join(".theo/plans");
@@ -61,7 +61,7 @@ impl AgentRunEngine {
                 .map(|mut it| it.next().is_some())
                 .unwrap_or(false);
             if !plan_written {
-                self.plan_mode_nudged = true;
+                self.tracking.plan_mode_nudged = true;
                 messages.push(Message::assistant(&content));
                 messages.push(Message::user(
                     "REMINDER: You wrote a plan as text but did not persist it. \
@@ -90,17 +90,18 @@ impl AgentRunEngine {
         // serial main loop (T5.4).
         let tool_calls_this_task = self.obs.metrics.snapshot().total_tool_calls as usize;
         let skill_created = self
+            .rt
             .skill_created_this_task
             .load(std::sync::atomic::Ordering::Relaxed);
         crate::memory_lifecycle::maybe_spawn_reviewers(
             &self.config,
-            &self.memory_nudge_counter,
-            &self.skill_nudge_counter,
+            &self.rt.memory_nudge_counter,
+            &self.rt.skill_nudge_counter,
             messages,
             tool_calls_this_task,
             skill_created,
         );
-        self.skill_created_this_task
+        self.rt.skill_created_this_task
             .store(false, std::sync::atomic::Ordering::Relaxed);
 
         self.transition_run(RunState::Converged);

@@ -68,7 +68,7 @@ impl AgentRunEngine {
                 .get(&self.task_id)
                 .map(|t| t.objective.clone())
                 .unwrap_or_default();
-            let ctx_msg = self.context_loop_state.build_context_loop(
+            let ctx_msg = self.rt.context_loop_state.build_context_loop(
                 iteration,
                 self.config.loop_cfg().max_iterations,
                 &task_objective,
@@ -77,7 +77,7 @@ impl AgentRunEngine {
         }
 
         // Phase transitions (legacy, preserved for context loop diagnostics).
-        self.context_loop_state
+        self.rt.context_loop_state
             .maybe_transition(iteration, self.config.loop_cfg().max_iterations);
 
         // Compaction: compress history with semantic progress context.
@@ -91,8 +91,9 @@ impl AgentRunEngine {
                 .take(100)
                 .collect(),
             current_phase: format!("{:?}", self.run.state),
-            target_files: self.context_loop_state.edits_files.clone(),
+            target_files: self.rt.context_loop_state.edits_files.clone(),
             recent_errors: self
+                .rt
                 .context_loop_state
                 .edit_failures
                 .iter()

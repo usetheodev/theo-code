@@ -207,7 +207,7 @@ impl AgentRunEngine {
             .spawn_with_spec_text(&spec, &objective, context.as_deref())
             .await;
 
-        self.budget_enforcer.record_tokens(result.tokens_used);
+        self.llm.budget_enforcer.record_tokens(result.tokens_used);
         self.obs.metrics.record_delegated_tokens(result.tokens_used);
 
         let prefix = redirect_note
@@ -303,7 +303,7 @@ impl AgentRunEngine {
                 .spawn_with_spec_text(&spec, &objective, context.as_deref())
                 .await;
 
-            self.budget_enforcer.record_tokens(result.tokens_used);
+            self.llm.budget_enforcer.record_tokens(result.tokens_used);
             self.obs.metrics.record_delegated_tokens(result.tokens_used);
 
             let mark = if result.success { "✅" } else { "❌" };

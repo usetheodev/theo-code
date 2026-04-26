@@ -113,7 +113,7 @@ impl AgentRunEngine {
         mut self,
         ctx: Arc<crate::subagent::resume::ResumeContext>,
     ) -> Self {
-        self.resume_context = Some(ctx);
+        self.rt.resume_context = Some(ctx);
         self
     }
 
@@ -131,7 +131,7 @@ impl AgentRunEngine {
 
     /// Sets the message queues for steering and follow-up injection.
     pub fn with_message_queues(mut self, queues: MessageQueues) -> Self {
-        self.message_queues = queues;
+        self.rt.message_queues = queues;
         self
     }
 
@@ -140,13 +140,13 @@ impl AgentRunEngine {
         mut self,
         provider: Arc<dyn theo_domain::graph_context::GraphContextProvider>,
     ) -> Self {
-        self.graph_context = Some(provider);
+        self.rt.graph_context = Some(provider);
         self
     }
 
     /// Sets the snapshot store for persistence (Invariant 7).
     pub fn with_snapshot_store(mut self, store: Arc<dyn SnapshotStore>) -> Self {
-        self.snapshot_store = Some(store);
+        self.rt.snapshot_store = Some(store);
         self
     }
 }

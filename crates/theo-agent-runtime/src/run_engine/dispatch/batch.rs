@@ -41,7 +41,7 @@ impl AgentRunEngine {
         };
 
         let total = calls.len().min(MAX_BATCH);
-        let registry = self.registry.clone();
+        let registry = self.llm.registry.clone();
         let mut futures = Vec::new();
         let mut blocked_results: Vec<(usize, String, String)> = Vec::new();
 
@@ -90,7 +90,7 @@ impl AgentRunEngine {
                 agent: "main".to_string(),
                 abort: abort_rx.clone(),
                 project_dir: self.project_dir.clone(),
-                graph_context: self.graph_context.clone(),
+                graph_context: self.rt.graph_context.clone(),
                 stdout_tx: None,
             };
 
@@ -134,7 +134,7 @@ impl AgentRunEngine {
             ));
 
             // Budget + metrics accounting.
-            self.budget_enforcer.record_tool_call();
+            self.llm.budget_enforcer.record_tool_call();
             self.obs.metrics.record_tool_call(&tool_name, 0, success);
 
             // Track edits in the context loop state.
@@ -146,7 +146,7 @@ impl AgentRunEngine {
                     .and_then(|p| p.as_str())
                     .unwrap_or("");
                 if !file.is_empty() {
-                    self.context_loop_state
+                    self.rt.context_loop_state
                         .record_edit_attempt(file, true, None);
                 }
             }

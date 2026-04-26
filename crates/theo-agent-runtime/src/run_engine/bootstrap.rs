@@ -52,7 +52,7 @@ impl AgentRunEngine {
         if !self.config.loop_cfg().is_subagent {
             crate::memory_lifecycle::maybe_spawn_autodream(
                 &self.config,
-                &self.autodream_attempted,
+                &self.rt.autodream_attempted,
                 &self.project_dir,
                 self.run.run_id.as_str(),
             );
@@ -199,7 +199,7 @@ impl AgentRunEngine {
     }
 
     async fn inject_planning_context(&mut self, messages: &mut Vec<Message>) {
-        let Some(ref provider) = self.graph_context else {
+        let Some(ref provider) = self.rt.graph_context else {
             return;
         };
         if !provider.is_ready() {

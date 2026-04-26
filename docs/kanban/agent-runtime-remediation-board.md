@@ -2,21 +2,21 @@
 
 **Source:** [agent-runtime-remediation-plan.md](../plans/agent-runtime-remediation-plan.md)
 **Created:** 2026-04-25
-**Last updated:** 2026-04-26 (iter 8 — T3.1 PR1+PR2 implementadas)
+**Last updated:** 2026-04-26 (iter 9 — T3.1 COMPLETO 5/5 PRs)
 
 ## Progress
 
 ```
-[============================================··] 94% (29/31 done)
+[=============================================·] 97% (30/31 done)
 ```
 
 | Column | Count | Cards |
 |---|---|---|
-| backlog | 2 | T3.1, T3.2 |
+| backlog | 1 | T3.2 |
 | ready | 0 | — |
 | doing | 0 | — |
 | review | 0 | — |
-| done | 29 | T0.1, T0.2, T0.3, T0.4, T1.1, T1.2, T1.3, T1.4, T2.1, T2.2, T2.3, T2.4, T2.5, T3.3, T3.4, T3.5, T3.6, T3.7, T3.8, T4.1, T4.2, T4.3, T4.4, T4.5, T4.6, T4.7, T4.8, T4.9, T4.10* |
+| done | 30 | T0.1, T0.2, T0.3, T0.4, T1.1, T1.2, T1.3, T1.4, T2.1, T2.2, T2.3, T2.4, T2.5, T3.1, T3.3, T3.4, T3.5, T3.6, T3.7, T3.8, T4.1, T4.2, T4.3, T4.4, T4.5, T4.6, T4.7, T4.8, T4.9, T4.10* |
 
 ## Phase Summary
 
@@ -25,9 +25,9 @@
 | 0 | Foundation / Unblockers | 4 | 4 | 100% |
 | 1 | Correção P1 Crítica | 4 | 4 | 100% |
 | 2 | Defesas Wired | 5 | 5 | 100% |
-| 3 | Refactor Arquitetural | 8 | 6 | 75% |
+| 3 | Refactor Arquitetural | 8 | 7 | 88% |
 | 4 | Hardening Backlog | 10 | 10 | 100%* |
-| **Total** | — | **31** | **29** | **94%** |
+| **Total** | — | **31** | **30** | **97%** |
 
 *T4.10 cleanup composite: 13/23 sub-tasks done (T4.10a/b/c/e/i/j/k/l/m/n/o/p/q/r);
 remaining 10 sub-tasks are larger refactors (T4.10f AgentResult relocation,
@@ -804,3 +804,7 @@ Status annotations: `[done]`, `[review]`, `[doing]`, `[ready]`, `[backlog]`
 | 2026-04-26 | T3.1 PR1 | (deferred) | done | `SubagentContext` — bundle de 10 fields `subagent_*` + `mcp_dispatcher` extraídos para `run_engine/contexts/subagent.rs`. 25+ call sites migrados. `Default` impl. 1204 lib tests verde. |
 | 2026-04-26 | T3.1 PR2 | (deferred) | done | `ObservabilityContext` — bundle de 9 fields (`metrics`, `working_set`, `context_metrics`, `pipeline`, `episodes_*`, `*_context_files`, `last_run_report`) extraídos para `run_engine/contexts/observability.rs`. ~50 call sites migrados via sed. 1204 lib tests verde. |
 | 2026-04-26 | T4.10h | (revisão) | done | Após adicionar `pub(crate)` para 32 módulos, integration tests precisaram restaurar 8 para `pub` (autodream, budget_enforcer, memory_lifecycle, memory_reviewer, skill_reviewer, state_manager, task_manager, tool_call_manager, tool_bridge, frontmatter). Public surface ainda significativamente reduzida. |
+| 2026-04-26 | T3.1 PR3 | (deferred) | done | `TrackingContext` — bundle de 4 fields (`done_attempts`, `plan_mode_nudged`, `failure_tracker`, `checkpoint_taken_this_turn`) extraídos para `run_engine/contexts/tracking.rs`. ~20 call sites migrados via sed. 1204 lib tests verde. |
+| 2026-04-26 | T3.1 PR4 | (deferred) | done | `RuntimeContext` — bundle de 10 fields (`snapshot_store`, `graph_context`, `context_loop_state`, `message_queues`, `session_token_usage`, `memory_nudge_counter`, `skill_nudge_counter`, `skill_created_this_task`, `autodream_attempted`, `resume_context`) extraídos para `run_engine/contexts/runtime.rs`. ~40 call sites migrados via sed. 1204 lib tests verde. |
+| 2026-04-26 | T3.1 PR5 | (deferred) | done | `LlmContext` — bundle de 4 fields (`client`, `registry`, `convergence`, `budget_enforcer`) extraídos para `run_engine/contexts/llm.rs`. ~40 call sites migrados via sed. 1204 lib tests verde. **T3.1 COMPLETO**: AgentRunEngine reduzido de 44 fields para 9 top-level (5 contexts + 4 utility). |
+| 2026-04-26 | T3.1 | backlog | done | **TODOS 5 PRs implementadas no Ralph loop**. find_p3_001 fechado. AgentRunEngine god-object resolvido. |

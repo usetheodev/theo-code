@@ -31,7 +31,7 @@ impl AgentRunEngine {
     /// store error is swallowed (shutdown path is best-effort per
     /// Invariant 7).
     pub(super) async fn persist_snapshot_if_configured(&self, messages: &[Message]) {
-        let Some(ref store) = self.snapshot_store else {
+        let Some(ref store) = self.rt.snapshot_store else {
             return;
         };
         let Some(task) = self.task_manager.get(&self.task_id) else {
@@ -52,7 +52,7 @@ impl AgentRunEngine {
             tool_calls,
             tool_results,
             self.event_bus.events(),
-            self.budget_enforcer.usage(),
+            self.llm.budget_enforcer.usage(),
             messages_json,
             vec![], // DLQ entries
         );
@@ -97,7 +97,7 @@ impl AgentRunEngine {
 
         // 2. Apply the tool's `prepare_arguments` hook
         // (normalizes/migrates args before schema validation).
-        let tool_args = if let Some(tool) = self.registry.get(name) {
+        let tool_args = if let Some(tool) = self.llm.registry.get(name) {
             tool.prepare_arguments(tool_args)
         } else {
             tool_args
@@ -116,14 +116,14 @@ impl AgentRunEngine {
             agent: "main".to_string(),
             abort: abort_rx.clone(),
             project_dir: self.project_dir.clone(),
-            graph_context: self.graph_context.clone(),
+            graph_context: self.rt.graph_context.clone(),
             stdout_tx: None,
         };
 
         // 5. Dispatch + await completion.
         let tool_result = self
             .tool_call_manager
-            .dispatch_and_execute(&tool_call_id, &self.registry, &ctx)
+            .dispatch_and_execute(&tool_call_id, &self.llm.registry, &ctx)
             .await;
 
         let (success, output) = match &tool_result {
@@ -132,14 +132,14 @@ impl AgentRunEngine {
         };
 
         // 6. Budget + metrics accounting.
-        self.budget_enforcer.record_tool_call();
+        self.llm.budget_enforcer.record_tool_call();
         self.obs.metrics.record_tool_call(name, 0, success);
 
         // 7. Failure-pattern tracker: on repeated failures, surface a
         // user-directed suggestion as a steering message.
         if !success {
             let pattern = format!("{}_failure", name);
-            if let Some(suggestion) = self.failure_tracker.record_and_check(&pattern) {
+            if let Some(suggestion) = self.tracking.failure_tracker.record_and_check(&pattern) {
                 messages.push(Message::user(&suggestion));
             }
         }
@@ -207,7 +207,7 @@ impl AgentRunEngine {
     /// Drain the steering message queue (if configured) and inject the
     /// messages as user turns before the next LLM call.
     pub(super) async fn drain_steering_queue(&self, messages: &mut Vec<Message>) {
-        let Some(ref steering_fn) = self.message_queues.steering else {
+        let Some(ref steering_fn) = self.rt.message_queues.steering else {
             return;
         };
         let steering_msgs = steering_fn().await;
@@ -334,7 +334,7 @@ impl AgentRunEngine {
         call: &theo_infra_llm::types::ToolCall,
         messages: &mut Vec<Message>,
     ) -> bool {
-        let Some(ref ctx) = self.resume_context else {
+        let Some(ref ctx) = self.rt.resume_context else {
             return false;
         };
         if !ctx.should_skip_tool_call(&call.id) {
@@ -417,8 +417,8 @@ impl AgentRunEngine {
     /// proceed. Publishes the `BudgetExceeded` event via the enforcer
     /// and flips task/run states to Failed/Aborted.
     pub(super) fn check_budget_or_exhausted(&mut self) -> Option<AgentResult> {
-        self.budget_enforcer.record_iteration();
-        let Err(violation) = self.budget_enforcer.check() else {
+        self.llm.budget_enforcer.record_iteration();
+        let Err(violation) = self.llm.budget_enforcer.check() else {
             return None;
         };
         self.transition_run(RunState::Aborted);
@@ -427,8 +427,8 @@ impl AgentRunEngine {
         let summary = format!(
             "Budget exceeded: {}. Edits succeeded: {}. Files: {}",
             violation,
-            self.context_loop_state.edits_succeeded,
-            self.context_loop_state.edits_files.join(", ")
+            self.rt.context_loop_state.edits_succeeded,
+            self.rt.context_loop_state.edits_files.join(", ")
         );
         self.obs.metrics.record_run_complete(false);
         Some(AgentResult::from_engine_state(

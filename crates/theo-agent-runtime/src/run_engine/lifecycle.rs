@@ -24,7 +24,7 @@ impl AgentRunEngine {
     /// can alert, but the shutdown path does not abort.
     pub(super) async fn record_session_exit(&mut self, result: &AgentResult) {
         // Save failure pattern tracker
-        self.failure_tracker.save();
+        self.tracking.failure_tracker.save();
 
         // Save context metrics to .theo/metrics/{run_id}.json.
         let metrics_dir = self.project_dir.join(".theo").join("metrics");
@@ -78,7 +78,7 @@ impl AgentRunEngine {
                 &events,
             );
             // Usage + cost accounting + lesson/hypothesis pipelines.
-            let mut usage = self.session_token_usage.clone();
+            let mut usage = self.rt.session_token_usage.clone();
             if let Some(c) = theo_domain::budget::known_model_cost(self.config.llm().model) {
                 usage.recompute_cost(&c);
             }
@@ -234,15 +234,15 @@ impl AgentRunEngine {
             self.run.run_id.as_str(),
             result.success,
             result.files_edited.len() as u64,
-            &self.session_token_usage,
+            &self.rt.session_token_usage,
             self.config.loop_cfg().max_iterations,
-            self.budget_enforcer.usage(),
+            self.llm.budget_enforcer.usage(),
             &self.obs.context_metrics.to_report(),
-            self.done_attempts,
+            self.tracking.done_attempts,
             self.obs.episodes_injected,
             self.obs.episodes_created,
-            self.failure_tracker.new_fingerprint_count(),
-            self.failure_tracker.recurrent_fingerprint_count(),
+            self.tracking.failure_tracker.new_fingerprint_count(),
+            self.tracking.failure_tracker.recurrent_fingerprint_count(),
             &self.obs.initial_context_files,
             &self.obs.pre_compaction_hot_files,
         );
