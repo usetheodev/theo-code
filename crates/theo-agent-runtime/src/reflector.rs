@@ -16,6 +16,7 @@
 /// New variants are added when sensors to detect them are implemented.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
+#[allow(dead_code)] // FM-3..FM-6 are reserved for future detector wiring.
 pub enum FailurePattern {
     /// FM-1: Agent ran multiple loops without editing any files.
     NoProgressLoop,
@@ -133,6 +134,9 @@ pub fn guidance_for_pattern(
 /// than `Ok`.
 #[derive(Default)]
 pub struct HeuristicReflector {
+    // T4.4: held for the future `record_tool_call` integration; current
+    // callers only use `corrective_guidance`.
+    #[allow(dead_code)]
     loop_detector: std::sync::Mutex<crate::observability::LoopDetector>,
 }
 
@@ -174,6 +178,7 @@ impl HeuristicReflector {
 
     /// T4.4: Record a tool invocation through the loop detector and return
     /// guidance if the verdict is `Correct` or `HardStop`.
+    #[allow(dead_code)] // pending pilot-loop integration
     pub fn record_tool_call(
         &self,
         tool_name: &str,

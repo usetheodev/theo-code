@@ -68,6 +68,7 @@ pub fn progress_file_path(project_dir: &Path) -> PathBuf {
 }
 
 /// Check if this is the first session (no progress file exists).
+#[allow(dead_code)] // pending session-onboarding integration
 pub fn is_first_session(project_dir: &Path) -> bool {
     !progress_file_path(project_dir).exists()
 }

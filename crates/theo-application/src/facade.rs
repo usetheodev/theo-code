@@ -29,8 +29,10 @@ pub mod agent {
     pub use theo_agent_runtime::pilot::{
         self, PilotConfig, PilotLoop, PilotResult, load_promise,
     };
-    // Roadmap — theo-cli pilot subcommand.
+    // Roadmap — theo-cli pilot subcommand (legacy markdown plans).
     pub use theo_agent_runtime::roadmap::{find_latest_roadmap, parse_roadmap};
+    // Plan store — SOTA Planning System (canonical JSON plans).
+    pub use theo_agent_runtime::plan_store::{find_latest_plan, load_plan, save_plan};
     // Observability listener types — theo-desktop.
     pub use theo_agent_runtime::observability;
     // Agent config helpers — theo-cli main.

@@ -21,7 +21,10 @@ use serde::Deserialize;
 use crate::agent_loop::{AgentLoop, AgentResult};
 use crate::config::AgentConfig;
 use crate::event_bus::EventBus;
+use crate::plan_store;
 use crate::roadmap;
+use theo_domain::identifiers::PlanTaskId;
+use theo_domain::plan::{Plan, PlanTaskStatus};
 use theo_infra_llm::types::Message;
 use theo_tooling::registry::create_default_registry;
 
@@ -356,6 +359,87 @@ impl PilotLoop {
         self.build_result(ExitReason::PromiseFulfilled)
     }
 
+    /// Execute tasks from a JSON plan file sequentially, respecting the
+    /// dependency DAG. Each `next_actionable_task()` becomes one pilot
+    /// loop iteration; status transitions are persisted between iterations.
+    ///
+    /// SOTA Planning System replacement for `run_from_roadmap`.
+    pub async fn run_from_plan(&mut self, plan_path: &Path) -> PilotResult {
+        let mut plan = match plan_store::load_plan(plan_path) {
+            Ok(p) => p,
+            Err(e) => {
+                return self.build_result(ExitReason::Error(format!(
+                    "Failed to load plan: {e}"
+                )));
+            }
+        };
+
+        if plan.next_actionable_task().is_none() {
+            // Plan is fully resolved (every task is terminal).
+            return self.build_result(ExitReason::FixPlanComplete);
+        }
+
+        self.last_git_sha = get_git_sha(&self.project_dir).await;
+
+        // Re-evaluate next-actionable each iteration. The status may have
+        // moved forward (Pending → Completed) and a new task may now have
+        // its dependencies satisfied.
+        while let Some(task) = plan.next_actionable_task().cloned() {
+            if let Some(reason) = self.check_core_guards() {
+                return self.build_result(reason);
+            }
+
+            // Mark in_progress + persist before running the agent.
+            update_task_status(&mut plan, task.id, PlanTaskStatus::InProgress);
+            plan.updated_at = theo_domain::clock::now_millis();
+            if let Err(e) = plan_store::save_plan(plan_path, &plan) {
+                tracing::warn!("Failed to save plan progress: {e}");
+            }
+
+            self.loop_count += 1;
+            let sha_before = get_git_sha(&self.project_dir).await;
+            let prompt = plan.task_to_agent_prompt(&task);
+
+            let loop_bus = self.build_iteration_bus();
+            let registry = create_default_registry();
+            let mut agent = AgentLoop::new(self.agent_config.clone(), registry);
+            if let Some(ref gc) = self.graph_context {
+                agent = agent.with_graph_context(gc.clone());
+            }
+
+            let result = agent
+                .run_with_history(
+                    &prompt,
+                    &self.project_dir,
+                    self.session_messages.clone(),
+                    Some(loop_bus),
+                )
+                .await;
+
+            self.track_tokens_and_files(&result);
+            self.record_exchange(&prompt, &result);
+
+            let progress = detect_git_progress(&self.project_dir, &sha_before).await;
+            self.last_git_sha = get_git_sha(&self.project_dir).await;
+            self.update_counters(&result, &progress);
+
+            // Update task status based on result, preserving outcome summary.
+            let new_status = if result.success {
+                PlanTaskStatus::Completed
+            } else {
+                PlanTaskStatus::Failed
+            };
+            update_task_status(&mut plan, task.id, new_status);
+            update_task_outcome(&mut plan, task.id, result.summary.clone());
+            plan.updated_at = theo_domain::clock::now_millis();
+            if let Err(e) = plan_store::save_plan(plan_path, &plan) {
+                tracing::warn!("Failed to save plan completion: {e}");
+            }
+        }
+
+        self.build_result(ExitReason::PromiseFulfilled)
+    }
+
     fn check_rate_limit(&mut self) -> bool {
         // Reset hourly counter
         if self.hour_start.elapsed().as_secs() >= 3600 {
@@ -570,6 +654,22 @@ impl EventListener for EventForwarder {
 /// Extracted for deterministic testing without wall-clock dependency.
 fn should_transition_to_halfopen(elapsed_secs: u64, cooldown_secs: u64) -> bool {
     elapsed_secs >= cooldown_secs
+}
+
+/// Mutates a `Plan` in place: sets the status of the matching `PlanTask`.
+/// No-op when the task ID is not found — caller already cloned by id.
+fn update_task_status(plan: &mut Plan, id: PlanTaskId, status: PlanTaskStatus) {
+    if let Some(task) = plan.find_task_mut(id) {
+        task.status = status;
+    }
+}
+
+/// Mutates a `Plan` in place: stores the agent's summary as the task outcome.
+/// No-op when the task ID is not found.
+fn update_task_outcome(plan: &mut Plan, id: PlanTaskId, outcome: String) {
+    if let Some(task) = plan.find_task_mut(id) {
+        task.outcome = Some(outcome);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1018,5 +1118,108 @@ exit_signal_threshold = 3
             None,
             Arc::new(EventBus::new()),
         )
+    }
+
+    // -- Plan integration helpers --
+
+    use theo_domain::identifiers::PhaseId;
+    use theo_domain::plan::{Phase, PhaseStatus, PlanTask, PLAN_FORMAT_VERSION};
+
+    fn sample_plan_for_pilot() -> Plan {
+        Plan {
+            version: PLAN_FORMAT_VERSION,
+            title: "Pilot integration".into(),
+            goal: "Drive a plan via the pilot loop".into(),
+            current_phase: PhaseId(1),
+            phases: vec![Phase {
+                id: PhaseId(1),
+                title: "Phase 1".into(),
+                status: PhaseStatus::InProgress,
+                tasks: vec![
+                    PlanTask {
+                        id: PlanTaskId(1),
+                        title: "First".into(),
+                        status: PlanTaskStatus::Pending,
+                        files: vec![],
+                        description: String::new(),
+                        dod: String::new(),
+                        depends_on: vec![],
+                        rationale: String::new(),
+                        outcome: None,
+                    },
+                    PlanTask {
+                        id: PlanTaskId(2),
+                        title: "Second".into(),
+                        status: PlanTaskStatus::Pending,
+                        files: vec![],
+                        description: String::new(),
+                        dod: String::new(),
+                        depends_on: vec![PlanTaskId(1)],
+                        rationale: String::new(),
+                        outcome: None,
+                    },
+                ],
+            }],
+            decisions: vec![],
+            created_at: 100,
+            updated_at: 100,
+        }
+    }
+
+    #[test]
+    fn update_task_status_changes_only_target_task() {
+        let mut plan = sample_plan_for_pilot();
+        update_task_status(&mut plan, PlanTaskId(1), PlanTaskStatus::Completed);
+        assert_eq!(plan.phases[0].tasks[0].status, PlanTaskStatus::Completed);
+        assert_eq!(plan.phases[0].tasks[1].status, PlanTaskStatus::Pending);
+    }
+
+    #[test]
+    fn update_task_status_unknown_id_is_noop() {
+        let mut plan = sample_plan_for_pilot();
+        update_task_status(&mut plan, PlanTaskId(99), PlanTaskStatus::Failed);
+        assert_eq!(plan.phases[0].tasks[0].status, PlanTaskStatus::Pending);
+    }
+
+    #[test]
+    fn update_task_outcome_records_summary() {
+        let mut plan = sample_plan_for_pilot();
+        update_task_outcome(&mut plan, PlanTaskId(2), "Done in 10s".into());
+        assert_eq!(
+            plan.phases[0].tasks[1].outcome.as_deref(),
+            Some("Done in 10s")
+        );
+    }
+
+    #[tokio::test]
+    async fn run_from_plan_returns_error_when_plan_path_missing() {
+        let mut pilot = make_test_pilot("test");
+        let result = pilot.run_from_plan(Path::new("/nonexistent/plan.json")).await;
+        assert!(matches!(result.reason, ExitReason::Error(_)));
+        assert!(!result.success);
+    }
+
+    #[tokio::test]
+    async fn run_from_plan_returns_complete_when_no_actionable_task() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("plan.json");
+
+        let mut plan = sample_plan_for_pilot();
+        // Mark all tasks completed → next_actionable_task() returns None.
+        for task in plan.phases[0].tasks.iter_mut() {
+            task.status = PlanTaskStatus::Completed;
+        }
+        plan_store::save_plan(&path, &plan).unwrap();
+
+        let mut pilot = PilotLoop::new(
+            AgentConfig::default(),
+            PilotConfig::default(),
+            dir.path().to_path_buf(),
+            "promise".into(),
+            None,
+            Arc::new(EventBus::new()),
+        );
+        let result = pilot.run_from_plan(&path).await;
+        assert!(matches!(result.reason, ExitReason::FixPlanComplete));
     }
 }

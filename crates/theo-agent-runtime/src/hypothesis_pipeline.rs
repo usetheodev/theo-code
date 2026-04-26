@@ -9,6 +9,9 @@
 //! context (caller's responsibility). Auto-prunes the file when
 //! `evidence_against > evidence_for * 2` and total evidence >= 3
 //! (delegated to `Hypothesis::should_auto_prune()` in theo-domain).
+//!
+//! Reserved-for-future-use hypothesis loop; not yet wired into runs.
+#![allow(dead_code)]
 
 use std::path::Path;
 

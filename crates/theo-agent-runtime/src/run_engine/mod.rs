@@ -286,6 +286,7 @@ impl AgentRunEngine {
 
     /// Borrow the underlying [`MetricsCollector`] for sites that need
     /// to call its mutating methods (`record_*`). T3.1 PR2.
+    #[allow(dead_code)] // retained for upcoming T3.1 callers
     pub(crate) fn metrics_collector(&self) -> &Arc<MetricsCollector> {
         &self.obs.metrics
     }

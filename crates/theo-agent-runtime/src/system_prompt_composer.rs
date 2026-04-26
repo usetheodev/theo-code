@@ -9,6 +9,9 @@
 //!
 //! The C2 criterion in `.theo/evolution_criteria.md` requires the base
 //! system prompt ≤10k tokens — the composer enforces this via `estimated_tokens`.
+//!
+//! Reserved-for-future-use composer; not yet wired into the runtime.
+#![allow(dead_code)]
 
 use theo_domain::tokens::estimate_tokens;
 

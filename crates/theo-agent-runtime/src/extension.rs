@@ -4,6 +4,9 @@
 //! and transform input. Backward compatible with existing `.theo/hooks/`.
 //!
 //! Pi-mono ref: `packages/coding-agent/src/core/extensions/index.ts`
+//!
+//! Reserved-for-future-use extension framework; not yet wired into the runtime.
+#![allow(dead_code)]
 
 use serde::{Deserialize, Serialize};
 

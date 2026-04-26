@@ -16,6 +16,9 @@
 //!   agent runtime can log it or enforce an allowlist of trusted hashes.
 //! - Tools registered from plugins are placed under `ToolCategory::Plugin`,
 //!   which is gated by the capability set even on "unrestricted" defaults.
+//!
+//! Reserved-for-future-use plugin loader; not yet wired into the tool registry.
+#![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
 

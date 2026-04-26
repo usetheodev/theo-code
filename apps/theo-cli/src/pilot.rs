@@ -46,8 +46,20 @@ pub async fn run_pilot(
     let cli_renderer = Arc::new(CliRenderer::new());
     event_bus.subscribe(cli_renderer);
 
-    // Check if there's a roadmap to execute from (before moving project_dir)
-    let roadmap_path = theo_application::facade::agent::find_latest_roadmap(&project_dir);
+    // SOTA Planning System: prefer .theo/plans/*.json over .md (legacy roadmap).
+    // `find_latest_plan` returns .json when present, otherwise falls back to .md.
+    let plan_path = theo_application::facade::agent::find_latest_plan(&project_dir);
+    let is_json_plan = plan_path
+        .as_ref()
+        .and_then(|p| p.extension())
+        .and_then(|e| e.to_str())
+        == Some("json");
+    let roadmap_path: Option<PathBuf> = if is_json_plan {
+        // Found a JSON plan; ignore legacy .md roadmaps.
+        None
+    } else {
+        plan_path.clone()
+    };
 
     // Initialize GRAPHCTX — fire-and-forget background build.
     // Disabled entirely when THEO_NO_GRAPHCTX=1.
@@ -88,8 +100,40 @@ pub async fn run_pilot(
         }
     });
 
-    // Execute from roadmap if available, otherwise normal loop
-    let result = if let Some(ref rmap) = roadmap_path {
+    // Execute from plan/roadmap if available, otherwise normal loop.
+    // Priority: JSON plan > legacy markdown roadmap > pure pilot.
+    let result = if is_json_plan
+        && let Some(ref pjson) = plan_path
+    {
+        match theo_application::facade::agent::load_plan(pjson) {
+            Ok(plan) => {
+                let pending = plan
+                    .all_tasks()
+                    .iter()
+                    .filter(|t| !t.status.is_terminal())
+                    .count();
+                eprintln!(
+                    "  Plan: {} ({} pending tasks)",
+                    accent(pjson.display().to_string(), caps()),
+                    pending
+                );
+                eprintln!();
+                if pending > 0 {
+                    pilot.run_from_plan(pjson).await
+                } else {
+                    pilot.run().await
+                }
+            }
+            Err(e) => {
+                eprintln!(
+                    "  {} {}",
+                    error("Plan parse error:", caps()),
+                    e
+                );
+                pilot.run().await
+            }
+        }
+    } else if let Some(ref rmap) = roadmap_path {
         let tasks =
             theo_application::facade::agent::parse_roadmap(rmap).unwrap_or_default();
         let pending = tasks.iter().filter(|t| !t.completed).count();

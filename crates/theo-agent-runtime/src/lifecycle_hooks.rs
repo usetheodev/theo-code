@@ -276,15 +276,15 @@ impl HookManager {
     pub fn validate_regexes(&self) -> Result<(), HookRegexError> {
         for (event, matchers) in &self.by_event {
             for (idx, m) in matchers.iter().enumerate() {
-                if let Some(pattern) = &m.matcher {
-                    if let Err(e) = Regex::new(pattern) {
-                        return Err(HookRegexError {
-                            event: event.clone(),
-                            index: idx,
-                            pattern: pattern.clone(),
-                            source: e,
-                        });
-                    }
+                if let Some(pattern) = &m.matcher
+                    && let Err(e) = Regex::new(pattern)
+                {
+                    return Err(HookRegexError {
+                        event: event.clone(),
+                        index: idx,
+                        pattern: pattern.clone(),
+                        source: e,
+                    });
                 }
             }
         }

@@ -67,16 +67,11 @@ pub(super) fn find_boundary_idx(messages: &[Message], preserve_tail: usize) -> u
     //     `assistant_with_tool_calls` whose matching `Role::Tool`
     //     results live AT or AFTER the boundary. Advance past those
     //     results so the assistant + its results stay together.
+    // Case A subsumes Case B (both require `messages[boundary_idx]` to be
+    // `Role::Tool`); clippy's `overly_complex_bool_expr` flagged Case B as
+    // dead code. The simplified form is logically equivalent.
     while boundary_idx < messages.len()
-        && (
-            // Case A: cut would land in the middle of consecutive tool
-            // results. Push forward until past the last contiguous Tool.
-            messages[boundary_idx].role == Role::Tool
-                || (boundary_idx > 0
-                    && messages[boundary_idx - 1].role == Role::Assistant
-                    && messages[boundary_idx - 1].tool_calls.is_some()
-                    && messages[boundary_idx].role == Role::Tool)
-        )
+        && messages[boundary_idx].role == Role::Tool
     {
         boundary_idx += 1;
     }

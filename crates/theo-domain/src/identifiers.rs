@@ -68,6 +68,69 @@ define_identifier!(
     "Unique identifier for an observability trajectory (derived projection of a run)."
 );
 
+// ---------------------------------------------------------------------------
+// Planning IDs (sequential u32, scoped within a single Plan)
+// ---------------------------------------------------------------------------
+//
+// Unlike `TaskId`/`RunId` (string-based, globally unique via timestamp+random),
+// planning IDs are *small sequential integers* assigned by the LLM when it
+// drafts a plan. They are scoped to a single `Plan` document — uniqueness is
+// enforced by `Plan::validate()`, not by the type itself.
+//
+// We deliberately keep them as transparent newtypes (no `generate()`,
+// no entropy) because plans are authored, not minted. See SOTA Planning
+// System plan, Fase 1.1.
+
+/// Sequential identifier for a `PlanTask` within a single `Plan`.
+///
+/// Display format: `T{n}` (e.g., `T1`, `T42`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, PartialOrd, Ord)]
+pub struct PlanTaskId(pub u32);
+
+impl PlanTaskId {
+    /// Returns the underlying `u32`.
+    pub fn as_u32(self) -> u32 {
+        self.0
+    }
+}
+
+impl fmt::Display for PlanTaskId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "T{}", self.0)
+    }
+}
+
+impl From<u32> for PlanTaskId {
+    fn from(value: u32) -> Self {
+        Self(value)
+    }
+}
+
+/// Sequential identifier for a `Phase` within a single `Plan`.
+///
+/// Display format: `P{n}` (e.g., `P1`, `P3`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, PartialOrd, Ord)]
+pub struct PhaseId(pub u32);
+
+impl PhaseId {
+    /// Returns the underlying `u32`.
+    pub fn as_u32(self) -> u32 {
+        self.0
+    }
+}
+
+impl fmt::Display for PhaseId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "P{}", self.0)
+    }
+}
+
+impl From<u32> for PhaseId {
+    fn from(value: u32) -> Self {
+        Self(value)
+    }
+}
+
 /// Collision-safe random `u64` derived from a fresh UUID v4.
 ///
 /// T4.6 / find_p4_010 / find_p5_008 — the original implementation mixed
@@ -307,6 +370,63 @@ mod tests {
              under concurrent generation; got {} (collision detected)",
             total.len()
         );
+    }
+
+    // ------------------------------------------------------------------
+    // Planning IDs — sequential u32 newtypes
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn plan_task_id_display_uses_t_prefix() {
+        assert_eq!(format!("{}", PlanTaskId(42)), "T42");
+        assert_eq!(format!("{}", PlanTaskId(1)), "T1");
+    }
+
+    #[test]
+    fn phase_id_display_uses_p_prefix() {
+        assert_eq!(format!("{}", PhaseId(3)), "P3");
+        assert_eq!(format!("{}", PhaseId(0)), "P0");
+    }
+
+    #[test]
+    fn plan_task_id_serde_roundtrip() {
+        let id = PlanTaskId(42);
+        let json = serde_json::to_string(&id).unwrap();
+        // Transparent newtype → serializes as the raw u32.
+        assert_eq!(json, "42");
+        let back: PlanTaskId = serde_json::from_str(&json).unwrap();
+        assert_eq!(id, back);
+    }
+
+    #[test]
+    fn phase_id_serde_roundtrip() {
+        let id = PhaseId(7);
+        let json = serde_json::to_string(&id).unwrap();
+        assert_eq!(json, "7");
+        let back: PhaseId = serde_json::from_str(&json).unwrap();
+        assert_eq!(id, back);
+    }
+
+    #[test]
+    fn plan_task_id_hashable_and_comparable() {
+        let mut set = HashSet::new();
+        set.insert(PlanTaskId(1));
+        set.insert(PlanTaskId(2));
+        set.insert(PlanTaskId(1));
+        assert_eq!(set.len(), 2);
+        assert!(PlanTaskId(1) < PlanTaskId(2));
+    }
+
+    #[test]
+    fn plan_task_id_from_u32() {
+        let id: PlanTaskId = 99u32.into();
+        assert_eq!(id.as_u32(), 99);
+    }
+
+    #[test]
+    fn phase_id_from_u32() {
+        let id: PhaseId = 5u32.into();
+        assert_eq!(id.as_u32(), 5);
     }
 
     #[test]

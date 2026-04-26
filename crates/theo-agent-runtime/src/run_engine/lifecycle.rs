@@ -191,25 +191,25 @@ impl AgentRunEngine {
         // sessions. `cleanup` was implemented but never invoked in
         // production; this hook closes the gap. Best-effort: any
         // failure is logged via tracing but does NOT block shutdown.
-        if !self.config.loop_cfg().is_subagent {
-            if let Some(ckpt) = self.subagent.checkpoint.as_deref() {
-                let ttl = self.config.checkpoint_ttl_seconds as i64;
-                if ttl > 0 {
-                    match ckpt.cleanup(ttl) {
-                        Ok(pruned) if pruned > 0 => {
-                            tracing::info!(
-                                pruned = pruned,
-                                ttl_seconds = ttl,
-                                "checkpoint cleanup pruned stale entries"
-                            );
-                        }
-                        Ok(_) => {}
-                        Err(e) => {
-                            tracing::warn!(
-                                error = %e,
-                                "checkpoint cleanup failed at session shutdown"
-                            );
-                        }
+        if !self.config.loop_cfg().is_subagent
+            && let Some(ckpt) = self.subagent.checkpoint.as_deref()
+        {
+            let ttl = self.config.checkpoint_ttl_seconds as i64;
+            if ttl > 0 {
+                match ckpt.cleanup(ttl) {
+                    Ok(pruned) if pruned > 0 => {
+                        tracing::info!(
+                            pruned = pruned,
+                            ttl_seconds = ttl,
+                            "checkpoint cleanup pruned stale entries"
+                        );
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e,
+                            "checkpoint cleanup failed at session shutdown"
+                        );
                     }
                 }
             }
@@ -224,9 +224,7 @@ impl AgentRunEngine {
         result: &AgentResult,
         had_events: bool,
     ) -> Option<crate::observability::report::RunReport> {
-        let Some(pipeline) = self.obs.pipeline.take() else {
-            return None;
-        };
+        let pipeline = self.obs.pipeline.take()?;
         let file_path = pipeline.finalize();
         self.obs.episodes_created = if had_events { 1 } else { 0 };
         let (detected, run_report) = crate::observability::finalize_run_observability(

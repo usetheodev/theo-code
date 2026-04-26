@@ -6,6 +6,9 @@
 //! Thresholds: 0/70/80/85/90/99% → None/Warning/Mask/Prune/Aggressive/Compact.
 //! Mask already lives in `compaction::compact_if_needed`.
 //! Warning/Aggressive/Compact are future iterations.
+//!
+//! Reserved-for-future-use compaction stages; Prune/Aggressive/Compact not yet wired.
+#![allow(dead_code)]
 
 use crate::compaction::{CompactionContext, compact_with_policy, estimate_total_tokens};
 use crate::config::CompactionPolicy;

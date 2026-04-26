@@ -334,10 +334,10 @@ impl AgentRunEngine {
 
                 // Persist tool result to state manager (crash recovery).
                 // T1.3 / find_p4_002 — see assistant-side comment above.
-                if let Some(ref mut sm) = state_manager {
-                    if let Err(e) = sm.append_message("tool", &output) {
-                        self.publish_state_append_failure("tool", &e);
-                    }
+                if let Some(ref mut sm) = state_manager
+                    && let Err(e) = sm.append_message("tool", &output)
+                {
+                    self.publish_state_append_failure("tool", &e);
                 }
 
                 // Sensor fire — extracted to

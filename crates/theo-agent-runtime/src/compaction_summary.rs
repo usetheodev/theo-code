@@ -11,6 +11,9 @@
 //! - `referencias/hermes-agent/agent/context_compressor.py:586-644` (template)
 //! - `referencias/opendev/crates/opendev-context/src/compaction/compactor/summary.rs:130-191`
 //!   (fallback without LLM)
+//!
+//! Reserved-for-future-use Compact-stage summary builder; not yet wired.
+#![allow(dead_code)]
 
 use theo_infra_llm::types::{Message, Role};
 

@@ -199,12 +199,12 @@ pub async fn serve(project_dir: PathBuf, port: u16, static_dir: Option<PathBuf>)
 /// Heuristic: locate the UI bundle shipped next to the binary (or dev path).
 pub fn find_default_static_dir() -> Option<PathBuf> {
     // 1) Binary-relative dist/ (e.g., ./dashboard-dist)
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let candidate = dir.join("dashboard-dist");
-            if candidate.exists() {
-                return Some(candidate);
-            }
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(dir) = exe.parent()
+    {
+        let candidate = dir.join("dashboard-dist");
+        if candidate.exists() {
+            return Some(candidate);
         }
     }
     // 2) Workspace-relative for dev runs: apps/theo-ui/dist

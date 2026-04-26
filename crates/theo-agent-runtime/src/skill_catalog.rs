@@ -11,6 +11,11 @@
 //!
 //! Frontmatter is a minimal `key: value` parser — avoiding a new dep
 //! (serde_yaml) per the workspace convention.
+//!
+//! Reserved for the upcoming progressive-disclosure skill plan; not yet
+//! wired into the runtime — module-level `dead_code` allow per workspace
+//! convention for future-use scaffolding.
+#![allow(dead_code)]
 
 use std::collections::BTreeMap;
 use std::fs;

@@ -387,7 +387,7 @@ fn main() {
 /// each time `delegate_task` resolves a sub-agent name.
 fn build_injections(
     features: &runtime_features::RuntimeFeatures,
-    project_dir: &PathBuf,
+    project_dir: &Path,
 ) -> theo_application::use_cases::run_agent_session::SubagentInjections {
     use std::sync::Arc;
     let mut inj = theo_application::use_cases::run_agent_session::SubagentInjections::default();

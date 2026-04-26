@@ -141,6 +141,10 @@ pub fn create_default_registry() -> ToolRegistry {
     use crate::glob::GlobTool;
     use crate::grep::GrepTool;
     use crate::memory::MemoryTool;
+    use crate::plan::{
+        AdvancePhaseTool, CreatePlanTool, GetNextTaskTool, GetPlanSummaryTool, LogEntryTool,
+        UpdateTaskTool,
+    };
     use crate::read::ReadTool;
     use crate::reflect::ReflectTool;
     use crate::think::ThinkTool;
@@ -198,6 +202,13 @@ pub fn create_default_registry() -> ToolRegistry {
         Box::new(MemoryTool::new()),
         Box::new(TaskCreateTool::new()),
         Box::new(TaskUpdateTool::new()),
+        // SOTA Planning System — schema-validated plans
+        Box::new(CreatePlanTool::new()),
+        Box::new(UpdateTaskTool::new()),
+        Box::new(AdvancePhaseTool::new()),
+        Box::new(LogEntryTool::new()),
+        Box::new(GetPlanSummaryTool::new()),
+        Box::new(GetNextTaskTool::new()),
         // Builtin plugins — typed operations
         Box::new(crate::git::GitStatusTool),
         Box::new(crate::git::GitDiffTool),

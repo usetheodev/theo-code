@@ -14,6 +14,7 @@ pub mod graph_context;
 pub mod identifiers;
 pub mod memory;
 pub mod permission;
+pub mod plan;
 pub mod priority;
 pub mod prompt_sanitizer;
 pub mod retry_policy;
