@@ -17,9 +17,11 @@
 //! See `docs/plans/sota-tier1-tier2-plan.md` §T15.1.
 
 pub mod index;
+pub mod markdown_source;
 pub mod source;
 pub mod tool;
 
 pub use index::{DocEntry, DocsIndex, ScoredDoc};
+pub use markdown_source::MarkdownDirSource;
 pub use source::{DocSource, StaticDocSource};
 pub use tool::DocsSearchTool;

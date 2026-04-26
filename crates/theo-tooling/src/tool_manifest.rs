@@ -236,9 +236,9 @@ pub const TOOL_MANIFEST: &[ToolManifestEntry] = &[
     ToolManifestEntry {
         id: "docs_search",
         exposure: ToolExposure::DefaultRegistry,
-        status: ToolStatus::Partial,
+        status: ToolStatus::Implemented,
         owner: "theo-tooling",
-        notes: "T15.1 partial — in-memory inverted index + DocSource trait; crates.io/MDN/npm fetchers deferred (need network + cache).",
+        notes: "T15.1 — in-memory inverted index + DocSource trait; ships StaticDocSource (test corpus) and MarkdownDirSource (offline filesystem-backed scanner for .md docs); crates.io/MDN/npm network fetchers still deferred.",
     },
     ToolManifestEntry {
         id: "plan_summary",
