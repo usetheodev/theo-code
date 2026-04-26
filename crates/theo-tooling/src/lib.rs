@@ -16,6 +16,7 @@ pub mod grep;
 pub mod http_client;
 pub mod invalid;
 pub mod jsonrpc_correlator;
+pub mod jsonrpc_reader;
 pub mod jsonrpc_session;
 pub mod jsonrpc_stdio;
 pub mod jsonrpc_subprocess;
