@@ -143,7 +143,7 @@ pub fn create_default_registry() -> ToolRegistry {
     use crate::memory::MemoryTool;
     use crate::plan::{
         AdvancePhaseTool, CreatePlanTool, GetNextTaskTool, GetPlanSummaryTool, LogEntryTool,
-        UpdateTaskTool,
+        ReplanTool, UpdateTaskTool,
     };
     use crate::read::ReadTool;
     use crate::reflect::ReflectTool;
@@ -209,6 +209,7 @@ pub fn create_default_registry() -> ToolRegistry {
         Box::new(LogEntryTool::new()),
         Box::new(GetPlanSummaryTool::new()),
         Box::new(GetNextTaskTool::new()),
+        Box::new(ReplanTool::new()),
         // Builtin plugins — typed operations
         Box::new(crate::git::GitStatusTool),
         Box::new(crate::git::GitDiffTool),

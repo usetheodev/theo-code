@@ -206,6 +206,13 @@ pub const TOOL_MANIFEST: &[ToolManifestEntry] = &[
         notes: "SOTA planning — return next actionable task via topological sort.",
     },
     ToolManifestEntry {
+        id: "plan_replan",
+        exposure: ToolExposure::DefaultRegistry,
+        status: ToolStatus::Implemented,
+        owner: "theo-tooling",
+        notes: "T6.1 — apply a typed PlanPatch (AddTask/RemoveTask/EditTask/ReorderDeps/SkipTask) atomically.",
+    },
+    ToolManifestEntry {
         id: "plan_summary",
         exposure: ToolExposure::DefaultRegistry,
         status: ToolStatus::Implemented,

@@ -1096,6 +1096,132 @@ impl Tool for GetNextTaskTool {
 }
 
 // ---------------------------------------------------------------------------
+// ReplanTool — `plan_replan` (T6.1)
+// ---------------------------------------------------------------------------
+
+pub struct ReplanTool;
+impl Default for ReplanTool {
+    fn default() -> Self {
+        Self
+    }
+}
+impl ReplanTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[async_trait]
+impl Tool for ReplanTool {
+    fn id(&self) -> &str {
+        "plan_replan"
+    }
+
+    fn description(&self) -> &str {
+        "T6.1 — Apply a typed PlanPatch to the persisted plan to recover \
+         from a stuck task. The patch must be one of: \
+         {kind:'add_task', phase:u32, task:{...}, position?:'end'|'begin'|{after_task:u32}}, \
+         {kind:'remove_task', id:u32}, \
+         {kind:'edit_task', id:u32, edits:{...}}, \
+         {kind:'reorder_deps', id:u32, new_deps:[u32]}, \
+         {kind:'skip_task', id:u32, rationale:string}. \
+         The plan is re-validated after the patch — invalid mutations \
+         (cycle, orphan dep, etc.) are rejected and the plan is left \
+         untouched. Use SkipTask when you cannot make progress on a \
+         failed task. Example: \
+         plan_replan({patch: {kind:'skip_task', id: 3, rationale: 'API deprecated'}})."
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            params: vec![ToolParam {
+                name: "patch".into(),
+                param_type: "object".into(),
+                description:
+                    "PlanPatch JSON object with `kind` discriminator (add_task|remove_task|edit_task|reorder_deps|skip_task)."
+                        .into(),
+                required: true,
+            }],
+            input_examples: vec![
+                json!({"patch": {"kind": "skip_task", "id": 3, "rationale": "Out of scope"}}),
+                json!({
+                    "patch": {
+                        "kind": "edit_task",
+                        "id": 1,
+                        "edits": {"status": "blocked", "rationale": "External dep failed"}
+                    }
+                }),
+            ],
+        }
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Orchestration
+    }
+
+    async fn execute(
+        &self,
+        args: Value,
+        ctx: &ToolContext,
+        _permissions: &mut PermissionCollector,
+    ) -> Result<ToolOutput, ToolError> {
+        let patch_value = args
+            .get("patch")
+            .ok_or_else(|| ToolError::InvalidArgs("missing object `patch`".into()))?;
+        let patch: theo_domain::plan_patch::PlanPatch = serde_json::from_value(patch_value.clone())
+            .map_err(|e| ToolError::InvalidArgs(format!("invalid `patch`: {e}")))?;
+
+        let path = plan_path(&ctx.project_dir);
+        let mut plan = read_plan(&path).map_err(|e| match e {
+            ToolError::Io(io) if io.kind() == std::io::ErrorKind::NotFound => {
+                ToolError::NotFound(
+                    "plan.json missing — call plan_create before plan_replan".into(),
+                )
+            }
+            other => other,
+        })?;
+
+        plan.apply_patch(&patch).map_err(|e| match e {
+            theo_domain::plan_patch::PatchError::TaskNotFound(id) => {
+                ToolError::NotFound(format!("task {id} not found in plan"))
+            }
+            theo_domain::plan_patch::PatchError::PhaseNotFound(id) => {
+                ToolError::NotFound(format!("phase {id} not found in plan"))
+            }
+            other => ToolError::Execution(format!("plan patch failed: {other}")),
+        })?;
+        plan.updated_at = now_millis();
+        write_plan(&path, &plan)?;
+
+        // Surface a short summary for both the user UI and the model.
+        let kind_label = match &patch {
+            theo_domain::plan_patch::PlanPatch::AddTask { .. } => "add_task",
+            theo_domain::plan_patch::PlanPatch::RemoveTask { .. } => "remove_task",
+            theo_domain::plan_patch::PlanPatch::EditTask { .. } => "edit_task",
+            theo_domain::plan_patch::PlanPatch::ReorderDeps { .. } => "reorder_deps",
+            theo_domain::plan_patch::PlanPatch::SkipTask { .. } => "skip_task",
+            _ => "unknown",
+        };
+
+        Ok(ToolOutput {
+            title: format!("Plan patched: {kind_label}"),
+            output: format!(
+                "Patch `{kind_label}` applied. Plan now has {tasks} task(s) across {phases} phase(s).",
+                tasks = plan.all_tasks().len(),
+                phases = plan.phases.len()
+            ),
+            metadata: json!({
+                "type": "plan_replan",
+                "kind": kind_label,
+                "version_counter": plan.version_counter,
+            }),
+            attachments: None,
+            llm_suffix: None,
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Suppress unused warning for backward-compat helper.
 // ---------------------------------------------------------------------------
 
@@ -1676,6 +1802,7 @@ mod tests {
             Box::new(LogEntryTool::new()),
             Box::new(GetPlanSummaryTool::new()),
             Box::new(GetNextTaskTool::new()),
+            Box::new(ReplanTool::new()),
         ];
         for t in &tools {
             t.schema().validate().unwrap_or_else(|e| {
@@ -1693,5 +1820,198 @@ mod tests {
         assert_eq!(LogEntryTool::new().id(), "plan_log");
         assert_eq!(GetPlanSummaryTool::new().id(), "plan_summary");
         assert_eq!(GetNextTaskTool::new().id(), "plan_next_task");
+        assert_eq!(ReplanTool::new().id(), "plan_replan");
+    }
+
+    // ----- T6.1 ReplanTool -----
+
+    #[tokio::test]
+    async fn t61_replan_tool_skip_task_persists_changes() {
+        let dir = tempdir().unwrap();
+        let ctx = make_ctx(dir.path().to_path_buf());
+        let mut perms = PermissionCollector::new();
+
+        // Seed a plan with one Pending task.
+        CreatePlanTool::new()
+            .execute(
+                json!({
+                    "title": "T61",
+                    "goal": "test replan",
+                    "phases": sample_phase_args(),
+                }),
+                &ctx,
+                &mut perms,
+            )
+            .await
+            .unwrap();
+
+        // Skip task 1.
+        let result = ReplanTool::new()
+            .execute(
+                json!({"patch": {"kind": "skip_task", "id": 1, "rationale": "Out of scope"}}),
+                &ctx,
+                &mut perms,
+            )
+            .await
+            .unwrap();
+        assert_eq!(result.metadata["kind"], "skip_task");
+
+        // Re-read plan and confirm task 1 is now Skipped with the rationale.
+        let plan = read_plan(&plan_path(dir.path())).unwrap();
+        let t = plan.find_task(PlanTaskId(1)).unwrap();
+        assert_eq!(t.status, PlanTaskStatus::Skipped);
+        assert_eq!(t.outcome.as_deref(), Some("Out of scope"));
+    }
+
+    #[tokio::test]
+    async fn t61_replan_tool_unknown_task_returns_not_found() {
+        let dir = tempdir().unwrap();
+        let ctx = make_ctx(dir.path().to_path_buf());
+        let mut perms = PermissionCollector::new();
+
+        CreatePlanTool::new()
+            .execute(
+                json!({
+                    "title": "T61",
+                    "goal": "test replan",
+                    "phases": sample_phase_args(),
+                }),
+                &ctx,
+                &mut perms,
+            )
+            .await
+            .unwrap();
+
+        let err = ReplanTool::new()
+            .execute(
+                json!({"patch": {"kind": "skip_task", "id": 99, "rationale": "x"}}),
+                &ctx,
+                &mut perms,
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::NotFound(_)));
+    }
+
+    #[tokio::test]
+    async fn t61_replan_tool_invalid_patch_shape_returns_invalid_args() {
+        let dir = tempdir().unwrap();
+        let ctx = make_ctx(dir.path().to_path_buf());
+        let mut perms = PermissionCollector::new();
+
+        CreatePlanTool::new()
+            .execute(
+                json!({
+                    "title": "T61",
+                    "goal": "test replan",
+                    "phases": sample_phase_args(),
+                }),
+                &ctx,
+                &mut perms,
+            )
+            .await
+            .unwrap();
+
+        let err = ReplanTool::new()
+            .execute(
+                json!({"patch": {"kind": "skip_task"}}), // missing id + rationale
+                &ctx,
+                &mut perms,
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::InvalidArgs(_)));
+    }
+
+    #[tokio::test]
+    async fn t61_replan_tool_missing_plan_returns_not_found() {
+        let dir = tempdir().unwrap();
+        let ctx = make_ctx(dir.path().to_path_buf());
+        let mut perms = PermissionCollector::new();
+
+        let err = ReplanTool::new()
+            .execute(
+                json!({"patch": {"kind": "skip_task", "id": 1, "rationale": "x"}}),
+                &ctx,
+                &mut perms,
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::NotFound(_)));
+    }
+
+    #[tokio::test]
+    async fn t61_replan_tool_cycle_introducing_patch_rolls_back() {
+        let dir = tempdir().unwrap();
+        let ctx = make_ctx(dir.path().to_path_buf());
+        let mut perms = PermissionCollector::new();
+
+        // Plan: t1 → t2 (t2 depends on t1).
+        CreatePlanTool::new()
+            .execute(
+                json!({
+                    "title": "T61",
+                    "goal": "test rollback",
+                    "phases": sample_phase_args(),
+                }),
+                &ctx,
+                &mut perms,
+            )
+            .await
+            .unwrap();
+
+        // ReorderDeps to make t1 depend on t2 → cycle 1↔2.
+        let err = ReplanTool::new()
+            .execute(
+                json!({
+                    "patch": {
+                        "kind": "reorder_deps",
+                        "id": 1,
+                        "new_deps": [2]
+                    }
+                }),
+                &ctx,
+                &mut perms,
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::Execution(_)));
+
+        // Disk state unchanged: t1 still has empty deps.
+        let plan = read_plan(&plan_path(dir.path())).unwrap();
+        let t1 = plan.find_task(PlanTaskId(1)).unwrap();
+        assert!(t1.depends_on.is_empty());
+    }
+
+    #[tokio::test]
+    async fn t61_replan_tool_records_increment_in_metadata() {
+        let dir = tempdir().unwrap();
+        let ctx = make_ctx(dir.path().to_path_buf());
+        let mut perms = PermissionCollector::new();
+
+        CreatePlanTool::new()
+            .execute(
+                json!({
+                    "title": "T61",
+                    "goal": "metadata check",
+                    "phases": sample_phase_args(),
+                }),
+                &ctx,
+                &mut perms,
+            )
+            .await
+            .unwrap();
+
+        let result = ReplanTool::new()
+            .execute(
+                json!({"patch": {"kind": "skip_task", "id": 1, "rationale": "skip"}}),
+                &ctx,
+                &mut perms,
+            )
+            .await
+            .unwrap();
+        // version_counter is part of the metadata so callers can correlate
+        // log lines with the saved plan.
+        assert!(result.metadata.get("version_counter").is_some());
     }
 }
