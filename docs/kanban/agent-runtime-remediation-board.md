@@ -2,7 +2,7 @@
 
 **Source:** [agent-runtime-remediation-plan.md](../plans/agent-runtime-remediation-plan.md)
 **Created:** 2026-04-25
-**Last updated:** 2026-04-26 (iter 6 — T3.3, T3.7, T3.8 done + T4.10 partial)
+**Last updated:** 2026-04-26 (iter 7 — T4.10f + T4.10h done + T3.1/T3.2 roadmaps documented)
 
 ## Progress
 
@@ -795,3 +795,7 @@ Status annotations: `[done]`, `[review]`, `[doing]`, `[ready]`, `[backlog]`
 | 2026-04-26 | T4.10a-r | (composite) | done | 13 sub-tasks: lifecycle counts, REVIEW.md drift, WIKI_LEGACY date test, hook responses log, parking_lot::Mutex, TOCTOU+atomicity docs, resume comment, EventBus doc, expect/find Some refactor, DEFAULT_EXCLUDES expand, load_all warnings |
 | 2026-04-26 | T3.7 | backlog | done | 32 `eprintln!` em paths produtivos migrados para `tracing` (12 arquivos); bin/ + PrintEventListener mantidos |
 | 2026-04-26 | T3.3 | ready | done | `theo_application::cli_runtime` re-exports + 3 CLI files migrados + main.rs migrado + Cargo dep removida + ADR-023 SUPERSEDED + gate 0 violations |
+| 2026-04-26 | T4.10f | (composite) | done | `crate::result` neutral module com AgentResult; `agent_loop::result` agora re-export — quebra ciclo agent_loop ↔ run_engine |
+| 2026-04-26 | T4.10h | (composite) | done | `lib.rs` reorganizado: 28 módulos `pub mod` (consumidos externamente), 32 `pub(crate) mod` (internos por grep audit); deprecated `pub use sanitizer` removido (zero consumers externos); 73 dead-code warnings novas reveladas (positivo) |
+| 2026-04-26 | T3.1 | (deferred) | docs | Roadmap 5-PR escrito em `docs/plans/T3.1-god-object-split-roadmap.md` — refactor multi-PR fora do escopo do loop |
+| 2026-04-26 | T3.2 | (deferred) | docs | Roadmap 8-PR escrito em `docs/plans/T3.2-agent-config-nested-roadmap.md` — refactor multi-PR fora do escopo do loop |
