@@ -7,10 +7,12 @@ pub mod discovery;
 pub mod operations;
 pub mod protocol;
 pub mod session_manager;
+pub mod tool;
 
 pub use client::{LspClient, LspClientError};
 pub use discovery::{discover, discover_with_path, DiscoveredServer};
 pub use session_manager::{LspSessionError, LspSessionManager};
+pub use tool::LspDefinitionTool;
 
 pub use protocol::{
     encode_frame, encode_message, try_decode_frame, InboundMessage, JsonRpcErrorObj,

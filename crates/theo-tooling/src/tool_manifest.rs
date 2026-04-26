@@ -154,7 +154,14 @@ pub const TOOL_MANIFEST: &[ToolManifestEntry] = &[
         exposure: ToolExposure::ExperimentalModule,
         status: ToolStatus::Stub,
         owner: "theo-tooling",
-        notes: "Experimental module; execute() returns not implemented and it is not in the default registry.",
+        notes: "Legacy stub. Replaced by `lsp_definition` (and forthcoming lsp_references / lsp_hover / lsp_rename) in the project-aware registry constructor.",
+    },
+    ToolManifestEntry {
+        id: "lsp_definition",
+        exposure: ToolExposure::DefaultRegistry,
+        status: ToolStatus::Implemented,
+        owner: "theo-tooling",
+        notes: "T3.1 — LSP `textDocument/definition` via LspSessionManager. Spawns + initialises native servers (rust-analyzer, pyright, gopls, tsserver, clangd). Wired by create_default_registry_with_project; missing servers surface as actionable execution errors.",
     },
     ToolManifestEntry {
         id: "memory",

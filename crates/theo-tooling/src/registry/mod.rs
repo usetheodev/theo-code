@@ -147,6 +147,7 @@ pub fn create_default_registry() -> ToolRegistry {
     use crate::edit::EditTool;
     use crate::glob::GlobTool;
     use crate::grep::GrepTool;
+    use crate::lsp::{LspDefinitionTool, LspSessionManager};
     use crate::memory::MemoryTool;
     use crate::plan::{
         AdvancePhaseTool, CreatePlanTool, GetNextTaskTool, GetPlanSummaryTool, LogEntryTool,
@@ -228,6 +229,17 @@ pub fn create_default_registry() -> ToolRegistry {
         // T15.1 — external docs RAG (empty index by default; populated
         // by future commits that wire crates.io/MDN/npm sources)
         Box::new(DocsSearchTool::new()),
+        // T3.1 — LSP definition tool. Default registry uses an empty
+        // catalogue (no PATH discovery) so the tool surfaces the same
+        // actionable error for every call until
+        // `create_default_registry_with_project` swaps in a real
+        // session manager. Keeping the tool registered in the default
+        // registry preserves the manifest invariant
+        // (every DefaultRegistry entry is reachable from
+        // create_default_registry).
+        Box::new(LspDefinitionTool::new(std::sync::Arc::new(
+            LspSessionManager::from_catalogue(std::collections::HashMap::new()),
+        ))),
         // Builtin plugins — typed operations
         Box::new(crate::git::GitStatusTool),
         Box::new(crate::git::GitDiffTool),
@@ -250,10 +262,14 @@ pub fn create_default_registry() -> ToolRegistry {
     registry
 }
 
-/// T15.1 — Variant of [`create_default_registry`] that wires the
-/// `docs_search` tool with an index pre-populated from the project's
-/// well-known Markdown locations (`<project>/docs/`,
-/// `<project>/.theo/wiki/`, `~/.cache/theo/docs/`).
+/// T15.1 + T3.1 — Variant of [`create_default_registry`] that wires
+/// project-aware tools:
+///
+/// 1. `docs_search` — populated from `<project>/docs/`,
+///    `<project>/.theo/wiki/`, `~/.cache/theo/docs/`.
+/// 2. `lsp_definition` — backed by an `LspSessionManager` that
+///    discovers installed LSP servers on PATH (rust-analyzer,
+///    pyright, gopls, etc.) and lazily spawns one per language.
 ///
 /// Use this constructor when a project root is known at session
 /// startup (the typical case for CLI / TUI / desktop runs). For
@@ -262,17 +278,32 @@ pub fn create_default_registry() -> ToolRegistry {
 pub fn create_default_registry_with_project(
     project_dir: &std::path::Path,
 ) -> ToolRegistry {
-    use crate::docs_search::{DocsSearchTool, bootstrap_docs_index};
+    use std::sync::Arc;
 
+    use crate::docs_search::{DocsSearchTool, bootstrap_docs_index};
+    use crate::lsp::{LspDefinitionTool, LspSessionManager};
+
+    let _ = project_dir; // silenced when no per-project state is wired
     let mut registry = create_default_registry();
-    // Replace the empty `docs_search` tool with one populated from
-    // the project's well-known locations. `register` returns an
-    // error on duplicate id; we deregister the empty stub first.
+
+    // T15.1 — populated docs_search index.
     let docs_index = bootstrap_docs_index(project_dir);
     registry.unregister("docs_search");
     registry
         .register(Box::new(DocsSearchTool::with_index(docs_index)))
         .expect("docs_search tool schema is valid");
+
+    // T3.1 — swap the default registry's empty-catalogue
+    // LspDefinitionTool for one backed by a real PATH-discovered
+    // session manager. The shared Arc means future lsp_* tools
+    // (lsp_references, lsp_hover, lsp_rename) reuse the same
+    // spawned server processes when they land.
+    let lsp_manager = Arc::new(LspSessionManager::from_path());
+    registry.unregister("lsp_definition");
+    registry
+        .register(Box::new(LspDefinitionTool::new(lsp_manager.clone())))
+        .expect("lsp_definition tool schema is valid");
+
     registry
 }
 
