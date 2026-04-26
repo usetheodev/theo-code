@@ -208,6 +208,7 @@ pub enum PlanValidationError {
 /// `Io` wraps `std::io::Error` directly (D8 — code-reviewer) so callers
 /// retain `ErrorKind` and source-chain context.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum PlanError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
@@ -217,6 +218,11 @@ pub enum PlanError {
     UnsupportedVersion { found: u32, max_supported: u32 },
     #[error(transparent)]
     Validation(#[from] PlanValidationError),
+    /// T7.1 — Compare-and-swap failure: on-disk plan was modified since
+    /// the caller last read it. Caller should reload, re-apply the
+    /// intent, and retry.
+    #[error("version mismatch: expected {expected}, on-disk has {actual}")]
+    VersionMismatch { expected: u64, actual: u64 },
 }
 
 // ---------------------------------------------------------------------------

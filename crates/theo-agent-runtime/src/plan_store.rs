@@ -38,6 +38,49 @@ pub fn load_plan(path: &Path) -> Result<Plan, PlanError> {
 /// rename. The plan is `validate()`'d first — invalid plans never hit disk.
 pub fn save_plan(path: &Path, plan: &Plan) -> Result<(), PlanError> {
     plan.validate()?;
+    write_plan_atomic(path, plan)
+}
+
+/// T7.1 — Compare-and-swap save: writes only if the on-disk plan's
+/// `version_counter` equals `expected`. Otherwise returns
+/// `PlanError::VersionMismatch` so a parallel worker that lost the race
+/// can reload and retry.
+///
+/// The race is closed for **single-process, single-fs** scenarios: read,
+/// claim, swap. Multi-host coordination is out of scope (Theo runs
+/// per-developer, single fs).
+///
+/// Special case: when the on-disk file does NOT exist, the save proceeds
+/// only when `expected == 0` (the "fresh plan" semantic). Any other
+/// expected value yields `VersionMismatch { expected, actual: 0 }`.
+pub fn save_plan_if_version(
+    path: &Path,
+    plan: &Plan,
+    expected: u64,
+) -> Result<(), PlanError> {
+    plan.validate()?;
+    let actual = on_disk_version(path)?;
+    if actual != expected {
+        return Err(PlanError::VersionMismatch { expected, actual });
+    }
+    write_plan_atomic(path, plan)
+}
+
+/// Read the `version_counter` of the on-disk plan, or `0` when the file
+/// does not exist. Other IO errors propagate.
+fn on_disk_version(path: &Path) -> Result<u64, PlanError> {
+    if !path.exists() {
+        return Ok(0);
+    }
+    let content = std::fs::read_to_string(path)?;
+    let plan: Plan = serde_json::from_str(&content)
+        .map_err(|e| PlanError::InvalidFormat(e.to_string()))?;
+    Ok(plan.version_counter)
+}
+
+/// Pure write helper — atomic temp+rename, parent dir created on demand.
+/// Caller is responsible for `validate()` and CAS checks.
+fn write_plan_atomic(path: &Path, plan: &Plan) -> Result<(), PlanError> {
     if let Some(parent) = path.parent()
         && !parent.as_os_str().is_empty()
         && !parent.exists()
@@ -273,5 +316,100 @@ mod tests {
 
         let err = load_plan(&path).unwrap_err();
         assert!(matches!(err, PlanError::Validation(_)));
+    }
+
+    // ----- T7.1: save_plan_if_version (CAS) -----
+
+    #[test]
+    fn t71_save_if_version_succeeds_when_expected_matches() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("plan.json");
+        let mut plan = sample_plan();
+        plan.version_counter = 5;
+
+        // Seed: write directly with current version_counter.
+        save_plan(&path, &plan).unwrap();
+        assert_eq!(on_disk_version(&path).unwrap(), 5);
+
+        // Bump and CAS-save with `expected = 5`.
+        let mut next = plan.clone();
+        next.version_counter = 6;
+        save_plan_if_version(&path, &next, 5).unwrap();
+        assert_eq!(on_disk_version(&path).unwrap(), 6);
+    }
+
+    #[test]
+    fn t71_save_if_version_returns_mismatch_when_disk_is_newer() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("plan.json");
+        let mut plan = sample_plan();
+        plan.version_counter = 7;
+        save_plan(&path, &plan).unwrap();
+
+        // Worker A read at version 5 but on-disk is now 7 → mismatch.
+        let mut stale_attempt = plan.clone();
+        stale_attempt.version_counter = 6;
+        let err = save_plan_if_version(&path, &stale_attempt, 5).unwrap_err();
+        match err {
+            PlanError::VersionMismatch { expected, actual } => {
+                assert_eq!(expected, 5);
+                assert_eq!(actual, 7);
+            }
+            other => panic!("expected VersionMismatch, got {other:?}"),
+        }
+
+        // Disk still at 7 — failed CAS does not corrupt.
+        assert_eq!(on_disk_version(&path).unwrap(), 7);
+    }
+
+    #[test]
+    fn t71_save_if_version_zero_expected_succeeds_for_fresh_path() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("fresh.json");
+        let plan = sample_plan(); // version_counter = 0
+        save_plan_if_version(&path, &plan, 0).unwrap();
+        assert!(path.exists());
+    }
+
+    #[test]
+    fn t71_save_if_version_nonzero_expected_fails_for_fresh_path() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("fresh.json");
+        let plan = sample_plan();
+        let err = save_plan_if_version(&path, &plan, 1).unwrap_err();
+        match err {
+            PlanError::VersionMismatch { expected, actual } => {
+                assert_eq!(expected, 1);
+                assert_eq!(actual, 0);
+            }
+            other => panic!("expected VersionMismatch, got {other:?}"),
+        }
+        assert!(!path.exists(), "no file should be written on CAS failure");
+    }
+
+    #[test]
+    fn t71_save_if_version_rejects_invalid_plan_before_cas_check() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("plan.json");
+        let mut bad = sample_plan();
+        bad.title = String::new(); // invalid
+        let err = save_plan_if_version(&path, &bad, 0).unwrap_err();
+        // Validation runs first — caller learns about the bug, not the
+        // version mismatch.
+        assert!(matches!(err, PlanError::Validation(_)));
+    }
+
+    #[test]
+    fn t71_save_if_version_atomic_temp_cleanup_on_disk_mismatch() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("plan.json");
+        let mut plan = sample_plan();
+        plan.version_counter = 3;
+        save_plan(&path, &plan).unwrap();
+
+        // CAS attempt with wrong expected — must NOT leave a `.json.tmp`.
+        let _ = save_plan_if_version(&path, &plan, 99);
+        let temp = path.with_extension("json.tmp");
+        assert!(!temp.exists(), "temp file leaked after failed CAS");
     }
 }
