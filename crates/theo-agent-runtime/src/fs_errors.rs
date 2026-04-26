@@ -24,7 +24,7 @@ use crate::event_bus::EventBus;
 /// `site` is a static identifier of the call site (e.g., "failure_tracker/save")
 /// that operators can grep for when a warning appears.
 pub fn warn_fs_error(site: &'static str, path: &Path, err: &impl std::fmt::Display) {
-    eprintln!("[theo] fs error at {site} ({}): {err}", path.display());
+    tracing::warn!(site = site, path = %path.display(), error = %err, "fs error");
 }
 
 /// Same as [`warn_fs_error`] but also emits a `DomainEvent::Error` so the
@@ -41,7 +41,7 @@ pub fn emit_fs_error(
     err: &impl std::fmt::Display,
 ) {
     let msg = format!("{err}");
-    eprintln!("[theo] fs error at {site} ({}): {msg}", path.display());
+    tracing::warn!(site = site, path = %path.display(), error = %msg, "fs error");
     bus.publish(DomainEvent::new(
         EventType::Error,
         entity_id,

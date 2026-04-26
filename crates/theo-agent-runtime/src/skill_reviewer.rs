@@ -191,13 +191,13 @@ pub fn spawn_skill_reviewer(
         match handle.as_reviewer().review(&window).await {
             Ok(SkillAction::NoOp) => {}
             Ok(action) => {
-                eprintln!(
-                    "[theo::skill_reviewer] action ready: {action:?} (executor wiring happens \
-                     at application layer)"
+                tracing::info!(
+                    action = ?action,
+                    "skill_reviewer action ready (executor wiring happens at application layer)"
                 );
             }
             Err(err) => {
-                eprintln!("[theo::skill_reviewer] background review failed: {err}");
+                tracing::warn!(error = %err, "skill_reviewer background review failed");
             }
         }
     })

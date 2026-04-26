@@ -149,7 +149,7 @@ impl OtlpGuard {
         let provider = match init_otlp_exporter() {
             Ok(p) => p,
             Err(e) => {
-                eprintln!("[otlp] init failed: {e}; continuing without telemetry");
+                tracing::warn!(error = %e, "OTLP init failed; continuing without telemetry");
                 None
             }
         };

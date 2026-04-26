@@ -136,17 +136,20 @@ pub fn run_gates_and_persist(
                         }
                     }
                     Err(e) => {
-                        eprintln!(
-                            "[theo-agent-runtime::lesson_pipeline] serialize {id} failed: {e}"
+                        tracing::warn!(
+                            id = %id,
+                            error = %e,
+                            "lesson_pipeline: serialize lesson failed"
                         );
                     }
                 }
             }
             Err(reject) => {
                 rejected += 1;
-                eprintln!(
-                    "[theo-agent-runtime::lesson_pipeline] {id} rejected: {}",
-                    reject.describe()
+                tracing::debug!(
+                    id = %id,
+                    reason = %reject.describe(),
+                    "lesson_pipeline: lesson rejected by quality filter"
                 );
             }
         }

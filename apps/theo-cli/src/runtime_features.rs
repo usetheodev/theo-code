@@ -8,9 +8,13 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::thread;
 
-use theo_agent_runtime::checkpoint::CheckpointManager;
-use theo_agent_runtime::subagent::watcher::{default_watch_dirs, RegistryWatcher};
-use theo_agent_runtime::subagent::ReloadableRegistry;
+// T3.3 / find_p3_009 / ADR-023 — switch to the
+// `theo_application::cli_runtime` re-export façade so the
+// apps/* → theo-application layer rule is honoured. The temporary
+// allowlist exception in `scripts/check-arch-contract.sh` retires
+// when this lands across all 3 CLI files.
+use theo_application::cli_runtime::watcher::{default_watch_dirs, RegistryWatcher};
+use theo_application::cli_runtime::{CheckpointManager, ReloadableRegistry};
 
 /// Activated runtime features (held for the lifetime of the session).
 pub struct RuntimeFeatures {
@@ -84,7 +88,7 @@ fn init_watcher_with_reload(
     Option<ReloadableRegistry>,
     Option<thread::JoinHandle<()>>,
 ) {
-    use theo_agent_runtime::subagent::{ApprovalMode, SubAgentRegistry};
+    use theo_application::cli_runtime::{ApprovalMode, SubAgentRegistry};
     let home = dirs::home_dir();
     let dirs = default_watch_dirs(Some(project_dir), home.as_deref());
 

@@ -400,24 +400,25 @@ fn build_injections(
         // Also seed a static snapshot as fallback.
         inj.registry = Some(Arc::new(rel.snapshot()));
     } else {
-        let mut reg = theo_agent_runtime::subagent::SubAgentRegistry::with_builtins();
+        // T3.3 — runtime types via the theo-application::cli_runtime façade.
+        let mut reg = theo_application::cli_runtime::SubAgentRegistry::with_builtins();
         let _ = reg.load_all(
             Some(project_dir),
             None,
-            theo_agent_runtime::subagent::ApprovalMode::TrustAll,
+            theo_application::cli_runtime::ApprovalMode::TrustAll,
         );
         inj.registry = Some(Arc::new(reg));
     }
 
     // Persistent run store under <project>/.theo/subagent/
-    let store = theo_agent_runtime::subagent_runs::FileSubagentRunStore::new(
+    let store = theo_application::cli_runtime::FileSubagentRunStore::new(
         project_dir.join(".theo").join("subagent"),
     );
     inj.run_store = Some(Arc::new(store));
 
     // Cancellation tree (always — Ctrl+C propagation).
     inj.cancellation = Some(Arc::new(
-        theo_agent_runtime::cancellation::CancellationTree::new(),
+        theo_application::cli_runtime::CancellationTree::new(),
     ));
 
     // Phase 9: checkpoint manager (only when --enable-checkpoints).

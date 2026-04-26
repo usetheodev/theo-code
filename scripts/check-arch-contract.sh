@@ -67,10 +67,10 @@ declare -A ALLOWED_DEPS=(
     # propagate transitively to it.
     ["crates/theo-application"]="theo-domain theo-engine-graph theo-engine-parser theo-engine-retrieval theo-governance theo-infra-llm theo-infra-auth theo-infra-memory theo-tooling theo-agent-runtime theo-api-contracts theo-isolation theo-infra-mcp"
     ["crates/theo-test-memory-fixtures"]="theo-domain theo-infra-memory"
-    # ADR-023 grants `apps/theo-cli` a TEMPORARY exception to import
-    # `theo-agent-runtime` directly. Sunsets when T3.3 (encapsulation
-    # via theo-application) is merged.
-    ["apps/theo-cli"]="theo-application theo-api-contracts theo-domain theo-agent-runtime"
+    # ADR-023 SUNSET (T3.3 done) — `apps/theo-cli` no longer imports
+    # `theo-agent-runtime` directly; the `cli_runtime` re-export module
+    # in `theo-application` is the contract surface.
+    ["apps/theo-cli"]="theo-application theo-api-contracts theo-domain"
     ["apps/theo-desktop"]="theo-application theo-api-contracts theo-domain"
     ["apps/theo-marklive"]="theo-application theo-api-contracts theo-domain"
 )

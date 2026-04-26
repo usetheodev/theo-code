@@ -101,8 +101,12 @@ pub fn check_usage(messages: &[Message], context_window_tokens: usize) -> Optimi
 /// a structured log line; dedupe lives in the caller to keep this pure.
 pub fn apply_warning(used: usize, limit: usize) {
     let ratio = (used as f64 * 100.0 / limit as f64) as u32;
-    eprintln!(
-        "context_pressure: stage=warning ratio={ratio}% used={used} limit={limit}"
+    tracing::warn!(
+        stage = "warning",
+        ratio = ratio,
+        used = used,
+        limit = limit,
+        "context pressure"
     );
 }
 

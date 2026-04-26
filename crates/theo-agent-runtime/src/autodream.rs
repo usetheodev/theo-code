@@ -21,8 +21,8 @@
 //! before persistence (delegated to the `AutodreamExecutor` impl so
 //! this module stays free of the `theo-infra-memory` dep).
 //!
-//! Errors are logged via `eprintln!` and never propagate to the main
-//! loop — autodream is best-effort.
+//! Errors are logged via `tracing` (T3.7 migration) and never
+//! propagate to the main loop — autodream is best-effort.
 
 use std::path::{Path, PathBuf};
 

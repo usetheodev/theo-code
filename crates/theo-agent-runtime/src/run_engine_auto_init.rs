@@ -50,7 +50,7 @@ pub(crate) fn auto_init_project_context(project_dir: &Path) {
         crate::fs_errors::warn_fs_error("auto_init/gitignore_write", &gitignore, &e);
     }
 
-    eprintln!("[theo] Auto-initialized .theo/theo.md — run `theo init` for detailed context");
+    tracing::info!("auto-initialized .theo/theo.md — run `theo init` for detailed context");
 }
 
 fn detect_project_lang(project_dir: &Path) -> &'static str {

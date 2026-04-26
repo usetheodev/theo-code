@@ -314,11 +314,11 @@ impl AgentRunEngine {
             target,
             "", // No task objective at this level
         );
-        eprintln!(
-            "[theo] Context overflow recovery: compacted {} → {} messages (target {})",
-            before_len,
-            messages.len(),
-            target
+        tracing::info!(
+            before = before_len,
+            after = messages.len(),
+            target = target,
+            "context overflow recovery: compacted messages",
         );
     }
 }

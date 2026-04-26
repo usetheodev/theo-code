@@ -72,17 +72,17 @@ impl ProjectConfig {
                 Ok(config) => match config.validate() {
                     Ok(()) => config,
                     Err(e) => {
-                        eprintln!("[theo] Warning: .theo/config.toml failed validation: {e}");
+                        tracing::warn!(error = %e, ".theo/config.toml failed validation");
                         Self::default()
                     }
                 },
                 Err(e) => {
-                    eprintln!("[theo] Warning: failed to parse .theo/config.toml: {e}");
+                    tracing::warn!(error = %e, "failed to parse .theo/config.toml");
                     Self::default()
                 }
             },
             Err(e) => {
-                eprintln!("[theo] Warning: failed to read .theo/config.toml: {e}");
+                tracing::warn!(error = %e, "failed to read .theo/config.toml");
                 Self::default()
             }
         }

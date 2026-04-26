@@ -45,14 +45,17 @@ pub fn maybe_spawn_autodream(
         .await
         {
             Ok(Ok(Some(report))) => {
-                eprintln!("[theo::autodream] ran: {report:?}");
+                tracing::info!(report = ?report, "autodream ran");
             }
             Ok(Ok(None)) => {}
             Ok(Err(err)) => {
-                eprintln!("[theo::autodream] failed: {err}");
+                tracing::warn!(error = %err, "autodream failed");
             }
             Err(_) => {
-                eprintln!("[theo::autodream] timed out after {}s", timeout.as_secs());
+                tracing::warn!(
+                    timeout_secs = timeout.as_secs(),
+                    "autodream timed out"
+                );
             }
         }
     });
@@ -100,7 +103,7 @@ pub async fn maybe_index_transcript(
         .record_session(&memory_dir, &session_id, &events)
         .await
     {
-        eprintln!("[theo::transcript] indexing failed: {err}");
+        tracing::warn!(error = %err, "transcript indexing failed");
     }
 }
 
@@ -158,11 +161,9 @@ pub fn spawn_memory_reviewer(
     window: Vec<theo_infra_llm::types::Message>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        // No tracing dep is wired into theo-agent-runtime yet — emit to
-        // stderr only when the reviewer reports a failure. Success is
-        // silent to avoid polluting stdout during interactive sessions.
+        // T3.7 — tracing replaces the stale "no tracing dep" comment.
         if let Err(err) = handle.as_reviewer().review(&window).await {
-            eprintln!("[theo::memory_reviewer] background review failed: {err}");
+            tracing::warn!(error = %err, "memory_reviewer background review failed");
         }
     })
 }

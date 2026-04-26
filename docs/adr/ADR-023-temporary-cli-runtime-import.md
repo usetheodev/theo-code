@@ -1,6 +1,6 @@
 # ADR-023: Temporary direct import of `theo-agent-runtime` from `apps/theo-cli`
 
-**Status:** Aceito (com sunset)
+**Status:** SUPERSEDED — sunset alcançado em T3.3 (commit pendente)
 **Data:** 2026-04-25
 **Autor:** Audit remediation (T0.4 helper for T3.3)
 **Escopo:** `scripts/check-arch-contract.sh`, `apps/theo-cli/src/{dashboard_agents,runtime_features,subagent_admin}.rs`
@@ -55,14 +55,21 @@ theo-api-contracts theo-domain`.
 - Se T3.3 demorar muito (>1 trimestre), este ADR deve ser revisitado:
   ou T3.3 é priorizada, ou a exceção é re-justificada com um ADR novo.
 
-## Sunset criteria
+## Sunset criteria — TODAS ATINGIDAS
 
-T3.3 fechada quando todas as 3 condições forem verdadeiras:
+T3.3 fechada com todas as 3 condições verdadeiras:
 
-1. `grep -r "use theo_agent_runtime" apps/theo-cli/src/` retorna 0
-2. Allowlist de `apps/theo-cli` no gate volta a `theo-application
+1. ✅ `grep -r "use theo_agent_runtime" apps/theo-cli/src/` retorna 0
+2. ✅ Allowlist de `apps/theo-cli` no gate restaurada para `theo-application
    theo-api-contracts theo-domain` (sem `theo-agent-runtime`)
-3. CI verde com a allowlist restritiva
+3. ✅ `bash scripts/check-arch-contract.sh` reporta 0 violations
+   (verificado localmente; CI confirma após merge)
+
+A ponte de tipos vive em `theo_application::cli_runtime::*`
+(re-exports leves de `CheckpointManager`, `EventBus`,
+`SubAgentManager`, `Resumer`, `ApprovalMode`, `CancellationTree`,
+`FileSubagentRunStore`, etc.). Esta é a única superfície de tipos
+do runtime visível para os apps daqui em diante.
 
 ## Referências
 

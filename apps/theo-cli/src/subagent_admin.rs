@@ -17,15 +17,17 @@ use std::sync::Arc;
 
 use clap::Subcommand;
 
-use theo_agent_runtime::checkpoint::CheckpointManager;
-use theo_agent_runtime::config::AgentConfig;
-use theo_agent_runtime::event_bus::EventBus;
-use theo_agent_runtime::subagent::approval::{
+// T3.3 / find_p3_009 / ADR-023 — switch to the
+// `theo_application::cli_runtime` re-export façade so the
+// apps/* → theo-application layer rule is honoured.
+use theo_application::cli_runtime::approval::{
     compute_current_manifest, load_approved, persist_approved, ApprovalManifest, ApprovedEntry,
     sha256_hex,
 };
-use theo_agent_runtime::subagent::{Resumer, SubAgentManager, SubAgentRegistry};
-use theo_agent_runtime::subagent_runs::{FileSubagentRunStore, RunStatus};
+use theo_application::cli_runtime::{
+    AgentConfig, CheckpointManager, EventBus, FileSubagentRunStore, Resumer, RunStatus,
+    SubAgentManager, SubAgentRegistry,
+};
 
 #[derive(Subcommand)]
 pub enum SubagentCmd {
@@ -213,7 +215,7 @@ pub fn handle_resume(
             }
             // Plan §16 line 596: NotResumable is a normal user condition, not
             // an error — print guidance instead of bubbling up exit-code 1.
-            Err(theo_agent_runtime::subagent::ResumeError::NotResumable {
+            Err(theo_application::cli_runtime::ResumeError::NotResumable {
                 status, ..
             }) => {
                 println!(
@@ -224,7 +226,7 @@ pub fn handle_resume(
                 );
                 Ok(())
             }
-            Err(theo_agent_runtime::subagent::ResumeError::NotFound(_)) => {
+            Err(theo_application::cli_runtime::ResumeError::NotFound(_)) => {
                 println!(
                     "Run '{}' not found in {}. \
                      Use `theo subagent list` to see available runs.",
@@ -505,9 +507,9 @@ pub mod resume {
     /// an error. Exit code 0.
     #[test]
     fn handle_subagent_resume_terminal_run_returns_ok_with_guidance() {
-        use theo_agent_runtime::subagent_runs::{
-            FileSubagentRunStore, RunStatus, SubagentRun,
-        };
+        // T3.3 — re-route via theo-application; SubagentRun stays direct
+        // (not in cli_runtime re-exports yet — follow-up).
+        use theo_application::cli_runtime::{FileSubagentRunStore, RunStatus, SubagentRun};
         use theo_domain::agent_spec::AgentSpec;
         let dir = TempDir::new().unwrap();
         let store_dir = dir.path().join(".theo").join("subagent");
@@ -537,9 +539,9 @@ pub mod resume {
     /// identical UX both times.
     #[test]
     fn handle_subagent_resume_terminal_run_is_idempotent() {
-        use theo_agent_runtime::subagent_runs::{
-            FileSubagentRunStore, RunStatus, SubagentRun,
-        };
+        // T3.3 — re-route via theo-application; SubagentRun stays direct
+        // (not in cli_runtime re-exports yet — follow-up).
+        use theo_application::cli_runtime::{FileSubagentRunStore, RunStatus, SubagentRun};
         use theo_domain::agent_spec::AgentSpec;
         let dir = TempDir::new().unwrap();
         let store_dir = dir.path().join(".theo").join("subagent");

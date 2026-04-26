@@ -168,7 +168,7 @@ impl HookRunner {
 
         for script in &scripts {
             if let Err(e) = self.execute_script(script, &event_json, timeout).await {
-                eprintln!("[theo] Hook error ({}): {e}", script.display());
+                tracing::error!(script = %script.display(), error = %e, "hook execution error");
             }
         }
     }

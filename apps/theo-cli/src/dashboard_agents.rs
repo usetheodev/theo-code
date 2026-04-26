@@ -259,10 +259,9 @@ mod tests {
     use axum::http::{Method, Request};
     use http_body_util::BodyExt;
     use tempfile::TempDir;
-    use theo_agent_runtime::subagent::builtins;
-    use theo_agent_runtime::subagent_runs::{
-        FileSubagentRunStore, RunStatus, SubagentRun,
-    };
+    // T3.3 / find_p3_009 / ADR-023 — runtime types now via theo-application.
+    use theo_application::cli_runtime::builtins;
+    use theo_application::cli_runtime::{FileSubagentRunStore, RunStatus, SubagentRun};
     use tower::ServiceExt;
 
     fn fixture_project() -> (TempDir, FileSubagentRunStore) {

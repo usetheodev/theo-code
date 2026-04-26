@@ -302,7 +302,13 @@ async fn test_hook_with_shell_metacharacters_escaped() {
         tool_args: Some(serde_json::json!({ "filePath": injection })),
     };
 
-    let runner = HookRunner::new(project.path(), HookConfig::default());
+    // T4.1: `HookConfig::default()` now disables project hooks.
+    // This test exercises the project-hook path explicitly, so opt in.
+    let cfg = HookConfig {
+        project_hooks_enabled: true,
+        ..HookConfig::default()
+    };
+    let runner = HookRunner::new(project.path(), cfg);
     let _ = runner.run_pre_hook("test_metachar_hook", &event).await;
 
     // Post-condition 1: the host's escape target must not exist —

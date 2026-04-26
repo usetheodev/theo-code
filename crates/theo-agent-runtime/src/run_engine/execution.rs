@@ -47,7 +47,7 @@ impl AgentRunEngine {
             ) {
                 Ok(sm) => Some(sm),
                 Err(e) => {
-                    eprintln!("[theo] State manager init failed (non-fatal): {e}");
+                    tracing::warn!(error = %e, "state manager init failed (non-fatal)");
                     None
                 }
             }
@@ -401,9 +401,10 @@ fn forced_tool_choice(
         other => other.to_string(),
     };
     if theo_domain::environment::bool_var("THEO_DEBUG_CODEX", false) {
-        eprintln!(
-            "[theo] THEO_FORCE_TOOL_CHOICE active: {} → {}",
-            forced, normalized
+        tracing::debug!(
+            forced = %forced,
+            normalized = %normalized,
+            "THEO_FORCE_TOOL_CHOICE active"
         );
     }
     Some(normalized)

@@ -10,10 +10,9 @@ license.workspace = true
 # through the `theo_application::facade` module.
 theo-domain.workspace = true
 theo-application.workspace = true
-# Track A/C/D: admin CLI commands (subagent/checkpoints/agents) call directly
-# into runtime-side stores. This is an explicit exception to ADR-010 for
-# operational tooling that doesn't go through the use_cases pipeline.
-theo-agent-runtime.workspace = true
+# T3.3 / find_p3_009 / ADR-023 SUNSET: `theo-agent-runtime` is no longer
+# a direct CLI dependency. Admin commands access runtime types via
+# `theo_application::cli_runtime::*` re-exports.
 tokio.workspace = true
 async-trait.workspace = true
 clap.workspace = true
@@ -70,4 +69,4 @@ dense-retrieval = ["theo-application/dense-retrieval"]
 # Phase 40 (otlp-exporter-plan) — passthrough to theo-application/otel.
 # When active, theo-cli main() initializes the OTLP exporter at startup
 # (only if OTLP_ENDPOINT env var is set; absent → no-op).
-otel = ["theo-application/otel", "theo-agent-runtime/otel"]
+otel = ["theo-application/otel"]

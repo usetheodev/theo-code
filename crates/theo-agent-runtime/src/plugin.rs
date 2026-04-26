@@ -151,9 +151,10 @@ fn load_plugins_from_dir(
         // different user. Supply-chain guard — a rogue writer with access
         // to `.theo/plugins/` cannot inject a tool under our uid.
         if !manifest_is_owned_by_current_user(&manifest_path) {
-            eprintln!(
-                "[theo] Plugin REJECTED (ownership mismatch): {} — manifest not owned by current user",
-                path.display()
+            tracing::warn!(
+                path = %path.display(),
+                reason = "ownership_mismatch",
+                "plugin REJECTED: manifest not owned by current user"
             );
             if let Some(bus) = bus {
                 bus.publish(theo_domain::event::DomainEvent::new(
@@ -176,10 +177,11 @@ fn load_plugins_from_dir(
                 if let Some(set) = allowlist
                     && !set.contains(&plugin.manifest_sha256)
                 {
-                    eprintln!(
-                        "[theo] Plugin REJECTED (sha256 not in allowlist): {} sha256={}",
-                        path.display(),
-                        &plugin.manifest_sha256[..16]
+                    tracing::warn!(
+                        path = %path.display(),
+                        sha256_prefix = &plugin.manifest_sha256[..16],
+                        reason = "allowlist_miss",
+                        "plugin REJECTED: sha256 not in allowlist"
                     );
                     if let Some(bus) = bus {
                         bus.publish(theo_domain::event::DomainEvent::new(
@@ -196,11 +198,11 @@ fn load_plugins_from_dir(
                     continue;
                 }
 
-                eprintln!(
-                    "[theo] Plugin loaded: {} ({}) sha256={}",
-                    plugin.manifest.name,
-                    path.display(),
-                    &plugin.manifest_sha256[..16]
+                tracing::info!(
+                    name = %plugin.manifest.name,
+                    path = %path.display(),
+                    sha256_prefix = &plugin.manifest_sha256[..16],
+                    "plugin loaded"
                 );
                 if let Some(bus) = bus {
                     bus.publish(theo_domain::event::DomainEvent::new(
@@ -218,9 +220,10 @@ fn load_plugins_from_dir(
                 plugins.push(plugin);
             }
             Err(e) => {
-                eprintln!(
-                    "[theo] Warning: failed to load plugin at {}: {e}",
-                    path.display()
+                tracing::warn!(
+                    path = %path.display(),
+                    error = %e,
+                    "failed to load plugin"
                 );
             }
         }
@@ -271,9 +274,10 @@ fn load_single_plugin(plugin_dir: &Path) -> Result<LoadedPlugin, String> {
         if script_path.exists() {
             tool_scripts.push((spec.clone(), script_path));
         } else {
-            eprintln!(
-                "[theo] Warning: plugin '{}' tool script not found: {}",
-                manifest.name, spec.script
+            tracing::warn!(
+                plugin = %manifest.name,
+                script = %spec.script,
+                "plugin tool script not found"
             );
         }
     }

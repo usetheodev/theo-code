@@ -223,9 +223,10 @@ impl SubAgentManager {
             super::mcp_tools::build_adapters_for_spec(cache, &spec.mcp_servers, dispatcher);
         for adapter in adapters {
             if let Err(e) = registry.register(Box::new(adapter)) {
-                eprintln!(
-                    "[subagent {}] WARNING: failed to register MCP tool: {}",
-                    spec.name, e
+                tracing::warn!(
+                    subagent = %spec.name,
+                    error = %e,
+                    "failed to register MCP tool in subagent registry"
                 );
             }
         }

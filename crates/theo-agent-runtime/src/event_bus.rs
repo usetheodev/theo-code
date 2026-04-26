@@ -96,9 +96,9 @@ impl EventBus {
                 // call_id that leaks PII into stderr-captured logs. Event
                 // type alone is enough for operators to correlate with
                 // the structured log stream.
-                eprintln!(
-                    "[EventBus] listener panicked on event {:?} (entity redacted)",
-                    event.event_type
+                tracing::error!(
+                    event_type = ?event.event_type,
+                    "EventBus listener panicked (entity redacted)"
                 );
             }
         }
