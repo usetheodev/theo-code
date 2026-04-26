@@ -15,7 +15,8 @@
   <p align="center">
     <a href="https://github.com/usetheodev/theo-code/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache%202.0-blue?style=flat-square"></a>
     <a href="https://github.com/usetheodev/theo-code"><img alt="Rust" src="https://img.shields.io/badge/rust-2024%20edition-orange?style=flat-square&logo=rust"></a>
-    <a href="https://github.com/usetheodev/theo-code"><img alt="Languages" src="https://img.shields.io/badge/languages-16-purple?style=flat-square"></a>
+    <a href="https://github.com/usetheodev/theo-code"><img alt="Languages" src="https://img.shields.io/badge/tree--sitter-14%20languages-purple?style=flat-square"></a>
+    <a href="https://github.com/usetheodev/theo-code"><img alt="Providers" src="https://img.shields.io/badge/LLM%20providers-26-green?style=flat-square"></a>
   </p>
 </p>
 
@@ -23,16 +24,16 @@
 
 ## What is Theo Code?
 
-Theo Code is an **AI coding assistant** that actually understands your codebase. It combines a fast CLI, a desktop app, and a **Code Wiki** that turns your project into a living, searchable knowledge base — like Obsidian, but auto-generated from your code.
+Theo Code is an **AI coding assistant** that actually understands your codebase. It combines a fast CLI, a Tauri v2 desktop app, and an auto-generated **Code Wiki** that turns your project into a living, searchable knowledge base.
 
 ```bash
-theo                              # Interactive REPL
+theo                              # Interactive TUI
 theo "fix the auth bug"           # Single-shot task
-theo --mode plan "design caching" # Plan before acting
-theo pilot "implement feature X"  # Fully autonomous loop
+theo --mode plan "design caching" # Plan before acting (headless)
+theo pilot "implement feature X"  # Autonomous loop with circuit breaker
 ```
 
-Theo works with **any OpenAI-compatible model** — GPT, Claude, Codex, Ollama, Groq, Mistral, and 20+ more.
+Theo works with **any OpenAI-compatible model** — GPT, Claude, Codex, Ollama, Groq, Mistral, DeepSeek, Cerebras, GitHub Copilot, Bedrock, Vertex, and more. Internally everything is OpenAI-compatible; providers convert at the boundary.
 
 ## What makes Theo different?
 
@@ -46,61 +47,55 @@ You: "fix the payment validation"
   → Model sees the RIGHT context, not everything
 ```
 
-Built on: Tree-Sitter (16 languages), code graph with community detection, RRF 3-ranker (BM25 + Tantivy + neural embeddings), graph attention propagation.
+Built on: **Tree-Sitter** for parsing (14 languages), a **code graph** with community detection, an **RRF 3-ranker** that fuses BM25 + Tantivy + neural embeddings, and graph attention propagation for follow-the-edges retrieval.
 
 **Benchmark**: MRR=0.86, Hit@5=0.97, cross-language (Rust + Python) validated on 57 queries across 3 repos.
 
 ### Code Wiki — Your codebase as a knowledge base
 
-Theo auto-generates a **navigable wiki** from your code — modules, types, dependencies, architecture — updated as your code changes. Think Obsidian for your codebase.
+Theo auto-generates a **navigable wiki** under `.theo/wiki/` whenever it builds the code graph — modules, communities, insights — and refreshes it incrementally as your code changes.
 
-- **Auto-generated pages** for every module, crate, and significant type
-- **Dependency graphs** showing how components connect
+- **Auto-generated** during context assembly — no extra step required
+- **Module pages** for every detected community (related files clustered by graph distance)
 - **LLM-enriched summaries** explaining what each module does and why
-- **Searchable** via BM25 full-text search
-- **Write-back** — the wiki learns and compounds knowledge over time
+- **Searchable** via BM25 full-text search inside the runtime
+- **Write-back insights** — knowledge compounds across sessions
 
-```bash
-theo wiki                         # Generate wiki for current project
-theo wiki --serve                 # Browse in your browser
-```
+For a polished standalone HTML viewer over any markdown directory, Theo ships **`theo-marklive`** as a separate binary.
 
-### CLI + Desktop
+### CLI + Desktop + Markdown viewer
 
-Two interfaces, same engine:
+Three apps, one engine:
 
-| | CLI | Desktop |
-|---|---|---|
-| **For** | Terminal-native developers | Visual exploration |
-| **Mode** | REPL, single-shot, pilot | Chat + Code Wiki browser |
-| **Stack** | Rust binary | Tauri v2 + React |
-| **Speed** | Instant startup | Native performance |
+| | `theo` (CLI) | `theo-desktop` | `theo-marklive` |
+|---|---|---|---|
+| **For** | Terminal-native developers | Visual exploration | Browsing any markdown wiki |
+| **Mode** | TUI, single-shot, pilot, headless | Chat + observability dashboard | Static HTML render |
+| **Stack** | Rust binary (clap + ratatui) | Tauri v2 + React 18 | Rust binary (pulldown-cmark) |
 
 ## Quick Start
 
 ### Install
 
 ```bash
-# From source
 git clone https://github.com/usetheodev/theo-code.git
 cd theo-code
 cargo install --path apps/theo-cli
-
-# Verify
 theo --version
 ```
 
 ### Configure
 
 ```bash
-# Option 1: OpenAI API key
-export OPENAI_API_KEY=sk-...
+# Option 1: OpenAI / OAuth
+theo login                         # OpenAI device flow (default)
+theo login --key sk-...            # Persist an API key
+theo login --server <RFC8628-url>  # Generic device flow
 
 # Option 2: Ollama (local, free)
-ollama serve  # Theo auto-detects localhost:11434
+ollama serve                       # Theo auto-detects localhost:11434
 
 # Option 3: Any OpenAI-compatible endpoint
-export OPENAI_API_KEY=your-key
 theo --provider groq "fix the bug"
 ```
 
@@ -108,8 +103,8 @@ theo --provider groq "fix the bug"
 
 ```bash
 cd your-project
-theo init          # AI-powered project analysis + wiki generation
-theo "add input validation to the create endpoint"
+theo init                                       # AI-driven project analysis → .theo/theo.md
+theo "add input validation to /users endpoint"  # Single-shot task
 ```
 
 ## Features
@@ -117,114 +112,144 @@ theo "add input validation to the create endpoint"
 ### Agent Modes
 
 ```bash
-theo                              # Agent mode — full autonomy
-theo --mode plan "design X"       # Plan mode — think before acting
-theo --mode ask "explain auth"    # Ask mode — questions only
-theo pilot "implement feature X"  # Pilot — autonomous loop with circuit breaker
+theo                              # Default: TUI / single-shot
+theo --mode plan "design X"       # PLAN mode — write plan to .theo/plans/, no edits
+theo --mode ask "explain auth"    # ASK mode — clarifying questions only
+theo pilot "implement feature X"  # PILOT — autonomous loop until promise is met
 ```
 
-### Tool Surface
+Modes are headless flags; inside the TUI use the `/mode` slash command.
 
-Theo exposes three different tool layers:
+### Tools
 
-- **Default registry tools**: the concrete built-ins registered by `theo-tooling`
-- **Meta-tools**: runtime-injected orchestration surfaces like `done`, `subagent`, `skill`, `batch`
-- **Experimental modules**: code that exists in-tree but is not part of the default registry and may still be partial or stubbed
+The runtime exposes three layers (source of truth: `crates/theo-tooling/src/tool_manifest.rs`):
 
-The current source of truth lives in `crates/theo-tooling/src/tool_manifest.rs`.
+| Layer | Count | What it is |
+|---|---|---|
+| **Default registry** | 21 | Built-in tools registered by `theo-tooling` and shipped to every agent |
+| **Meta-tools** | 5 | Orchestration surfaces injected by `theo-agent-runtime` (`batch`, `done`, `skill`, `subagent`, `subagent_parallel`) |
+| **Experimental modules** | 8 | Code present in-tree but not in the default registry — partial or stubbed |
 
-| Category | Tools |
-|---|---|
-| **Core** | `bash` (sandboxed), `read`, `write`, `edit`, `grep`, `glob`, `apply_patch` |
-| **Intelligence** | `codebase_context`, `webfetch`, `think`, `reflect`, `memory` |
-| **Git** | `git_status`, `git_diff`, `git_log`, `git_commit` |
-| **HTTP** | `http_get`, `http_post` (SSRF-protected) |
-| **Meta-tools** | `batch` (parallel), `subagent`, `skill`, `done` |
+**Default registry tools**: `apply_patch`, `bash` (sandboxed), `codebase_context`, `edit`, `env_info`, `git_commit`, `git_diff`, `git_log`, `git_status`, `glob`, `grep`, `http_get`, `http_post` (SSRF-protected), `memory`, `read`, `reflect`, `task_create`, `task_update`, `think`, `webfetch`, `write`.
 
-Experimental modules currently present in-tree but not in the default registry include `websearch`, `codesearch`, `lsp`, `multiedit`, `question`, `task`, `ls`, and `plan_exit`. Some are partial or stubbed and are not part of the main runtime promise until promoted into the default registry.
+**Experimental modules** (not promoted to the default registry): `codesearch`, `ls`, `lsp`, `multiedit`, `plan_exit`, `question`, `task`, `websearch`. Some are partial or stubbed and are not part of the runtime promise until promoted.
 
 ### Sub-Agents
 
-Delegate work to specialized sub-agents that run in parallel:
+Delegate work to specialized sub-agents that run in parallel, with a concurrency cap (Semaphore) and capability bundles per spawn:
 
 ```
 Main Agent: "fix the bug and add tests"
-  → spawns explorer (reads code, finds root cause)
-  → spawns implementer (applies fix)
-  → spawns verifier (runs tests)
+  → spawns explorer  (read-only capabilities, finds root cause)
+  → spawns implementer (write capabilities, applies fix)
+  → spawns verifier  (read + bash, runs tests)
 ```
+
+Sub-agent specs live in `.theo/agents/` (project) or `~/.theo/agents/` (user). The S3 manifest gates which specs are approved.
 
 ### Sandbox
 
-Every `bash` command runs sandboxed — bwrap > landlock > noop cascade. PID isolation, network control, env sanitization, command validation.
+Every `bash` command runs sandboxed — `bwrap > landlock > noop` cascade on Linux, `sandbox-exec` layer on macOS. PID isolation, network control, env sanitization, command validation, denied-paths enforcement, rlimits.
 
-### Session Persistence & Context Compaction
+### Defense in depth
 
-Sessions persist across restarts. Long conversations don't degrade — Theo compresses old messages while preserving critical context.
+- **Prompt-injection fences**: tool results, MCP responses, hook injections, and `.theo/PROMPT.md` all flow through `fence_untrusted` / `strip_injection_tokens`.
+- **Capability gate**: always installed, default `unrestricted`; sub-agents inherit a narrower set per spec.
+- **Secret scrubbing**: persisted JSONL transcripts redact `sk-ant-…`, `ghp_…`, `AKIA…`, and PEM blocks before reaching disk.
+- **Plugin allowlist**: optional pinned set of plugin manifest SHA-256 hashes; mismatched plugins fail to load.
+- **API-key redaction**: `AgentConfig.llm.api_key` renders as `[REDACTED]` in every Debug output.
+- **CSPRNG identifiers**: `RunId` / `TaskId` / `CallId` / `EventId` / `TrajectoryId` are UUID v4-backed (no wall-clock collision risk on fast hardware).
+- **Cancellation**: ≤ 500 ms propagation via `tokio_util::sync::CancellationToken` to in-flight tools.
+
+### Session persistence & checkpoints
+
+Sessions persist across restarts as JSONL transcripts (fsynced after every append). Long conversations don't degrade — Theo compresses old messages while preserving critical context (compaction with tool-pair atomicity).
+
+Use `theo checkpoints` to manage shadow-git checkpoints taken before destructive tool calls (`write`, `edit`, `apply_patch`, `bash`). TTL-driven cleanup runs at session shutdown.
+
+### Observability dashboard
+
+```bash
+theo dashboard --port 5173
+```
+
+Serves the built `theo-ui` bundle and exposes `/api/list_runs`, `/api/run/<id>/trajectory`, etc. Combine with `ssh -L 5173:localhost:5173 …` to inspect remote runs.
+
+OpenTelemetry exporter is available behind the `otel` feature (`cargo build --features otel`).
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────┐
-│           theo-cli    /    theo-desktop          │
-│          (terminal)       (Tauri v2 + React)     │
-├─────────────────────────────────────────────────┤
-│              theo-application                    │
-│         (use cases, GRAPHCTX service)            │
-├──────────────┬───────────────┬──────────────────┤
-│ Code Intel   │ Agent Runtime │   Governance     │
-│ engine-graph │ agent-runtime │   governance     │
-│ engine-parser│               │                  │
-│ engine-retr. │               │                  │
-├──────────────┴───────────────┴──────────────────┤
-│                Infrastructure                    │
-│    theo-infra-llm (25 providers, streaming)      │
-│    theo-infra-auth (OAuth PKCE, Device Flow)     │
-│    theo-tooling (21 tools, sandbox)              │
-├─────────────────────────────────────────────────┤
-│              theo-domain                         │
-│       Pure types, traits, errors (zero deps)     │
-└─────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────┐
+│  theo-cli  /  theo-desktop  /  theo-marklive        │
+│  (clap+ratatui)  (Tauri v2 + React)  (markdown→HTML)│
+├─────────────────────────────────────────────────────┤
+│              theo-application                       │
+│        use cases, GRAPHCTX service,                 │
+│        cli_runtime re-exports (apps' contract)      │
+├──────────────┬───────────────┬─────────────────────┤
+│ Code Intel   │ Agent Runtime │     Governance      │
+│ engine-graph │ agent-runtime │     governance      │
+│ engine-parser│  + isolation  │                     │
+│ engine-retr. │  + infra-mcp  │                     │
+├──────────────┴───────────────┴─────────────────────┤
+│                Infrastructure                       │
+│  theo-infra-llm  (26 providers, streaming)          │
+│  theo-infra-auth (OAuth PKCE, RFC 8628)             │
+│  theo-infra-memory (Tantivy-backed mem provider)    │
+│  theo-tooling   (21 default tools, sandbox)         │
+├─────────────────────────────────────────────────────┤
+│              theo-domain                            │
+│   Pure types, traits, errors (zero workspace deps)  │
+└─────────────────────────────────────────────────────┘
 ```
 
-**11 crates**, 4 bounded contexts, strict dependency rules. `theo-domain` has zero dependencies. Apps talk to `theo-application`, never to engines directly.
+**15 production crates**, 4 bounded contexts (Code Intelligence, Agent Runtime, Governance, Infrastructure) plus `theo-application` as the use-case layer. Strict dependency rules enforced by `scripts/check-arch-contract.sh` (zero violations as of `develop`). `theo-domain` has zero workspace deps. Apps talk to `theo-application`, never to engines or infra directly (ADR-023 sunset).
 
 ## Supported Languages
 
-16 languages via Tree-Sitter:
+14 languages via Tree-Sitter:
 
-TypeScript, JavaScript, Python, Rust, Go, Java, Kotlin, Scala, C, C++, C#, PHP, Ruby, Swift — with framework-specific extractors for Express, FastAPI, Flask, Django, Spring Boot, ASP.NET, Laravel, and Rails.
+| Code-graph (full graph + symbols) | Parser-only (symbols + imports) |
+|---|---|
+| Rust, Python, TypeScript, JavaScript | C, C#, C++, Go, Java, Kotlin, PHP, Ruby, Scala, Swift |
+
+Framework-aware extractors are layered on top for popular stacks (Express, FastAPI, Flask, Django, Spring Boot, ASP.NET, Laravel, Rails).
 
 ## LLM Providers
 
-25 providers out of the box. Internally everything is OpenAI-compatible — providers convert at the boundary.
+26 providers in the catalog (`crates/theo-infra-llm/src/provider/catalog/`). Internally everything is OpenAI-compatible; providers convert at the boundary.
 
-| Provider | Auth |
+| Group | Providers |
 |---|---|
-| OpenAI (GPT-4o, o1, o3, Codex) | API key / OAuth PKCE |
-| Anthropic (Claude) | API key |
-| Ollama (local) | None |
-| Groq, Mistral, Together, DeepSeek, Fireworks... | API key |
-| GitHub Copilot | Device Flow |
-| Any OA-compatible endpoint | `--provider` flag |
+| **OpenAI family** | OpenAI, OpenRouter, xAI, Mistral, Groq, DeepInfra, Cerebras, Cohere, Together AI, Perplexity, Vercel, ChatGPT/Codex |
+| **Anthropic** | Anthropic Claude |
+| **Local** | Ollama, vLLM, LM Studio |
+| **Cloud / enterprise** | Azure (OpenAI + Cognitive), GitHub Copilot, GitLab, Cloudflare Workers, Cloudflare Gateway, SAP AI Core, Amazon Bedrock, Google Vertex (+ Vertex Anthropic) |
+
+Auth: API key, OAuth PKCE (OpenAI), RFC 8628 device flow (GitHub Copilot, generic), or none (Ollama / vLLM / LM Studio).
 
 ## Development
 
 ```bash
-cargo build                          # Build workspace
+cargo build                          # Build cargo workspace
 cargo test                           # Run all tests
-cargo test -p theo-engine-graph      # Test specific crate
-cd apps/theo-desktop && cargo tauri dev  # Desktop app
-cd apps/theo-ui && npm run dev       # Frontend dev server
+cargo test -p theo-engine-graph      # Specific crate
+bash scripts/check-arch-contract.sh  # Architecture gate
+cd apps/theo-desktop && cargo tauri dev  # Desktop dev
+cd apps/theo-ui && npm run dev       # React frontend dev server
 ```
+
+The benchmark harness (`apps/theo-benchmark/`) is a Python project, not part of the cargo build — see its own `pyproject.toml`.
 
 ## Contributing
 
-1. `theo-domain` has **zero dependencies** on other crates
-2. Apps talk to `theo-application`, never to engines directly
-3. Every logic change needs tests (Arrange-Act-Assert)
-4. `cargo test` must pass with zero failures
-5. Code in English, communication in Portuguese or English
+1. `theo-domain` has **zero workspace deps**.
+2. Apps talk to `theo-application` only — never to engines or infra directly (ADR-023).
+3. Every logic change needs tests (Arrange-Act-Assert). Bug fixes need a regression test BEFORE the fix (TDD).
+4. `cargo test` and `scripts/check-arch-contract.sh` must pass with zero failures.
+5. Code in English (variables, functions, comments). Communication: Português Brasil ou inglês.
+6. Errors typed with `thiserror`; never swallow them silently. No `unwrap()` / `expect()` in production paths.
 
 ## License
 
