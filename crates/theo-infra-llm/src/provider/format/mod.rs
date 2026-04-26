@@ -6,6 +6,7 @@
 pub mod anthropic;
 pub mod codex;
 pub mod passthrough;
+pub mod serialize_oa;
 
 use super::spec::FormatKind;
 use crate::error::LlmError;

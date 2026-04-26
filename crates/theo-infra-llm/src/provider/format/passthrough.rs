@@ -3,6 +3,7 @@
 //! Used by the majority of providers that speak standard /v1/chat/completions.
 
 use super::FormatConverter;
+use super::serialize_oa::serialize_oa_compat;
 use crate::error::LlmError;
 use crate::types::{ChatRequest, ChatResponse};
 
@@ -11,7 +12,10 @@ pub struct OaPassthrough;
 
 impl FormatConverter for OaPassthrough {
     fn convert_request(&self, request: &ChatRequest) -> serde_json::Value {
-        serde_json::to_value(request).unwrap_or_default()
+        // T0.1 / D1: bridge `Message.content_blocks` to OA-compat array
+        // shape (vision-capable providers like OpenAI gpt-4o accept this).
+        // Text-only messages are unaffected.
+        serialize_oa_compat(request)
     }
 
     fn convert_response(&self, body: serde_json::Value) -> Result<ChatResponse, LlmError> {
