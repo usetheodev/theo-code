@@ -26,6 +26,7 @@ pub mod sandbox;
 pub mod shell_tool;
 pub mod skill;
 pub mod task;
+pub mod test_gen;
 pub mod think;
 pub mod todo;
 pub mod tool_manifest;

@@ -213,6 +213,13 @@ pub const TOOL_MANIFEST: &[ToolManifestEntry] = &[
         notes: "T6.1 — apply a typed PlanPatch (AddTask/RemoveTask/EditTask/ReorderDeps/SkipTask) atomically.",
     },
     ToolManifestEntry {
+        id: "gen_property_test",
+        exposure: ToolExposure::DefaultRegistry,
+        status: ToolStatus::Implemented,
+        owner: "theo-tooling",
+        notes: "T5.1 — generate proptest scaffolding for a Rust function (no execution).",
+    },
+    ToolManifestEntry {
         id: "plan_summary",
         exposure: ToolExposure::DefaultRegistry,
         status: ToolStatus::Implemented,
