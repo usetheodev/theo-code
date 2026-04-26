@@ -4,6 +4,7 @@
 // they live as child modules rather than siblings.
 mod bootstrap;
 mod builders;
+mod contexts;
 mod delegate_handler;
 mod dispatch;
 mod execution;
@@ -16,6 +17,7 @@ mod post_dispatch_updates;
 mod stream_batcher;
 mod text_response;
 
+pub use contexts::{ObservabilityContext, SubagentContext};
 pub use handoff::HandoffOutcome;
 
 use std::path::PathBuf;
@@ -58,7 +60,6 @@ pub struct AgentRunEngine {
     config: AgentConfig,
     project_dir: PathBuf,
     budget_enforcer: BudgetEnforcer,
-    metrics: Arc<MetricsCollector>,
     convergence: ConvergenceEvaluator,
     done_attempts: u32,
     /// One-shot guard: in Plan mode, if the model converges with text only and
@@ -69,10 +70,6 @@ pub struct AgentRunEngine {
     snapshot_store: Option<Arc<dyn SnapshotStore>>,
     graph_context: Option<Arc<dyn theo_domain::graph_context::GraphContextProvider>>,
     context_loop_state: ContextLoopState,
-    /// Active context scope — tracks hot files, events, hypotheses for this run.
-    working_set: theo_domain::working_set::WorkingSet,
-    /// Context breakdown metrics — measures context usage patterns.
-    context_metrics: ContextMetrics,
     /// Steering and follow-up message queues for mid-run injection.
     /// Pi-mono ref: `packages/agent/src/agent-loop.ts:165-229`
     message_queues: MessageQueues,
@@ -94,45 +91,30 @@ pub struct AgentRunEngine {
     /// been attempted for this session so we don't retry on every
     /// message in long-running sessions.
     autodream_attempted: std::sync::atomic::AtomicBool,
-    observability: Option<crate::observability::ObservabilityPipeline>,
-    episodes_injected: u32, episodes_created: u32,
-    initial_context_files: std::collections::HashSet<String>,
-    pre_compaction_hot_files: std::collections::HashSet<String>,
-    /// Sub-agent integrations — when present, propagated to spawn_with_spec.
-    /// Optional so backward-compat is preserved.
-    subagent_registry: Option<Arc<crate::subagent::SubAgentRegistry>>,
-    subagent_run_store: Option<Arc<crate::subagent_runs::FileSubagentRunStore>>,
-    subagent_hooks: Option<Arc<crate::lifecycle_hooks::HookManager>>,
-    subagent_cancellation: Option<Arc<crate::cancellation::CancellationTree>>,
-    subagent_checkpoint: Option<Arc<crate::checkpoint::CheckpointManager>>,
-    subagent_worktree: Option<Arc<theo_isolation::WorktreeProvider>>,
-    subagent_mcp: Option<Arc<theo_infra_mcp::McpRegistry>>,
-    /// Optional MCP discovery cache propagated to spawn_with_spec.
-    subagent_mcp_discovery: Option<Arc<theo_infra_mcp::DiscoveryCache>>,
-    /// Optional handoff guardrail chain. When `None`, a default chain
-    /// (built-ins) is used per delegate_task call. Programmatic callers
-    /// can register custom guardrails by injecting a chain.
-    subagent_handoff_guardrails: Option<Arc<crate::handoff_guardrail::GuardrailChain>>,
+    /// T3.1 PR2 / find_p3_001 — observability + working-set bundle.
+    /// Replaces the previous flat fields:
+    /// `metrics`, `working_set`, `context_metrics`, `observability`,
+    /// `episodes_injected`, `episodes_created`,
+    /// `initial_context_files`, `pre_compaction_hot_files`,
+    /// `last_run_report`.
+    obs: contexts::ObservabilityContext,
+    /// T3.1 PR1 / find_p3_001 — sub-agent integration plumbing
+    /// (registry, run_store, hooks, cancellation, checkpoint,
+    /// worktree, mcp + discovery + dispatcher, handoff_guardrails,
+    /// reloadable) bundled into a single owned struct. Replaces the
+    /// previous 10 flat `subagent_*` fields. See
+    /// `run_engine/contexts/subagent.rs`.
+    subagent: contexts::SubagentContext,
     /// Optional resume context. When present, the dispatch loop
     /// consults `executed_tool_calls` before invoking each tool and
     /// replays cached results from `executed_tool_results` to avoid
-    /// double side-effects.
+    /// double side-effects. (Stays flat — not part of the subagent
+    /// integration bundle; used by the run loop for replay mode.)
     resume_context: Option<Arc<crate::subagent::resume::ResumeContext>>,
-    /// Lazy-built dispatcher for `mcp:server:tool` calls. Built from
-    /// `subagent_mcp` on first use.
-    subagent_mcp_dispatcher: std::sync::OnceLock<Arc<theo_infra_mcp::McpDispatcher>>,
-    /// Optional ReloadableRegistry. When Some, takes precedence over
-    /// `subagent_registry`: each delegate_task call reads
-    /// `reloadable.snapshot()` so watcher changes take effect immediately
-    /// without restart.
-    subagent_reloadable: Option<crate::subagent::ReloadableRegistry>,
     /// Whether a checkpoint snapshot has already been taken this turn.
     /// Reset at the start of every turn; set to `true` on first
     /// mutating-tool dispatch. One snapshot per turn max.
     checkpoint_taken_this_turn: std::sync::atomic::AtomicBool,
-    /// Phase 64 (benchmark-sota-metrics-plan): RunReport captured after
-    /// finalize_observability. The caller reads this to embed in AgentResult.
-    last_run_report: Option<crate::observability::report::RunReport>,
 }
 
 impl AgentRunEngine {
@@ -207,7 +189,6 @@ impl AgentRunEngine {
             config,
             project_dir,
             budget_enforcer,
-            metrics,
             convergence,
             done_attempts: 0,
             plan_mode_nudged: false,
@@ -215,42 +196,24 @@ impl AgentRunEngine {
             snapshot_store: None,
             graph_context: None,
             context_loop_state,
-            working_set: theo_domain::working_set::WorkingSet::new(),
-            context_metrics: ContextMetrics::new(),
             message_queues: MessageQueues::default(),
             session_token_usage: theo_domain::budget::TokenUsage::default(),
             memory_nudge_counter: Arc::new(crate::memory_lifecycle::MemoryNudgeCounter::new()),
             skill_nudge_counter: Arc::new(crate::skill_reviewer::SkillNudgeCounter::new()),
             skill_created_this_task: std::sync::atomic::AtomicBool::new(false),
             autodream_attempted: std::sync::atomic::AtomicBool::new(false),
-            observability, episodes_injected: 0, episodes_created: 0,
-            initial_context_files: Default::default(), pre_compaction_hot_files: Default::default(),
-            subagent_registry: None,
-            subagent_run_store: None,
-            subagent_hooks: None,
-            subagent_cancellation: None,
-            subagent_checkpoint: None,
-            subagent_worktree: None,
-            subagent_mcp: None,
-            subagent_mcp_discovery: None,
-            subagent_handoff_guardrails: None,
-            subagent_mcp_dispatcher: std::sync::OnceLock::new(),
-            subagent_reloadable: None,
+            obs: contexts::ObservabilityContext::new(metrics, observability),
+            subagent: contexts::SubagentContext::default(),
             resume_context: None,
             checkpoint_taken_this_turn: std::sync::atomic::AtomicBool::new(false),
-            last_run_report: None,
         }
     }
 
-    /// Lazy: build the McpDispatcher from `subagent_mcp` registry on first call.
-    /// Returns `None` if no MCP registry is attached.
+    /// Lazy: build the McpDispatcher from the subagent MCP registry on
+    /// first call. Returns `None` if no MCP registry is attached.
+    /// T3.1 PR1 — delegates to `SubagentContext::mcp_dispatcher`.
     pub fn mcp_dispatcher(&self) -> Option<Arc<theo_infra_mcp::McpDispatcher>> {
-        let reg = self.subagent_mcp.as_ref()?;
-        Some(
-            self.subagent_mcp_dispatcher
-                .get_or_init(|| Arc::new(theo_infra_mcp::McpDispatcher::new(reg.clone())))
-                .clone(),
-        )
+        self.subagent.mcp_dispatcher()
     }
 
     /// Dispatch a tool call to MCP if its name is in the
@@ -334,7 +297,8 @@ impl AgentRunEngine {
     /// the once-per-turn state. Returns the commit SHA on success, None
     /// if no checkpoint manager is attached or snapshot fails (fail-soft).
     pub fn checkpoint_before_mutation(&self, label: &str) -> Option<String> {
-        self.subagent_checkpoint
+        self.subagent
+            .checkpoint
             .as_ref()
             .and_then(|cm| cm.snapshot(label).ok())
     }
@@ -363,7 +327,13 @@ impl AgentRunEngine {
 
     /// Returns a snapshot of current runtime metrics.
     pub fn metrics(&self) -> RuntimeMetrics {
-        self.metrics.snapshot()
+        self.obs.metrics.snapshot()
+    }
+
+    /// Borrow the underlying [`MetricsCollector`] for sites that need
+    /// to call its mutating methods (`record_*`). T3.1 PR2.
+    pub(crate) fn metrics_collector(&self) -> &Arc<MetricsCollector> {
+        &self.obs.metrics
     }
 
     /// Exposes the pair `(files_edited, current_iteration)` for
@@ -377,7 +347,7 @@ impl AgentRunEngine {
 
     /// Takes the RunReport captured by the last finalize_observability call.
     pub fn take_run_report(&mut self) -> Option<crate::observability::report::RunReport> {
-        self.last_run_report.take()
+        self.obs.last_run_report.take()
     }
 
     // `execute` + `execute_with_history` moved to `run_engine/execution.rs`.
@@ -1112,7 +1082,7 @@ mod tests {
         let engine = setup
             .create_engine("test")
             .with_subagent_handoff_guardrails(chain);
-        assert!(engine.subagent_handoff_guardrails.is_some());
+        assert!(engine.subagent.handoff_guardrails.is_some());
     }
 
     #[test]
@@ -1122,7 +1092,7 @@ mod tests {
         let engine = setup
             .create_engine("test")
             .with_subagent_mcp_discovery(cache);
-        assert!(engine.subagent_mcp_discovery.is_some());
+        assert!(engine.subagent.mcp_discovery.is_some());
     }
 
     #[tokio::test]
@@ -1350,7 +1320,7 @@ mod tests {
             .with_subagent_hooks(std::sync::Arc::new(
                 crate::lifecycle_hooks::HookManager::new(),
             ));
-        assert!(engine.subagent_hooks.is_some());
+        assert!(engine.subagent.hooks.is_some());
     }
 
     #[test]
@@ -1458,7 +1428,7 @@ mod tests {
             .with_subagent_cancellation(std::sync::Arc::new(
                 crate::cancellation::CancellationTree::new(),
             ));
-        assert!(engine.subagent_cancellation.is_some());
+        assert!(engine.subagent.cancellation.is_some());
     }
 
     #[test]

@@ -135,7 +135,7 @@ impl AgentRunEngine {
 
             // Budget + metrics accounting.
             self.budget_enforcer.record_tool_call();
-            self.metrics.record_tool_call(&tool_name, 0, success);
+            self.obs.metrics.record_tool_call(&tool_name, 0, success);
 
             // Track edits in the context loop state.
             if success

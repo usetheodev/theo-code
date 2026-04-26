@@ -20,7 +20,7 @@ impl AgentRunEngine {
     pub async fn execute(&mut self) -> crate::agent_loop::AgentResult {
         let mut result = self.execute_with_history(Vec::new()).await;
         self.record_session_exit(&result).await;
-        result.run_report = self.last_run_report.take();
+        result.run_report = self.obs.last_run_report.take();
         result
     }
 
@@ -107,7 +107,7 @@ impl AgentRunEngine {
         // applies to the keep-alive binding, *not* to the original
         // sender).
         let (abort_tx, abort_rx) = tokio::sync::watch::channel(false);
-        if let Some(ct) = self.subagent_cancellation.as_ref() {
+        if let Some(ct) = self.subagent.cancellation.as_ref() {
             let token = ct.child(self.run.run_id.as_str());
             let tx = abort_tx.clone();
             tokio::spawn(async move {

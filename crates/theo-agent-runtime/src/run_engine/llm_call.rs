@@ -196,7 +196,7 @@ impl AgentRunEngine {
         // counter in sync.
         let total_attempts = attempt_count.load(Ordering::Relaxed);
         for _ in 0..total_attempts.saturating_sub(1) {
-            self.metrics.record_retry();
+            self.obs.metrics.record_retry();
         }
 
         let resp = resp_outcome?;
@@ -215,7 +215,7 @@ impl AgentRunEngine {
             .unwrap_or(0);
         let total_tok = input_tok + output_tok;
         self.budget_enforcer.record_tokens(total_tok);
-        self.metrics
+        self.obs.metrics
             .record_llm_call_detailed(llm_duration, input_tok, output_tok);
         self.session_token_usage
             .accumulate(&theo_domain::budget::TokenUsage {
@@ -267,7 +267,7 @@ impl AgentRunEngine {
     pub(super) fn build_llm_abort_result(&mut self, err: &LlmError) -> AgentResult {
         self.transition_run(RunState::Aborted);
         self.try_task_transition(TaskState::Failed);
-        self.metrics.record_run_complete(false);
+        self.obs.metrics.record_run_complete(false);
         let class = llm_error_to_class(err);
         AgentResult::from_engine_state(
             self,
@@ -290,8 +290,8 @@ impl AgentRunEngine {
         messages: &mut Vec<Message>,
     ) {
         // Snapshot hot files BEFORE compaction destroys them (FM-6).
-        for f in &self.working_set.hot_files {
-            self.pre_compaction_hot_files.insert(f.clone());
+        for f in &self.obs.working_set.hot_files {
+            self.obs.pre_compaction_hot_files.insert(f.clone());
         }
 
         self.event_bus.publish(DomainEvent::new(

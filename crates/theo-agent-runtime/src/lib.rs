@@ -41,20 +41,25 @@ pub mod subagent_runs;
 pub mod transcript_indexer;
 
 // ── Internal modules (pub(crate) — T4.10h) ─────────────────────────────
-pub(crate) mod autodream;
-pub(crate) mod budget_enforcer;
+//
+// Note: a subset is `pub` (not `pub(crate)`) because integration tests
+// in `crates/theo-agent-runtime/tests/` reach into them. Integration
+// tests are first-class consumers — they live in a separate compilation
+// unit that sees the same surface as external crates.
+pub mod autodream;          // tests/observability_e2e.rs
+pub mod budget_enforcer;    // observability tests
 pub(crate) mod compaction_stages;
 pub(crate) mod compaction_summary;
 pub(crate) mod extension;
 pub(crate) mod failure_tracker;
-pub(crate) mod frontmatter;
+pub mod frontmatter;        // doctest in frontmatter::split_frontmatter
 pub(crate) mod fs_errors;
 pub(crate) mod hypothesis_pipeline;
 pub(crate) mod jit_instructions;
 pub(crate) mod lesson_pipeline;
 pub(crate) mod loop_state;
-pub(crate) mod memory_lifecycle;
-pub(crate) mod memory_reviewer;
+pub mod memory_lifecycle;   // tests/memory_*.rs
+pub mod memory_reviewer;    // tests/memory_*.rs
 pub(crate) mod persistence;
 pub(crate) mod plugin;
 pub(crate) mod reflector;
@@ -66,13 +71,13 @@ pub(crate) mod secret_scrubber;
 pub(crate) mod sensor;
 pub(crate) mod session_bootstrap;
 pub(crate) mod skill_catalog;
-pub(crate) mod skill_reviewer;
+pub mod skill_reviewer;     // tests/sota12_integration.rs
 pub(crate) mod snapshot;
-pub(crate) mod state_manager;
+pub mod state_manager;      // tests/state_manager_failure.rs
 pub(crate) mod system_prompt_composer;
-pub(crate) mod task_manager;
-pub(crate) mod tool_bridge;
-pub(crate) mod tool_call_manager;
+pub mod task_manager;       // tests/observability_pipeline.rs
+pub mod tool_bridge;        // tests/meta_tools_t7_3.rs
+pub mod tool_call_manager;  // tests/observability_pipeline.rs
 pub(crate) mod tool_pair_integrity;
 
 // ── File-local modules ─────────────────────────────────────────────────

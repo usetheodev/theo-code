@@ -80,7 +80,7 @@ impl AgentRunEngine {
         // HookContext.target_agent + target_objective are populated so
         // YAML matchers can regex-match against them.
         let hook_block = if blocked_by.is_none() {
-            self.subagent_hooks.as_ref().and_then(|hooks| {
+            self.subagent.hooks.as_ref().and_then(|hooks| {
                 use crate::lifecycle_hooks::{HookContext, HookEvent, HookResponse};
                 let hook_ctx = HookContext {
                     tool_name: Some(format!("delegate_task:{}", target_agent)),

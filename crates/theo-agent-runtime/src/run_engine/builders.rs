@@ -21,7 +21,7 @@ impl AgentRunEngine {
         mut self,
         registry: Arc<crate::subagent::SubAgentRegistry>,
     ) -> Self {
-        self.subagent_registry = Some(registry);
+        self.subagent.registry = Some(registry);
         self
     }
 
@@ -31,7 +31,7 @@ impl AgentRunEngine {
         mut self,
         store: Arc<crate::subagent_runs::FileSubagentRunStore>,
     ) -> Self {
-        self.subagent_run_store = Some(store);
+        self.subagent.run_store = Some(store);
         self
     }
 
@@ -40,7 +40,7 @@ impl AgentRunEngine {
         mut self,
         hooks: Arc<crate::lifecycle_hooks::HookManager>,
     ) -> Self {
-        self.subagent_hooks = Some(hooks);
+        self.subagent.hooks = Some(hooks);
         self
     }
 
@@ -50,7 +50,7 @@ impl AgentRunEngine {
         mut self,
         tree: Arc<crate::cancellation::CancellationTree>,
     ) -> Self {
-        self.subagent_cancellation = Some(tree);
+        self.subagent.cancellation = Some(tree);
         self
     }
 
@@ -59,7 +59,7 @@ impl AgentRunEngine {
         mut self,
         manager: Arc<crate::checkpoint::CheckpointManager>,
     ) -> Self {
-        self.subagent_checkpoint = Some(manager);
+        self.subagent.checkpoint = Some(manager);
         self
     }
 
@@ -69,7 +69,7 @@ impl AgentRunEngine {
         mut self,
         provider: Arc<theo_isolation::WorktreeProvider>,
     ) -> Self {
-        self.subagent_worktree = Some(provider);
+        self.subagent.worktree = Some(provider);
         self
     }
 
@@ -77,7 +77,7 @@ impl AgentRunEngine {
     /// `spec.mcp_servers` get a system-prompt hint listing the allowed
     /// `mcp:server:tool` namespace.
     pub fn with_subagent_mcp(mut self, mcp: Arc<theo_infra_mcp::McpRegistry>) -> Self {
-        self.subagent_mcp = Some(mcp);
+        self.subagent.mcp = Some(mcp);
         self
     }
 
@@ -89,7 +89,7 @@ impl AgentRunEngine {
         mut self,
         cache: Arc<theo_infra_mcp::DiscoveryCache>,
     ) -> Self {
-        self.subagent_mcp_discovery = Some(cache);
+        self.subagent.mcp_discovery = Some(cache);
         self
     }
 
@@ -100,7 +100,7 @@ impl AgentRunEngine {
         mut self,
         chain: Arc<crate::handoff_guardrail::GuardrailChain>,
     ) -> Self {
-        self.subagent_handoff_guardrails = Some(chain);
+        self.subagent.handoff_guardrails = Some(chain);
         self
     }
 
@@ -125,7 +125,7 @@ impl AgentRunEngine {
         mut self,
         reloadable: crate::subagent::ReloadableRegistry,
     ) -> Self {
-        self.subagent_reloadable = Some(reloadable);
+        self.subagent.reloadable = Some(reloadable);
         self
     }
 

@@ -56,7 +56,7 @@ impl AgentRunEngine {
             messages_json,
             vec![], // DLQ entries
         );
-        snapshot.working_set = Some(self.working_set.clone());
+        snapshot.working_set = Some(self.obs.working_set.clone());
         snapshot.checksum = snapshot.compute_checksum();
         let _ = store.save(&self.run.run_id, &snapshot).await;
     }
@@ -133,7 +133,7 @@ impl AgentRunEngine {
 
         // 6. Budget + metrics accounting.
         self.budget_enforcer.record_tool_call();
-        self.metrics.record_tool_call(name, 0, success);
+        self.obs.metrics.record_tool_call(name, 0, success);
 
         // 7. Failure-pattern tracker: on repeated failures, surface a
         // user-directed suggestion as a steering message.
@@ -308,7 +308,7 @@ impl AgentRunEngine {
         }
         self.transition_run(RunState::Aborted);
         self.try_task_transition(TaskState::Failed);
-        self.metrics.record_run_complete(false);
+        self.obs.metrics.record_run_complete(false);
         let summary = format!(
             "Doom loop abort: '{}' called identically {} times. Agent is stuck.",
             name,
@@ -430,7 +430,7 @@ impl AgentRunEngine {
             self.context_loop_state.edits_succeeded,
             self.context_loop_state.edits_files.join(", ")
         );
-        self.metrics.record_run_complete(false);
+        self.obs.metrics.record_run_complete(false);
         Some(AgentResult::from_engine_state(
             self,
             false,

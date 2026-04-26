@@ -88,7 +88,7 @@ impl AgentRunEngine {
         // per-task counter with no happens-before dependency on any
         // other load; written and read on the same task inside the
         // serial main loop (T5.4).
-        let tool_calls_this_task = self.metrics.snapshot().total_tool_calls as usize;
+        let tool_calls_this_task = self.obs.metrics.snapshot().total_tool_calls as usize;
         let skill_created = self
             .skill_created_this_task
             .load(std::sync::atomic::Ordering::Relaxed);
@@ -105,7 +105,7 @@ impl AgentRunEngine {
 
         self.transition_run(RunState::Converged);
         self.try_task_transition(TaskState::Completed);
-        self.metrics.record_run_complete(true);
+        self.obs.metrics.record_run_complete(true);
         DispatchOutcome::Converged(AgentResult::from_engine_state(
             self,
             true,

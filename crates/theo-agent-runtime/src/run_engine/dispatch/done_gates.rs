@@ -56,7 +56,7 @@ impl AgentRunEngine {
         }
         self.transition_run(RunState::Converged);
         self.try_task_transition(TaskState::Completed);
-        self.metrics.record_run_complete(true);
+        self.obs.metrics.record_run_complete(true);
         let annotated = format!(
             "{} [accepted after {} done attempts]",
             summary, self.done_attempts
@@ -135,7 +135,7 @@ impl AgentRunEngine {
     pub(super) fn accept_done(&mut self, summary: String) -> DispatchOutcome {
         self.transition_run(RunState::Converged);
         self.try_task_transition(TaskState::Completed);
-        self.metrics.record_run_complete(true);
+        self.obs.metrics.record_run_complete(true);
         DispatchOutcome::Converged(AgentResult::from_engine_state(
             self,
             true,

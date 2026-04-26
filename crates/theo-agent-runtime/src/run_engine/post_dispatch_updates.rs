@@ -27,11 +27,11 @@ impl AgentRunEngine {
                         .or(args.get("file_path"))
                         .and_then(|p| p.as_str())
                 {
-                    self.working_set.touch_file(path);
-                    self.context_metrics.record_artifact_fetch(path, iteration);
+                    self.obs.working_set.touch_file(path);
+                    self.obs.context_metrics.record_artifact_fetch(path, iteration);
                     // Feed usefulness pipeline — which files the agent
                     // actually references vs just scans.
-                    self.context_metrics.record_tool_reference(path);
+                    self.obs.context_metrics.record_tool_reference(path);
                 }
             }
             "grep" | "glob" | "codebase_context" => {
@@ -41,16 +41,16 @@ impl AgentRunEngine {
                         .or(args.get("query"))
                         .and_then(|p| p.as_str())
                         .unwrap_or("");
-                    self.context_metrics
+                    self.obs.context_metrics
                         .record_action(&format!("{}: {}", name, query), iteration);
                     if let Some(path) = args.get("path").and_then(|p| p.as_str()) {
-                        self.context_metrics.record_tool_reference(path);
+                        self.obs.context_metrics.record_tool_reference(path);
                     }
                 }
             }
             _ => {}
         }
-        self.working_set
+        self.obs.working_set
             .record_event(format!("tool:{}:iter{}", name, iteration), 20);
     }
 

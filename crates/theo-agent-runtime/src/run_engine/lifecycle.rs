@@ -30,7 +30,7 @@ impl AgentRunEngine {
         let metrics_dir = self.project_dir.join(".theo").join("metrics");
         match tokio::fs::create_dir_all(&metrics_dir).await {
             Ok(()) => {
-                let report = self.context_metrics.to_report();
+                let report = self.obs.context_metrics.to_report();
                 let metrics_path =
                     metrics_dir.join(format!("{}.json", self.run.run_id.as_str()));
                 let body = serde_json::to_string_pretty(&report).unwrap_or_default();
@@ -192,7 +192,7 @@ impl AgentRunEngine {
         // production; this hook closes the gap. Best-effort: any
         // failure is logged via tracing but does NOT block shutdown.
         if !self.config.loop_cfg().is_subagent {
-            if let Some(ckpt) = self.subagent_checkpoint.as_deref() {
+            if let Some(ckpt) = self.subagent.checkpoint.as_deref() {
                 let ttl = self.config.checkpoint_ttl_seconds as i64;
                 if ttl > 0 {
                     match ckpt.cleanup(ttl) {
@@ -216,7 +216,7 @@ impl AgentRunEngine {
         }
 
         // Observability: drain writer, compute RunReport, append summary line.
-        self.last_run_report = self.finalize_observability(result, !events.is_empty());
+        self.obs.last_run_report = self.finalize_observability(result, !events.is_empty());
     }
 
     pub(super) fn finalize_observability(
@@ -224,11 +224,11 @@ impl AgentRunEngine {
         result: &AgentResult,
         had_events: bool,
     ) -> Option<crate::observability::report::RunReport> {
-        let Some(pipeline) = self.observability.take() else {
+        let Some(pipeline) = self.obs.pipeline.take() else {
             return None;
         };
         let file_path = pipeline.finalize();
-        self.episodes_created = if had_events { 1 } else { 0 };
+        self.obs.episodes_created = if had_events { 1 } else { 0 };
         let (detected, run_report) = crate::observability::finalize_run_observability(
             &file_path,
             self.run.run_id.as_str(),
@@ -237,14 +237,14 @@ impl AgentRunEngine {
             &self.session_token_usage,
             self.config.loop_cfg().max_iterations,
             self.budget_enforcer.usage(),
-            &self.context_metrics.to_report(),
+            &self.obs.context_metrics.to_report(),
             self.done_attempts,
-            self.episodes_injected,
-            self.episodes_created,
+            self.obs.episodes_injected,
+            self.obs.episodes_created,
             self.failure_tracker.new_fingerprint_count(),
             self.failure_tracker.recurrent_fingerprint_count(),
-            &self.initial_context_files,
-            &self.pre_compaction_hot_files,
+            &self.obs.initial_context_files,
+            &self.obs.pre_compaction_hot_files,
         );
         detected.publish_events(&self.event_bus, self.run.run_id.as_str());
         run_report

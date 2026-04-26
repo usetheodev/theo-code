@@ -77,10 +77,10 @@ impl AgentRunEngine {
     /// snapshot, the static one, or a fresh builtins+load_all.
     fn build_subagent_manager(&self) -> crate::subagent::SubAgentManager {
         let registry: Arc<crate::subagent::SubAgentRegistry> = if let Some(rel) =
-            &self.subagent_reloadable
+            &self.subagent.reloadable
         {
             Arc::new(rel.snapshot())
-        } else if let Some(r) = &self.subagent_registry {
+        } else if let Some(r) = &self.subagent.registry {
             r.clone()
         } else {
             let mut reg = crate::subagent::SubAgentRegistry::with_builtins();
@@ -112,27 +112,27 @@ impl AgentRunEngine {
             self.project_dir.clone(),
             registry,
         )
-        .with_metrics(self.metrics.clone());
+        .with_metrics(self.obs.metrics.clone());
 
-        if let Some(store) = &self.subagent_run_store {
+        if let Some(store) = &self.subagent.run_store {
             manager = manager.with_run_store(store.clone());
         }
-        if let Some(hooks) = &self.subagent_hooks {
+        if let Some(hooks) = &self.subagent.hooks {
             manager = manager.with_hooks(hooks.clone());
         }
-        if let Some(tree) = &self.subagent_cancellation {
+        if let Some(tree) = &self.subagent.cancellation {
             manager = manager.with_cancellation(tree.clone());
         }
-        if let Some(cm) = &self.subagent_checkpoint {
+        if let Some(cm) = &self.subagent.checkpoint {
             manager = manager.with_checkpoint(cm.clone());
         }
-        if let Some(wp) = &self.subagent_worktree {
+        if let Some(wp) = &self.subagent.worktree {
             manager = manager.with_worktree_provider(wp.clone());
         }
-        if let Some(mcp) = &self.subagent_mcp {
+        if let Some(mcp) = &self.subagent.mcp {
             manager = manager.with_mcp_registry(mcp.clone());
         }
-        if let Some(cache) = &self.subagent_mcp_discovery {
+        if let Some(cache) = &self.subagent.mcp_discovery {
             manager = manager.with_mcp_discovery(cache.clone());
         }
         manager
@@ -140,7 +140,7 @@ impl AgentRunEngine {
 
     /// Resolve handoff guardrail chain — injected or default.
     fn resolve_handoff_guardrails(&self) -> Arc<crate::handoff_guardrail::GuardrailChain> {
-        self.subagent_handoff_guardrails
+        self.subagent.handoff_guardrails
             .clone()
             .unwrap_or_else(|| {
                 Arc::new(crate::handoff_guardrail::GuardrailChain::with_default_builtins())
@@ -208,7 +208,7 @@ impl AgentRunEngine {
             .await;
 
         self.budget_enforcer.record_tokens(result.tokens_used);
-        self.metrics.record_delegated_tokens(result.tokens_used);
+        self.obs.metrics.record_delegated_tokens(result.tokens_used);
 
         let prefix = redirect_note
             .map(|n| format!("{} ", n))
@@ -304,7 +304,7 @@ impl AgentRunEngine {
                 .await;
 
             self.budget_enforcer.record_tokens(result.tokens_used);
-            self.metrics.record_delegated_tokens(result.tokens_used);
+            self.obs.metrics.record_delegated_tokens(result.tokens_used);
 
             let mark = if result.success { "✅" } else { "❌" };
             let prefix = redirect_note

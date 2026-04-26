@@ -122,7 +122,7 @@ impl AgentRunEngine {
             .filter_map(|m| m.content.as_ref())
             .map(|c| c.len().div_ceil(4))
             .sum();
-        self.context_metrics
+        self.obs.context_metrics
             .record_context_size(iteration, estimated_context_tokens);
         estimated_context_tokens
     }

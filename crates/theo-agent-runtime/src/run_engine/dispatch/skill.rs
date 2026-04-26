@@ -135,7 +135,7 @@ impl AgentRunEngine {
             }),
         ));
 
-        let registry: Arc<crate::subagent::SubAgentRegistry> = match &self.subagent_registry {
+        let registry: Arc<crate::subagent::SubAgentRegistry> = match &self.subagent.registry {
             Some(r) => r.clone(),
             None => Arc::new(crate::subagent::SubAgentRegistry::with_builtins()),
         };
@@ -150,7 +150,7 @@ impl AgentRunEngine {
             self.project_dir.clone(),
             registry,
         )
-        .with_metrics(self.metrics.clone());
+        .with_metrics(self.obs.metrics.clone());
 
         let sub_result = manager
             .spawn_with_spec_text(&spec, instructions, None)
@@ -170,7 +170,7 @@ impl AgentRunEngine {
         }
 
         self.budget_enforcer.record_tokens(sub_result.tokens_used);
-        self.metrics.record_delegated_tokens(sub_result.tokens_used);
+        self.obs.metrics.record_delegated_tokens(sub_result.tokens_used);
 
         messages.push(Message::tool_result(&call.id, "skill", &result_msg));
     }

@@ -120,7 +120,7 @@ impl AgentRunEngine {
                     self.config.context().context_window_tokens,
                     &mut messages,
                 );
-            self.episodes_injected = self.episodes_injected.saturating_add(injected as u32);
+            self.obs.episodes_injected = self.obs.episodes_injected.saturating_add(injected as u32);
         }
 
         // Boot sequence: inject progress from previous sessions + recent
@@ -227,7 +227,7 @@ impl AgentRunEngine {
         }
         // Record initial context files for the task-derailment sensor.
         for b in ctx.blocks.iter().take(5) {
-            self.initial_context_files.insert(b.source_id.clone());
+            self.obs.initial_context_files.insert(b.source_id.clone());
         }
         let file_hints: Vec<String> = ctx
             .blocks
