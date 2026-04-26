@@ -15,6 +15,7 @@ pub mod glob;
 pub mod grep;
 pub mod http_client;
 pub mod invalid;
+pub mod jsonrpc_session;
 pub mod jsonrpc_stdio;
 pub mod ls;
 pub mod lsp;
