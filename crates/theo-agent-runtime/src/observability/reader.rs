@@ -175,6 +175,7 @@ mod tests {
             EnvelopeKind::Summary => {
                 TrajectoryEnvelope::summary(run_id, seq, 0, serde_json::json!({}))
             }
+            EnvelopeKind::Rating => TrajectoryEnvelope::rating(run_id, seq, 0, 1, 0, None),
         };
         serde_json::to_string(&env).unwrap()
     }

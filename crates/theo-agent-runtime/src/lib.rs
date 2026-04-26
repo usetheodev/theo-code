@@ -41,6 +41,7 @@ pub mod session_tree;
 pub mod skill;
 pub mod subagent;
 pub mod subagent_runs;
+pub mod trajectory_export;
 pub mod transcript_indexer;
 
 // ── Internal modules (pub(crate) — T4.10h) ─────────────────────────────
