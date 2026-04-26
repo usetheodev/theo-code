@@ -74,7 +74,7 @@ pub(crate) mod run_engine_sandbox;
 pub(crate) mod secret_scrubber;
 pub(crate) mod sensor;
 pub(crate) mod session_bootstrap;
-pub(crate) mod skill_catalog;
+pub mod skill_catalog;        // T9.1 — exposed via theo-application::use_cases::skills
 pub mod skill_reviewer;     // tests/sota12_integration.rs
 pub(crate) mod snapshot;
 pub mod state_manager;      // tests/state_manager_failure.rs

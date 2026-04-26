@@ -13,6 +13,7 @@ pub mod memory_ui;
 pub mod observability_ui;
 pub mod pipeline;
 pub mod run_agent_session;
+pub mod skills;
 pub mod transcript_indexer_impl;
 pub mod wiki_backend_impl;
 pub mod wiki_enrichment;
