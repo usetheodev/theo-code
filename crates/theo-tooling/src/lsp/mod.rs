@@ -3,10 +3,12 @@
 // `protocol.rs`; full client + server discovery is the next iteration.
 
 pub mod client;
+pub mod discovery;
 pub mod operations;
 pub mod protocol;
 
 pub use client::{LspClient, LspClientError};
+pub use discovery::{discover, discover_with_path, DiscoveredServer};
 
 pub use protocol::{
     encode_frame, encode_message, try_decode_frame, InboundMessage, JsonRpcErrorObj,
