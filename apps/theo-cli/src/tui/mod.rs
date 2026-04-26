@@ -35,7 +35,7 @@ use theo_application::facade::agent::EventBus;
 #[allow(deprecated)]
 use theo_application::facade::agent::AgentLoop;
 use theo_application::facade::llm::Message;
-use theo_application::facade::tooling::create_default_registry;
+use theo_application::facade::tooling::create_default_registry_with_project;
 
 use app::{Msg, TuiState};
 
@@ -490,7 +490,8 @@ pub async fn run(
                     }
                     cfg.loop_cfg.mode = AgentMode::Agent;
 
-                    let registry = create_default_registry();
+                    // T15.1 — populate docs_search index from project's well-known locations.
+                    let registry = create_default_registry_with_project(&task_dir);
                     let agent = injections_for_task.apply_to(AgentLoop::new(cfg.clone(), registry));
 
                     tui_log("AgentLoop created, calling run_with_history...");

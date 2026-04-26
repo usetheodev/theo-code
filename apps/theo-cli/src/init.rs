@@ -353,7 +353,8 @@ pub async fn run_init_with_agent(
     let renderer = std::sync::Arc::new(crate::renderer::CliRenderer::new());
     event_bus.subscribe(renderer);
 
-    let registry = theo_application::facade::tooling::create_default_registry();
+    // T15.1 — populate docs_search index from project's docs/, .theo/wiki/, ~/.cache/theo/docs/.
+    let registry = theo_application::facade::tooling::create_default_registry_with_project(project_dir);
     let mut agent_config = config;
     agent_config.loop_cfg.max_iterations = 30; // Cap for init task
     agent_config.context.system_prompt = "You are a project analyzer. Read the codebase and generate configuration files. Be thorough but concise. Always use tools, never guess.".to_string();

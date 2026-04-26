@@ -4,7 +4,7 @@ use std::sync::Arc;
 use theo_agent_runtime::event_bus::EventListener;
 use theo_agent_runtime::{AgentConfig, AgentLoop, AgentResult};
 use theo_domain::graph_context::GraphContextProvider;
-use theo_tooling::registry::create_default_registry;
+use theo_tooling::registry::create_default_registry_with_project;
 
 use super::graph_context_service::GraphContextService;
 
@@ -148,7 +148,10 @@ pub async fn run_agent_session_with_injections(
             Some(service)
         };
 
-    let registry = create_default_registry();
+    // T15.1 — populate docs_search index from project's well-known
+    // Markdown locations (docs/, .theo/wiki/, ~/.cache/theo/docs/)
+    // so the agent has searchable docs out of the box.
+    let registry = create_default_registry_with_project(project_dir);
     let mut agent = AgentLoop::new(config, registry).with_event_listener(event_listener);
     if let Some(gc) = graph_context {
         agent = agent.with_graph_context(gc);

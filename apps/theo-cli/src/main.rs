@@ -804,7 +804,8 @@ tool, time pressure), say so honestly — don't claim success.\n";
             &project_dir,
         );
 
-        let registry = theo_application::facade::tooling::create_default_registry();
+        // T15.1 — populate docs_search index from project's docs/, .theo/wiki/, ~/.cache/theo/docs/.
+        let registry = theo_application::facade::tooling::create_default_registry_with_project(&project_dir);
 
         // Phase 29 follow-up (sota-gaps-followup) — closes gap #7.
         // Headless previously bypassed `build_injections`, so MCP discovery,
