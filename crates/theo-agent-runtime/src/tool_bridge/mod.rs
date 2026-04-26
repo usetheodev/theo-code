@@ -80,13 +80,35 @@ pub async fn execute_tool_call(
     call: &ToolCall,
     ctx: &ToolContext,
 ) -> (Message, bool) {
+    let (msg, ok, _meta) = execute_tool_call_with_metadata(registry, call, ctx).await;
+    (msg, ok)
+}
+
+/// T1.2 / T0.1 — Execute a tool call AND surface the tool's metadata
+/// (when present) so callers can wire side-band content like vision
+/// blocks through `vision_propagation::build_image_followup`.
+///
+/// Meta-tools (`batch_execute`, `tool_search`) don't expose metadata
+/// today, so the third tuple slot is always `None` for them.
+///
+/// Existing callers can keep using [`execute_tool_call`] which discards
+/// the metadata for back-compat.
+pub async fn execute_tool_call_with_metadata(
+    registry: &ToolRegistry,
+    call: &ToolCall,
+    ctx: &ToolContext,
+) -> (Message, bool, Option<serde_json::Value>) {
     let name = &call.function.name;
 
     let args = match call.parse_arguments() {
         Ok(args) => args,
         Err(e) => {
             let error_msg = format!("Failed to parse arguments: {e}");
-            return (Message::tool_result(&call.id, name, &error_msg), false);
+            return (
+                Message::tool_result(&call.id, name, &error_msg),
+                false,
+                None,
+            );
         }
     };
 
@@ -94,9 +116,15 @@ pub async fn execute_tool_call(
     // need direct registry access. Anthropic "Programmatic Tool Calling"
     // (batch_execute) + deferred-tool discovery (tool_search).
     match name.as_str() {
-        "batch_execute" => execute_meta::handle_batch_execute(registry, call, ctx, &args).await,
-        "tool_search" => execute_meta::handle_tool_search(registry, call, &args),
-        _ => execute_regular::execute_regular_tool(registry, call, ctx, args).await,
+        "batch_execute" => {
+            let (m, ok) = execute_meta::handle_batch_execute(registry, call, ctx, &args).await;
+            (m, ok, None)
+        }
+        "tool_search" => {
+            let (m, ok) = execute_meta::handle_tool_search(registry, call, &args);
+            (m, ok, None)
+        }
+        _ => execute_regular::execute_regular_tool_with_metadata(registry, call, ctx, args).await,
     }
 }
 
@@ -413,6 +441,135 @@ mod tests {
             content.contains("Example: coaching_error({filePath:"),
             "override guidance must be appended: got `{content}`"
         );
+    }
+
+    // ----- T1.2 / T0.1 — execute_tool_call_with_metadata -----
+
+    /// Tool that emits a vision metadata block — proves the metadata
+    /// pathway plumbs end-to-end from `Tool::execute` to the new
+    /// `execute_tool_call_with_metadata` return slot.
+    struct VisionMetaTool;
+
+    #[async_trait]
+    impl Tool for VisionMetaTool {
+        fn id(&self) -> &str {
+            "vision_meta"
+        }
+        fn description(&self) -> &str {
+            "test tool that emits a vision metadata block"
+        }
+        async fn execute(
+            &self,
+            _args: serde_json::Value,
+            _ctx: &ToolContext,
+            _perm: &mut PermissionCollector,
+        ) -> Result<ToolOutput, ToolError> {
+            Ok(ToolOutput::new("ok", "image attached")
+                .with_metadata(serde_json::json!({
+                    "type": "vision_meta",
+                    "image_block": {
+                        "type": "image_url",
+                        "image_url": {"url": "https://e.x/test.png"}
+                    }
+                })))
+        }
+    }
+
+    fn vision_call() -> ToolCall {
+        ToolCall {
+            id: "call-vis".to_string(),
+            call_type: "function".to_string(),
+            function: FunctionCall {
+                name: "vision_meta".to_string(),
+                arguments: "{}".to_string(),
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn execute_tool_call_with_metadata_returns_tool_metadata() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Box::new(VisionMetaTool)).unwrap();
+
+        let (msg, ok, meta) =
+            execute_tool_call_with_metadata(&registry, &vision_call(), &test_ctx()).await;
+        assert!(ok);
+        assert!(msg.content.is_some());
+        let m = meta.expect("metadata returned");
+        assert_eq!(m["type"], "vision_meta");
+        assert_eq!(m["image_block"]["type"], "image_url");
+    }
+
+    #[tokio::test]
+    async fn execute_tool_call_with_metadata_propagates_to_image_followup() {
+        // E2E: tool emits image_block → vision_propagation builds a
+        // user-role follow-up Message with content_blocks. Proves the
+        // T1.2 ↔ T0.1 ↔ vision_propagation pipeline composes.
+        let mut registry = ToolRegistry::new();
+        registry.register(Box::new(VisionMetaTool)).unwrap();
+
+        let (_msg, _ok, meta) =
+            execute_tool_call_with_metadata(&registry, &vision_call(), &test_ctx()).await;
+        let metadata = meta.expect("metadata present");
+        let followup = crate::vision_propagation::build_image_followup(&metadata, "vision_meta")
+            .expect("followup produced");
+        assert!(followup.has_image());
+        let blocks = followup.content_blocks.as_ref().unwrap();
+        // text pointer + image
+        assert_eq!(blocks.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn execute_tool_call_with_metadata_returns_none_for_unknown_tool() {
+        let registry = ToolRegistry::new(); // empty — `unknown_tool` not registered
+        let call = ToolCall {
+            id: "c1".into(),
+            call_type: "function".into(),
+            function: FunctionCall {
+                name: "unknown_tool".into(),
+                arguments: "{}".into(),
+            },
+        };
+        let (msg, ok, meta) =
+            execute_tool_call_with_metadata(&registry, &call, &test_ctx()).await;
+        assert!(!ok);
+        assert!(meta.is_none());
+        assert!(msg.content.unwrap().contains("Unknown tool"));
+    }
+
+    #[tokio::test]
+    async fn execute_tool_call_with_metadata_returns_none_for_meta_tools() {
+        let registry = ToolRegistry::new();
+        let call = ToolCall {
+            id: "c1".into(),
+            call_type: "function".into(),
+            function: FunctionCall {
+                name: "tool_search".into(),
+                arguments: "{\"query\":\"x\"}".into(),
+            },
+        };
+        let (_msg, _ok, meta) =
+            execute_tool_call_with_metadata(&registry, &call, &test_ctx()).await;
+        // Meta-tools don't expose metadata yet — preserves the existing contract.
+        assert!(meta.is_none());
+    }
+
+    #[tokio::test]
+    async fn execute_tool_call_with_metadata_invalid_args_returns_none() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Box::new(VisionMetaTool)).unwrap();
+        let call = ToolCall {
+            id: "c1".into(),
+            call_type: "function".into(),
+            function: FunctionCall {
+                name: "vision_meta".into(),
+                arguments: "not valid json".into(), // parse fails
+            },
+        };
+        let (_msg, ok, meta) =
+            execute_tool_call_with_metadata(&registry, &call, &test_ctx()).await;
+        assert!(!ok);
+        assert!(meta.is_none());
     }
 
     #[tokio::test]

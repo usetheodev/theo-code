@@ -11,15 +11,32 @@ use theo_tooling::registry::ToolRegistry;
 
 const DEFAULT_TRUNCATION_CAP: usize = 8000;
 
-/// Execute a regular (non-meta) tool call by name. Returns an error
-/// `Message` when the tool is unknown; otherwise delegates to the
-/// `Tool::execute` trait impl and formats the output.
+/// Back-compat shim — discards metadata. Existing callers that don't
+/// need to inspect tool metadata stay on this signature.
 pub(super) async fn execute_regular_tool(
     registry: &ToolRegistry,
     call: &ToolCall,
     ctx: &ToolContext,
     args: serde_json::Value,
 ) -> (Message, bool) {
+    let (msg, ok, _meta) =
+        execute_regular_tool_with_metadata(registry, call, ctx, args).await;
+    (msg, ok)
+}
+
+/// Execute a regular (non-meta) tool call. Returns the tool_result
+/// `Message`, success flag, AND the tool's `output.metadata` JSON when
+/// the call succeeded. The metadata is the channel for sideband data
+/// like `image_block` (T1.2) — callers that wire vision propagation
+/// (T0.1) consume it via `vision_propagation::build_image_followup`.
+///
+/// On error or unknown tool, returns `None` for the metadata slot.
+pub(super) async fn execute_regular_tool_with_metadata(
+    registry: &ToolRegistry,
+    call: &ToolCall,
+    ctx: &ToolContext,
+    args: serde_json::Value,
+) -> (Message, bool, Option<serde_json::Value>) {
     let name = &call.function.name;
 
     let Some(tool) = registry.get(name) else {
@@ -27,7 +44,11 @@ pub(super) async fn execute_regular_tool(
             "Unknown tool: {name}. Available tools: {}",
             registry.ids().join(", ")
         );
-        return (Message::tool_result(&call.id, name, &error_msg), false);
+        return (
+            Message::tool_result(&call.id, name, &error_msg),
+            false,
+            None,
+        );
     };
 
     let mut permissions = PermissionCollector::new();
@@ -36,12 +57,17 @@ pub(super) async fn execute_regular_tool(
     let args_for_error = args.clone();
     match tool.execute(args, ctx, &mut permissions).await {
         Ok(output) => {
+            let metadata = if output.metadata.is_null() {
+                None
+            } else {
+                Some(output.metadata.clone())
+            };
             let body = apply_truncation(tool.truncation_rule(), &output.output);
             let result = match output.llm_suffix.as_deref() {
                 Some(suffix) if !suffix.is_empty() => format!("{body}\n\n{suffix}"),
                 _ => body,
             };
-            (Message::tool_result(&call.id, name, result), true)
+            (Message::tool_result(&call.id, name, result), true, metadata)
         }
         Err(e) => {
             // Let the tool coach the agent on how to fix the call: named
@@ -52,7 +78,7 @@ pub(super) async fn execute_regular_tool(
                 Some(guidance) => format!("Tool error: {e}\n\n{guidance}"),
                 None => format!("Tool error: {e}"),
             };
-            (Message::tool_result(&call.id, name, error_msg), false)
+            (Message::tool_result(&call.id, name, error_msg), false, None)
         }
     }
 }
