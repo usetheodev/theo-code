@@ -1,5 +1,13 @@
-// LSP tool - experimental, requires Language Server Protocol integration
-// TODO: Implement LSP operations (goToDefinition, references, hover, etc.)
+// LSP tool - experimental, requires Language Server Protocol integration.
+// T3.1 partial: protocol layer (JSON-RPC framing) implemented in
+// `protocol.rs`; full client + server discovery is the next iteration.
+
+pub mod protocol;
+
+pub use protocol::{
+    encode_frame, encode_message, try_decode_frame, InboundMessage, JsonRpcErrorObj,
+    JsonRpcNotification, JsonRpcRequest, JsonRpcResponse, LspProtocolError, RequestIdGen,
+};
 
 use async_trait::async_trait;
 use theo_domain::error::ToolError;
