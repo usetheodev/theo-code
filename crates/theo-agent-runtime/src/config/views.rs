@@ -21,7 +21,7 @@
 //! trim toward the per-file 500-line target). Views and accessors are
 //! re-exported from `mod.rs` so the public path stays byte-identical.
 
-use super::{AgentConfig, ContextConfig, LlmConfig, LoopConfig, MemoryHandle, RouterHandle};
+use super::{AgentConfig, ContextConfig, LlmConfig, LoopConfig, MemoryConfig, RouterHandle};
 
 // T3.2 PR1 — `LlmView` removed; `AgentConfig::llm()` now returns
 // `&LlmConfig` (the owned nested sub-config) directly. Field-access
@@ -35,15 +35,8 @@ use super::{AgentConfig, ContextConfig, LlmConfig, LoopConfig, MemoryHandle, Rou
 // T3.2 PR3 — `ContextView` removed; `AgentConfig::context()` now returns
 // `&ContextConfig` (the owned nested sub-config) directly.
 
-/// Memory subsystem. ≤5 fields.
-#[derive(Debug)]
-pub struct MemoryView<'a> {
-    pub enabled: bool,
-    pub provider: Option<&'a MemoryHandle>,
-    pub review_nudge_interval: usize,
-    pub reviewer: Option<&'a crate::memory_reviewer::MemoryReviewerHandle>,
-    pub transcript_indexer: Option<&'a crate::transcript_indexer::TranscriptIndexerHandle>,
-}
+// T3.2 PR4 — `MemoryView` removed; `AgentConfig::memory()` now returns
+// `&MemoryConfig` (the owned nested sub-config) directly.
 
 /// PLAN_AUTO_EVOLUTION_SOTA. ≤5 fields.
 #[derive(Debug)]
@@ -86,15 +79,10 @@ impl AgentConfig {
         &self.context
     }
 
-    /// Memory subsystem view.
-    pub fn memory(&self) -> MemoryView<'_> {
-        MemoryView {
-            enabled: self.memory_enabled,
-            provider: self.memory_provider.as_ref(),
-            review_nudge_interval: self.memory_review_nudge_interval,
-            reviewer: self.memory_reviewer.as_ref(),
-            transcript_indexer: self.transcript_indexer.as_ref(),
-        }
+    /// Memory subsystem accessor. T3.2 PR4 — returns the owned nested
+    /// `MemoryConfig` directly instead of a borrowed view.
+    pub fn memory(&self) -> &MemoryConfig {
+        &self.memory
     }
 
     /// PLAN_AUTO_EVOLUTION_SOTA view.

@@ -2,7 +2,7 @@
 //!
 //! Central dispatch for the four MemoryProvider hooks called from the
 //! agent loop. Every entry point short-circuits to a no-op when the
-//! feature flag `AgentConfig.memory_enabled` is false or when no provider
+//! feature flag `AgentConfig.memory.enabled` is false or when no provider
 //! is configured — runtime behaviour is identical to pre-RM0 in that
 //! case. Keeps the hot path in `run_engine.rs` free of explicit
 //! `if memory_enabled && provider.is_some() { ... }` noise.
@@ -61,7 +61,7 @@ impl MemoryLifecycle {
 
     fn active_handle(cfg: &AgentConfig) -> Option<&crate::config::MemoryHandle> {
         let mem = cfg.memory();
-        if mem.enabled { mem.provider } else { None }
+        if mem.enabled { mem.provider.as_ref() } else { None }
     }
 }
 
@@ -203,10 +203,13 @@ mod phase1_tests {
 
     fn cfg_with_reviewer(interval: usize, reviewer: Option<MemoryReviewerHandle>) -> AgentConfig {
         AgentConfig {
-            memory_enabled: true,
-            memory_provider: Some(crate::config::MemoryHandle::new(Arc::new(StubProvider))),
-            memory_review_nudge_interval: interval,
-            memory_reviewer: reviewer,
+            memory: crate::config::MemoryConfig {
+                enabled: true,
+                provider: Some(crate::config::MemoryHandle::new(Arc::new(StubProvider))),
+                review_nudge_interval: interval,
+                reviewer,
+                ..crate::config::MemoryConfig::default()
+            },
             ..AgentConfig::default()
         }
     }
@@ -277,7 +280,7 @@ mod phase1_tests {
             3,
             Some(MemoryReviewerHandle::new(Arc::new(NullMemoryReviewer))),
         );
-        cfg.memory_enabled = false;
+        cfg.memory.enabled = false;
         let counter = MemoryNudgeCounter::new();
         assert_eq!(
             should_trigger_memory_review(&cfg, &counter),
@@ -352,7 +355,7 @@ mod phase1_tests {
     #[test]
     fn test_ac_1_7_default_config_disables_reviewer_until_explicitly_wired() {
         let cfg = AgentConfig::default();
-        assert!(cfg.memory_reviewer.is_none());
+        assert!(cfg.memory.reviewer.is_none());
         let counter = MemoryNudgeCounter::new();
         assert_eq!(
             should_trigger_memory_review(&cfg, &counter),
@@ -425,8 +428,11 @@ mod tests {
 
     fn cfg_with(provider: Arc<dyn MemoryProvider>, enabled: bool) -> AgentConfig {
         AgentConfig {
-            memory_enabled: enabled,
-            memory_provider: Some(MemoryHandle::new(provider)),
+            memory: crate::config::MemoryConfig {
+                enabled,
+                provider: Some(MemoryHandle::new(provider)),
+                ..crate::config::MemoryConfig::default()
+            },
             ..AgentConfig::default()
         }
     }
@@ -537,8 +543,11 @@ mod tests {
     #[tokio::test]
     async fn test_rm0_bonus_enabled_without_provider_is_noop() {
         let cfg = AgentConfig {
-            memory_enabled: true,
-            memory_provider: None,
+            memory: crate::config::MemoryConfig {
+                enabled: true,
+                provider: None,
+                ..crate::config::MemoryConfig::default()
+            },
             ..AgentConfig::default()
         };
 

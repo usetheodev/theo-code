@@ -9,7 +9,7 @@ mod prompts;
 mod views;
 
 pub use views::{
-    EvolutionView, MemoryView, PluginView, RoutingView,
+    EvolutionView, PluginView, RoutingView,
 };
 pub use prompts::system_prompt_for_mode;
 
@@ -276,6 +276,48 @@ impl Default for ContextConfig {
     }
 }
 
+/// Memory subsystem sub-config. T3.2 PR4 — owned nested sub-config that
+/// replaces the 5 flat memory-related fields previously held on
+/// `AgentConfig` (find_p3_004). Field names were normalized to drop the
+/// `memory_*` prefix since the parent struct already carries that scope.
+#[derive(Debug, Clone)]
+pub struct MemoryConfig {
+    /// Master switch for the agent-memory subsystem. When `false`, every
+    /// memory lifecycle hook short-circuits to the NullMemoryProvider —
+    /// runtime behavior is identical to pre-RM0. Plan ref:
+    /// `outputs/agent-memory-plan.md` RM-pre-5.
+    pub enabled: bool,
+    /// Optional memory provider. When `Some` AND `enabled == true`,
+    /// the agent loop calls `prefetch` before each LLM call, `sync_turn`
+    /// after each completed turn, `on_pre_compress` before compaction,
+    /// and `on_session_end` at convergence/abort. Plan ref:
+    /// `outputs/agent-memory-plan.md` RM0.
+    pub provider: Option<MemoryHandle>,
+    /// PLAN_AUTO_EVOLUTION_SOTA: number of user turns between background
+    /// memory-reviewer spawns. `0` disables the nudge entirely. Default:
+    /// 10 (matches Hermes `run_agent.py:1418`).
+    pub review_nudge_interval: usize,
+    /// PLAN_AUTO_EVOLUTION_SOTA: optional reviewer invoked when the nudge
+    /// counter fires. When `None`, the nudge becomes a no-op even if
+    /// `review_nudge_interval > 0`.
+    pub reviewer: Option<crate::memory_reviewer::MemoryReviewerHandle>,
+    /// PLAN_AUTO_EVOLUTION_SOTA: optional transcript indexer. `None`
+    /// disables cross-session BM25 recall.
+    pub transcript_indexer: Option<crate::transcript_indexer::TranscriptIndexerHandle>,
+}
+
+impl Default for MemoryConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            provider: None,
+            review_nudge_interval: 10,
+            reviewer: None,
+            transcript_indexer: None,
+        }
+    }
+}
+
 /// Run-loop policy. T3.2 PR2 — owned sub-config grouping the 6
 /// run-loop fields previously held flat on AgentConfig.
 #[derive(Debug, Clone)]
@@ -312,6 +354,7 @@ impl Default for LoopConfig {
 /// T3.2 PR1 — `LlmConfig` extracted.
 /// T3.2 PR2 — `LoopConfig` extracted.
 /// T3.2 PR3 — `ContextConfig` extracted.
+/// T3.2 PR4 — `MemoryConfig` extracted.
 ///
 /// `Debug` is implemented manually so that `api_key` (now inside
 /// `LlmConfig`) renders as `Some("[REDACTED]")` / `None` instead of
@@ -327,13 +370,8 @@ pub struct AgentConfig {
     /// Capability set for this agent. Controls which tools are allowed.
     /// None = unrestricted (all tools allowed). Set by SubAgentManager for sub-agents.
     pub capability_set: Option<theo_domain::capability::CapabilitySet>,
-    /// Master switch for the agent-memory subsystem. When `false`, every
-    /// memory lifecycle hook (`prefetch`, `sync_turn`, `on_pre_compress`,
-    /// `on_session_end`) short-circuits to the NullMemoryProvider — runtime
-    /// behavior is identical to pre-RM0. When `true`, the configured
-    /// `MemoryEngine` is consulted at every hook. Plan ref:
-    /// `outputs/agent-memory-plan.md` RM-pre-5. Default: `false`.
-    pub memory_enabled: bool,
+    /// Memory subsystem sub-config. T3.2 PR4 / find_p3_004.
+    pub memory: MemoryConfig,
     /// Optional model router. When `Some`, every ChatRequest consults the
     /// router for its model + reasoning effort. When `None`, the session
     /// uses `model` / `reasoning_effort` verbatim — preserving pre-R3
@@ -342,24 +380,6 @@ pub struct AgentConfig {
     /// Wrapped in `RouterHandle` so `AgentConfig` can stay `Debug + Clone`
     /// without forcing the trait to require `Debug`.
     pub router: Option<RouterHandle>,
-    /// Optional memory provider. When `Some` AND `memory_enabled == true`,
-    /// the agent loop calls `prefetch` before each LLM call, `sync_turn`
-    /// after each completed turn, `on_pre_compress` before compaction, and
-    /// `on_session_end` at convergence/abort. When `None` OR
-    /// `memory_enabled == false`, memory hooks short-circuit to a
-    /// NullMemoryProvider (runtime behaviour identical to pre-RM0). Plan
-    /// ref: `outputs/agent-memory-plan.md` RM0.
-    pub memory_provider: Option<MemoryHandle>,
-    /// PLAN_AUTO_EVOLUTION_SOTA: number of user turns between
-    /// background memory-reviewer spawns. `0` disables the nudge entirely.
-    /// Default: 10 (matches Hermes `run_agent.py:1418` and mitigates
-    /// Issue #8506 by design — `AtomicUsize` on `RunEngine` persists
-    /// across turns).
-    pub memory_review_nudge_interval: usize,
-    /// PLAN_AUTO_EVOLUTION_SOTA: optional reviewer invoked
-    /// when the nudge counter fires. When `None`, the nudge becomes a
-    /// no-op even if `memory_review_nudge_interval > 0`.
-    pub memory_reviewer: Option<crate::memory_reviewer::MemoryReviewerHandle>,
     /// PLAN_AUTO_EVOLUTION_SOTA: enables post-session
     /// memory consolidation (autodream). Default: `true` — the actual
     /// run still respects 24h cooldown, lock file, and minimum file
@@ -382,11 +402,6 @@ pub struct AgentConfig {
     /// skill nudge counter fires. `None` disables the feature even
     /// with a positive interval.
     pub skill_reviewer: Option<crate::skill_reviewer::SkillReviewerHandle>,
-    /// PLAN_AUTO_EVOLUTION_SOTA: optional transcript
-    /// indexer. `None` disables cross-session BM25 recall; the
-    /// concrete Tantivy-backed impl lives in `theo-application` to
-    /// keep bounded contexts intact.
-    pub transcript_indexer: Option<crate::transcript_indexer::TranscriptIndexerHandle>,
     /// T1.3 supply-chain: optional pinned set of plugin manifest
     /// SHA-256 hashes. When `Some`, a plugin is only loaded if its
     /// computed `manifest_sha256` is in the set — a typo in one
@@ -483,17 +498,13 @@ impl Default for AgentConfig {
             loop_cfg: LoopConfig::default(),
             context: ContextConfig::default(),
             capability_set: None,
-            memory_enabled: false,
-            memory_provider: None,
+            memory: MemoryConfig::default(),
             router: None,
-            memory_review_nudge_interval: 10,
-            memory_reviewer: None,
             autodream_enabled: true,
             autodream_timeout_secs: 60,
             autodream: None,
             skill_review_nudge_interval: 10,
             skill_reviewer: None,
-            transcript_indexer: None,
             plugin_allowlist: None,
             // 7 days of shadow checkpoints. T3.5 / find_p5_005.
             checkpoint_ttl_seconds: 7 * 24 * 60 * 60,
@@ -580,8 +591,8 @@ mod tests {
         // T3.2 PR1 — LlmView removed (see LlmConfig in mod.rs).
         // T3.2 PR2 — LoopView removed (see LoopConfig in mod.rs).
         // T3.2 PR3 — ContextView removed (see ContextConfig in mod.rs).
+        // T3.2 PR4 — MemoryView removed (see MemoryConfig in mod.rs).
         for view in [
-            "MemoryView",
             "EvolutionView",
             "RoutingView",
             "PluginView",

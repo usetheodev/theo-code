@@ -93,7 +93,7 @@ pub async fn maybe_index_transcript(
     if cfg.loop_cfg().is_subagent || events.is_empty() {
         return;
     }
-    let Some(handle) = cfg.memory().transcript_indexer.cloned() else {
+    let Some(handle) = cfg.memory().transcript_indexer.clone() else {
         return;
     };
     let memory_dir = project_dir.join(".theo").join("memory");
@@ -122,7 +122,7 @@ pub fn maybe_spawn_reviewers(
     if matches!(
         should_trigger_memory_review(cfg, memory_counter),
         MemoryReviewTrigger::ShouldSpawn
-    ) && let Some(reviewer) = cfg.memory().reviewer.cloned()
+    ) && let Some(reviewer) = cfg.memory().reviewer.clone()
     {
         let window = recent_review_window(messages, cfg.memory().review_nudge_interval);
         // Fire-and-forget: dropping the handle detaches intentionally.

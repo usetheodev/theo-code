@@ -1232,7 +1232,7 @@ async fn resolve_agent_config(
     // for backward-compat (test_pre5_ac_1_memory_enabled_default_false).
     // Set `THEO_MEMORY=1` (or any non-empty value) to activate every hook.
     if std::env::var("THEO_MEMORY").map(|v| !v.is_empty()).unwrap_or(false) {
-        config.memory_enabled = true;
+        config.memory.enabled = true;
         eprintln!("[theo] THEO_MEMORY=1 detected — memory subsystem active");
     }
     let mut provider_name = "default".to_string();

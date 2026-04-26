@@ -56,8 +56,8 @@ impl MemoryProvider for RecordingProvider {
 
 fn cfg_enabled(provider: Arc<dyn MemoryProvider>) -> AgentConfig {
     let mut cfg = AgentConfig::default();
-    cfg.memory_enabled = true;
-    cfg.memory_provider = Some(MemoryHandle::new(provider));
+    cfg.memory.enabled = true;
+    cfg.memory.provider = Some(MemoryHandle::new(provider));
     cfg
 }
 
@@ -96,7 +96,7 @@ async fn test_t0_1_ac_2_sync_turn_inline_pairs_user_assistant() {
 async fn test_t0_1_ac_5_memory_disabled_is_zero_overhead() {
     let (provider, log) = RecordingProvider::new();
     let mut cfg = cfg_enabled(provider);
-    cfg.memory_enabled = false;
+    cfg.memory.enabled = false;
 
     let block = MemoryLifecycle::prefetch(&cfg, "q").await;
     MemoryLifecycle::sync_turn(&cfg, "u", "a").await;
@@ -127,10 +127,10 @@ fn test_t0_1_ac_6_no_dual_memory_injection_invariant() {
     // so run_engine can branch on it; the existence of this type-level
     // contract is the test artefact.
     let mut cfg = AgentConfig::default();
-    cfg.memory_enabled = true;
-    assert!(cfg.memory_enabled);
-    cfg.memory_enabled = false;
-    assert!(!cfg.memory_enabled);
+    cfg.memory.enabled = true;
+    assert!(cfg.memory.enabled);
+    cfg.memory.enabled = false;
+    assert!(!cfg.memory.enabled);
 }
 
 // ── AC-0.1.7: canonical hook sequence for a single-turn session ──────

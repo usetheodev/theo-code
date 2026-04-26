@@ -107,11 +107,14 @@ fn base_cfg(
     skill_calls: Arc<AtomicUsize>,
 ) -> AgentConfig {
     AgentConfig {
-        memory_enabled: true,
-        memory_provider: Some(MemoryHandle::new(Arc::new(StubProvider))),
-        memory_reviewer: Some(MemoryReviewerHandle::new(Arc::new(
-            RecordingMemoryReviewer { calls: mem_calls },
-        ))),
+        memory: theo_agent_runtime::config::MemoryConfig {
+            enabled: true,
+            provider: Some(MemoryHandle::new(Arc::new(StubProvider))),
+            reviewer: Some(MemoryReviewerHandle::new(Arc::new(
+                RecordingMemoryReviewer { calls: mem_calls },
+            ))),
+            ..theo_agent_runtime::config::MemoryConfig::default()
+        },
         skill_reviewer: Some(SkillReviewerHandle::new(Arc::new(
             RecordingSkillReviewer { calls: skill_calls },
         ))),
@@ -289,7 +292,7 @@ async fn phase2_autodream_spawn_via_wiring_helper_respects_disable_flag() {
 #[test]
 fn phase4_transcript_indexer_is_optional_and_defaults_to_none() {
     let cfg = AgentConfig::default();
-    assert!(cfg.transcript_indexer.is_none());
+    assert!(cfg.memory.transcript_indexer.is_none());
 }
 
 // ---------------------------------------------------------------------------
@@ -367,10 +370,13 @@ fn review_window_capped_to_avoid_reviewer_overload() {
 #[test]
 fn memory_reviewer_trigger_disabled_when_no_reviewer() {
     let cfg = AgentConfig {
-        memory_enabled: true,
-        memory_provider: Some(MemoryHandle::new(Arc::new(StubProvider))),
-        memory_reviewer: None,
-        memory_review_nudge_interval: 3,
+        memory: theo_agent_runtime::config::MemoryConfig {
+            enabled: true,
+            provider: Some(MemoryHandle::new(Arc::new(StubProvider))),
+            reviewer: None,
+            review_nudge_interval: 3,
+            ..theo_agent_runtime::config::MemoryConfig::default()
+        },
         ..AgentConfig::default()
     };
     let counter = MemoryNudgeCounter::new();

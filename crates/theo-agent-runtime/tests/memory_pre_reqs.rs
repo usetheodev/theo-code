@@ -80,7 +80,7 @@ fn test_pre4_ac_2_adr_008_exists_and_signed() {
 fn test_pre5_ac_1_memory_enabled_default_false() {
     let cfg = AgentConfig::default();
     assert!(
-        !cfg.memory_enabled,
+        !cfg.memory.enabled,
         "memory_enabled must be off by default for backward-compat"
     );
 }
@@ -88,7 +88,7 @@ fn test_pre5_ac_1_memory_enabled_default_false() {
 #[test]
 fn test_pre5_ac_2_memory_enabled_mutable_at_runtime() {
     let mut cfg = AgentConfig::default();
-    assert!(!cfg.memory_enabled);
-    cfg.memory_enabled = true;
-    assert!(cfg.memory_enabled);
+    assert!(!cfg.memory.enabled);
+    cfg.memory.enabled = true;
+    assert!(cfg.memory.enabled);
 }
