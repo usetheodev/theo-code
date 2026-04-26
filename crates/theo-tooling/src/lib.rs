@@ -4,6 +4,7 @@ pub mod batch;
 pub mod browser;
 pub mod codebase_context;
 pub mod codesearch;
+pub mod computer;
 pub mod dap;
 pub mod docs_search;
 pub mod edit;
