@@ -147,7 +147,9 @@ pub fn create_default_registry() -> ToolRegistry {
     use crate::edit::EditTool;
     use crate::glob::GlobTool;
     use crate::grep::GrepTool;
-    use crate::lsp::{LspDefinitionTool, LspSessionManager};
+    use crate::lsp::{
+        LspDefinitionTool, LspHoverTool, LspReferencesTool, LspSessionManager,
+    };
     use crate::memory::MemoryTool;
     use crate::plan::{
         AdvancePhaseTool, CreatePlanTool, GetNextTaskTool, GetPlanSummaryTool, LogEntryTool,
@@ -229,15 +231,21 @@ pub fn create_default_registry() -> ToolRegistry {
         // T15.1 — external docs RAG (empty index by default; populated
         // by future commits that wire crates.io/MDN/npm sources)
         Box::new(DocsSearchTool::new()),
-        // T3.1 — LSP definition tool. Default registry uses an empty
-        // catalogue (no PATH discovery) so the tool surfaces the same
-        // actionable error for every call until
-        // `create_default_registry_with_project` swaps in a real
-        // session manager. Keeping the tool registered in the default
-        // registry preserves the manifest invariant
+        // T3.1 — LSP tool family. Default registry uses an empty
+        // catalogue (no PATH discovery) so the tools surface the
+        // same actionable error for every call until
+        // `create_default_registry_with_project` swaps in real
+        // session managers. Keeping the tools registered in the
+        // default registry preserves the manifest invariant
         // (every DefaultRegistry entry is reachable from
         // create_default_registry).
         Box::new(LspDefinitionTool::new(std::sync::Arc::new(
+            LspSessionManager::from_catalogue(std::collections::HashMap::new()),
+        ))),
+        Box::new(LspReferencesTool::new(std::sync::Arc::new(
+            LspSessionManager::from_catalogue(std::collections::HashMap::new()),
+        ))),
+        Box::new(LspHoverTool::new(std::sync::Arc::new(
             LspSessionManager::from_catalogue(std::collections::HashMap::new()),
         ))),
         // Builtin plugins — typed operations
@@ -281,7 +289,9 @@ pub fn create_default_registry_with_project(
     use std::sync::Arc;
 
     use crate::docs_search::{DocsSearchTool, bootstrap_docs_index};
-    use crate::lsp::{LspDefinitionTool, LspSessionManager};
+    use crate::lsp::{
+        LspDefinitionTool, LspHoverTool, LspReferencesTool, LspSessionManager,
+    };
 
     let _ = project_dir; // silenced when no per-project state is wired
     let mut registry = create_default_registry();
@@ -294,15 +304,23 @@ pub fn create_default_registry_with_project(
         .expect("docs_search tool schema is valid");
 
     // T3.1 — swap the default registry's empty-catalogue
-    // LspDefinitionTool for one backed by a real PATH-discovered
-    // session manager. The shared Arc means future lsp_* tools
-    // (lsp_references, lsp_hover, lsp_rename) reuse the same
-    // spawned server processes when they land.
+    // LSP tools for ones backed by a real PATH-discovered session
+    // manager. The shared Arc means every lsp_* tool reuses the
+    // same spawned server processes (one rust-analyzer serves
+    // both lsp_definition and lsp_references on `.rs` files).
     let lsp_manager = Arc::new(LspSessionManager::from_path());
-    registry.unregister("lsp_definition");
+    for tool_id in ["lsp_definition", "lsp_references", "lsp_hover"] {
+        registry.unregister(tool_id);
+    }
     registry
         .register(Box::new(LspDefinitionTool::new(lsp_manager.clone())))
         .expect("lsp_definition tool schema is valid");
+    registry
+        .register(Box::new(LspReferencesTool::new(lsp_manager.clone())))
+        .expect("lsp_references tool schema is valid");
+    registry
+        .register(Box::new(LspHoverTool::new(lsp_manager.clone())))
+        .expect("lsp_hover tool schema is valid");
 
     registry
 }

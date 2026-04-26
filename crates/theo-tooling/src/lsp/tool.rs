@@ -265,6 +265,266 @@ impl Tool for LspDefinitionTool {
     }
 }
 
+// ---------------------------------------------------------------------------
+// `lsp_references`
+// ---------------------------------------------------------------------------
+
+/// `lsp_references` — find every reference to the symbol at a position.
+pub struct LspReferencesTool {
+    manager: Arc<LspSessionManager>,
+}
+
+impl LspReferencesTool {
+    pub fn new(manager: Arc<LspSessionManager>) -> Self {
+        Self { manager }
+    }
+}
+
+#[async_trait]
+impl Tool for LspReferencesTool {
+    fn id(&self) -> &str {
+        "lsp_references"
+    }
+
+    fn description(&self) -> &str {
+        "T3.1 — List every reference to the symbol at file_path:line:character. \
+         Uses the project's installed LSP server. Pass `include_declaration: true` \
+         to also include the declaration site (default: false — references only). \
+         Beats grep when the symbol name is shared across modules — the LSP \
+         server understands scope and returns only true references. Returns a \
+         deduplicated list of {uri, line, character} entries. \
+         Example: lsp_references({file_path: \"/abs/src/lib.rs\", line: 42, character: 12, include_declaration: true})."
+    }
+
+    fn schema(&self) -> ToolSchema {
+        position_schema(vec![ToolParam {
+            name: "include_declaration".into(),
+            param_type: "boolean".into(),
+            description:
+                "When true, the result also includes the declaration site. Default: false."
+                    .into(),
+            required: false,
+        }])
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Search
+    }
+
+    async fn execute(
+        &self,
+        args: Value,
+        ctx: &ToolContext,
+        _permissions: &mut PermissionCollector,
+    ) -> Result<ToolOutput, ToolError> {
+        let pos = PositionArgs::parse(&args)?;
+        let _ = extension_or_error(&pos.file_path)?;
+        let include_declaration = args
+            .get("include_declaration")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+
+        let client = self
+            .manager
+            .ensure_client_for(&pos.file_path, &ctx.project_dir)
+            .await
+            .map_err(map_session_error)?;
+
+        let uri = operations::path_to_uri(&pos.file_path.to_string_lossy());
+        let params = json!({
+            "textDocument": {"uri": uri},
+            "position": {"line": pos.line, "character": pos.character},
+            "context": {"includeDeclaration": include_declaration},
+        });
+        let resp = open_and_request(
+            client.as_ref(),
+            &pos.file_path,
+            "textDocument/references",
+            params,
+        )
+        .await?;
+        Ok(format_references_output(&resp, include_declaration))
+    }
+}
+
+fn format_references_output(resp: &JsonRpcResponse, include_declaration: bool) -> ToolOutput {
+    let entries = collect_locations(resp.result.as_ref());
+    if entries.is_empty() {
+        return ToolOutput::new(
+            "lsp_references: no references found",
+            "The LSP server returned no references for the requested position.",
+        )
+        .with_metadata(json!({
+            "type": "lsp_references",
+            "include_declaration": include_declaration,
+            "matched": 0,
+            "results": [],
+        }));
+    }
+    // Dedup identical (uri, line, character) tuples — some servers
+    // emit overlapping references when the call site spans multiple
+    // ranges, and the user's view shouldn't be cluttered.
+    let mut seen: std::collections::HashSet<(String, u64, u64)> =
+        std::collections::HashSet::new();
+    let entries: Vec<LocationEntry> = entries
+        .into_iter()
+        .filter(|e| seen.insert((e.uri.clone(), e.line, e.character)))
+        .collect();
+
+    let mut out = format!(
+        "lsp_references: {} reference(s){}\n\n",
+        entries.len(),
+        if include_declaration {
+            " (including declaration)"
+        } else {
+            ""
+        }
+    );
+    for (i, e) in entries.iter().enumerate() {
+        out.push_str(&format!(
+            "{rank}. {uri}:{line}:{character}\n",
+            rank = i + 1,
+            uri = e.uri,
+            line = e.line,
+            character = e.character,
+        ));
+    }
+    let meta_results: Vec<Value> = entries
+        .iter()
+        .map(|e| {
+            json!({
+                "uri": e.uri,
+                "line": e.line,
+                "character": e.character,
+            })
+        })
+        .collect();
+    ToolOutput::new(format!("lsp_references: {} hit(s)", entries.len()), out).with_metadata(
+        json!({
+            "type": "lsp_references",
+            "include_declaration": include_declaration,
+            "matched": entries.len(),
+            "results": meta_results,
+        }),
+    )
+}
+
+// ---------------------------------------------------------------------------
+// `lsp_hover`
+// ---------------------------------------------------------------------------
+
+/// `lsp_hover` — return the LSP server's documentation for a symbol.
+pub struct LspHoverTool {
+    manager: Arc<LspSessionManager>,
+}
+
+impl LspHoverTool {
+    pub fn new(manager: Arc<LspSessionManager>) -> Self {
+        Self { manager }
+    }
+}
+
+#[async_trait]
+impl Tool for LspHoverTool {
+    fn id(&self) -> &str {
+        "lsp_hover"
+    }
+
+    fn description(&self) -> &str {
+        "T3.1 — Show the LSP server's hover documentation for the symbol at \
+         file_path:line:character. Includes type signature, doc comments, and \
+         (in some servers) examples. Cheaper than reading whole files when you \
+         only need to know what a function takes / returns. \
+         Example: lsp_hover({file_path: \"/abs/src/lib.rs\", line: 42, character: 12})."
+    }
+
+    fn schema(&self) -> ToolSchema {
+        position_schema(Vec::new())
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Search
+    }
+
+    async fn execute(
+        &self,
+        args: Value,
+        ctx: &ToolContext,
+        _permissions: &mut PermissionCollector,
+    ) -> Result<ToolOutput, ToolError> {
+        let pos = PositionArgs::parse(&args)?;
+        let _ = extension_or_error(&pos.file_path)?;
+
+        let client = self
+            .manager
+            .ensure_client_for(&pos.file_path, &ctx.project_dir)
+            .await
+            .map_err(map_session_error)?;
+
+        let uri = operations::path_to_uri(&pos.file_path.to_string_lossy());
+        let params = json!({
+            "textDocument": {"uri": uri},
+            "position": {"line": pos.line, "character": pos.character},
+        });
+        let resp = open_and_request(
+            client.as_ref(),
+            &pos.file_path,
+            "textDocument/hover",
+            params,
+        )
+        .await?;
+        Ok(format_hover_output(&resp))
+    }
+}
+
+fn format_hover_output(resp: &JsonRpcResponse) -> ToolOutput {
+    let result = resp.result.as_ref();
+    let body = result.and_then(extract_hover_text).unwrap_or_default();
+    if body.is_empty() {
+        return ToolOutput::new(
+            "lsp_hover: no documentation",
+            "The LSP server returned no hover content for the requested position.",
+        )
+        .with_metadata(json!({
+            "type": "lsp_hover",
+            "matched": 0,
+            "contents": "",
+        }));
+    }
+    let preview = body.lines().next().unwrap_or("");
+    ToolOutput::new(format!("lsp_hover: {preview}"), body.clone()).with_metadata(json!({
+        "type": "lsp_hover",
+        "matched": 1,
+        "contents": body,
+    }))
+}
+
+/// Pull the displayable text out of a hover result. LSP `Hover.contents`
+/// is `MarkupContent | MarkedString | MarkedString[]`. We flatten to
+/// a newline-joined string. Unknown shapes return None.
+fn extract_hover_text(v: &Value) -> Option<String> {
+    let contents = v.get("contents")?;
+    if contents.is_null() {
+        return None;
+    }
+    Some(flatten_contents(contents))
+}
+
+fn flatten_contents(v: &Value) -> String {
+    if let Some(s) = v.as_str() {
+        return s.to_string();
+    }
+    // MarkedString { language, value }
+    if let Some(value) = v.get("value").and_then(Value::as_str) {
+        return value.to_string();
+    }
+    if let Some(arr) = v.as_array() {
+        let parts: Vec<String> = arr.iter().map(flatten_contents).collect();
+        return parts.join("\n\n");
+    }
+    String::new()
+}
+
 fn format_definition_output(resp: &JsonRpcResponse) -> ToolOutput {
     let result = resp.result.as_ref();
     // LSP `definition` returns Location | Location[] | LocationLink[] | null.
@@ -609,6 +869,219 @@ mod tests {
         };
         let out = format_definition_output(&resp);
         assert!(out.title.contains("no definition found"));
+        assert_eq!(out.metadata["matched"], 0);
+    }
+
+    // ── lsp_references ────────────────────────────────────────────
+
+    #[test]
+    fn t31lsptool_references_id_and_category() {
+        let t = LspReferencesTool::new(empty_manager());
+        assert_eq!(t.id(), "lsp_references");
+        assert_eq!(t.category(), ToolCategory::Search);
+    }
+
+    #[test]
+    fn t31lsptool_references_schema_validates_and_includes_optional_flag() {
+        let t = LspReferencesTool::new(empty_manager());
+        let schema = t.schema();
+        schema.validate().unwrap();
+        let names: Vec<_> = schema.params.iter().map(|p| p.name.as_str()).collect();
+        assert!(names.contains(&"include_declaration"));
+        let inc = schema
+            .params
+            .iter()
+            .find(|p| p.name == "include_declaration")
+            .unwrap();
+        assert!(!inc.required, "include_declaration must be optional");
+    }
+
+    #[tokio::test]
+    async fn t31lsptool_references_extensionless_file_returns_invalid_args() {
+        let t = LspReferencesTool::new(empty_manager());
+        let ctx = make_ctx(PathBuf::from("/tmp"));
+        let mut perms = PermissionCollector::new();
+        let err = t
+            .execute(
+                json!({"file_path": "/tmp/Makefile", "line": 0, "character": 0}),
+                &ctx,
+                &mut perms,
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::InvalidArgs(_)));
+    }
+
+    #[tokio::test]
+    async fn t31lsptool_references_unknown_extension_returns_actionable_error() {
+        let t = LspReferencesTool::new(empty_manager());
+        let ctx = make_ctx(PathBuf::from("/tmp"));
+        let mut perms = PermissionCollector::new();
+        let err = t
+            .execute(
+                json!({"file_path": "/tmp/x.rs", "line": 0, "character": 0}),
+                &ctx,
+                &mut perms,
+            )
+            .await
+            .unwrap_err();
+        match err {
+            ToolError::Execution(msg) => assert!(msg.contains("no LSP server installed")),
+            other => panic!("expected Execution error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn t31lsptool_format_references_includes_count_and_dedups() {
+        // Same (uri, line, character) twice — must collapse to 1.
+        let resp = JsonRpcResponse {
+            jsonrpc: "2.0".into(),
+            id: 1,
+            result: Some(json!([
+                {"uri":"file:///a","range":{"start":{"line":1,"character":2},"end":{"line":1,"character":3}}},
+                {"uri":"file:///a","range":{"start":{"line":1,"character":2},"end":{"line":1,"character":4}}},
+                {"uri":"file:///b","range":{"start":{"line":4,"character":5},"end":{"line":4,"character":6}}},
+            ])),
+            error: None,
+        };
+        let out = format_references_output(&resp, false);
+        assert_eq!(out.metadata["matched"], 2, "duplicate (a,1,2) collapses");
+        assert!(out.output.contains("file:///a:1:2"));
+        assert!(out.output.contains("file:///b:4:5"));
+    }
+
+    #[test]
+    fn t31lsptool_format_references_with_declaration_marks_metadata() {
+        let resp = JsonRpcResponse {
+            jsonrpc: "2.0".into(),
+            id: 1,
+            result: Some(json!([
+                {"uri":"file:///a","range":{"start":{"line":1,"character":2},"end":{"line":1,"character":3}}},
+            ])),
+            error: None,
+        };
+        let out = format_references_output(&resp, true);
+        assert_eq!(out.metadata["include_declaration"], true);
+        assert!(out.output.contains("(including declaration)"));
+    }
+
+    #[test]
+    fn t31lsptool_format_references_handles_no_results_gracefully() {
+        let resp = JsonRpcResponse {
+            jsonrpc: "2.0".into(),
+            id: 1,
+            result: Some(serde_json::Value::Null),
+            error: None,
+        };
+        let out = format_references_output(&resp, false);
+        assert!(out.title.contains("no references found"));
+        assert_eq!(out.metadata["matched"], 0);
+    }
+
+    // ── lsp_hover ─────────────────────────────────────────────────
+
+    #[test]
+    fn t31lsptool_hover_id_and_category() {
+        let t = LspHoverTool::new(empty_manager());
+        assert_eq!(t.id(), "lsp_hover");
+        assert_eq!(t.category(), ToolCategory::Search);
+    }
+
+    #[test]
+    fn t31lsptool_hover_schema_validates() {
+        let t = LspHoverTool::new(empty_manager());
+        t.schema().validate().unwrap();
+    }
+
+    #[tokio::test]
+    async fn t31lsptool_hover_unknown_extension_returns_actionable_error() {
+        let t = LspHoverTool::new(empty_manager());
+        let ctx = make_ctx(PathBuf::from("/tmp"));
+        let mut perms = PermissionCollector::new();
+        let err = t
+            .execute(
+                json!({"file_path": "/tmp/x.rs", "line": 0, "character": 0}),
+                &ctx,
+                &mut perms,
+            )
+            .await
+            .unwrap_err();
+        match err {
+            ToolError::Execution(msg) => assert!(msg.contains("no LSP server installed")),
+            other => panic!("expected Execution error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn t31lsptool_extract_hover_text_handles_markup_content() {
+        // MarkupContent { kind: "markdown", value: "..." }
+        let v = json!({
+            "contents": {"kind": "markdown", "value": "fn foo(x: u32) -> bool"}
+        });
+        let text = extract_hover_text(&v).unwrap();
+        assert_eq!(text, "fn foo(x: u32) -> bool");
+    }
+
+    #[test]
+    fn t31lsptool_extract_hover_text_handles_marked_string_array() {
+        // MarkedString[] — older LSP servers (deprecated but real).
+        let v = json!({
+            "contents": [
+                {"language": "rust", "value": "fn foo(x: u32) -> bool"},
+                "Returns true when even.",
+            ]
+        });
+        let text = extract_hover_text(&v).unwrap();
+        assert!(text.contains("fn foo(x: u32) -> bool"));
+        assert!(text.contains("Returns true when even."));
+    }
+
+    #[test]
+    fn t31lsptool_extract_hover_text_handles_plain_string() {
+        // MarkedString as a bare string (legacy).
+        let v = json!({"contents": "plain doc string"});
+        let text = extract_hover_text(&v).unwrap();
+        assert_eq!(text, "plain doc string");
+    }
+
+    #[test]
+    fn t31lsptool_extract_hover_text_returns_none_for_null() {
+        let v = json!({"contents": null});
+        assert!(extract_hover_text(&v).is_none());
+    }
+
+    #[test]
+    fn t31lsptool_extract_hover_text_returns_none_for_missing_contents() {
+        let v = json!({"unrelated": "field"});
+        assert!(extract_hover_text(&v).is_none());
+    }
+
+    #[test]
+    fn t31lsptool_format_hover_uses_first_line_as_title() {
+        let resp = JsonRpcResponse {
+            jsonrpc: "2.0".into(),
+            id: 1,
+            result: Some(json!({
+                "contents": {"kind":"markdown","value":"fn first_line\nbody continues"}
+            })),
+            error: None,
+        };
+        let out = format_hover_output(&resp);
+        assert!(out.title.contains("fn first_line"));
+        assert_eq!(out.metadata["matched"], 1);
+        assert_eq!(out.metadata["contents"], "fn first_line\nbody continues");
+    }
+
+    #[test]
+    fn t31lsptool_format_hover_handles_empty_response_gracefully() {
+        let resp = JsonRpcResponse {
+            jsonrpc: "2.0".into(),
+            id: 1,
+            result: Some(serde_json::Value::Null),
+            error: None,
+        };
+        let out = format_hover_output(&resp);
+        assert!(out.title.contains("no documentation"));
         assert_eq!(out.metadata["matched"], 0);
     }
 }

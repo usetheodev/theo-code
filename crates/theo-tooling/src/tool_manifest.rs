@@ -164,6 +164,20 @@ pub const TOOL_MANIFEST: &[ToolManifestEntry] = &[
         notes: "T3.1 — LSP `textDocument/definition` via LspSessionManager. Spawns + initialises native servers (rust-analyzer, pyright, gopls, tsserver, clangd). Wired by create_default_registry_with_project; missing servers surface as actionable execution errors.",
     },
     ToolManifestEntry {
+        id: "lsp_references",
+        exposure: ToolExposure::DefaultRegistry,
+        status: ToolStatus::Implemented,
+        owner: "theo-tooling",
+        notes: "T3.1 — LSP `textDocument/references` via LspSessionManager. Optional `include_declaration` flag. Dedupes overlapping ranges. Shares the spawned servers with lsp_definition.",
+    },
+    ToolManifestEntry {
+        id: "lsp_hover",
+        exposure: ToolExposure::DefaultRegistry,
+        status: ToolStatus::Implemented,
+        owner: "theo-tooling",
+        notes: "T3.1 — LSP `textDocument/hover` via LspSessionManager. Normalises MarkupContent / MarkedString / MarkedString[] into a flat doc string. Cheaper than reading whole files when the agent only needs a signature.",
+    },
+    ToolManifestEntry {
         id: "memory",
         exposure: ToolExposure::DefaultRegistry,
         status: ToolStatus::Implemented,
