@@ -13,6 +13,7 @@ pub mod client;
 pub mod discovery;
 pub mod operations;
 pub mod protocol;
+pub mod session_manager;
 
 pub use client::{DapClient, DapClientError};
 pub use discovery::{discover as discover_adapters, DiscoveredAdapter};
@@ -20,3 +21,4 @@ pub use protocol::{
     encode_frame, encode_message, try_decode_frame, DapEvent, DapMessage, DapProtocolError,
     DapRequest, DapResponse, DapSeqGen,
 };
+pub use session_manager::{DapSessionError, DapSessionManager};
