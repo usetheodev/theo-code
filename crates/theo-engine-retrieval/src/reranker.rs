@@ -138,6 +138,48 @@ pub use inner::CrossEncoderReranker;
 #[cfg(test)]
 use inner::build_rerank_document;
 
+/// Runtime gate + tuning for the cross-encoder reranker.
+///
+/// T8.1 — The reranker module is always compiled, but whether to
+/// INVOKE it on a given retrieval is a runtime config decision.
+/// `use_reranker = true` is the SOTA-default (≈+15pt nDCG@10 vs
+/// plain RRF in the plan's A/B target); set `false` to fall back to
+/// pure RRF for cost-sensitive paths.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CrossEncoderConfig {
+    /// Master switch. `false` = skip the reranker stage entirely
+    /// (pipeline returns the RRF top-K unchanged).
+    pub use_reranker: bool,
+    /// Final number of files returned after reranking.
+    pub top_k: usize,
+    /// Cap on candidates fed to the cross-encoder. Higher = better
+    /// recall but slower (~10ms/doc). 50 is the SOTA default.
+    pub max_candidates: usize,
+}
+
+impl Default for CrossEncoderConfig {
+    fn default() -> Self {
+        Self {
+            // SOTA-default: reranker on. Set explicitly so a future
+            // refactor that drops `Default` makes the choice visible.
+            use_reranker: true,
+            top_k: 20,
+            max_candidates: 50,
+        }
+    }
+}
+
+impl CrossEncoderConfig {
+    /// Cost-sensitive preset: skip the reranker entirely.
+    pub fn rrf_only() -> Self {
+        Self {
+            use_reranker: false,
+            top_k: 20,
+            max_candidates: 50,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -311,6 +353,39 @@ mod tests {
         let doc = build_rerank_document(&graph, "nonexistent/file.rs");
         // Falls back to just the path (no node in graph).
         assert!(doc.contains("nonexistent/file.rs"));
+    }
+
+    #[test]
+    fn t81cfg_default_enables_reranker() {
+        // SOTA-default invariant: a fresh CrossEncoderConfig must
+        // ship with use_reranker = true. Regression here would
+        // silently revert the SOTA gain, so the test is explicit.
+        let cfg = CrossEncoderConfig::default();
+        assert!(
+            cfg.use_reranker,
+            "Default::default() must have use_reranker = true (SOTA gate)"
+        );
+        assert!(cfg.top_k > 0);
+        assert!(cfg.max_candidates >= cfg.top_k);
+    }
+
+    #[test]
+    fn t81cfg_rrf_only_preset_disables_reranker() {
+        let cfg = CrossEncoderConfig::rrf_only();
+        assert!(!cfg.use_reranker);
+        // Other tunables remain reasonable so a caller switching to
+        // RRF-only still gets the same shape of output.
+        assert!(cfg.top_k > 0);
+        assert!(cfg.max_candidates >= cfg.top_k);
+    }
+
+    #[test]
+    fn t81cfg_clone_and_partialeq_round_trip() {
+        let a = CrossEncoderConfig::default();
+        let b = a.clone();
+        assert_eq!(a, b);
+        let c = CrossEncoderConfig::rrf_only();
+        assert_ne!(a, c, "default vs rrf_only must differ");
     }
 
     #[test]
