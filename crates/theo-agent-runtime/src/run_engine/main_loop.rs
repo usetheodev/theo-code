@@ -74,7 +74,7 @@ impl AgentRunEngine {
         iteration: usize,
         abort_rx: &tokio::sync::watch::Receiver<bool>,
         messages: &mut Vec<Message>,
-    ) -> Option<(bool, String)> {
+    ) -> Option<(bool, String, Option<serde_json::Value>)> {
         use theo_domain::session::{MessageId, SessionId};
         use theo_domain::tool::ToolContext;
         use theo_domain::tool_call::ToolCallState;
@@ -126,9 +126,13 @@ impl AgentRunEngine {
             .dispatch_and_execute(&tool_call_id, &self.llm.registry, &ctx)
             .await;
 
-        let (success, output) = match &tool_result {
-            Ok(r) => (r.status == ToolCallState::Succeeded, r.output.clone()),
-            Err(e) => (false, format!("Tool call error: {}", e)),
+        let (success, output, metadata) = match &tool_result {
+            Ok(r) => (
+                r.status == ToolCallState::Succeeded,
+                r.output.clone(),
+                r.metadata.clone(),
+            ),
+            Err(e) => (false, format!("Tool call error: {}", e), None),
         };
 
         // 6. Budget + metrics accounting.
@@ -144,7 +148,7 @@ impl AgentRunEngine {
             }
         }
 
-        Some((success, output))
+        Some((success, output, metadata))
     }
 
     /// Emit `RunStateChanged` marking a pre-mutation checkpoint snapshot.

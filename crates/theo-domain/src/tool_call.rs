@@ -153,6 +153,14 @@ pub struct ToolResultRecord {
     pub status: ToolCallState,
     pub error: Option<String>,
     pub duration_ms: u64,
+    /// T1.2 / T0.1 — Optional `ToolOutput.metadata` carried through so
+    /// callers building the conversation can extract sideband content
+    /// (vision blocks via
+    /// `theo_agent_runtime::vision_propagation::push_image_followup`).
+    /// `None` for legacy tools or tools that emit no metadata. Backward
+    /// compatible across persisted result records via `#[serde(default)]`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
 }
 
 // ---------------------------------------------------------------------------
@@ -331,11 +339,61 @@ mod tests {
             status: ToolCallState::Succeeded,
             error: None,
             duration_ms: 42,
+            metadata: None,
         };
         let json = serde_json::to_string(&result).unwrap();
         let back: ToolResultRecord = serde_json::from_str(&json).unwrap();
         assert_eq!(back.call_id, result.call_id);
         assert_eq!(back.status, result.status);
         assert_eq!(back.duration_ms, 42);
+    }
+
+    #[test]
+    fn t12_tool_result_record_metadata_field_default_none() {
+        // Legacy persisted records (without `metadata`) deserialize cleanly
+        // with `metadata = None` thanks to `#[serde(default)]`.
+        let json = r#"{
+            "call_id": "c-1",
+            "output": "x",
+            "status": "Succeeded",
+            "duration_ms": 10
+        }"#;
+        let r: ToolResultRecord = serde_json::from_str(json).unwrap();
+        assert!(r.metadata.is_none());
+    }
+
+    #[test]
+    fn t12_tool_result_record_metadata_serde_roundtrip() {
+        let r = ToolResultRecord {
+            call_id: CallId::new("c-2"),
+            output: "image attached".into(),
+            status: ToolCallState::Succeeded,
+            error: None,
+            duration_ms: 5,
+            metadata: Some(serde_json::json!({
+                "image_block": {"type": "image_url", "image_url": {"url": "u"}}
+            })),
+        };
+        let json = serde_json::to_string(&r).unwrap();
+        // Field IS serialized when Some.
+        assert!(json.contains("image_block"));
+        let back: ToolResultRecord = serde_json::from_str(&json).unwrap();
+        assert!(back.metadata.is_some());
+    }
+
+    #[test]
+    fn t12_tool_result_record_none_metadata_omitted_in_json() {
+        // skip_serializing_if avoids polluting persisted records with
+        // useless `"metadata": null` for the common (text-only) path.
+        let r = ToolResultRecord {
+            call_id: CallId::new("c-3"),
+            output: "x".into(),
+            status: ToolCallState::Succeeded,
+            error: None,
+            duration_ms: 1,
+            metadata: None,
+        };
+        let json = serde_json::to_string(&r).unwrap();
+        assert!(!json.contains("metadata"));
     }
 }

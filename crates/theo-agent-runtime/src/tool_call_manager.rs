@@ -165,9 +165,13 @@ impl ToolCallManager {
         };
         // Lock is released here — safe to await.
 
-        // 3. Execute tool via tool_bridge (no lock held)
+        // 3. Execute tool via tool_bridge (no lock held).
+        // T1.2 / T0.1 — use the metadata-aware dispatch so vision-emitting
+        // tools (e.g., `read_image`) can have their `image_block` propagated
+        // through `ToolResultRecord.metadata` for the conversation builder.
         let start = std::time::Instant::now();
-        let (message, success) = tool_bridge::execute_tool_call(registry, &llm_call, ctx).await;
+        let (message, success, metadata) =
+            tool_bridge::execute_tool_call_with_metadata(registry, &llm_call, ctx).await;
         let duration_ms = start.elapsed().as_millis() as u64;
 
         // 4. Determine final state
@@ -196,6 +200,7 @@ impl ToolCallManager {
             status: final_state,
             error,
             duration_ms,
+            metadata,
         };
         self.results
             .lock()

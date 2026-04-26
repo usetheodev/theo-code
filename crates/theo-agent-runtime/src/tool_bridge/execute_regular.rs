@@ -11,19 +11,6 @@ use theo_tooling::registry::ToolRegistry;
 
 const DEFAULT_TRUNCATION_CAP: usize = 8000;
 
-/// Back-compat shim — discards metadata. Existing callers that don't
-/// need to inspect tool metadata stay on this signature.
-pub(super) async fn execute_regular_tool(
-    registry: &ToolRegistry,
-    call: &ToolCall,
-    ctx: &ToolContext,
-    args: serde_json::Value,
-) -> (Message, bool) {
-    let (msg, ok, _meta) =
-        execute_regular_tool_with_metadata(registry, call, ctx, args).await;
-    (msg, ok)
-}
-
 /// Execute a regular (non-meta) tool call. Returns the tool_result
 /// `Message`, success flag, AND the tool's `output.metadata` JSON when
 /// the call succeeded. The metadata is the channel for sideband data

@@ -295,8 +295,10 @@ impl AgentRunEngine {
                 }
 
                 // Regular tool dispatch — extracted to
-                // main_loop::execute_regular_tool_call.
-                let Some((success, output)) = self
+                // main_loop::execute_regular_tool_call. The 3rd element is
+                // the tool's `ToolOutput.metadata` propagated through
+                // `ToolResultRecord.metadata` (T1.2/T0.1 — vision channel).
+                let Some((success, output, metadata)) = self
                     .execute_regular_tool_call(call, iteration, &abort_rx, &mut messages)
                     .await
                 else {
@@ -345,6 +347,18 @@ impl AgentRunEngine {
                 self.fire_sensor_for_write_tool(sensor_runner.as_ref(), call, name, success);
 
                 messages.push(result_msg);
+
+                // T1.2 / T0.1 — Append a vision follow-up user message
+                // when the tool surfaced an image_block in metadata
+                // (e.g., `read_image`). No-op when metadata is absent or
+                // doesn't carry vision content.
+                if let Some(meta) = metadata.as_ref() {
+                    crate::vision_propagation::push_image_followup(
+                        &mut messages,
+                        meta,
+                        name,
+                    );
+                }
 
                 // Post-hook — extracted to main_loop::run_post_tool_hook.
                 self.run_post_tool_hook(hook_runner.as_ref(), call).await;
