@@ -1,3 +1,4 @@
+mod cmd_skill;
 mod config;
 mod dashboard;
 mod dashboard_agents;
@@ -220,6 +221,46 @@ enum Commands {
         #[command(subcommand)]
         action: mcp_admin::McpCmd,
     },
+
+    /// T9.1 — Skill catalog: list / view / delete user-installed skills.
+    ///
+    /// Skills live under `$THEO_HOME/skills/<name>/SKILL.md` (default
+    /// `$THEO_HOME = ~/.theo`). Each skill is a directory with a
+    /// `SKILL.md` (frontmatter + body) plus optional `references/`,
+    /// `templates/`, `assets/`, `scripts/` subdirs.
+    Skill {
+        #[command(subcommand)]
+        action: SkillCmd,
+    },
+}
+
+/// T9.1 — Subcommands for `theo skill`.
+#[derive(Subcommand)]
+enum SkillCmd {
+    /// List metadata for every installed skill (tier 1 — fast).
+    List {
+        /// Output format: `text` (default) or `json`.
+        #[arg(long)]
+        format: Option<String>,
+    },
+
+    /// View the full body + linked files of one skill (tier 2).
+    View {
+        /// Skill name (matches the directory under `skills/`).
+        name: String,
+    },
+
+    /// Delete an installed skill (removes its directory under
+    /// `$THEO_HOME/skills/<name>/`). NOT a network operation —
+    /// purely local filesystem cleanup.
+    Delete {
+        /// Skill name to remove.
+        name: String,
+
+        /// Skip the confirmation prompt.
+        #[arg(long)]
+        yes: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -353,6 +394,19 @@ fn main() {
                 eprintln!("Error: {}", e);
                 std::process::exit(1);
             }
+        }
+        Some(Commands::Skill { action }) => {
+            let code = match action {
+                SkillCmd::List { format } => {
+                    let fmt = cmd_skill::ListFormat::from_str_opt(format.as_deref());
+                    cmd_skill::handle_list(fmt)
+                }
+                SkillCmd::View { name } => cmd_skill::handle_view(&name),
+                SkillCmd::Delete { name, yes } => {
+                    cmd_skill::handle_delete(&name, yes)
+                }
+            };
+            std::process::exit(code);
         }
         None => {
             // Phase 9 + 13: activate runtime features per CLI flags.

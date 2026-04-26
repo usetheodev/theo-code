@@ -41,6 +41,12 @@ pub mod agent {
     pub use theo_agent_runtime::project_config;
     // Skill registry — theo-cli TUI.
     pub use theo_agent_runtime::skill;
+    // T9.1 — Skill catalog CRUD primitives consumed by the
+    // `theo skill` CLI subcommand. The high-level use case lives at
+    // `theo_application::use_cases::skills` (list/view/theo_home).
+    pub use theo_agent_runtime::skill_catalog::{
+        delete_skill, SkillCatalogError, SkillMetadata, SkillView,
+    };
 }
 
 /// Types that apps pulled in from `theo-infra-llm` before T1.2.

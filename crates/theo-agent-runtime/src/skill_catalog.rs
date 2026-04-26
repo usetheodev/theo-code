@@ -12,10 +12,11 @@
 //! Frontmatter is a minimal `key: value` parser — avoiding a new dep
 //! (serde_yaml) per the workspace convention.
 //!
-//! Reserved for the upcoming progressive-disclosure skill plan; not yet
-//! wired into the runtime — module-level `dead_code` allow per workspace
-//! convention for future-use scaffolding.
-#![allow(dead_code)]
+//! T9.1 — Public CRUD API exposed for `theo skill list/view/install/delete`
+//! CLI subcommand and the use-case layer in `theo-application`. The
+//! module-level `#![allow(dead_code)]` previously applied to the whole
+//! module is lifted; symbols that remain genuinely unused inside the crate
+//! carry per-symbol allows with a documented rationale.
 
 use std::collections::BTreeMap;
 use std::fs;
