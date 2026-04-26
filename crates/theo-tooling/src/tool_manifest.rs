@@ -220,6 +220,13 @@ pub const TOOL_MANIFEST: &[ToolManifestEntry] = &[
         notes: "T5.1 — generate proptest scaffolding for a Rust function (no execution).",
     },
     ToolManifestEntry {
+        id: "gen_mutation_test",
+        exposure: ToolExposure::DefaultRegistry,
+        status: ToolStatus::Implemented,
+        owner: "theo-tooling",
+        notes: "T5.2 — invoke cargo-mutants and report surviving mutations (subprocess).",
+    },
+    ToolManifestEntry {
         id: "plan_summary",
         exposure: ToolExposure::DefaultRegistry,
         status: ToolStatus::Implemented,

@@ -147,7 +147,7 @@ pub fn create_default_registry() -> ToolRegistry {
     };
     use crate::read::ReadTool;
     use crate::reflect::ReflectTool;
-    use crate::test_gen::GenPropertyTestTool;
+    use crate::test_gen::{GenMutationTestTool, GenPropertyTestTool};
     use crate::think::ThinkTool;
     use crate::todo::{TaskCreateTool, TaskUpdateTool};
     use crate::webfetch::WebFetchTool;
@@ -211,8 +211,9 @@ pub fn create_default_registry() -> ToolRegistry {
         Box::new(GetPlanSummaryTool::new()),
         Box::new(GetNextTaskTool::new()),
         Box::new(ReplanTool::new()),
-        // T5.1 — auto-test-generation
+        // T5.1 / T5.2 — auto-test-generation
         Box::new(GenPropertyTestTool::new()),
+        Box::new(GenMutationTestTool::new()),
         // Builtin plugins — typed operations
         Box::new(crate::git::GitStatusTool),
         Box::new(crate::git::GitDiffTool),

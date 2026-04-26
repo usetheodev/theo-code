@@ -13,6 +13,8 @@
 //!
 //! See `docs/plans/sota-tier1-tier2-plan.md` §T5.1 + ADR D7.
 
+pub mod mutation;
 pub mod property;
 
+pub use mutation::GenMutationTestTool;
 pub use property::GenPropertyTestTool;
