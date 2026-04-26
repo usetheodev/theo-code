@@ -79,8 +79,8 @@ fn live_probe_real_run_produces_trajectory() {
     let task_id = tm.create_task(SessionId::new("s"), AgentType::Coder, "probe task".into());
     let client = LlmClient::new(&stub_url, Some("test-key".into()), "test-model");
     let mut config = AgentConfig::default();
-    config.max_iterations = 2;
-    config.is_subagent = false;
+    config.loop_cfg.max_iterations = 2;
+    config.loop_cfg.is_subagent = false;
 
     let mut engine = AgentRunEngine::new(
         task_id,

@@ -893,7 +893,7 @@ mod tests {
     #[test]
     fn doom_loop_threshold_config_exposes_default() {
         let config = AgentConfig::default();
-        assert_eq!(config.doom_loop_threshold, Some(3));
+        assert_eq!(config.loop_cfg.doom_loop_threshold, Some(3));
     }
 
     // -----------------------------------------------------------------------

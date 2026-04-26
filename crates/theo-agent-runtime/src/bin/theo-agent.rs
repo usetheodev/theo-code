@@ -155,7 +155,7 @@ async fn main() {
     }
 
     if let Some(n) = max_iter {
-        config.max_iterations = n;
+        config.loop_cfg.max_iterations = n;
     }
 
     eprintln!("╔══════════════════════════════════╗");
@@ -171,7 +171,7 @@ async fn main() {
             .unwrap_or(&config.llm.base_url)
     );
     eprintln!("║ Repo:  {:<24} ║", repo);
-    eprintln!("║ Max:   {:<24} ║", config.max_iterations);
+    eprintln!("║ Max:   {:<24} ║", config.loop_cfg.max_iterations);
     eprintln!("╚══════════════════════════════════╝");
     eprintln!();
     eprintln!("Task: {task}");

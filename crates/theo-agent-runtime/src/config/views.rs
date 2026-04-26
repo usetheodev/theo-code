@@ -23,7 +23,7 @@
 
 use std::collections::HashMap;
 
-use super::{AgentConfig, AgentMode, CompactionPolicy, LlmConfig, MemoryHandle, RouterHandle, ToolExecutionMode};
+use super::{AgentConfig, CompactionPolicy, LlmConfig, LoopConfig, MemoryHandle, RouterHandle};
 
 // T3.2 PR1 — `LlmView` removed; `AgentConfig::llm()` now returns
 // `&LlmConfig` (the owned nested sub-config) directly. Field-access
@@ -31,16 +31,8 @@ use super::{AgentConfig, AgentMode, CompactionPolicy, LlmConfig, MemoryHandle, R
 // previously chained `.cloned()` on `Option<&String>` now need
 // `.clone()` on `Option<String>` (migration done in T3.2 PR1 commit).
 
-/// Run-loop policy. ≤6 fields.
-#[derive(Debug)]
-pub struct LoopView<'a> {
-    pub max_iterations: usize,
-    pub mode: AgentMode,
-    pub is_subagent: bool,
-    pub doom_loop_threshold: Option<usize>,
-    pub aggressive_retry: bool,
-    pub tool_execution_mode: &'a ToolExecutionMode,
-}
+// T3.2 PR2 — `LoopView` removed; `AgentConfig::loop_cfg()` now returns
+// `&LoopConfig` (the owned nested sub-config) directly.
 
 /// Context window / compaction. ≤4 fields.
 #[derive(Debug)]
@@ -91,16 +83,9 @@ impl AgentConfig {
         &self.llm
     }
 
-    /// Run-loop policy view.
-    pub fn loop_cfg(&self) -> LoopView<'_> {
-        LoopView {
-            max_iterations: self.max_iterations,
-            mode: self.mode,
-            is_subagent: self.is_subagent,
-            doom_loop_threshold: self.doom_loop_threshold,
-            aggressive_retry: self.aggressive_retry,
-            tool_execution_mode: &self.tool_execution_mode,
-        }
+    /// Run-loop policy accessor. T3.2 PR2.
+    pub fn loop_cfg(&self) -> &LoopConfig {
+        &self.loop_cfg
     }
 
     /// Context / compaction view.

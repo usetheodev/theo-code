@@ -154,7 +154,7 @@ impl ProjectConfig {
             config.llm.temperature = temp;
         }
         if let Some(max_iter) = self.max_iterations {
-            config.max_iterations = max_iter;
+            config.loop_cfg.max_iterations = max_iter;
         }
         if let Some(max_tok) = self.max_tokens {
             config.llm.max_tokens = max_tok;
@@ -163,7 +163,7 @@ impl ProjectConfig {
             config.llm.reasoning_effort = Some(effort.clone());
         }
         if let Some(threshold) = self.doom_loop_threshold {
-            config.doom_loop_threshold = Some(threshold);
+            config.loop_cfg.doom_loop_threshold = Some(threshold);
         }
         if let Some(interval) = self.context_loop_interval {
             config.context_loop_interval = interval;
@@ -589,7 +589,7 @@ max_iterations = 50
         project.apply_to(&mut config);
 
         assert_eq!(config.llm.model, "custom-model");
-        assert_eq!(config.max_iterations, 42);
+        assert_eq!(config.loop_cfg.max_iterations, 42);
         assert_eq!(config.llm.temperature, original_temp); // unchanged
     }
 
@@ -637,11 +637,11 @@ max_iterations = 50
         let project = ProjectConfig::default();
         let mut config = AgentConfig::default();
         let original_model = config.llm.model.clone();
-        let original_max = config.max_iterations;
+        let original_max = config.loop_cfg.max_iterations;
         project.apply_to(&mut config);
 
         assert_eq!(config.llm.model, original_model);
-        assert_eq!(config.max_iterations, original_max);
+        assert_eq!(config.loop_cfg.max_iterations, original_max);
     }
 
     #[test]

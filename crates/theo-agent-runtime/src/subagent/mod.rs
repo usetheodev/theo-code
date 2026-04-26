@@ -539,10 +539,10 @@ mod tests {
         // Verify that sub-agent configs are marked as sub-agents (is_subagent=true)
         // by the spawn_with_spec implementation. Indirect check via clone+set.
         let config = AgentConfig::default();
-        assert!(!config.is_subagent, "parent config must not be sub-agent");
+        assert!(!config.loop_cfg.is_subagent, "parent config must not be sub-agent");
         let mut sub_config = config.clone();
-        sub_config.is_subagent = true;
-        assert!(sub_config.is_subagent, "sub-agent config must be marked");
+        sub_config.loop_cfg.is_subagent = true;
+        assert!(sub_config.loop_cfg.is_subagent, "sub-agent config must be marked");
     }
 
     #[test]

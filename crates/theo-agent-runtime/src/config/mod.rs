@@ -9,7 +9,7 @@ mod prompts;
 mod views;
 
 pub use views::{
-    ContextView, EvolutionView, LoopView, MemoryView, PluginView, RoutingView,
+    ContextView, EvolutionView, MemoryView, PluginView, RoutingView,
 };
 pub use prompts::system_prompt_for_mode;
 
@@ -250,10 +250,41 @@ impl std::fmt::Debug for LlmConfig {
     }
 }
 
+/// Run-loop policy. T3.2 PR2 — owned sub-config grouping the 6
+/// run-loop fields previously held flat on AgentConfig.
+#[derive(Debug, Clone)]
+pub struct LoopConfig {
+    /// Maximum number of iterations before stopping.
+    pub max_iterations: usize,
+    /// Agent interaction mode (Agent, Plan, Ask). Controls runtime guards.
+    pub mode: AgentMode,
+    /// Whether this agent is a sub-agent.
+    pub is_subagent: bool,
+    /// Doom loop detection threshold.
+    pub doom_loop_threshold: Option<usize>,
+    /// Use aggressive retry policy (5 retries, 10-120s) for rate limits.
+    pub aggressive_retry: bool,
+    /// How tool calls within a single LLM response are executed.
+    pub tool_execution_mode: ToolExecutionMode,
+}
+
+impl Default for LoopConfig {
+    fn default() -> Self {
+        Self {
+            max_iterations: 200,
+            mode: AgentMode::default(),
+            is_subagent: false,
+            doom_loop_threshold: Some(3),
+            aggressive_retry: false,
+            tool_execution_mode: ToolExecutionMode::default(),
+        }
+    }
+}
+
 /// Configuration for the agent loop.
 ///
-/// T3.2 PR1 — `LlmConfig` extracted as owned nested sub-config.
-/// Remaining flat fields will follow in PR2-PR7.
+/// T3.2 PR1 — `LlmConfig` extracted.
+/// T3.2 PR2 — `LoopConfig` extracted.
 ///
 /// `Debug` is implemented manually so that `api_key` (now inside
 /// `LlmConfig`) renders as `Some("[REDACTED]")` / `None` instead of
@@ -262,38 +293,17 @@ impl std::fmt::Debug for LlmConfig {
 pub struct AgentConfig {
     /// LLM connection + sampling sub-config. T3.2 PR1 / find_p3_004.
     pub llm: LlmConfig,
-    /// Maximum number of iterations before stopping.
-    pub max_iterations: usize,
+    /// Run-loop policy sub-config. T3.2 PR2 / find_p3_004.
+    pub loop_cfg: LoopConfig,
     /// System prompt prepended to every conversation.
     pub system_prompt: String,
     /// Interval (in iterations) for context loop injection.
     pub context_loop_interval: usize,
-    /// Agent interaction mode (Agent, Plan, Ask). Controls runtime guards.
-    /// Default: Agent (no guards — full autonomy).
-    pub mode: AgentMode,
-    /// Whether this agent is a sub-agent. Sub-agents do NOT receive delegation
-    /// meta-tools (subagent, subagent_parallel, skill) or skills summary injection.
-    /// This prevents recursive spawning. Default: false.
-    pub is_subagent: bool,
     /// Capability set for this agent. Controls which tools are allowed.
     /// None = unrestricted (all tools allowed). Set by SubAgentManager for sub-agents.
     pub capability_set: Option<theo_domain::capability::CapabilitySet>,
-    /// Doom loop detection threshold. If the same tool call (name + args) is
-    /// repeated this many times consecutively, a warning is injected.
-    /// None = disabled. Default: Some(3).
-    pub doom_loop_threshold: Option<usize>,
     /// Context window size in tokens for the target model.
-    /// Used by compaction to decide when to compress history.
-    /// Default: 128_000 (covers most modern models).
     pub context_window_tokens: usize,
-    /// How tool calls within a single LLM response are executed.
-    /// Sequential = one at a time (default). Parallel = concurrent dispatch.
-    /// See [`ToolExecutionMode`] for details on the parallel strategy.
-    pub tool_execution_mode: ToolExecutionMode,
-    /// Use aggressive retry policy (5 retries, 10-120s delays) for rate limits.
-    /// Useful in headless/benchmark mode where losing an instance to a transient
-    /// rate limit is expensive. Default: false (uses standard 3 retries, 1-30s).
-    pub aggressive_retry: bool,
     /// Compaction policy — centralized parameters for context compaction.
     /// Default matches the previously hardcoded constants.
     pub compaction_policy: CompactionPolicy,
@@ -383,10 +393,10 @@ pub struct AgentConfig {
 impl std::fmt::Debug for AgentConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AgentConfig")
-            .field("max_iterations", &self.max_iterations)
-            // T3.2 PR1 — LLM connection moved to nested LlmConfig.
-            // Its own manual Debug impl redacts api_key.
+            // T3.2 PR1+PR2 — LLM connection + run-loop policy moved to
+            // nested sub-configs. LlmConfig's own Debug impl redacts api_key.
             .field("llm", &self.llm)
+            .field("loop_cfg", &self.loop_cfg)
             // The remaining fields are large and not security-sensitive;
             // we render them via a single non-exhaustive marker so this
             // Debug impl does not need to track every future field
@@ -449,16 +459,11 @@ impl Default for AgentConfig {
     fn default() -> Self {
         Self {
             llm: LlmConfig::default(),
-            max_iterations: 200,
+            loop_cfg: LoopConfig::default(),
             system_prompt: prompts::default_system_prompt().to_string(),
             context_loop_interval: 5,
-            mode: AgentMode::default(),
-            is_subagent: false,
             capability_set: None,
-            doom_loop_threshold: Some(3),
             context_window_tokens: 128_000,
-            tool_execution_mode: ToolExecutionMode::default(),
-            aggressive_retry: false,
             compaction_policy: CompactionPolicy::default(),
             memory_enabled: false,
             memory_provider: None,
@@ -554,10 +559,9 @@ mod tests {
                 .count()
         }
 
-        // T3.2 PR1 — `LlmView` removed; the owned `LlmConfig` lives in
-        // `mod.rs` and has 8 fields (verified by t43_debug tests).
+        // T3.2 PR1 — LlmView removed (see LlmConfig in mod.rs).
+        // T3.2 PR2 — LoopView removed (see LoopConfig in mod.rs).
         for view in [
-            "LoopView",
             "ContextView",
             "MemoryView",
             "EvolutionView",
@@ -576,7 +580,7 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = AgentConfig::default();
-        assert_eq!(config.max_iterations, 200);
+        assert_eq!(config.loop_cfg.max_iterations, 200);
         assert_eq!(config.llm.temperature, 0.1);
         assert_eq!(config.context_loop_interval, 5);
         assert!(config.llm.endpoint_override.is_none());
@@ -587,7 +591,7 @@ mod tests {
     fn is_subagent_false_by_default() {
         let config = AgentConfig::default();
         assert!(
-            !config.is_subagent,
+            !config.loop_cfg.is_subagent,
             "main agents must NOT be marked as sub-agents"
         );
     }
@@ -789,7 +793,7 @@ mod tests {
     fn agent_config_default_uses_sequential_tool_execution() {
         let config = AgentConfig::default();
         assert_eq!(
-            config.tool_execution_mode,
+            config.loop_cfg.tool_execution_mode,
             ToolExecutionMode::Sequential,
             "default config must use sequential tool execution for backward compatibility"
         );

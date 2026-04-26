@@ -371,8 +371,8 @@ async fn agent_converges_when_llm_returns_text_only_first_turn() {
     let mut config = AgentConfig::default();
     config.llm.base_url = mock_url;
     config.llm.api_key = Some("test-key".to_string());
-    config.is_subagent = true;
-    config.max_iterations = 5;
+    config.loop_cfg.is_subagent = true;
+    config.loop_cfg.max_iterations = 5;
 
     let agent = AgentLoop::new(config, create_default_registry());
     let result = agent.run("trivial converge", project.path()).await;
@@ -430,8 +430,8 @@ async fn agent_converges_after_one_tool_dispatch_round_trip() {
     let mut config = AgentConfig::default();
     config.llm.base_url = mock_url;
     config.llm.api_key = Some("test-key".to_string());
-    config.is_subagent = true;
-    config.max_iterations = 5;
+    config.loop_cfg.is_subagent = true;
+    config.loop_cfg.max_iterations = 5;
 
     let agent = AgentLoop::new(config, create_default_registry());
     let result = agent.run("read the file", project.path()).await;
@@ -480,8 +480,8 @@ async fn agent_aborts_when_max_iterations_reached() {
     let mut config = AgentConfig::default();
     config.llm.base_url = mock_url;
     config.llm.api_key = Some("test-key".to_string());
-    config.is_subagent = true;
-    config.max_iterations = 2;
+    config.loop_cfg.is_subagent = true;
+    config.loop_cfg.max_iterations = 2;
 
     let agent = AgentLoop::new(config, create_default_registry());
     let result = agent.run("loop forever", project.path()).await;
@@ -537,8 +537,8 @@ async fn agent_converges_after_two_tool_calls_then_text() {
     let mut config = AgentConfig::default();
     config.llm.base_url = mock_url;
     config.llm.api_key = Some("test-key".to_string());
-    config.is_subagent = true;
-    config.max_iterations = 5;
+    config.loop_cfg.is_subagent = true;
+    config.loop_cfg.max_iterations = 5;
 
     let agent = AgentLoop::new(config, create_default_registry());
     let result = agent.run("read then glob then done", project.path()).await;
@@ -577,10 +577,10 @@ async fn agent_done_gate_force_accepts_after_max_attempts() {
     let mut config = AgentConfig::default();
     config.llm.base_url = mock_url;
     config.llm.api_key = Some("test-key".to_string());
-    config.is_subagent = true;
+    config.loop_cfg.is_subagent = true;
     // Plenty of iteration budget — the gate, not the budget, must
     // be the terminator here.
-    config.max_iterations = 10;
+    config.loop_cfg.max_iterations = 10;
 
     let agent = AgentLoop::new(config, create_default_registry());
     let result = agent.run("ask done repeatedly", project.path()).await;
@@ -630,8 +630,8 @@ async fn agent_loads_in_context_skill_then_converges() {
     let mut config = AgentConfig::default();
     config.llm.base_url = mock_url;
     config.llm.api_key = Some("test-key".to_string());
-    config.is_subagent = true;
-    config.max_iterations = 5;
+    config.loop_cfg.is_subagent = true;
+    config.loop_cfg.max_iterations = 5;
 
     let agent = AgentLoop::new(config, create_default_registry());
     let result = agent.run("commit my changes", project.path()).await;
@@ -700,8 +700,8 @@ async fn agent_continues_after_tool_failure_until_converge() {
     let mut config = AgentConfig::default();
     config.llm.base_url = mock_url;
     config.llm.api_key = Some("test-key".to_string());
-    config.is_subagent = true;
-    config.max_iterations = 5;
+    config.loop_cfg.is_subagent = true;
+    config.loop_cfg.max_iterations = 5;
 
     let agent = AgentLoop::new(config, create_default_registry());
     let result = agent.run("read file with retry", project.path()).await;
@@ -787,12 +787,12 @@ async fn agent_retries_after_503_and_succeeds() {
     let mut config = AgentConfig::default();
     config.llm.base_url = mock_url;
     config.llm.api_key = Some("test-key".to_string());
-    config.is_subagent = true;
-    config.max_iterations = 3;
+    config.loop_cfg.is_subagent = true;
+    config.loop_cfg.max_iterations = 3;
     // Aggressive retry policy keeps the test fast — the default LLM
     // policy uses larger sleeps that would push the test into
     // multi-second territory.
-    config.aggressive_retry = true;
+    config.loop_cfg.aggressive_retry = true;
 
     // Listener proves at least one retry event fires through the bus
     // (the run wires its own EventBus internally; we re-acquire one
@@ -894,8 +894,8 @@ async fn agent_recovers_from_context_overflow_then_converges() {
     let mut config = AgentConfig::default();
     config.llm.base_url = mock_url;
     config.llm.api_key = Some("test-key".to_string());
-    config.is_subagent = true;
-    config.max_iterations = 5;
+    config.loop_cfg.is_subagent = true;
+    config.loop_cfg.max_iterations = 5;
 
     let bus = Arc::new(EventBus::new());
     let recovery_counter = Arc::new(OverflowRecoveryCounter::new());
@@ -977,8 +977,8 @@ async fn agent_dispatches_batch_execute_then_converges() {
     let mut config = AgentConfig::default();
     config.llm.base_url = mock_url;
     config.llm.api_key = Some("test-key".to_string());
-    config.is_subagent = true;
-    config.max_iterations = 5;
+    config.loop_cfg.is_subagent = true;
+    config.loop_cfg.max_iterations = 5;
 
     let agent = AgentLoop::new(config, create_default_registry());
     let result = agent.run("run two globs in a batch", project.path()).await;
@@ -1096,8 +1096,8 @@ async fn agent_replays_cached_tool_result_on_resume() {
     let mut config = AgentConfig::default();
     config.llm.base_url = mock_url;
     config.llm.api_key = Some("test-key".to_string());
-    config.is_subagent = true;
-    config.max_iterations = 5;
+    config.loop_cfg.is_subagent = true;
+    config.loop_cfg.max_iterations = 5;
 
     let bus = Arc::new(EventBus::new());
     let replay_counter = Arc::new(ReplayCounter::new());
@@ -1168,8 +1168,8 @@ async fn agent_done_gate_1_blocks_then_recovers_with_text() {
     let mut config = AgentConfig::default();
     config.llm.base_url = mock_url;
     config.llm.api_key = Some("test-key".to_string());
-    config.is_subagent = true;
-    config.max_iterations = 5;
+    config.loop_cfg.is_subagent = true;
+    config.loop_cfg.max_iterations = 5;
 
     let agent = AgentLoop::new(config, create_default_registry());
     let result = agent.run("premature done", project.path()).await;
@@ -1230,8 +1230,8 @@ async fn agent_spawns_subagent_skill_then_converges() {
     let mut config = AgentConfig::default();
     config.llm.base_url = mock_url;
     config.llm.api_key = Some("test-key".to_string());
-    config.is_subagent = true;
-    config.max_iterations = 5;
+    config.loop_cfg.is_subagent = true;
+    config.loop_cfg.max_iterations = 5;
 
     let agent = AgentLoop::new(config, create_default_registry());
     let result = agent.run("invoke verifier via skill", project.path()).await;
@@ -1356,9 +1356,9 @@ async fn agent_done_gate_2_blocks_via_cargo_then_force_accepts() {
     let mut config = AgentConfig::default();
     config.llm.base_url = mock_url;
     config.llm.api_key = Some("test-key".to_string());
-    config.is_subagent = true;
+    config.loop_cfg.is_subagent = true;
     // Generous budget: 1 write + ≥4 done() iterations + safety margin.
-    config.max_iterations = 20;
+    config.loop_cfg.max_iterations = 20;
 
     let agent = AgentLoop::new(config, create_default_registry());
     let result = agent.run("break Cargo.toml then claim done", project_path).await;
@@ -1436,8 +1436,8 @@ async fn agent_dispatches_batch_with_26_calls_truncates_at_max() {
     let mut config = AgentConfig::default();
     config.llm.base_url = mock_url;
     config.llm.api_key = Some("test-key".to_string());
-    config.is_subagent = true;
-    config.max_iterations = 5;
+    config.loop_cfg.is_subagent = true;
+    config.loop_cfg.max_iterations = 5;
 
     let agent = AgentLoop::new(config, create_default_registry());
     let result = agent.run("submit 26 batch sub-calls", project.path()).await;
