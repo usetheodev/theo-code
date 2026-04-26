@@ -145,6 +145,7 @@ pub fn create_default_registry() -> ToolRegistry {
         AdvancePhaseTool, CreatePlanTool, GetNextTaskTool, GetPlanSummaryTool, LogEntryTool,
         ReplanTool, UpdateTaskTool,
     };
+    use crate::docs_search::DocsSearchTool;
     use crate::read::ReadTool;
     use crate::read_image::ReadImageTool;
     use crate::reflect::ReflectTool;
@@ -217,6 +218,9 @@ pub fn create_default_registry() -> ToolRegistry {
         Box::new(GenMutationTestTool::new()),
         // T1.2 — multimodal: load images as vision blocks
         Box::new(ReadImageTool::new()),
+        // T15.1 — external docs RAG (empty index by default; populated
+        // by future commits that wire crates.io/MDN/npm sources)
+        Box::new(DocsSearchTool::new()),
         // Builtin plugins — typed operations
         Box::new(crate::git::GitStatusTool),
         Box::new(crate::git::GitDiffTool),

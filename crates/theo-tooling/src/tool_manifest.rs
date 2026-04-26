@@ -234,6 +234,13 @@ pub const TOOL_MANIFEST: &[ToolManifestEntry] = &[
         notes: "T1.2 — load PNG/JPEG/WebP/GIF as base64 vision block; magic-byte MIME detection; 20 MiB cap.",
     },
     ToolManifestEntry {
+        id: "docs_search",
+        exposure: ToolExposure::DefaultRegistry,
+        status: ToolStatus::Partial,
+        owner: "theo-tooling",
+        notes: "T15.1 partial — in-memory inverted index + DocSource trait; crates.io/MDN/npm fetchers deferred (need network + cache).",
+    },
+    ToolManifestEntry {
         id: "plan_summary",
         exposure: ToolExposure::DefaultRegistry,
         status: ToolStatus::Implemented,

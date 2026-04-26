@@ -3,6 +3,7 @@ pub mod bash;
 pub mod batch;
 pub mod codebase_context;
 pub mod codesearch;
+pub mod docs_search;
 pub mod edit;
 pub mod env_info;
 pub mod external_directory;
