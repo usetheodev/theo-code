@@ -146,6 +146,7 @@ pub fn create_default_registry() -> ToolRegistry {
         ReplanTool, UpdateTaskTool,
     };
     use crate::read::ReadTool;
+    use crate::read_image::ReadImageTool;
     use crate::reflect::ReflectTool;
     use crate::test_gen::{GenMutationTestTool, GenPropertyTestTool};
     use crate::think::ThinkTool;
@@ -214,6 +215,8 @@ pub fn create_default_registry() -> ToolRegistry {
         // T5.1 / T5.2 — auto-test-generation
         Box::new(GenPropertyTestTool::new()),
         Box::new(GenMutationTestTool::new()),
+        // T1.2 — multimodal: load images as vision blocks
+        Box::new(ReadImageTool::new()),
         // Builtin plugins — typed operations
         Box::new(crate::git::GitStatusTool),
         Box::new(crate::git::GitDiffTool),

@@ -227,6 +227,13 @@ pub const TOOL_MANIFEST: &[ToolManifestEntry] = &[
         notes: "T5.2 — invoke cargo-mutants and report surviving mutations (subprocess).",
     },
     ToolManifestEntry {
+        id: "read_image",
+        exposure: ToolExposure::DefaultRegistry,
+        status: ToolStatus::Implemented,
+        owner: "theo-tooling",
+        notes: "T1.2 — load PNG/JPEG/WebP/GIF as base64 vision block; magic-byte MIME detection; 20 MiB cap.",
+    },
+    ToolManifestEntry {
         id: "plan_summary",
         exposure: ToolExposure::DefaultRegistry,
         status: ToolStatus::Implemented,
