@@ -146,20 +146,21 @@ impl ProjectConfig {
     /// Merge project config into an AgentConfig.
     /// Project values override defaults. CLI args should be applied AFTER this.
     pub fn apply_to(&self, config: &mut AgentConfig) {
+        // T3.2 PR1 — LLM-related fields now live in `config.llm`.
         if let Some(ref model) = self.model {
-            config.model = model.clone();
+            config.llm.model = model.clone();
         }
         if let Some(temp) = self.temperature {
-            config.temperature = temp;
+            config.llm.temperature = temp;
         }
         if let Some(max_iter) = self.max_iterations {
             config.max_iterations = max_iter;
         }
         if let Some(max_tok) = self.max_tokens {
-            config.max_tokens = max_tok;
+            config.llm.max_tokens = max_tok;
         }
         if let Some(ref effort) = self.reasoning_effort {
-            config.reasoning_effort = Some(effort.clone());
+            config.llm.reasoning_effort = Some(effort.clone());
         }
         if let Some(threshold) = self.doom_loop_threshold {
             config.doom_loop_threshold = Some(threshold);
@@ -584,12 +585,12 @@ max_iterations = 50
         };
 
         let mut config = AgentConfig::default();
-        let original_temp = config.temperature;
+        let original_temp = config.llm.temperature;
         project.apply_to(&mut config);
 
-        assert_eq!(config.model, "custom-model");
+        assert_eq!(config.llm.model, "custom-model");
         assert_eq!(config.max_iterations, 42);
-        assert_eq!(config.temperature, original_temp); // unchanged
+        assert_eq!(config.llm.temperature, original_temp); // unchanged
     }
 
     #[test]
@@ -606,11 +607,11 @@ max_iterations = 50
         assert_eq!(project.temperature, Some(0.0), "env var should set temperature");
 
         let mut config = AgentConfig::default();
-        assert_eq!(config.temperature, 0.1, "default should be 0.1");
+        assert_eq!(config.llm.temperature, 0.1, "default should be 0.1");
 
         project.apply_to(&mut config);
         assert_eq!(
-            config.temperature, 0.0,
+            config.llm.temperature, 0.0,
             "after apply_to, temperature should be 0.0 from env var"
         );
         // EnvSnapshot::drop restores the original env automatically.
@@ -626,20 +627,20 @@ max_iterations = 50
         assert!(project.model.is_none());
 
         let mut config = AgentConfig::default();
-        let original_temp = config.temperature;
+        let original_temp = config.llm.temperature;
         project.apply_to(&mut config);
-        assert_eq!(config.temperature, original_temp, "should remain unchanged");
+        assert_eq!(config.llm.temperature, original_temp, "should remain unchanged");
     }
 
     #[test]
     fn merge_with_empty_project_config_equals_base_config() {
         let project = ProjectConfig::default();
         let mut config = AgentConfig::default();
-        let original_model = config.model.clone();
+        let original_model = config.llm.model.clone();
         let original_max = config.max_iterations;
         project.apply_to(&mut config);
 
-        assert_eq!(config.model, original_model);
+        assert_eq!(config.llm.model, original_model);
         assert_eq!(config.max_iterations, original_max);
     }
 

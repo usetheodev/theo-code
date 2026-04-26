@@ -369,8 +369,8 @@ async fn agent_converges_when_llm_returns_text_only_first_turn() {
     // The base_url points at the mock, api_key is non-None so the
     // run_agent_session guard doesn't reject.
     let mut config = AgentConfig::default();
-    config.base_url = mock_url;
-    config.api_key = Some("test-key".to_string());
+    config.llm.base_url = mock_url;
+    config.llm.api_key = Some("test-key".to_string());
     config.is_subagent = true;
     config.max_iterations = 5;
 
@@ -428,8 +428,8 @@ async fn agent_converges_after_one_tool_dispatch_round_trip() {
     let mock_url = spawn_sse_mock_multi(bodies).await;
 
     let mut config = AgentConfig::default();
-    config.base_url = mock_url;
-    config.api_key = Some("test-key".to_string());
+    config.llm.base_url = mock_url;
+    config.llm.api_key = Some("test-key".to_string());
     config.is_subagent = true;
     config.max_iterations = 5;
 
@@ -478,8 +478,8 @@ async fn agent_aborts_when_max_iterations_reached() {
     let mock_url = spawn_sse_mock_multi(bodies).await;
 
     let mut config = AgentConfig::default();
-    config.base_url = mock_url;
-    config.api_key = Some("test-key".to_string());
+    config.llm.base_url = mock_url;
+    config.llm.api_key = Some("test-key".to_string());
     config.is_subagent = true;
     config.max_iterations = 2;
 
@@ -535,8 +535,8 @@ async fn agent_converges_after_two_tool_calls_then_text() {
     let mock_url = spawn_sse_mock_multi(bodies).await;
 
     let mut config = AgentConfig::default();
-    config.base_url = mock_url;
-    config.api_key = Some("test-key".to_string());
+    config.llm.base_url = mock_url;
+    config.llm.api_key = Some("test-key".to_string());
     config.is_subagent = true;
     config.max_iterations = 5;
 
@@ -575,8 +575,8 @@ async fn agent_done_gate_force_accepts_after_max_attempts() {
     let mock_url = spawn_sse_mock_multi(bodies).await;
 
     let mut config = AgentConfig::default();
-    config.base_url = mock_url;
-    config.api_key = Some("test-key".to_string());
+    config.llm.base_url = mock_url;
+    config.llm.api_key = Some("test-key".to_string());
     config.is_subagent = true;
     // Plenty of iteration budget — the gate, not the budget, must
     // be the terminator here.
@@ -628,8 +628,8 @@ async fn agent_loads_in_context_skill_then_converges() {
     let mock_url = spawn_sse_mock_multi(bodies).await;
 
     let mut config = AgentConfig::default();
-    config.base_url = mock_url;
-    config.api_key = Some("test-key".to_string());
+    config.llm.base_url = mock_url;
+    config.llm.api_key = Some("test-key".to_string());
     config.is_subagent = true;
     config.max_iterations = 5;
 
@@ -698,8 +698,8 @@ async fn agent_continues_after_tool_failure_until_converge() {
     let mock_url = spawn_sse_mock_multi(bodies).await;
 
     let mut config = AgentConfig::default();
-    config.base_url = mock_url;
-    config.api_key = Some("test-key".to_string());
+    config.llm.base_url = mock_url;
+    config.llm.api_key = Some("test-key".to_string());
     config.is_subagent = true;
     config.max_iterations = 5;
 
@@ -785,8 +785,8 @@ async fn agent_retries_after_503_and_succeeds() {
     let project = tempfile::tempdir().expect("tempdir");
 
     let mut config = AgentConfig::default();
-    config.base_url = mock_url;
-    config.api_key = Some("test-key".to_string());
+    config.llm.base_url = mock_url;
+    config.llm.api_key = Some("test-key".to_string());
     config.is_subagent = true;
     config.max_iterations = 3;
     // Aggressive retry policy keeps the test fast — the default LLM
@@ -892,8 +892,8 @@ async fn agent_recovers_from_context_overflow_then_converges() {
     let project = tempfile::tempdir().expect("tempdir");
 
     let mut config = AgentConfig::default();
-    config.base_url = mock_url;
-    config.api_key = Some("test-key".to_string());
+    config.llm.base_url = mock_url;
+    config.llm.api_key = Some("test-key".to_string());
     config.is_subagent = true;
     config.max_iterations = 5;
 
@@ -975,8 +975,8 @@ async fn agent_dispatches_batch_execute_then_converges() {
     let mock_url = spawn_sse_mock_multi(bodies).await;
 
     let mut config = AgentConfig::default();
-    config.base_url = mock_url;
-    config.api_key = Some("test-key".to_string());
+    config.llm.base_url = mock_url;
+    config.llm.api_key = Some("test-key".to_string());
     config.is_subagent = true;
     config.max_iterations = 5;
 
@@ -1094,8 +1094,8 @@ async fn agent_replays_cached_tool_result_on_resume() {
     let mock_url = spawn_sse_mock_multi(bodies).await;
 
     let mut config = AgentConfig::default();
-    config.base_url = mock_url;
-    config.api_key = Some("test-key".to_string());
+    config.llm.base_url = mock_url;
+    config.llm.api_key = Some("test-key".to_string());
     config.is_subagent = true;
     config.max_iterations = 5;
 
@@ -1166,8 +1166,8 @@ async fn agent_done_gate_1_blocks_then_recovers_with_text() {
     let mock_url = spawn_sse_mock_multi(bodies).await;
 
     let mut config = AgentConfig::default();
-    config.base_url = mock_url;
-    config.api_key = Some("test-key".to_string());
+    config.llm.base_url = mock_url;
+    config.llm.api_key = Some("test-key".to_string());
     config.is_subagent = true;
     config.max_iterations = 5;
 
@@ -1228,8 +1228,8 @@ async fn agent_spawns_subagent_skill_then_converges() {
     let mock_url = spawn_sse_mock_multi(bodies).await;
 
     let mut config = AgentConfig::default();
-    config.base_url = mock_url;
-    config.api_key = Some("test-key".to_string());
+    config.llm.base_url = mock_url;
+    config.llm.api_key = Some("test-key".to_string());
     config.is_subagent = true;
     config.max_iterations = 5;
 
@@ -1354,8 +1354,8 @@ async fn agent_done_gate_2_blocks_via_cargo_then_force_accepts() {
     let mock_url = spawn_sse_mock_multi(bodies).await;
 
     let mut config = AgentConfig::default();
-    config.base_url = mock_url;
-    config.api_key = Some("test-key".to_string());
+    config.llm.base_url = mock_url;
+    config.llm.api_key = Some("test-key".to_string());
     config.is_subagent = true;
     // Generous budget: 1 write + ≥4 done() iterations + safety margin.
     config.max_iterations = 20;
@@ -1434,8 +1434,8 @@ async fn agent_dispatches_batch_with_26_calls_truncates_at_max() {
     let mock_url = spawn_sse_mock_multi(bodies).await;
 
     let mut config = AgentConfig::default();
-    config.base_url = mock_url;
-    config.api_key = Some("test-key".to_string());
+    config.llm.base_url = mock_url;
+    config.llm.api_key = Some("test-key".to_string());
     config.is_subagent = true;
     config.max_iterations = 5;
 

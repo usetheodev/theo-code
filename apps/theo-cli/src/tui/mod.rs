@@ -107,7 +107,7 @@ pub async fn run(
     let size = terminal.size()?;
     let mut state = TuiState::new(
         provider_name,
-        config.model.clone(),
+        config.llm.model.clone(),
         config.max_iterations,
         size.width,
         size.height,
@@ -447,23 +447,23 @@ pub async fn run(
                     &project_dir,
                 );
                 tui_log(&format!("Resolved provider: {fresh_provider}"));
-                tui_log(&format!("Model: {}", fresh_config.model));
-                tui_log(&format!("Base URL: {}", fresh_config.base_url));
-                tui_log(&format!("API key present: {}", fresh_config.api_key.is_some()));
-                tui_log(&format!("Endpoint override: {:?}", fresh_config.endpoint_override));
+                tui_log(&format!("Model: {}", fresh_config.llm.model));
+                tui_log(&format!("Base URL: {}", fresh_config.llm.base_url));
+                tui_log(&format!("API key present: {}", fresh_config.llm.api_key.is_some()));
+                tui_log(&format!("Endpoint override: {:?}", fresh_config.llm.endpoint_override));
 
                 if fresh_provider != "default" {
                     state.status.provider = fresh_provider.clone();
-                    state.status.model = fresh_config.model.clone();
+                    state.status.model = fresh_config.llm.model.clone();
                 }
 
                 // Show debug info in transcript
                 let debug_msg = format!(
                     "[debug] provider={} model={} key={} url={}",
                     &state.status.provider,
-                    &fresh_config.model,
-                    if fresh_config.api_key.is_some() { "yes" } else { "NO" },
-                    &fresh_config.base_url,
+                    &fresh_config.llm.model,
+                    if fresh_config.llm.api_key.is_some() { "yes" } else { "NO" },
+                    &fresh_config.llm.base_url,
                 );
                 app::update(&mut state, Msg::Notify(debug_msg));
 
@@ -494,9 +494,9 @@ pub async fn run(
                     let agent = injections_for_task.apply_to(AgentLoop::new(cfg.clone(), registry));
 
                     tui_log("AgentLoop created, calling run_with_history...");
-                    tui_log(&format!("  api_key len: {}", cfg.api_key.as_ref().map(|k| k.len()).unwrap_or(0)));
-                    tui_log(&format!("  base_url: {}", cfg.base_url));
-                    tui_log(&format!("  endpoint: {:?}", cfg.endpoint_override));
+                    tui_log(&format!("  api_key len: {}", cfg.llm.api_key.as_ref().map(|k| k.len()).unwrap_or(0)));
+                    tui_log(&format!("  base_url: {}", cfg.llm.base_url));
+                    tui_log(&format!("  endpoint: {:?}", cfg.llm.endpoint_override));
                     tui_log(&format!("  history msgs: {}", task_messages.len()));
 
                     let result = agent

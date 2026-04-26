@@ -118,12 +118,12 @@ async fn main() {
 
     if let Some(ref raw_url) = url {
         // Legacy mode: raw URL
-        config.base_url = raw_url.clone();
-        config.model = model.unwrap_or_else(|| std::env::var("MODEL_NAME").unwrap_or(config.model));
-        config.api_key = api_key
+        config.llm.base_url = raw_url.clone();
+        config.llm.model = model.unwrap_or_else(|| std::env::var("MODEL_NAME").unwrap_or(config.llm.model));
+        config.llm.api_key = api_key
             .or_else(|| std::env::var("OPENAI_API_KEY").ok())
             .or_else(|| std::env::var("ANTHROPIC_API_KEY").ok());
-        eprintln!("[theo] Using legacy URL: {}", config.base_url);
+        eprintln!("[theo] Using legacy URL: {}", config.llm.base_url);
     } else {
         // Provider-based resolution
         let resolved = resolve_provider(provider_id.as_deref(), &api_key).await;
@@ -131,14 +131,14 @@ async fn main() {
 
         match provider_registry.get(&resolved.provider_id) {
             Some(spec) => {
-                config.base_url = spec.base_url.to_string();
-                config.endpoint_override = Some(spec.endpoint_url());
-                config.api_key = resolved.api_key;
-                config.model = model.unwrap_or(resolved.default_model);
+                config.llm.base_url = spec.base_url.to_string();
+                config.llm.endpoint_override = Some(spec.endpoint_url());
+                config.llm.api_key = resolved.api_key;
+                config.llm.model = model.unwrap_or(resolved.default_model);
 
                 // Dynamic headers (e.g., ChatGPT-Account-Id for Codex)
                 for (k, v) in resolved.extra_headers {
-                    config.extra_headers.insert(k, v);
+                    config.llm.extra_headers.insert(k, v);
                 }
 
                 eprintln!("[theo] Provider: {} ({})", spec.display_name, spec.id);
@@ -161,13 +161,14 @@ async fn main() {
     eprintln!("╔══════════════════════════════════╗");
     eprintln!("║        theo-agent v0.1.0         ║");
     eprintln!("╠══════════════════════════════════╣");
-    eprintln!("║ Model: {:<24} ║", config.model);
+    eprintln!("║ Model: {:<24} ║", config.llm.model);
     eprintln!(
         "║ URL:   {:<24} ║",
         config
+            .llm
             .endpoint_override
             .as_deref()
-            .unwrap_or(&config.base_url)
+            .unwrap_or(&config.llm.base_url)
     );
     eprintln!("║ Repo:  {:<24} ║", repo);
     eprintln!("║ Max:   {:<24} ║", config.max_iterations);

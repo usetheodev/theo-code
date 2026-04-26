@@ -23,20 +23,13 @@
 
 use std::collections::HashMap;
 
-use super::{AgentConfig, AgentMode, CompactionPolicy, MemoryHandle, RouterHandle, ToolExecutionMode};
+use super::{AgentConfig, AgentMode, CompactionPolicy, LlmConfig, MemoryHandle, RouterHandle, ToolExecutionMode};
 
-/// LLM connection / model configuration. ≤8 fields.
-#[derive(Debug)]
-pub struct LlmView<'a> {
-    pub base_url: &'a str,
-    pub api_key: Option<&'a String>,
-    pub model: &'a str,
-    pub endpoint_override: Option<&'a String>,
-    pub extra_headers: &'a HashMap<String, String>,
-    pub max_tokens: u32,
-    pub temperature: f32,
-    pub reasoning_effort: Option<&'a String>,
-}
+// T3.2 PR1 — `LlmView` removed; `AgentConfig::llm()` now returns
+// `&LlmConfig` (the owned nested sub-config) directly. Field-access
+// syntax `config.llm().model` keeps working unchanged; sites that
+// previously chained `.cloned()` on `Option<&String>` now need
+// `.clone()` on `Option<String>` (migration done in T3.2 PR1 commit).
 
 /// Run-loop policy. ≤6 fields.
 #[derive(Debug)]
@@ -92,18 +85,10 @@ pub struct PluginView<'a> {
 }
 
 impl AgentConfig {
-    /// LLM connection view (T4.1 — read-only group accessor).
-    pub fn llm(&self) -> LlmView<'_> {
-        LlmView {
-            base_url: &self.base_url,
-            api_key: self.api_key.as_ref(),
-            model: &self.model,
-            endpoint_override: self.endpoint_override.as_ref(),
-            extra_headers: &self.extra_headers,
-            max_tokens: self.max_tokens,
-            temperature: self.temperature,
-            reasoning_effort: self.reasoning_effort.as_ref(),
-        }
+    /// LLM connection accessor. T3.2 PR1 — returns the owned nested
+    /// `LlmConfig` directly instead of a borrowed view.
+    pub fn llm(&self) -> &LlmConfig {
+        &self.llm
     }
 
     /// Run-loop policy view.

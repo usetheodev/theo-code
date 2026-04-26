@@ -80,8 +80,8 @@ fn apply_routing(
             (c.model_id, c.reasoning_effort, c.routing_reason)
         }
         None => (
-            cfg.model.clone(),
-            cfg.reasoning_effort.clone(),
+            cfg.llm.model.clone(),
+            cfg.llm.reasoning_effort.clone(),
             "no_router",
         ),
     }
@@ -94,7 +94,7 @@ fn test_r3_ac_1_run_engine_uses_router_model() {
     let choice = ModelChoice::new("anthropic", "haiku-mock", 2048);
     let (mock, _seen) = MockRouter::new(choice.clone());
     let mut cfg = AgentConfig::default();
-    cfg.model = "default-model".to_string();
+    cfg.llm.model = "default-model".to_string();
     cfg.router = Some(RouterHandle::new(Arc::new(mock)));
 
     let mut ctx = RoutingContext::new(RoutingPhase::Normal);
@@ -109,7 +109,7 @@ fn test_r3_ac_1_run_engine_uses_router_model() {
 #[test]
 fn test_r3_ac_2_none_router_preserves_session_default_model() {
     let mut cfg = AgentConfig::default();
-    cfg.model = "session-default".to_string();
+    cfg.llm.model = "session-default".to_string();
     cfg.router = None;
     let ctx = RoutingContext::new(RoutingPhase::Normal);
     let (model, _effort, reason) = apply_routing(&cfg, &ctx);
@@ -150,14 +150,14 @@ fn test_r3_ac_4_routing_does_not_mutate_session_model() {
     let choice = ModelChoice::new("anthropic", "cheap-model", 2048);
     let (mock, _seen) = MockRouter::new(choice);
     let mut cfg = AgentConfig::default();
-    cfg.model = "default".to_string();
+    cfg.llm.model = "default".to_string();
     cfg.router = Some(RouterHandle::new(Arc::new(mock)));
 
     let ctx = RoutingContext::new(RoutingPhase::Normal);
     let (model, _, _) = apply_routing(&cfg, &ctx);
     assert_eq!(model, "cheap-model");
     assert_eq!(
-        cfg.model, "default",
+        cfg.llm.model, "default",
         "router must not mutate AgentConfig.model"
     );
 }
@@ -182,7 +182,7 @@ impl ModelRouter for PanicRouter {
 fn test_r3_ac_5_router_failure_falls_back_to_session_default() {
     // Mirror the catch_unwind guard from run_engine.rs.
     let mut cfg = AgentConfig::default();
-    cfg.model = "session-default".to_string();
+    cfg.llm.model = "session-default".to_string();
     cfg.router = Some(RouterHandle::new(Arc::new(PanicRouter)));
 
     let ctx = RoutingContext::new(RoutingPhase::Normal);
@@ -194,8 +194,8 @@ fn test_r3_ac_5_router_failure_falls_back_to_session_default() {
     let (model, _, reason) = match guarded {
         Ok(value) => value,
         Err(_) => (
-            cfg.model.clone(),
-            cfg.reasoning_effort.clone(),
+            cfg.llm.model.clone(),
+            cfg.llm.reasoning_effort.clone(),
             "router_panic_fallback_default",
         ),
     };

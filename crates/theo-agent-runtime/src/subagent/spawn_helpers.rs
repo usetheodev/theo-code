@@ -430,7 +430,7 @@ impl SubAgentManager {
         sub_config.is_subagent = true;
         sub_config.capability_set = Some(spec.capability_set.clone());
         if let Some(m) = &spec.model_override {
-            sub_config.model = m.clone();
+            sub_config.llm.model = m.clone();
         }
 
         sub_config.system_prompt = if has_worktree {

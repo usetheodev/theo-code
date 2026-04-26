@@ -9,7 +9,7 @@ mod prompts;
 mod views;
 
 pub use views::{
-    ContextView, EvolutionView, LlmView, LoopView, MemoryView, PluginView, RoutingView,
+    ContextView, EvolutionView, LoopView, MemoryView, PluginView, RoutingView,
 };
 pub use prompts::system_prompt_for_mode;
 
@@ -193,16 +193,15 @@ impl Default for CompactionPolicy {
 // AgentConfig
 // ---------------------------------------------------------------------------
 
-/// Configuration for the agent loop.
+/// LLM connection / model configuration. T3.2 PR1 — owned nested
+/// sub-config that replaces the 8 flat LLM-related fields previously
+/// held on `AgentConfig` (find_p3_004).
 ///
-/// `Debug` is implemented manually so that the `api_key` field renders
-/// as `Some("[REDACTED]")` / `None` instead of the actual secret. This
-/// blocks accidental leaks via `tracing::debug!`, `dbg!`, panic
-/// backtraces, or `println!("{:#?}", config)`. T4.3 / find_p6_009.
+/// `Debug` is implemented manually so that `api_key` renders as
+/// `Some("[REDACTED]")` / `None` instead of the actual secret
+/// (T4.3 / find_p6_009).
 #[derive(Clone)]
-pub struct AgentConfig {
-    /// Maximum number of iterations before stopping.
-    pub max_iterations: usize,
+pub struct LlmConfig {
     /// LLM base URL (OpenAI-compatible).
     pub base_url: String,
     /// API key (optional, for local models).
@@ -214,16 +213,61 @@ pub struct AgentConfig {
     pub endpoint_override: Option<String>,
     /// Extra headers sent with every LLM request.
     pub extra_headers: HashMap<String, String>,
-    /// System prompt prepended to every conversation.
-    pub system_prompt: String,
     /// Maximum tokens for LLM response.
     pub max_tokens: u32,
     /// Temperature for LLM sampling.
     pub temperature: f32,
-    /// Interval (in iterations) for context loop injection.
-    pub context_loop_interval: usize,
     /// Reasoning effort for LLM: "low", "medium", "high". None = model default.
     pub reasoning_effort: Option<String>,
+}
+
+impl Default for LlmConfig {
+    fn default() -> Self {
+        Self {
+            base_url: "http://localhost:8000".to_string(),
+            api_key: None,
+            model: "default".to_string(),
+            endpoint_override: None,
+            extra_headers: HashMap::new(),
+            max_tokens: 4096,
+            temperature: 0.1,
+            reasoning_effort: None,
+        }
+    }
+}
+
+impl std::fmt::Debug for LlmConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LlmConfig")
+            .field("base_url", &self.base_url)
+            .field("api_key", &self.api_key.as_ref().map(|_| "[REDACTED]"))
+            .field("model", &self.model)
+            .field("endpoint_override", &self.endpoint_override)
+            .field("max_tokens", &self.max_tokens)
+            .field("temperature", &self.temperature)
+            .field("reasoning_effort", &self.reasoning_effort)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Configuration for the agent loop.
+///
+/// T3.2 PR1 — `LlmConfig` extracted as owned nested sub-config.
+/// Remaining flat fields will follow in PR2-PR7.
+///
+/// `Debug` is implemented manually so that `api_key` (now inside
+/// `LlmConfig`) renders as `Some("[REDACTED]")` / `None` instead of
+/// the actual secret. T4.3 / find_p6_009.
+#[derive(Clone)]
+pub struct AgentConfig {
+    /// LLM connection + sampling sub-config. T3.2 PR1 / find_p3_004.
+    pub llm: LlmConfig,
+    /// Maximum number of iterations before stopping.
+    pub max_iterations: usize,
+    /// System prompt prepended to every conversation.
+    pub system_prompt: String,
+    /// Interval (in iterations) for context loop injection.
+    pub context_loop_interval: usize,
     /// Agent interaction mode (Agent, Plan, Ask). Controls runtime guards.
     /// Default: Agent (no guards — full autonomy).
     pub mode: AgentMode,
@@ -340,12 +384,9 @@ impl std::fmt::Debug for AgentConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AgentConfig")
             .field("max_iterations", &self.max_iterations)
-            .field("base_url", &self.base_url)
-            .field(
-                "api_key",
-                &self.api_key.as_ref().map(|_| "[REDACTED]"),
-            )
-            .field("model", &self.model)
+            // T3.2 PR1 — LLM connection moved to nested LlmConfig.
+            // Its own manual Debug impl redacts api_key.
+            .field("llm", &self.llm)
             // The remaining fields are large and not security-sensitive;
             // we render them via a single non-exhaustive marker so this
             // Debug impl does not need to track every future field
@@ -407,17 +448,10 @@ impl std::fmt::Debug for RouterHandle {
 impl Default for AgentConfig {
     fn default() -> Self {
         Self {
+            llm: LlmConfig::default(),
             max_iterations: 200,
-            base_url: "http://localhost:8000".to_string(),
-            api_key: None,
-            model: "default".to_string(),
-            endpoint_override: None,
-            extra_headers: HashMap::new(),
             system_prompt: prompts::default_system_prompt().to_string(),
-            max_tokens: 4096,
-            temperature: 0.1,
             context_loop_interval: 5,
-            reasoning_effort: None,
             mode: AgentMode::default(),
             is_subagent: false,
             capability_set: None,
@@ -457,7 +491,7 @@ mod tests {
     #[test]
     fn t43_debug_redacts_api_key_when_present() {
         let mut cfg = AgentConfig::default();
-        cfg.api_key = Some("sk-ant-real-secret-do-not-leak".into());
+        cfg.llm.api_key = Some("sk-ant-real-secret-do-not-leak".into());
         let dbg = format!("{:?}", cfg);
         assert!(
             !dbg.contains("sk-ant-real-secret-do-not-leak"),
@@ -484,7 +518,7 @@ mod tests {
     #[test]
     fn t43_debug_pretty_print_does_not_leak_api_key() {
         let mut cfg = AgentConfig::default();
-        cfg.api_key = Some("sk-ant-pretty-print-secret".into());
+        cfg.llm.api_key = Some("sk-ant-pretty-print-secret".into());
         let pretty = format!("{:#?}", cfg);
         assert!(
             !pretty.contains("sk-ant-pretty-print-secret"),
@@ -520,8 +554,9 @@ mod tests {
                 .count()
         }
 
+        // T3.2 PR1 — `LlmView` removed; the owned `LlmConfig` lives in
+        // `mod.rs` and has 8 fields (verified by t43_debug tests).
         for view in [
-            "LlmView",
             "LoopView",
             "ContextView",
             "MemoryView",
@@ -542,10 +577,10 @@ mod tests {
     fn test_default_config() {
         let config = AgentConfig::default();
         assert_eq!(config.max_iterations, 200);
-        assert_eq!(config.temperature, 0.1);
+        assert_eq!(config.llm.temperature, 0.1);
         assert_eq!(config.context_loop_interval, 5);
-        assert!(config.endpoint_override.is_none());
-        assert!(config.extra_headers.is_empty());
+        assert!(config.llm.endpoint_override.is_none());
+        assert!(config.llm.extra_headers.is_empty());
     }
 
     #[test]

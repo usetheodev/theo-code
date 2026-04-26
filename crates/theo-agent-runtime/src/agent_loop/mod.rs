@@ -100,9 +100,9 @@ impl AgentLoop {
             let llm = config.llm();
             (
                 llm.base_url.to_string(),
-                llm.api_key.cloned(),
+                llm.api_key.clone(),
                 llm.model.to_string(),
-                llm.endpoint_override.cloned(),
+                llm.endpoint_override.clone(),
                 llm.extra_headers
                     .iter()
                     .map(|(k, v)| (k.clone(), v.clone()))
@@ -611,7 +611,7 @@ mod tests {
         let agent_loop = AgentLoop::new(config.clone(), registry);
 
         // Verify constructor propagates config correctly
-        assert_eq!(agent_loop.client_model, config.model);
+        assert_eq!(agent_loop.client_model, config.llm.model);
         assert!(
             agent_loop.graph_context.is_none(),
             "graph_context should be None by default"

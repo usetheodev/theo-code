@@ -79,7 +79,7 @@ impl AgentRunEngine {
             );
             // Usage + cost accounting + lesson/hypothesis pipelines.
             let mut usage = self.rt.session_token_usage.clone();
-            if let Some(c) = theo_domain::budget::known_model_cost(self.config.llm().model) {
+            if let Some(c) = theo_domain::budget::known_model_cost(&self.config.llm().model) {
                 usage.recompute_cost(&c);
             }
             summary.token_usage = Some(usage);

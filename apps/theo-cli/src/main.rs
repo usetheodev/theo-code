@@ -713,7 +713,7 @@ fn cmd_headless(
 
         // CLI flags override everything (highest precedence)
         if let Some(t) = temperature {
-            config.temperature = t;
+            config.llm.temperature = t;
         }
 
         let mode_str = mode.as_deref().unwrap_or("agent");
@@ -732,8 +732,8 @@ fn cmd_headless(
             false
         };
 
-        let model_name = config.model.clone();
-        let temperature_actual = config.temperature;
+        let model_name = config.llm.model.clone();
+        let temperature_actual = config.llm.temperature;
 
         // In headless mode, trim the system prompt to reduce per-call token overhead.
         // Remove verbose sections that don't help a single-shot benchmark task.
@@ -1253,9 +1253,9 @@ async fn resolve_agent_config(
 
     if let Some(pid) = provider_id {
         if let Some(spec) = registry.get(pid) {
-            config.base_url = spec.base_url.to_string();
-            config.endpoint_override = Some(spec.endpoint_url());
-            config.api_key = api_key.or_else(|| {
+            config.llm.base_url = spec.base_url.to_string();
+            config.llm.endpoint_override = Some(spec.endpoint_url());
+            config.llm.api_key = api_key.or_else(|| {
                 spec.api_key_env_var()
                     .and_then(|var| std::env::var(var).ok())
             });
@@ -1266,30 +1266,31 @@ async fn resolve_agent_config(
         }
     } else if oauth_applied {
         if let Some(spec) = registry.get("chatgpt-codex") {
-            config.base_url = spec.base_url.to_string();
-            config.endpoint_override = Some(spec.endpoint_url());
-            config.api_key = api_key;
+            config.llm.base_url = spec.base_url.to_string();
+            config.llm.endpoint_override = Some(spec.endpoint_url());
+            config.llm.api_key = api_key;
             provider_name = spec.display_name.to_string();
 
             let auth = theo_application::facade::auth::OpenAIAuth::with_default_store();
             if let Ok(Some(tokens)) = auth.get_tokens()
                 && let Some(ref account_id) = tokens.account_id {
                     config
+                        .llm
                         .extra_headers
                         .insert("ChatGPT-Account-Id".to_string(), account_id.clone());
                 }
         }
     } else if let Ok(key) = std::env::var("OPENAI_API_KEY")
         && let Some(spec) = registry.get("openai") {
-            config.base_url = spec.base_url.to_string();
-            config.endpoint_override = Some(spec.endpoint_url());
-            config.api_key = Some(key);
+            config.llm.base_url = spec.base_url.to_string();
+            config.llm.endpoint_override = Some(spec.endpoint_url());
+            config.llm.api_key = Some(key);
             provider_name = "OpenAI".to_string();
         }
 
     if let Some(m) = model {
-        config.model = m.to_string();
-    } else if oauth_applied && config.model == "default" {
+        config.llm.model = m.to_string();
+    } else if oauth_applied && config.llm.model == "default" {
         // Default to gpt-5.4 ("current strong everyday").
         //
         // ChatGPT-account OAuth supports a SUBSET of the catalog
@@ -1303,15 +1304,15 @@ async fn resolve_agent_config(
         // See `theo_application::use_cases::router_loader::CHATGPT_OAUTH_SUPPORTED_MODELS`
         // for the canonical allowlist + startup warning when slots
         // misconfigure to an unsupported model.
-        config.model = "gpt-5.4".to_string();
+        config.llm.model = "gpt-5.4".to_string();
     }
 
     if let Some(n) = max_iter {
         config.max_iterations = n;
     }
 
-    if config.reasoning_effort.is_none() {
-        config.reasoning_effort = Some("medium".to_string());
+    if config.llm.reasoning_effort.is_none() {
+        config.llm.reasoning_effort = Some("medium".to_string());
     }
 
     (config, provider_name)

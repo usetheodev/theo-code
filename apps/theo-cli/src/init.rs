@@ -335,7 +335,7 @@ pub async fn run_init_with_agent(
     }
 
     // Check if LLM is available
-    if config.api_key.is_none() {
+    if config.llm.api_key.is_none() {
         eprintln!("  No API key — using static template");
         let project_type = detect_project_type(project_dir);
         let project_name = detect_project_name(project_dir, project_type);

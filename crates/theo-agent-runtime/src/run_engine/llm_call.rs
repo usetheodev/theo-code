@@ -61,7 +61,7 @@ impl AgentRunEngine {
                         let llm = self.config.llm();
                         (
                             llm.model.to_string(),
-                            llm.reasoning_effort.cloned(),
+                            llm.reasoning_effort.clone(),
                             "router_panic_fallback_default",
                         )
                     }
@@ -71,7 +71,7 @@ impl AgentRunEngine {
                 let llm = self.config.llm();
                 (
                     llm.model.to_string(),
-                    llm.reasoning_effort.cloned(),
+                    llm.reasoning_effort.clone(),
                     "no_router",
                 )
             }
@@ -98,7 +98,7 @@ impl AgentRunEngine {
         // Publish LlmCallStart (triggers "Thinking..." in CLI).
         // OTel payload lets OtelExportingListener build a
         // `gen_ai.*`-attributed span.
-        let provider_hint = derive_provider_hint(self.config.llm().base_url);
+        let provider_hint = derive_provider_hint(&self.config.llm().base_url);
         let llm_start_span =
             crate::observability::otel::llm_call_span(provider_hint, chosen_model);
         self.event_bus.publish(DomainEvent::new(
@@ -225,7 +225,7 @@ impl AgentRunEngine {
             });
 
         let mut llm_end_span = crate::observability::otel::llm_call_span(
-            derive_provider_hint(self.config.llm().base_url),
+            derive_provider_hint(&self.config.llm().base_url),
             chosen_model,
         );
         llm_end_span.set(
