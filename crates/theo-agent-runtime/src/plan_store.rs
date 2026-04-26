@@ -109,11 +109,13 @@ mod tests {
                     depends_on: vec![],
                     rationale: String::new(),
                     outcome: None,
+                    assignee: None,
                 }],
             }],
             decisions: vec![],
             created_at: 1_000,
             updated_at: 1_000,
+            version_counter: 0,
         }
     }
 

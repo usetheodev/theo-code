@@ -112,6 +112,12 @@ pub struct PlanTask {
     /// foundation for feedback-loop replanning.
     #[serde(default)]
     pub outcome: Option<String>,
+    /// T7.1 — Run id of the agent that has reserved this task. `None`
+    /// means the task is available to be claimed by any worker. Set by
+    /// `Plan::claim_task` (CAS via `plan_store::save_plan_if_version`)
+    /// and cleared by `Plan::release_task` once the worker finishes.
+    #[serde(default)]
+    pub assignee: Option<String>,
 }
 
 /// Group of tasks executed together; advances one at a time.
@@ -135,6 +141,38 @@ pub struct Plan {
     pub decisions: Vec<PlanDecision>,
     pub created_at: u64,
     pub updated_at: u64,
+    /// T7.1 — Monotonic counter bumped on every successful save. Enables
+    /// optimistic concurrency control: `plan_store::save_plan_if_version`
+    /// rejects writes when the on-disk version is newer than the caller's
+    /// last read, so two agents trying to claim the same task can be
+    /// serialised by retrying.
+    #[serde(default)]
+    pub version_counter: u64,
+}
+
+// ---------------------------------------------------------------------------
+// Multi-agent claim (T7.1)
+// ---------------------------------------------------------------------------
+
+/// Outcome of a `Plan::claim_task` attempt.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ClaimResult {
+    /// Successfully reserved (or already owned by the same agent).
+    Claimed,
+    /// Another agent currently holds this task.
+    AlreadyClaimed { by: String },
+    /// The task id is not in the plan.
+    NotFound,
+    /// The task is already finished (Completed/Skipped/Failed/Blocked).
+    Terminal,
+}
+
+impl ClaimResult {
+    /// Returns true when the caller now owns the task (or already did).
+    pub fn is_owned(&self) -> bool {
+        matches!(self, ClaimResult::Claimed)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -280,6 +318,102 @@ impl Plan {
     /// Look up a phase by id (read-only).
     pub fn find_phase(&self, id: PhaseId) -> Option<&Phase> {
         self.phases.iter().find(|p| p.id == id)
+    }
+
+    /// T7.1 — Reserve a task for a specific agent. Returns `ClaimResult`:
+    ///
+    /// - `Claimed` when the task was unclaimed and now has `assignee = Some(agent)`.
+    /// - `AlreadyClaimed { by }` when another agent already holds it.
+    /// - `NotFound` when the task id is unknown.
+    /// - `Terminal` when the task is in a terminal state (Completed/Skipped/
+    ///   Failed/Blocked) — claiming finished work is a no-op.
+    ///
+    /// The plan's `version_counter` is bumped on success so callers using
+    /// `plan_store::save_plan_if_version` can detect concurrent writers.
+    pub fn claim_task(
+        &mut self,
+        task_id: PlanTaskId,
+        agent_id: impl Into<String>,
+    ) -> crate::plan::ClaimResult {
+        let agent_id = agent_id.into();
+        let task = match self.find_task_mut(task_id) {
+            Some(t) => t,
+            None => return ClaimResult::NotFound,
+        };
+        if task.status.is_terminal() {
+            return ClaimResult::Terminal;
+        }
+        if let Some(by) = &task.assignee {
+            if by == &agent_id {
+                return ClaimResult::Claimed; // idempotent self-claim
+            }
+            return ClaimResult::AlreadyClaimed { by: by.clone() };
+        }
+        task.assignee = Some(agent_id);
+        self.version_counter = self.version_counter.saturating_add(1);
+        ClaimResult::Claimed
+    }
+
+    /// T7.1 — Release a previously claimed task.
+    ///
+    /// Returns `true` if the assignee was cleared. The release is a no-op
+    /// (returning `false`) when:
+    /// - the task id is unknown
+    /// - the task wasn't claimed
+    /// - the claim belongs to a different agent (defensive — only the
+    ///   owner can release)
+    ///
+    /// Bumps `version_counter` only on actual mutation.
+    pub fn release_task(
+        &mut self,
+        task_id: PlanTaskId,
+        agent_id: impl Into<String>,
+    ) -> bool {
+        let agent_id = agent_id.into();
+        let task = match self.find_task_mut(task_id) {
+            Some(t) => t,
+            None => return false,
+        };
+        match &task.assignee {
+            Some(by) if by == &agent_id => {
+                task.assignee = None;
+                self.version_counter = self.version_counter.saturating_add(1);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// T7.1 — Iterator over tasks that are unclaimed AND `Pending` AND
+    /// have all dependencies satisfied. Used by parallel workers to pick
+    /// the next task to claim.
+    pub fn next_unclaimed_actionable_task(&self) -> Option<&PlanTask> {
+        let order = self.topological_order().ok()?;
+        let by_id: std::collections::HashMap<PlanTaskId, &PlanTask> = self
+            .all_tasks()
+            .into_iter()
+            .map(|t| (t.id, t))
+            .collect();
+
+        for id in order {
+            let task = by_id.get(&id)?;
+            if task.status != PlanTaskStatus::Pending {
+                continue;
+            }
+            if task.assignee.is_some() {
+                continue;
+            }
+            let deps_ok = task.depends_on.iter().all(|d| {
+                by_id
+                    .get(d)
+                    .map(|t| t.status.satisfies_dependency())
+                    .unwrap_or(false)
+            });
+            if deps_ok {
+                return Some(*task);
+            }
+        }
+        None
     }
 
     /// T6.1 / D4 — Apply a `PlanPatch` to mutate the plan in place.
@@ -593,6 +727,7 @@ mod tests {
             depends_on: deps.into_iter().map(PlanTaskId).collect(),
             rationale: String::new(),
             outcome: None,
+            assignee: None,
         }
     }
 
@@ -615,6 +750,7 @@ mod tests {
             decisions: vec![],
             created_at: 100,
             updated_at: 100,
+            version_counter: 0,
         }
     }
 
@@ -972,6 +1108,7 @@ mod tests {
                 depends_on: vec![],
                 rationale: "Because".into(),
                 outcome: None,
+                assignee: None,
             }],
         )]);
         let task = &plan.phases[0].tasks[0];
@@ -1208,6 +1345,192 @@ mod tests {
         // Plan unchanged.
         let t1 = plan.find_task(PlanTaskId(1)).unwrap();
         assert!(t1.depends_on.is_empty());
+    }
+
+    // ---------------------------------------------------------------------
+    // T7.1 — Multi-agent claim/release + version_counter
+    // ---------------------------------------------------------------------
+
+    #[test]
+    fn t71_claim_succeeds_when_unclaimed() {
+        let mut plan = make_plan(vec![phase(
+            1,
+            PhaseStatus::InProgress,
+            vec![task(1, PlanTaskStatus::Pending, vec![])],
+        )]);
+        let r = plan.claim_task(PlanTaskId(1), "agent-A");
+        assert_eq!(r, ClaimResult::Claimed);
+        assert_eq!(
+            plan.find_task(PlanTaskId(1)).unwrap().assignee.as_deref(),
+            Some("agent-A")
+        );
+        assert!(plan.version_counter > 0);
+    }
+
+    #[test]
+    fn t71_claim_already_held_returns_already_claimed() {
+        let mut plan = make_plan(vec![phase(
+            1,
+            PhaseStatus::InProgress,
+            vec![task(1, PlanTaskStatus::Pending, vec![])],
+        )]);
+        plan.claim_task(PlanTaskId(1), "agent-A");
+        let r = plan.claim_task(PlanTaskId(1), "agent-B");
+        match r {
+            ClaimResult::AlreadyClaimed { by } => assert_eq!(by, "agent-A"),
+            other => panic!("expected AlreadyClaimed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn t71_claim_self_is_idempotent() {
+        let mut plan = make_plan(vec![phase(
+            1,
+            PhaseStatus::InProgress,
+            vec![task(1, PlanTaskStatus::Pending, vec![])],
+        )]);
+        let _ = plan.claim_task(PlanTaskId(1), "agent-A");
+        let v_after_first = plan.version_counter;
+        let r = plan.claim_task(PlanTaskId(1), "agent-A");
+        assert_eq!(r, ClaimResult::Claimed);
+        // Second claim by same agent does NOT bump counter (no mutation).
+        assert_eq!(plan.version_counter, v_after_first);
+    }
+
+    #[test]
+    fn t71_claim_unknown_id_returns_not_found() {
+        let mut plan = make_plan(vec![phase(
+            1,
+            PhaseStatus::InProgress,
+            vec![task(1, PlanTaskStatus::Pending, vec![])],
+        )]);
+        let r = plan.claim_task(PlanTaskId(99), "agent-A");
+        assert_eq!(r, ClaimResult::NotFound);
+    }
+
+    #[test]
+    fn t71_claim_terminal_task_returns_terminal() {
+        let mut plan = make_plan(vec![phase(
+            1,
+            PhaseStatus::InProgress,
+            vec![task(1, PlanTaskStatus::Completed, vec![])],
+        )]);
+        let r = plan.claim_task(PlanTaskId(1), "agent-A");
+        assert_eq!(r, ClaimResult::Terminal);
+    }
+
+    #[test]
+    fn t71_release_clears_assignee_when_owner_matches() {
+        let mut plan = make_plan(vec![phase(
+            1,
+            PhaseStatus::InProgress,
+            vec![task(1, PlanTaskStatus::Pending, vec![])],
+        )]);
+        plan.claim_task(PlanTaskId(1), "agent-A");
+        let v_before_release = plan.version_counter;
+        assert!(plan.release_task(PlanTaskId(1), "agent-A"));
+        assert!(plan.find_task(PlanTaskId(1)).unwrap().assignee.is_none());
+        assert!(plan.version_counter > v_before_release);
+    }
+
+    #[test]
+    fn t71_release_by_different_agent_is_noop() {
+        let mut plan = make_plan(vec![phase(
+            1,
+            PhaseStatus::InProgress,
+            vec![task(1, PlanTaskStatus::Pending, vec![])],
+        )]);
+        plan.claim_task(PlanTaskId(1), "agent-A");
+        let v_before = plan.version_counter;
+        assert!(!plan.release_task(PlanTaskId(1), "agent-B"));
+        assert_eq!(
+            plan.find_task(PlanTaskId(1)).unwrap().assignee.as_deref(),
+            Some("agent-A")
+        );
+        assert_eq!(plan.version_counter, v_before);
+    }
+
+    #[test]
+    fn t71_release_unknown_or_unclaimed_is_noop() {
+        let mut plan = make_plan(vec![phase(
+            1,
+            PhaseStatus::InProgress,
+            vec![task(1, PlanTaskStatus::Pending, vec![])],
+        )]);
+        assert!(!plan.release_task(PlanTaskId(99), "agent-A"));
+        assert!(!plan.release_task(PlanTaskId(1), "agent-A"));
+    }
+
+    #[test]
+    fn t71_next_unclaimed_actionable_skips_assigned_tasks() {
+        let mut plan = make_plan(vec![phase(
+            1,
+            PhaseStatus::InProgress,
+            vec![
+                task(1, PlanTaskStatus::Pending, vec![]),
+                task(2, PlanTaskStatus::Pending, vec![]),
+            ],
+        )]);
+        plan.claim_task(PlanTaskId(1), "agent-A");
+        let next = plan.next_unclaimed_actionable_task().unwrap();
+        assert_eq!(next.id, PlanTaskId(2));
+    }
+
+    #[test]
+    fn t71_next_unclaimed_returns_none_when_all_claimed() {
+        let mut plan = make_plan(vec![phase(
+            1,
+            PhaseStatus::InProgress,
+            vec![
+                task(1, PlanTaskStatus::Pending, vec![]),
+                task(2, PlanTaskStatus::Pending, vec![1]),
+            ],
+        )]);
+        plan.claim_task(PlanTaskId(1), "a");
+        // T2 has unsatisfied dep (T1 is in_progress not completed) → None
+        assert!(plan.next_unclaimed_actionable_task().is_none());
+    }
+
+    #[test]
+    fn t71_version_counter_serde_roundtrip() {
+        let mut plan = make_plan(vec![phase(
+            1,
+            PhaseStatus::InProgress,
+            vec![task(1, PlanTaskStatus::Pending, vec![])],
+        )]);
+        plan.version_counter = 42;
+        let json = serde_json::to_string(&plan).unwrap();
+        let back: Plan = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.version_counter, 42);
+    }
+
+    #[test]
+    fn t71_legacy_plan_without_version_counter_loads_with_default() {
+        let json = r#"{
+            "version": 1,
+            "title": "Legacy",
+            "goal": "test",
+            "current_phase": 1,
+            "phases": [{
+                "id": 1,
+                "title": "P",
+                "status": "in_progress",
+                "tasks": [{"id": 1, "title": "T", "status": "pending"}]
+            }],
+            "created_at": 0,
+            "updated_at": 0
+        }"#;
+        let plan: Plan = serde_json::from_str(json).unwrap();
+        assert_eq!(plan.version_counter, 0);
+        assert!(plan.phases[0].tasks[0].assignee.is_none());
+    }
+
+    #[test]
+    fn t71_claim_result_is_owned_predicate() {
+        assert!(ClaimResult::Claimed.is_owned());
+        assert!(!ClaimResult::NotFound.is_owned());
+        assert!(!ClaimResult::Terminal.is_owned());
+        assert!(!ClaimResult::AlreadyClaimed { by: "x".into() }.is_owned());
     }
 
     #[test]

@@ -1146,6 +1146,7 @@ exit_signal_threshold = 3
                         depends_on: vec![],
                         rationale: String::new(),
                         outcome: None,
+                        assignee: None,
                     },
                     PlanTask {
                         id: PlanTaskId(2),
@@ -1157,12 +1158,14 @@ exit_signal_threshold = 3
                         depends_on: vec![PlanTaskId(1)],
                         rationale: String::new(),
                         outcome: None,
+                        assignee: None,
                     },
                 ],
             }],
             decisions: vec![],
             created_at: 100,
             updated_at: 100,
+            version_counter: 0,
         }
     }
 

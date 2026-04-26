@@ -186,6 +186,7 @@ fn build_plan_from_args(
                     depends_on: t.depends_on.into_iter().map(PlanTaskId).collect(),
                     rationale: t.rationale,
                     outcome: None,
+                    assignee: None,
                 })
                 .collect(),
         })
@@ -201,6 +202,7 @@ fn build_plan_from_args(
         decisions: vec![],
         created_at: now,
         updated_at: now,
+        version_counter: 0,
     })
 }
 

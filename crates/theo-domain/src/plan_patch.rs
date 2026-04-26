@@ -174,6 +174,7 @@ mod tests {
                 depends_on: vec![],
                 rationale: String::new(),
                 outcome: None,
+                assignee: None,
             },
             position: InsertPosition::Begin,
         };
