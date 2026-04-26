@@ -2,6 +2,7 @@
 // T3.1 partial: protocol layer (JSON-RPC framing) implemented in
 // `protocol.rs`; full client + server discovery is the next iteration.
 
+pub mod operations;
 pub mod protocol;
 
 pub use protocol::{
