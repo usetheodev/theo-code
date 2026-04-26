@@ -1,6 +1,7 @@
 pub mod apply_patch;
 pub mod bash;
 pub mod batch;
+pub mod browser;
 pub mod codebase_context;
 pub mod codesearch;
 pub mod dap;
