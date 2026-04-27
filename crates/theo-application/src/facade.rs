@@ -52,7 +52,9 @@ pub mod agent {
 /// Types that apps pulled in from `theo-infra-llm` before T1.2.
 pub mod llm {
     pub use theo_infra_llm::provider::registry as provider_registry;
+    pub use theo_infra_llm::provider::LlmProvider;
     pub use theo_infra_llm::types::Message;
+    pub use theo_infra_llm::client::LlmClient;
 
     /// Routing infrastructure (Phase 14 + 27 sota-gaps-followup gap #4).
     /// Re-exported so the CLI can wire `AutomaticModelRouter` into

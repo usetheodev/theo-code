@@ -75,6 +75,36 @@ pub async fn run_pilot(
             Some(service)
         };
 
+    // T6.1 final — opt-in auto-replan advisor. THEO_AUTO_REPLAN=1
+    // builds an LlmReplanAdvisor from the same config the agent
+    // uses, and wires it into the pilot. On threshold breach the
+    // pilot calls advisor.propose with a 5 s timeout and applies
+    // the proposed PlanPatch automatically. Default OFF — manual
+    // `plan_failure_status` + `plan_replan` remains the recommended
+    // workflow for users who want per-failure human review.
+    let replan_advisor: Option<
+        Arc<dyn theo_domain::plan_patch::ReplanAdvisor>,
+    > = if env_auto_replan_enabled() {
+        match build_replan_advisor(&config) {
+            Some(adv) => {
+                eprintln!(
+                    "[theo:auto_replan] enabled — threshold breaches will trigger \
+                     LLM-driven plan_replan automatically (5s timeout per call)"
+                );
+                Some(adv)
+            }
+            None => {
+                eprintln!(
+                    "[theo:auto_replan] requested but provider construction \
+                     failed — falling back to manual replan flow"
+                );
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     // Create pilot loop
     let mut pilot = PilotLoop::new(
         config,
@@ -86,6 +116,9 @@ pub async fn run_pilot(
     );
     if let Some(gc) = graph_context {
         pilot = pilot.with_graph_context(gc);
+    }
+    if let Some(advisor) = replan_advisor {
+        pilot = pilot.with_replan_advisor(advisor);
     }
 
     // Setup Ctrl+C handler
@@ -286,5 +319,112 @@ impl EventListener for PilotRenderer {
             }
             _ => {} // CliRenderer handles all other events
         }
+    }
+}
+
+/// T6.1 final — Read `THEO_AUTO_REPLAN` from the environment.
+/// Truthy (`1`/`true`/`yes`/`on`, case-insensitive) opts the pilot
+/// loop into automatic LLM-driven plan_replan on threshold breach.
+/// Default OFF — manual replan via plan_failure_status remains the
+/// safe default.
+fn env_auto_replan_enabled() -> bool {
+    match std::env::var("THEO_AUTO_REPLAN") {
+        Ok(v) => {
+            let lower = v.to_ascii_lowercase();
+            matches!(lower.as_str(), "1" | "true" | "yes" | "on")
+        }
+        Err(_) => false,
+    }
+}
+
+/// T6.1 final — Build an `LlmReplanAdvisor` from the agent's
+/// `AgentConfig.llm` block. Returns `None` on any failure path
+/// (missing API key, base_url empty, ...) so the caller can fall
+/// back gracefully.
+fn build_replan_advisor(
+    config: &AgentConfig,
+) -> Option<Arc<dyn theo_domain::plan_patch::ReplanAdvisor>> {
+    let api_key = config.llm.api_key.clone();
+    let base_url = config.llm.base_url.clone();
+    if base_url.trim().is_empty() {
+        return None;
+    }
+    let model = config.llm.model.clone();
+    if model.trim().is_empty() {
+        return None;
+    }
+    let mut client = theo_application::facade::llm::LlmClient::new(
+        base_url, api_key, model,
+    );
+    if let Some(ep) = config.llm.endpoint_override.clone() {
+        client = client.with_endpoint(ep);
+    }
+    let llm: Arc<dyn theo_application::facade::llm::LlmProvider> = Arc::new(client);
+    let advisor = theo_application::use_cases::replan_advisor::LlmReplanAdvisor::new(llm);
+    Some(Arc::new(advisor))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn t61pilot_env_auto_replan_disabled_by_default() {
+        let prev = std::env::var_os("THEO_AUTO_REPLAN");
+        unsafe {
+            std::env::remove_var("THEO_AUTO_REPLAN");
+        }
+        assert!(!env_auto_replan_enabled());
+        if let Some(v) = prev {
+            unsafe {
+                std::env::set_var("THEO_AUTO_REPLAN", v);
+            }
+        }
+    }
+
+    #[test]
+    fn t61pilot_env_auto_replan_recognises_truthy_values() {
+        let prev = std::env::var_os("THEO_AUTO_REPLAN");
+        unsafe {
+            for v in ["1", "true", "TRUE", "yes", "on"] {
+                std::env::set_var("THEO_AUTO_REPLAN", v);
+                assert!(env_auto_replan_enabled(), "{v} should opt in");
+            }
+            for v in ["0", "false", "no", "off", "", "garbage"] {
+                std::env::set_var("THEO_AUTO_REPLAN", v);
+                assert!(!env_auto_replan_enabled(), "{v} should NOT opt in");
+            }
+            std::env::remove_var("THEO_AUTO_REPLAN");
+            if let Some(v) = prev {
+                std::env::set_var("THEO_AUTO_REPLAN", v);
+            }
+        }
+    }
+
+    #[test]
+    fn t61pilot_build_advisor_returns_none_when_base_url_empty() {
+        let mut config = AgentConfig::default();
+        config.llm.base_url = String::new();
+        config.llm.model = "gpt-4o".into();
+        assert!(build_replan_advisor(&config).is_none());
+    }
+
+    #[test]
+    fn t61pilot_build_advisor_returns_none_when_model_empty() {
+        let mut config = AgentConfig::default();
+        config.llm.base_url = "http://localhost:8000".into();
+        config.llm.model = "   ".into();
+        assert!(build_replan_advisor(&config).is_none());
+    }
+
+    #[test]
+    fn t61pilot_build_advisor_returns_some_when_minimum_fields_present() {
+        let mut config = AgentConfig::default();
+        config.llm.base_url = "http://localhost:8000".into();
+        config.llm.model = "gpt-4o".into();
+        // No API key needed for construction (the client uses None
+        // when unset and surfaces auth failures at request time).
+        let advisor = build_replan_advisor(&config);
+        assert!(advisor.is_some(), "minimum config should yield a working advisor");
     }
 }
