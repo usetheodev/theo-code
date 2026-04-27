@@ -89,7 +89,7 @@ impl Tool for BrowserOpenTool {
     async fn execute(
         &self,
         args: Value,
-        _ctx: &ToolContext,
+        ctx: &ToolContext,
         _permissions: &mut PermissionCollector,
     ) -> Result<ToolOutput, ToolError> {
         let url = args
@@ -102,11 +102,24 @@ impl Tool for BrowserOpenTool {
             return Err(ToolError::InvalidArgs("`url` is empty".into()));
         }
 
+        // T14.1 — surface lifecycle progress to the streaming UI.
+        // Page loads can take 2–10 s; a single static "tool started"
+        // indicator gives a poor UX. Three checkpoints mirror what
+        // a user sees in a real browser: spawn → navigate → ready.
+        crate::partial::emit_progress_with_pct(
+            ctx,
+            "browser_open",
+            format!("Spawning sidecar for {url}"),
+            0.10,
+        );
+
         let result = self
             .manager
             .request(BrowserAction::Open { url: url.clone() })
             .await
             .map_err(map_session_error)?;
+
+        crate::partial::emit_progress_with_pct(ctx, "browser_open", "Navigated", 1.0);
 
         match result {
             BrowserResult::Navigated { final_url, title } => Ok(ToolOutput::new(
@@ -285,7 +298,7 @@ impl Tool for BrowserScreenshotTool {
     async fn execute(
         &self,
         args: Value,
-        _ctx: &ToolContext,
+        ctx: &ToolContext,
         _permissions: &mut PermissionCollector,
     ) -> Result<ToolOutput, ToolError> {
         let full_page = args.get("full_page").and_then(Value::as_bool).unwrap_or(false);
@@ -299,6 +312,20 @@ impl Tool for BrowserScreenshotTool {
                 )));
             }
         };
+
+        // T14.1 — full-page captures of long pages can take seconds
+        // (Playwright re-renders + the sidecar base64-encodes the
+        // PNG). Surface a single in-progress checkpoint so the UI
+        // doesn't appear frozen.
+        crate::partial::emit_progress(
+            ctx,
+            "browser_screenshot",
+            if full_page {
+                "Capturing full page (may take a few seconds)…"
+            } else {
+                "Capturing viewport…"
+            },
+        );
 
         let result = self
             .manager
