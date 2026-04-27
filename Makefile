@@ -136,6 +136,10 @@ check-coverage-status: ## SOTA Global DoD #6 (partial): validate local .coverage
 check-changelog-phase-coverage: ## SOTA Global DoD #7: CHANGELOG mentions every phase 0..16
 	@bash $(SCRIPTS)/check-changelog-phase-coverage.sh
 
+.PHONY: check-sota-dod-test
+check-sota-dod-test: ## Regression test for the SOTA-DoD gate scripts themselves
+	@bash $(SCRIPTS)/check-sota-dod.test.sh
+
 # ── Composite audit ────────────────────────────────────────────────────────
 .PHONY: audit
 audit: ## Run all 8 audit techniques

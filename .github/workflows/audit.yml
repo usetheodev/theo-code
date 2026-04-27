@@ -33,6 +33,8 @@ jobs:
           fetch-depth: 0
       - name: arch-contract regex regression (T0.1 / find_p5_001)
         run: bash scripts/check-arch-contract.test.sh
+      - name: SOTA-DoD gate regression tests (commits d2c8d5a..df70fce)
+        run: bash scripts/check-sota-dod.test.sh
       - name: arch-contract (T1.5)
         run: bash scripts/check-arch-contract.sh
       - name: size (T4.6)
