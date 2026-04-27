@@ -248,7 +248,28 @@ pub fn compile(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
+    use std::sync::{Mutex, MutexGuard};
+
+    /// Serializes every test in this module that either calls `compile()`
+    /// (which reads `WIKI_COMPILE_ENABLED`) or mutates that env var.
+    /// Cargo runs tests in parallel by default, so without this lock
+    /// `test_rm5b_ac_6_kill_switch_blocks_compile` (which sets
+    /// `WIKI_COMPILE_ENABLED=false`) would race with the other tests
+    /// in this module — they'd see the kill switch active, get
+    /// `CompiledWiki::empty()`, and crash on `r.pages[0]`. Locking
+    /// every test that depends on the env-var-driven kill switch
+    /// turns the parallel race into deterministic serial execution
+    /// for this module only.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Acquire `ENV_LOCK` with poison recovery. A panicking test
+    /// would otherwise poison the mutex and break every subsequent
+    /// test in the module — recover the inner guard so the next test
+    /// can still run (the env var state may be wrong but the test
+    /// itself can detect that and clean up).
+    fn env_lock() -> MutexGuard<'static, ()> {
+        ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner())
+    }
 
     struct StaticClient {
         canned: Vec<CompilerResponse>,
@@ -310,6 +331,7 @@ mod tests {
     // ── RM5b-AC-1 ───────────────────────────────────────────────
     #[test]
     fn test_rm5b_ac_1_two_compilations_produce_byte_identical_output() {
+        let _guard = env_lock();
         let client = StaticClient::identical("FIXED", 0.01);
         let budget = CompileBudget::default();
         let r1 = compile(&client, sources(), &HashSet::new(), &budget, "page").unwrap();
@@ -323,6 +345,7 @@ mod tests {
     // ── RM5b-AC-2 ───────────────────────────────────────────────
     #[test]
     fn test_rm5b_ac_2_extract_phase_processes_every_uncached_source() {
+        let _guard = env_lock();
         // Plan calls this "parallel extract"; the unit test asserts the
         // OUTCOME (every uncached source visited exactly once) which is
         // what callers actually depend on. Parallelism is an impl detail.
@@ -343,6 +366,7 @@ mod tests {
     // ── RM5b-AC-3 ───────────────────────────────────────────────
     #[test]
     fn test_rm5b_ac_3_max_llm_calls_hard_limit_enforced() {
+        let _guard = env_lock();
         let client = StaticClient::identical("R", 0.00);
         let budget = CompileBudget {
             max_llm_calls: 1, // not enough for 2 extracts + generate
@@ -359,6 +383,7 @@ mod tests {
     // ── RM5b-AC-4 ───────────────────────────────────────────────
     #[test]
     fn test_rm5b_ac_4_max_cost_hard_limit_enforced() {
+        let _guard = env_lock();
         let client = StaticClient::identical("R", 0.30); // each call $0.30
         let budget = CompileBudget {
             max_llm_calls: 10,
@@ -375,6 +400,7 @@ mod tests {
     // ── RM5b-AC-5 ───────────────────────────────────────────────
     #[test]
     fn test_rm5b_ac_5_frontmatter_contract_enforced() {
+        let _guard = env_lock();
         let client = StaticClient::identical("# heading", 0.01);
         let r = compile(
             &client,
@@ -396,8 +422,13 @@ mod tests {
     // ── RM5b-AC-6 ───────────────────────────────────────────────
     #[test]
     fn test_rm5b_ac_6_kill_switch_blocks_compile() {
-        // SAFETY: single-threaded test — `std::env::set_var` is safe because
-        // no other thread in this test reads the same variable concurrently.
+        // SAFETY: holding `ENV_LOCK` serialises every test in this
+        // module that depends on `WIKI_COMPILE_ENABLED`, so for the
+        // duration of this test no other thread reads the variable.
+        // Without the lock, cargo test's parallel runner would race
+        // this `set_var` with other tests calling `compile()` and
+        // they'd see `CompiledWiki::empty()`.
+        let _guard = env_lock();
         unsafe { std::env::set_var("WIKI_COMPILE_ENABLED", "false") };
         let client = StaticClient::identical("R", 0.01);
         let r = compile(
@@ -418,6 +449,7 @@ mod tests {
     // ── RM5b-AC-7 ───────────────────────────────────────────────
     #[test]
     fn test_rm5b_ac_7_cache_ids_skip_extract() {
+        let _guard = env_lock();
         let client = StaticClient::identical("R", 0.01);
         let cached: HashSet<String> = ["a".to_string(), "b".to_string()].into_iter().collect();
         let r = compile(
@@ -435,6 +467,7 @@ mod tests {
 
     #[test]
     fn empty_sources_returns_empty_compile() {
+        let _guard = env_lock();
         let client = StaticClient::identical("R", 0.01);
         let r = compile(
             &client,
@@ -457,6 +490,11 @@ mod tests {
 
     #[test]
     fn kill_switch_off_by_default() {
+        // Same `ENV_LOCK` discipline as RM5b-AC-6: any test that
+        // mutates `WIKI_COMPILE_ENABLED` must serialise against
+        // every other test that reads it via `compile()` /
+        // `kill_switch_active()`.
+        let _guard = env_lock();
         unsafe { std::env::remove_var("WIKI_COMPILE_ENABLED") };
         assert!(!kill_switch_active());
     }
