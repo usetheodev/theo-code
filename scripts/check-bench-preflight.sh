@@ -90,16 +90,34 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 3. runner/smoke.py --help works
+# 3. Every runner script under apps/theo-benchmark/runner/ has a
+#    working `--help`. Validates the full bench scaffold (smoke +
+#    A/B testing + monitoring + evolution + telemetry export) —
+#    each runner is a piece of the SOTA bench surface that future
+#    eval.yml jobs may invoke.
 # ---------------------------------------------------------------------------
 
-SMOKE="apps/theo-benchmark/runner/smoke.py"
-if [[ ! -f "$SMOKE" ]]; then
-    record FAIL "$SMOKE exists"
-elif python3 "$SMOKE" --help >/dev/null 2>&1; then
-    record PASS "smoke.py --help (argparse + imports)"
+RUNNER_DIR="apps/theo-benchmark/runner"
+if [[ ! -d "$RUNNER_DIR" ]]; then
+    record FAIL "runner dir exists" "$RUNNER_DIR missing"
 else
-    record FAIL "smoke.py --help"
+    runner_total=0
+    runner_bad=0
+    for f in "$RUNNER_DIR"/*.py; do
+        [[ -e "$f" ]] || continue
+        runner_total=$((runner_total + 1))
+        if python3 "$f" --help >/dev/null 2>&1; then
+            :
+        else
+            runner_bad=$((runner_bad + 1))
+            record FAIL "runner --help" "$f"
+        fi
+    done
+    if [[ $runner_total -eq 0 ]]; then
+        record FAIL "runner scripts present" "$RUNNER_DIR has no .py runners"
+    elif [[ $runner_bad -eq 0 ]]; then
+        record PASS "all $runner_total runner --help (argparse + imports)"
+    fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -135,16 +153,41 @@ tomllib.load(open(sys.argv[1], 'rb'))
 fi
 
 # ---------------------------------------------------------------------------
-# 5. analysis/report_builder.py imports
+# 5. Every analysis module under apps/theo-benchmark/analysis/
+#    imports cleanly. The SOTA report (Phase 64) chain pulls in
+#    report_builder + a few siblings; if any module has a syntax
+#    error or missing dep, smoke.py falls back to a degraded
+#    report at runtime — pre-flight catches it earlier.
 # ---------------------------------------------------------------------------
 
-REPORT_BUILDER="apps/theo-benchmark/analysis/report_builder.py"
-if [[ ! -f "$REPORT_BUILDER" ]]; then
-    record FAIL "report_builder.py exists" "$REPORT_BUILDER missing"
-elif ( cd apps/theo-benchmark && python3 -c "from analysis.report_builder import build_report, report_to_markdown" 2>/dev/null ); then
-    record PASS "analysis.report_builder importable (build_report + report_to_markdown)"
+ANALYSIS_DIR="apps/theo-benchmark/analysis"
+if [[ ! -d "$ANALYSIS_DIR" ]]; then
+    record FAIL "analysis dir exists" "$ANALYSIS_DIR missing"
 else
-    record FAIL "analysis.report_builder import"
+    analysis_total=0
+    analysis_bad=0
+    while IFS= read -r f; do
+        analysis_total=$((analysis_total + 1))
+        modname="$(basename "$f" .py)"
+        # Run the import from the bench root so `analysis.` is on the path.
+        if ( cd apps/theo-benchmark && python3 -c "from analysis import $modname" 2>/dev/null ); then
+            :
+        else
+            analysis_bad=$((analysis_bad + 1))
+            record FAIL "analysis module imports" "$f"
+        fi
+    done < <(find "$ANALYSIS_DIR" -maxdepth 1 -name "*.py" ! -name "__init__.py" | sort)
+    if [[ $analysis_total -eq 0 ]]; then
+        record FAIL "analysis modules present" "$ANALYSIS_DIR has no .py modules"
+    elif [[ $analysis_bad -eq 0 ]]; then
+        record PASS "all $analysis_total analysis modules import"
+    fi
+    # Extra: confirm the specific symbols smoke.py uses still resolve.
+    if ( cd apps/theo-benchmark && python3 -c "from analysis.report_builder import build_report, report_to_markdown" 2>/dev/null ); then
+        record PASS "analysis.report_builder.{build_report,report_to_markdown} resolved"
+    else
+        record FAIL "analysis.report_builder symbol resolution"
+    fi
 fi
 
 # ---------------------------------------------------------------------------
