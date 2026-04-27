@@ -112,6 +112,14 @@ check-io-tests-report: ## T5.2 inline I/O test report (no fail)
 check-changelog: ## T6.5 enforce CHANGELOG.md update
 	@bash $(SCRIPTS)/check-changelog.sh 2>/dev/null || echo "check-changelog: script not yet implemented (T6.5)"
 
+.PHONY: check-sota-dod
+check-sota-dod: ## SOTA Tier 1 + Tier 2 DoD report (arch + clippy + tests)
+	@bash $(SCRIPTS)/check-sota-dod.sh
+
+.PHONY: check-sota-dod-quick
+check-sota-dod-quick: ## SOTA DoD report (arch + clippy only, no tests)
+	@bash $(SCRIPTS)/check-sota-dod.sh --quick
+
 # ── Composite audit ────────────────────────────────────────────────────────
 .PHONY: audit
 audit: ## Run all 8 audit techniques
