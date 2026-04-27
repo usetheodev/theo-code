@@ -170,6 +170,7 @@ pub fn create_default_registry() -> ToolRegistry {
     use crate::read::ReadTool;
     use crate::read_image::ReadImageTool;
     use crate::reflect::ReflectTool;
+    use crate::computer::ComputerActionTool;
     use crate::screenshot::ScreenshotTool;
     use crate::test_gen::{GenMutationTestTool, GenPropertyTestTool};
     use crate::think::ThinkTool;
@@ -246,6 +247,10 @@ pub fn create_default_registry() -> ToolRegistry {
         // (screencapture / gnome-screenshot / import). Gracefully
         // degrades to typed `no display` error in headless contexts.
         Box::new(ScreenshotTool::new()),
+        // T4.1 — Anthropic Computer Use (UI automation via xdotool /
+        // cliclick). Single dispatch tool over the full ComputerAction
+        // enum. CAPABILITY-GATED — see ADR D6.
+        Box::new(ComputerActionTool::new()),
         // T15.1 — external docs RAG (empty index by default; populated
         // by future commits that wire crates.io/MDN/npm sources)
         Box::new(DocsSearchTool::new()),

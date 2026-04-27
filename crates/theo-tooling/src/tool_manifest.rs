@@ -395,6 +395,13 @@ pub const TOOL_MANIFEST: &[ToolManifestEntry] = &[
         notes: "T1.1 — capture local screen via platform CLI (macOS screencapture; Linux gnome-screenshot → import fallback). No xcap dep. Returns base64 PNG vision block. Headless / no-display contexts surface a typed NoDisplay error with actionable webfetch fallback hint.",
     },
     ToolManifestEntry {
+        id: "computer_action",
+        exposure: ToolExposure::DefaultRegistry,
+        status: ToolStatus::Implemented,
+        owner: "theo-tooling",
+        notes: "T4.1 — Anthropic Computer Use API mapped to OS CLIs (xdotool on Linux/X11; cliclick on macOS). Single dispatch tool over the full ComputerAction enum: screenshot, mouse_move/down/up, click, double_click, type, key, scroll, wait. CAPABILITY-GATED (ADR D6) — UI automation can move money / send messages, OFF by default.",
+    },
+    ToolManifestEntry {
         id: "docs_search",
         exposure: ToolExposure::DefaultRegistry,
         status: ToolStatus::Implemented,

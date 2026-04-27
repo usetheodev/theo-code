@@ -15,8 +15,12 @@
 //! Capability gate: `Capability::ComputerUse` is OFF by default
 //! (per ADR D6 — risk is high). Caller MUST opt in explicitly.
 
+pub mod driver;
 pub mod protocol;
+pub mod tool;
 
+pub use driver::{execute_action, validate_xdotool_key};
 pub use protocol::{
     ComputerAction, ComputerError, ComputerResult, MouseButton, ScrollDirection,
 };
+pub use tool::ComputerActionTool;
