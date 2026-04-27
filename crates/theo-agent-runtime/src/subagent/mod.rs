@@ -482,6 +482,28 @@ mod tests {
 
     use theo_domain::tool::ToolCategory;
 
+    /// Serializes the 4 async tests that exercise the MCP-discovery
+    /// path (`mcp_registry: Some`, `mcp_discovery: Some`, non-empty
+    /// `mcp_servers`) — the same path that
+    /// `spawn_with_spec_skips_discovery_when_env_disables_auto`
+    /// mutates `THEO_MCP_AUTO_DISCOVERY` against.
+    ///
+    /// `tokio::sync::Mutex` is required (not `std::sync::Mutex`)
+    /// because `#[tokio::test]` async tests hold the guard across
+    /// `.await` points and `std::sync::MutexGuard` is `!Send`. Tests
+    /// in earlier sync-only modules (wiki/compiler, onboarding) use
+    /// `std::sync::Mutex` because their tests don't `.await`.
+    ///
+    /// Same flake class as the wiki/compiler / onboarding fixes
+    /// (commits 8025a70, 184ff59) — narrowly scoped to just the
+    /// 4 collision-condition tests instead of all 60+ tests in the
+    /// file.
+    fn mcp_env_lock() -> &'static tokio::sync::Mutex<()> {
+        use tokio::sync::Mutex;
+        static M: std::sync::OnceLock<Mutex<()>> = std::sync::OnceLock::new();
+        M.get_or_init(|| Mutex::new(()))
+    }
+
     #[test]
     fn builtin_explorer_capability_is_read_only() {
         let spec = builtins::explorer();
@@ -1024,6 +1046,7 @@ mod tests {
 
     #[tokio::test]
     async fn spawn_with_spec_auto_triggers_discovery_when_cache_empty() {
+        let _guard = mcp_env_lock().lock().await;
         // The spec declares mcp_servers but cache is empty. After spawn (even
         // a depth-limit early return), the cache should remain empty BUT the
         // discovery attempt should have happened — verified indirectly by
@@ -1081,6 +1104,7 @@ mod tests {
 
     #[tokio::test]
     async fn spawn_with_spec_skips_discovery_when_cache_already_populated() {
+        let _guard = mcp_env_lock().lock().await;
         // Pre-populated cache: spawn should NOT re-trigger discovery.
         // We assert this by registering an unreachable server but seeding
         // the cache with a fake tool — if discovery ran, the call would
@@ -1196,6 +1220,7 @@ mod tests {
 
     #[tokio::test]
     async fn spawn_with_spec_continues_when_discovery_fails_completely() {
+        let _guard = mcp_env_lock().lock().await;
         // All servers unreachable → spawn still proceeds (fail-soft).
         use std::collections::BTreeMap;
         use std::sync::Arc;
@@ -1235,11 +1260,16 @@ mod tests {
 
     #[tokio::test]
     async fn spawn_with_spec_skips_discovery_when_env_disables_auto() {
+        let _guard = mcp_env_lock().lock().await;
         // THEO_MCP_AUTO_DISCOVERY=0 disables auto-trigger even with
         // unreachable servers in the registry.
         use std::collections::BTreeMap;
         use std::sync::Arc;
-        // SAFETY: env_remove on drop via guard; only this test toggles it.
+        // SAFETY: holding `mcp_env_lock` serialises against the 3
+        // sibling MCP-discovery async tests, so for the duration of
+        // this test no other thread reads the variable. The pre-existing
+        // claim ("only this test toggles it") was wrong — cargo test
+        // is multi-threaded by default.
         unsafe { std::env::set_var("THEO_MCP_AUTO_DISCOVERY", "0"); }
         let bus = Arc::new(EventBus::new());
         let cache = Arc::new(theo_infra_mcp::DiscoveryCache::new());
