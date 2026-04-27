@@ -120,6 +120,32 @@ pub enum PatchError {
     Empty,
 }
 
+/// T6.1 — Trait the agent runtime uses to ask an external advisor
+/// for a recovery `PlanPatch` when a task is stuck.
+///
+/// `theo-application::use_cases::replan_advisor` provides the
+/// LLM-driven implementation; tests / offline mode supply mocks
+/// that return canned patches. Pure-domain trait so
+/// `theo-agent-runtime` can hold a `Box<dyn ReplanAdvisor>` without
+/// taking on a dependency on `theo-application` (per ADR-016).
+///
+/// `propose` returns `None` when the advisor decided not to issue
+/// a patch (LLM unavailable, no useful action). Callers fall back
+/// to logging the threshold breach without crashing the pilot.
+#[async_trait::async_trait]
+pub trait ReplanAdvisor: Send + Sync {
+    /// Ask the advisor to propose ONE patch that would unstick the
+    /// given task. `failure_summary` is the agent's last `result.summary`
+    /// for that task — typically the error message or the
+    /// final-iteration outcome description.
+    async fn propose(
+        &self,
+        plan: &crate::plan::Plan,
+        failed_task_id: PlanTaskId,
+        failure_summary: &str,
+    ) -> Option<PlanPatch>;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

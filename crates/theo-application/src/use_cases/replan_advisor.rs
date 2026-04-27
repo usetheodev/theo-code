@@ -18,9 +18,11 @@ use std::sync::Arc;
 
 use serde_json::{Value, json};
 
+use async_trait::async_trait;
+
 use theo_domain::identifiers::PlanTaskId;
 use theo_domain::plan::{Plan, PlanTask};
-use theo_domain::plan_patch::PlanPatch;
+use theo_domain::plan_patch::{PlanPatch, ReplanAdvisor};
 use theo_infra_llm::provider::LlmProvider;
 use theo_infra_llm::types::{ChatRequest, Message};
 
@@ -212,6 +214,54 @@ pub async fn propose_recovery_patch(
     })?;
     let _ = json!(()); // silence unused-import path
     validate_patch_against_plan(plan, patch)
+}
+
+/// T6.1 — `ReplanAdvisor` impl that wraps an `LlmProvider`. Apps
+/// (theo-cli) construct one of these and hand it to
+/// `PilotLoop::with_replan_advisor` so threshold breaches in the
+/// pilot loop trigger a real LLM-driven recovery patch.
+///
+/// `propose` returns `None` (instead of an error) on every failure
+/// path (LLM unavailable, response unparseable, patch invalid)
+/// because the trait contract is "give me a patch you're confident
+/// in, OR fall back". The pilot logs a manual-replan hint when
+/// `None` is returned so the operator still sees the breach.
+pub struct LlmReplanAdvisor {
+    llm: std::sync::Arc<dyn LlmProvider>,
+}
+
+impl LlmReplanAdvisor {
+    pub fn new(llm: std::sync::Arc<dyn LlmProvider>) -> Self {
+        Self { llm }
+    }
+}
+
+#[async_trait]
+impl ReplanAdvisor for LlmReplanAdvisor {
+    async fn propose(
+        &self,
+        plan: &Plan,
+        failed_task_id: PlanTaskId,
+        failure_summary: &str,
+    ) -> Option<PlanPatch> {
+        match propose_recovery_patch(
+            self.llm.clone(),
+            plan,
+            failed_task_id,
+            failure_summary,
+        )
+        .await
+        {
+            Ok(patch) => Some(patch),
+            Err(e) => {
+                eprintln!(
+                    "[theo:replan_advisor] LLM-driven proposal failed (falling \
+                     back to manual replan): {e}"
+                );
+                None
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -512,5 +562,68 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, ReplanAdvisorError::PatchInvalid(_)));
+    }
+
+    // ── LlmReplanAdvisor (the trait wrapper used by the pilot) ────
+
+    #[tokio::test]
+    async fn t61trait_llm_advisor_returns_some_on_well_formed_patch() {
+        let plan = small_plan_with_failed_task();
+        let llm = FakeLlm::ok(
+            r#"{"kind":"skip_task","id":1,"rationale":"unrecoverable"}"#,
+        );
+        let advisor = LlmReplanAdvisor::new(llm);
+        let result = advisor.propose(&plan, PlanTaskId(1), "context").await;
+        match result {
+            Some(PlanPatch::SkipTask { id, rationale }) => {
+                assert_eq!(id, PlanTaskId(1));
+                assert_eq!(rationale, "unrecoverable");
+            }
+            other => panic!("expected Some(SkipTask), got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn t61trait_llm_advisor_returns_none_on_llm_error() {
+        // Trait contract: propose returns Option, NOT Result. Every
+        // failure mode collapses to None so the pilot's fallback
+        // (log + manual replan hint) fires reliably.
+        let plan = small_plan_with_failed_task();
+        let llm = FakeLlm::err("rate limited");
+        let advisor = LlmReplanAdvisor::new(llm);
+        let result = advisor.propose(&plan, PlanTaskId(1), "x").await;
+        assert!(result.is_none(), "LLM error must collapse to None");
+    }
+
+    #[tokio::test]
+    async fn t61trait_llm_advisor_returns_none_on_unparseable_response() {
+        let plan = small_plan_with_failed_task();
+        let llm = FakeLlm::ok("definitely not json");
+        let advisor = LlmReplanAdvisor::new(llm);
+        let result = advisor.propose(&plan, PlanTaskId(1), "x").await;
+        assert!(result.is_none(), "unparseable response must collapse to None");
+    }
+
+    #[tokio::test]
+    async fn t61trait_llm_advisor_returns_none_on_invalid_patch() {
+        // LLM hallucinates a task id that doesn't exist; advisor
+        // catches via validate_patch_against_plan and returns None.
+        let plan = small_plan_with_failed_task();
+        let llm = FakeLlm::ok(r#"{"kind":"skip_task","id":999,"rationale":"x"}"#);
+        let advisor = LlmReplanAdvisor::new(llm);
+        let result = advisor.propose(&plan, PlanTaskId(1), "x").await;
+        assert!(result.is_none(), "invalid patch must collapse to None");
+    }
+
+    #[tokio::test]
+    async fn t61trait_llm_advisor_returns_none_on_unknown_failed_task_id() {
+        // Caller asks the advisor to recover a task that doesn't
+        // exist. The wrapper silently downgrades to None so the
+        // pilot loop doesn't crash.
+        let plan = small_plan_with_failed_task();
+        let llm = FakeLlm::ok(r#"{"kind":"skip_task","id":1,"rationale":"x"}"#);
+        let advisor = LlmReplanAdvisor::new(llm);
+        let result = advisor.propose(&plan, PlanTaskId(999), "x").await;
+        assert!(result.is_none(), "unknown task_id must collapse to None");
     }
 }
