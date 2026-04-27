@@ -26,6 +26,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history required by `check-adr-coverage.sh` (git log
+          # --grep over D1..D16-tied task IDs). Other structural gates
+          # are content-only and tolerate the deeper fetch.
+          fetch-depth: 0
       - name: arch-contract regex regression (T0.1 / find_p5_001)
         run: bash scripts/check-arch-contract.test.sh
       - name: arch-contract (T1.5)
@@ -42,6 +47,11 @@ jobs:
         run: bash scripts/check-secrets.sh
       - name: changelog touched (T6.5)
         run: bash scripts/check-changelog.sh --base=origin/${{ github.base_ref || 'main' }}
+      # SOTA Global DoD #8 (commit ef452fb / d2c8d5a) — every ADR
+      # D1-D16 has at least one commit referencing one of its tied
+      # task IDs.
+      - name: ADR coverage (SOTA Global DoD #8)
+        run: bash scripts/check-adr-coverage.sh
 
   # ── Rust build + tests ──────────────────────────────────────────────────
   rust:
@@ -59,6 +69,11 @@ jobs:
         run: cargo build -p theo-agent-runtime --features otel
       - name: test OTel feature (T0.3 / find_p5_002)
         run: cargo test -p theo-agent-runtime --features otel --test otlp_network_smoke
+      # SOTA Global DoD #6 partial (commit b49371a) — clippy::too_many_lines
+      # per-crate ceiling. The script invokes its own cargo clippy run, so
+      # placement in the `rust` job (which has cargo + cache) is correct.
+      - name: complexity gate (SOTA Global DoD #6 partial)
+        run: bash scripts/check-complexity.sh
 
   # ── UI build + tests ────────────────────────────────────────────────────
   ui:
@@ -148,6 +163,12 @@ jobs:
         run: cargo install cargo-tarpaulin --locked
       - name: run coverage check
         run: bash scripts/check-coverage.sh
+      # SOTA Global DoD #6 partial (commit ef452fb) — fast validator
+      # of the cobertura.xml that `check-coverage.sh` just produced.
+      # Cheap belt-and-suspenders: if the artifact wasn't produced
+      # OR fell below the line-rate floor, surface it explicitly.
+      - name: coverage status (SOTA Global DoD #6 partial)
+        run: bash scripts/check-coverage-status.sh
 
   # ── Module-size gate (T8.5): cap production-only LOC per file. ──
   # Counts non-test lines (stops at first `#[cfg(test)]`) in every .rs
