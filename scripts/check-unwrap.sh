@@ -133,7 +133,10 @@ filter_production_only() {
         {
           path=$1
           if (!(path in cfg_line)) {
-            cmd = "grep -nE '\''^[[:space:]]*#\\[cfg\\(test\\)\\]'\'' " path " | head -1"
+            # Match both outer (`#[cfg(test)]`) and inner
+            # (`#![cfg(test)]`) attribute forms — the latter scopes
+            # an entire sibling-test file, e.g. dap/tool_tests.rs.
+            cmd = "grep -nE '\''^[[:space:]]*#!?\\[cfg\\(test\\)\\]'\'' " path " | head -1"
             got = (cmd | getline first) ; close(cmd)
             if (got > 0) {
               split(first, parts, ":"); cfg_line[path] = parts[1] + 0

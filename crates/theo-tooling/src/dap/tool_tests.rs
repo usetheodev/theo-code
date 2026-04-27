@@ -1,3 +1,12 @@
+// Sibling test body of `dap/tool.rs` re-attached via
+// `#[cfg(test)] #[path = "tool_tests.rs"] mod tests;`. The inner
+// attribute below is redundant for the compiler (the `mod` decl
+// already cfg-gates this file) but signals to scripts/check-unwrap.sh
+// and scripts/check-panic.sh that every line is test-only — so the
+// production-only filter excludes the entire file from violation
+// counts. Only test code lives here.
+#![cfg(test)]
+
 use super::*;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
