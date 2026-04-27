@@ -203,11 +203,15 @@ pub fn from_request(body: &Value) -> CommonRequest {
                     .iter()
                     .filter_map(|s| s.as_str().map(String::from))
                     .collect();
-                if strs.len() == 1 {
-                    return Some(StopSequence::Single(strs.into_iter().next().unwrap()));
-                }
-                if !strs.is_empty() {
-                    return Some(StopSequence::Multiple(strs));
+                let mut iter = strs.into_iter();
+                match (iter.next(), iter.next()) {
+                    (Some(only), None) => return Some(StopSequence::Single(only)),
+                    (Some(first), Some(second)) => {
+                        let mut rest: Vec<String> = vec![first, second];
+                        rest.extend(iter);
+                        return Some(StopSequence::Multiple(rest));
+                    }
+                    (None, _) => {}
                 }
             }
             None

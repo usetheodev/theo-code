@@ -239,12 +239,15 @@ pub fn from_request(body: &Value) -> CommonRequest {
                     .iter()
                     .filter_map(|s| s.as_str().map(String::from))
                     .collect();
-                if strs.len() == 1 {
-                    Some(StopSequence::Single(strs.into_iter().next().unwrap()))
-                } else if !strs.is_empty() {
-                    Some(StopSequence::Multiple(strs))
-                } else {
-                    None
+                let mut iter = strs.into_iter();
+                match (iter.next(), iter.next()) {
+                    (Some(only), None) => Some(StopSequence::Single(only)),
+                    (Some(first), Some(second)) => {
+                        let mut rest: Vec<String> = vec![first, second];
+                        rest.extend(iter);
+                        Some(StopSequence::Multiple(rest))
+                    }
+                    (None, _) => None,
                 }
             } else {
                 v.as_str().map(|s| StopSequence::Single(s.to_string()))

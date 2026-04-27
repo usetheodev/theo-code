@@ -130,10 +130,8 @@ pub fn from_request(body: &Value) -> CommonRequest {
                                 .and_then(|i| i.as_str())
                                 .unwrap_or_default()
                                 .to_string();
-                            let input = p.get("input");
-                            let arguments = match input {
-                                Some(v) if v.is_string() => v.as_str().unwrap().to_string(),
-                                Some(v) => v.to_string(),
+                            let arguments = match p.get("input") {
+                                Some(v) => v.as_str().map_or_else(|| v.to_string(), str::to_owned),
                                 None => "{}".to_string(),
                             };
                             tool_calls.push(CommonToolCall {
@@ -211,12 +209,15 @@ pub fn from_request(body: &Value) -> CommonRequest {
                 .iter()
                 .filter_map(|s| s.as_str().map(String::from))
                 .collect();
-            if strs.len() == 1 {
-                Some(StopSequence::Single(strs.into_iter().next().unwrap()))
-            } else if !strs.is_empty() {
-                Some(StopSequence::Multiple(strs))
-            } else {
-                None
+            let mut iter = strs.into_iter();
+            match (iter.next(), iter.next()) {
+                (Some(only), None) => Some(StopSequence::Single(only)),
+                (Some(first), Some(second)) => {
+                    let mut rest: Vec<String> = vec![first, second];
+                    rest.extend(iter);
+                    Some(StopSequence::Multiple(rest))
+                }
+                (None, _) => None
             }
         } else {
             v.as_str().map(|s| StopSequence::Single(s.to_string()))
@@ -500,10 +501,8 @@ pub fn from_response(resp: &Value) -> CommonResponse {
                 .and_then(|i| i.as_str())
                 .unwrap_or_default()
                 .to_string();
-            let input = b.get("input");
-            let arguments = match input {
-                Some(v) if v.is_string() => v.as_str().unwrap().to_string(),
-                Some(v) => v.to_string(),
+            let arguments = match b.get("input") {
+                Some(v) => v.as_str().map_or_else(|| v.to_string(), str::to_owned),
                 None => "{}".to_string(),
             };
             CommonToolCall {
