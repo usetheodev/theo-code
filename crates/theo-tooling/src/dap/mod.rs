@@ -14,6 +14,7 @@ pub mod discovery;
 pub mod operations;
 pub mod protocol;
 pub mod session_manager;
+pub mod tool;
 
 pub use client::{DapClient, DapClientError};
 pub use discovery::{discover as discover_adapters, DiscoveredAdapter};
@@ -22,3 +23,6 @@ pub use protocol::{
     DapRequest, DapResponse, DapSeqGen,
 };
 pub use session_manager::{DapSessionError, DapSessionManager};
+pub use tool::{
+    DebugContinueTool, DebugLaunchTool, DebugSetBreakpointTool, DebugTerminateTool,
+};

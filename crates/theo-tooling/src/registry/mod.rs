@@ -144,6 +144,10 @@ impl Default for ToolRegistry {
 pub fn create_default_registry() -> ToolRegistry {
     use crate::apply_patch::ApplyPatchTool;
     use crate::bash::BashTool;
+    use crate::dap::{
+        DapSessionManager, DebugContinueTool, DebugLaunchTool, DebugSetBreakpointTool,
+        DebugTerminateTool,
+    };
     use crate::edit::EditTool;
     use crate::glob::GlobTool;
     use crate::grep::GrepTool;
@@ -252,6 +256,22 @@ pub fn create_default_registry() -> ToolRegistry {
         Box::new(LspRenameTool::new(std::sync::Arc::new(
             LspSessionManager::from_catalogue(std::collections::HashMap::new()),
         ))),
+        // T13.1 — DAP tool family. Same dual-registry pattern as the
+        // lsp_* tools: empty-catalogue stubs in the default registry
+        // (actionable error path); real PATH-discovered manager
+        // swapped in by `create_default_registry_with_project`.
+        Box::new(DebugLaunchTool::new(std::sync::Arc::new(
+            DapSessionManager::from_catalogue(std::collections::HashMap::new()),
+        ))),
+        Box::new(DebugSetBreakpointTool::new(std::sync::Arc::new(
+            DapSessionManager::from_catalogue(std::collections::HashMap::new()),
+        ))),
+        Box::new(DebugContinueTool::new(std::sync::Arc::new(
+            DapSessionManager::from_catalogue(std::collections::HashMap::new()),
+        ))),
+        Box::new(DebugTerminateTool::new(std::sync::Arc::new(
+            DapSessionManager::from_catalogue(std::collections::HashMap::new()),
+        ))),
         // Builtin plugins — typed operations
         Box::new(crate::git::GitStatusTool),
         Box::new(crate::git::GitDiffTool),
@@ -292,6 +312,10 @@ pub fn create_default_registry_with_project(
 ) -> ToolRegistry {
     use std::sync::Arc;
 
+    use crate::dap::{
+        DapSessionManager, DebugContinueTool, DebugLaunchTool, DebugSetBreakpointTool,
+        DebugTerminateTool,
+    };
     use crate::docs_search::{DocsSearchTool, bootstrap_docs_index};
     use crate::lsp::{
         LspDefinitionTool, LspHoverTool, LspReferencesTool, LspRenameTool,
@@ -329,6 +353,33 @@ pub fn create_default_registry_with_project(
     registry
         .register(Box::new(LspRenameTool::new(lsp_manager.clone())))
         .expect("lsp_rename tool schema is valid");
+
+    // T13.1 — same pattern for the debug_* family. Critical:
+    // every debug_* tool MUST share the SAME Arc<DapSessionManager>
+    // so they all see the same session table. Splitting the manager
+    // would make `debug_set_breakpoint({session_id: "a"})` fail to
+    // find the session that `debug_launch({session_id: "a"})` opened.
+    let dap_manager = Arc::new(DapSessionManager::from_path());
+    for tool_id in [
+        "debug_launch",
+        "debug_set_breakpoint",
+        "debug_continue",
+        "debug_terminate",
+    ] {
+        registry.unregister(tool_id);
+    }
+    registry
+        .register(Box::new(DebugLaunchTool::new(dap_manager.clone())))
+        .expect("debug_launch tool schema is valid");
+    registry
+        .register(Box::new(DebugSetBreakpointTool::new(dap_manager.clone())))
+        .expect("debug_set_breakpoint tool schema is valid");
+    registry
+        .register(Box::new(DebugContinueTool::new(dap_manager.clone())))
+        .expect("debug_continue tool schema is valid");
+    registry
+        .register(Box::new(DebugTerminateTool::new(dap_manager.clone())))
+        .expect("debug_terminate tool schema is valid");
 
     registry
 }
