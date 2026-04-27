@@ -145,8 +145,9 @@ pub fn create_default_registry() -> ToolRegistry {
     use crate::apply_patch::ApplyPatchTool;
     use crate::bash::BashTool;
     use crate::browser::{
-        BrowserClickTool, BrowserCloseTool, BrowserOpenTool, BrowserScreenshotTool,
-        BrowserSessionManager,
+        BrowserClickTool, BrowserCloseTool, BrowserEvalTool, BrowserOpenTool,
+        BrowserScreenshotTool, BrowserSessionManager, BrowserTypeTool,
+        BrowserWaitForSelectorTool,
     };
     use crate::dap::{
         DapSessionManager, DebugContinueTool, DebugEvalTool, DebugLaunchTool,
@@ -302,6 +303,15 @@ pub fn create_default_registry() -> ToolRegistry {
         Box::new(BrowserScreenshotTool::new(std::sync::Arc::new(
             BrowserSessionManager::new("node", "/__theo_no_browser__/playwright_sidecar.js"),
         ))),
+        Box::new(BrowserTypeTool::new(std::sync::Arc::new(
+            BrowserSessionManager::new("node", "/__theo_no_browser__/playwright_sidecar.js"),
+        ))),
+        Box::new(BrowserEvalTool::new(std::sync::Arc::new(
+            BrowserSessionManager::new("node", "/__theo_no_browser__/playwright_sidecar.js"),
+        ))),
+        Box::new(BrowserWaitForSelectorTool::new(std::sync::Arc::new(
+            BrowserSessionManager::new("node", "/__theo_no_browser__/playwright_sidecar.js"),
+        ))),
         Box::new(BrowserCloseTool::new(std::sync::Arc::new(
             BrowserSessionManager::new("node", "/__theo_no_browser__/playwright_sidecar.js"),
         ))),
@@ -346,8 +356,9 @@ pub fn create_default_registry_with_project(
     use std::sync::Arc;
 
     use crate::browser::{
-        BrowserClickTool, BrowserCloseTool, BrowserOpenTool, BrowserScreenshotTool,
-        BrowserSessionManager,
+        BrowserClickTool, BrowserCloseTool, BrowserEvalTool, BrowserOpenTool,
+        BrowserScreenshotTool, BrowserSessionManager, BrowserTypeTool,
+        BrowserWaitForSelectorTool,
     };
     use crate::dap::{
         DapSessionManager, DebugContinueTool, DebugEvalTool, DebugLaunchTool,
@@ -454,6 +465,9 @@ pub fn create_default_registry_with_project(
     for tool_id in [
         "browser_open",
         "browser_click",
+        "browser_type",
+        "browser_eval",
+        "browser_wait_for_selector",
         "browser_screenshot",
         "browser_close",
     ] {
@@ -465,6 +479,15 @@ pub fn create_default_registry_with_project(
     registry
         .register(Box::new(BrowserClickTool::new(browser_manager.clone())))
         .expect("browser_click tool schema is valid");
+    registry
+        .register(Box::new(BrowserTypeTool::new(browser_manager.clone())))
+        .expect("browser_type tool schema is valid");
+    registry
+        .register(Box::new(BrowserEvalTool::new(browser_manager.clone())))
+        .expect("browser_eval tool schema is valid");
+    registry
+        .register(Box::new(BrowserWaitForSelectorTool::new(browser_manager.clone())))
+        .expect("browser_wait_for_selector tool schema is valid");
     registry
         .register(Box::new(BrowserScreenshotTool::new(browser_manager.clone())))
         .expect("browser_screenshot tool schema is valid");

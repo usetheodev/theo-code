@@ -33,4 +33,7 @@ pub use protocol::{
 };
 pub use session_manager::{BrowserSessionError, BrowserSessionManager};
 pub use sidecar::{SidecarError, SidecarSession};
-pub use tool::{BrowserClickTool, BrowserCloseTool, BrowserOpenTool, BrowserScreenshotTool};
+pub use tool::{
+    BrowserClickTool, BrowserCloseTool, BrowserEvalTool, BrowserOpenTool,
+    BrowserScreenshotTool, BrowserTypeTool, BrowserWaitForSelectorTool,
+};

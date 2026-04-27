@@ -255,6 +255,27 @@ pub const TOOL_MANIFEST: &[ToolManifestEntry] = &[
         notes: "T2.1 — browser_screenshot. PNG (default) or JPEG; full_page toggle. Returns base64 image in metadata for vision-block propagation.",
     },
     ToolManifestEntry {
+        id: "browser_type",
+        exposure: ToolExposure::DefaultRegistry,
+        status: ToolStatus::Implemented,
+        owner: "theo-tooling",
+        notes: "T2.1 — browser_type via Playwright's `page.fill`. Replaces field value (NOT append). Empty text clears the field — accepted as the standard idiom.",
+    },
+    ToolManifestEntry {
+        id: "browser_eval",
+        exposure: ToolExposure::DefaultRegistry,
+        status: ToolStatus::Implemented,
+        owner: "theo-tooling",
+        notes: "T2.1 — browser_eval runs JS in page context, returns JSON-serialized value. Useful for extracting hydrated React state, localStorage, etc. DOM nodes / functions return as null.",
+    },
+    ToolManifestEntry {
+        id: "browser_wait_for_selector",
+        exposure: ToolExposure::DefaultRegistry,
+        status: ToolStatus::Implemented,
+        owner: "theo-tooling",
+        notes: "T2.1 — browser_wait_for_selector. Default 5000ms timeout; clamped at 60000ms (1 min) so a stuck page can't hang the agent indefinitely.",
+    },
+    ToolManifestEntry {
         id: "browser_close",
         exposure: ToolExposure::DefaultRegistry,
         status: ToolStatus::Implemented,

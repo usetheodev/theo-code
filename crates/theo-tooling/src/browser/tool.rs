@@ -344,6 +344,325 @@ impl Tool for BrowserScreenshotTool {
 }
 
 // ---------------------------------------------------------------------------
+// `browser_type`
+// ---------------------------------------------------------------------------
+
+pub struct BrowserTypeTool {
+    manager: Arc<BrowserSessionManager>,
+}
+
+impl BrowserTypeTool {
+    pub fn new(manager: Arc<BrowserSessionManager>) -> Self {
+        Self { manager }
+    }
+}
+
+#[async_trait]
+impl Tool for BrowserTypeTool {
+    fn id(&self) -> &str {
+        "browser_type"
+    }
+
+    fn description(&self) -> &str {
+        "T2.1 — Fill the input matching `selector` with `text`. Uses \
+         Playwright's `page.fill` (faster than `page.keyboard.type` for \
+         forms — single atomic value set, no per-key delay). The previous \
+         value is REPLACED, not appended. Requires an open page. \
+         Example: browser_type({selector: \"input[name=q]\", text: \"hello\"})."
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            params: vec![
+                ToolParam {
+                    name: "selector".into(),
+                    param_type: "string".into(),
+                    description:
+                        "Playwright selector for the input — same syntax as browser_click."
+                            .into(),
+                    required: true,
+                },
+                ToolParam {
+                    name: "text".into(),
+                    param_type: "string".into(),
+                    description:
+                        "Value to set. Empty string clears the field."
+                            .into(),
+                    required: true,
+                },
+            ],
+            input_examples: vec![json!({"selector": "input[name=q]", "text": "hello"})],
+        }
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Search
+    }
+
+    async fn execute(
+        &self,
+        args: Value,
+        _ctx: &ToolContext,
+        _permissions: &mut PermissionCollector,
+    ) -> Result<ToolOutput, ToolError> {
+        let selector = args
+            .get("selector")
+            .and_then(Value::as_str)
+            .ok_or_else(|| ToolError::InvalidArgs("missing string `selector`".into()))?
+            .trim()
+            .to_string();
+        if selector.is_empty() {
+            return Err(ToolError::InvalidArgs("`selector` is empty".into()));
+        }
+        let text = args
+            .get("text")
+            .and_then(Value::as_str)
+            .ok_or_else(|| ToolError::InvalidArgs("missing string `text`".into()))?
+            .to_string();
+
+        let result = self
+            .manager
+            .request(BrowserAction::Type {
+                selector: selector.clone(),
+                text: text.clone(),
+            })
+            .await
+            .map_err(map_session_error)?;
+        match result {
+            BrowserResult::Empty => Ok(ToolOutput::new(
+                format!("browser_type: filled `{selector}` ({} chars)", text.chars().count()),
+                format!(
+                    "Set value of `{selector}` to {} chars. The page may have \
+                     fired input/change events; use browser_screenshot to verify.",
+                    text.chars().count()
+                ),
+            )
+            .with_metadata(json!({
+                "type": "browser_type",
+                "selector": selector,
+                "text_length": text.chars().count(),
+            }))),
+            other => Err(ToolError::Execution(format!(
+                "unexpected sidecar result for `type`: {other:?}"
+            ))),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// `browser_eval`
+// ---------------------------------------------------------------------------
+
+pub struct BrowserEvalTool {
+    manager: Arc<BrowserSessionManager>,
+}
+
+impl BrowserEvalTool {
+    pub fn new(manager: Arc<BrowserSessionManager>) -> Self {
+        Self { manager }
+    }
+}
+
+#[async_trait]
+impl Tool for BrowserEvalTool {
+    fn id(&self) -> &str {
+        "browser_eval"
+    }
+
+    fn description(&self) -> &str {
+        "T2.1 — Run a JS expression / IIFE in the page context and return its \
+         JSON-serialized value. Useful for extracting structured data the page \
+         exposes only at runtime (auth tokens in localStorage, hydrated React \
+         state, etc.). The result must be JSON-serialisable — DOM nodes and \
+         functions return as null. Requires an open page. \
+         Example: browser_eval({js: \"document.title\"}) or \
+         browser_eval({js: \"JSON.stringify(window.__INITIAL_STATE__)\"})."
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            params: vec![ToolParam {
+                name: "js".into(),
+                param_type: "string".into(),
+                description:
+                    "JS expression or arrow body. Result must be JSON-serialisable. \
+                     Use `JSON.stringify(x)` for complex objects."
+                        .into(),
+                required: true,
+            }],
+            input_examples: vec![
+                json!({"js": "document.title"}),
+                json!({"js": "Array.from(document.querySelectorAll('a')).map(a => a.href)"}),
+            ],
+        }
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Search
+    }
+
+    async fn execute(
+        &self,
+        args: Value,
+        _ctx: &ToolContext,
+        _permissions: &mut PermissionCollector,
+    ) -> Result<ToolOutput, ToolError> {
+        let js = args
+            .get("js")
+            .and_then(Value::as_str)
+            .ok_or_else(|| ToolError::InvalidArgs("missing string `js`".into()))?
+            .trim()
+            .to_string();
+        if js.is_empty() {
+            return Err(ToolError::InvalidArgs("`js` is empty".into()));
+        }
+
+        let result = self
+            .manager
+            .request(BrowserAction::Eval { js: js.clone() })
+            .await
+            .map_err(map_session_error)?;
+        match result {
+            BrowserResult::EvalResult { value } => {
+                let preview = match &value {
+                    Value::String(s) => {
+                        let trimmed: String = s.chars().take(80).collect();
+                        if s.chars().count() > 80 {
+                            format!("\"{trimmed}…\"")
+                        } else {
+                            format!("\"{trimmed}\"")
+                        }
+                    }
+                    other => other.to_string().chars().take(80).collect(),
+                };
+                Ok(ToolOutput::new(
+                    format!("browser_eval: {preview}"),
+                    format!("expression: {js}\nresult: {value}"),
+                )
+                .with_metadata(json!({
+                    "type": "browser_eval",
+                    "expression": js,
+                    "result": value,
+                })))
+            }
+            other => Err(ToolError::Execution(format!(
+                "unexpected sidecar result for `eval`: {other:?}"
+            ))),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// `browser_wait_for_selector`
+// ---------------------------------------------------------------------------
+
+pub struct BrowserWaitForSelectorTool {
+    manager: Arc<BrowserSessionManager>,
+}
+
+impl BrowserWaitForSelectorTool {
+    pub fn new(manager: Arc<BrowserSessionManager>) -> Self {
+        Self { manager }
+    }
+}
+
+const DEFAULT_WAIT_MS: u64 = 5_000;
+const MAX_WAIT_MS: u64 = 60_000;
+
+#[async_trait]
+impl Tool for BrowserWaitForSelectorTool {
+    fn id(&self) -> &str {
+        "browser_wait_for_selector"
+    }
+
+    fn description(&self) -> &str {
+        "T2.1 — Wait until `selector` appears in the page (DAP `waitForSelector`). \
+         Use BEFORE browser_click on dynamically-rendered content (SPA navigation, \
+         infinite scroll, AJAX-injected DOM). Default timeout 5000ms; max 60000ms \
+         (1 minute). Returns success when found, or surfaces a typed \
+         SelectorTimeout error including the timeout duration. \
+         Example: browser_wait_for_selector({selector: \".loaded\", timeout_ms: 10000})."
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            params: vec![
+                ToolParam {
+                    name: "selector".into(),
+                    param_type: "string".into(),
+                    description: "Playwright selector to wait for.".into(),
+                    required: true,
+                },
+                ToolParam {
+                    name: "timeout_ms".into(),
+                    param_type: "integer".into(),
+                    description: format!(
+                        "Max wait in milliseconds (default {DEFAULT_WAIT_MS}, capped at {MAX_WAIT_MS})."
+                    ),
+                    required: false,
+                },
+            ],
+            input_examples: vec![
+                json!({"selector": ".loaded"}),
+                json!({"selector": "#dynamic-content", "timeout_ms": 10000}),
+            ],
+        }
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Search
+    }
+
+    async fn execute(
+        &self,
+        args: Value,
+        _ctx: &ToolContext,
+        _permissions: &mut PermissionCollector,
+    ) -> Result<ToolOutput, ToolError> {
+        let selector = args
+            .get("selector")
+            .and_then(Value::as_str)
+            .ok_or_else(|| ToolError::InvalidArgs("missing string `selector`".into()))?
+            .trim()
+            .to_string();
+        if selector.is_empty() {
+            return Err(ToolError::InvalidArgs("`selector` is empty".into()));
+        }
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(Value::as_u64)
+            .unwrap_or(DEFAULT_WAIT_MS)
+            .min(MAX_WAIT_MS);
+
+        let result = self
+            .manager
+            .request(BrowserAction::WaitForSelector {
+                selector: selector.clone(),
+                timeout_ms,
+            })
+            .await
+            .map_err(map_session_error)?;
+        match result {
+            BrowserResult::SelectorFound => Ok(ToolOutput::new(
+                format!("browser_wait_for_selector: `{selector}` appeared"),
+                format!(
+                    "Element matching `{selector}` is now in the DOM (waited up to {timeout_ms}ms). \
+                     Safe to call browser_click / browser_eval against it."
+                ),
+            )
+            .with_metadata(json!({
+                "type": "browser_wait_for_selector",
+                "selector": selector,
+                "timeout_ms": timeout_ms,
+            }))),
+            other => Err(ToolError::Execution(format!(
+                "unexpected sidecar result for `wait_for_selector`: {other:?}"
+            ))),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // `browser_close`
 // ---------------------------------------------------------------------------
 
@@ -634,5 +953,193 @@ mod tests {
             .unwrap();
         assert_eq!(out.metadata["was_active"], false);
         assert!(out.title.contains("no session was active"));
+    }
+
+    // ── browser_type ──────────────────────────────────────────────
+
+    #[test]
+    fn t21btool_type_id_and_category() {
+        let t = BrowserTypeTool::new(missing_script_manager());
+        assert_eq!(t.id(), "browser_type");
+        assert_eq!(t.category(), ToolCategory::Search);
+    }
+
+    #[test]
+    fn t21btool_type_schema_validates_with_required_args() {
+        let t = BrowserTypeTool::new(missing_script_manager());
+        let schema = t.schema();
+        schema.validate().unwrap();
+        for p in &schema.params {
+            assert!(p.required, "{} should be required", p.name);
+        }
+    }
+
+    #[tokio::test]
+    async fn t21btool_type_missing_selector_returns_invalid_args() {
+        let t = BrowserTypeTool::new(missing_script_manager());
+        let mut perms = PermissionCollector::new();
+        let err = t
+            .execute(json!({"text": "hi"}), &make_ctx(), &mut perms)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::InvalidArgs(_)));
+    }
+
+    #[tokio::test]
+    async fn t21btool_type_missing_text_returns_invalid_args() {
+        let t = BrowserTypeTool::new(missing_script_manager());
+        let mut perms = PermissionCollector::new();
+        let err = t
+            .execute(
+                json!({"selector": "input"}),
+                &make_ctx(),
+                &mut perms,
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::InvalidArgs(_)));
+    }
+
+    #[tokio::test]
+    async fn t21btool_type_empty_selector_returns_invalid_args() {
+        let t = BrowserTypeTool::new(missing_script_manager());
+        let mut perms = PermissionCollector::new();
+        let err = t
+            .execute(
+                json!({"selector": "  ", "text": "hi"}),
+                &make_ctx(),
+                &mut perms,
+            )
+            .await
+            .unwrap_err();
+        match err {
+            ToolError::InvalidArgs(msg) => assert!(msg.contains("`selector` is empty")),
+            other => panic!("expected InvalidArgs, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn t21btool_type_empty_text_is_accepted() {
+        // Empty text is the "clear field" idiom — must NOT be rejected
+        // as InvalidArgs. The downstream missing-script error confirms
+        // the args parsed correctly.
+        let t = BrowserTypeTool::new(missing_script_manager());
+        let mut perms = PermissionCollector::new();
+        let err = t
+            .execute(
+                json!({"selector": "input", "text": ""}),
+                &make_ctx(),
+                &mut perms,
+            )
+            .await
+            .unwrap_err();
+        match err {
+            ToolError::Execution(msg) => assert!(msg.contains("playwright_sidecar.js")),
+            other => panic!("expected downstream Execution error, got {other:?}"),
+        }
+    }
+
+    // ── browser_eval ──────────────────────────────────────────────
+
+    #[test]
+    fn t21btool_eval_id_and_category() {
+        let t = BrowserEvalTool::new(missing_script_manager());
+        assert_eq!(t.id(), "browser_eval");
+        assert_eq!(t.category(), ToolCategory::Search);
+    }
+
+    #[test]
+    fn t21btool_eval_schema_validates_with_js_required() {
+        let t = BrowserEvalTool::new(missing_script_manager());
+        let schema = t.schema();
+        schema.validate().unwrap();
+        let js = schema.params.iter().find(|p| p.name == "js").unwrap();
+        assert!(js.required);
+    }
+
+    #[tokio::test]
+    async fn t21btool_eval_missing_js_returns_invalid_args() {
+        let t = BrowserEvalTool::new(missing_script_manager());
+        let mut perms = PermissionCollector::new();
+        let err = t
+            .execute(json!({}), &make_ctx(), &mut perms)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::InvalidArgs(_)));
+    }
+
+    #[tokio::test]
+    async fn t21btool_eval_empty_js_returns_invalid_args() {
+        let t = BrowserEvalTool::new(missing_script_manager());
+        let mut perms = PermissionCollector::new();
+        let err = t
+            .execute(
+                json!({"js": "   "}),
+                &make_ctx(),
+                &mut perms,
+            )
+            .await
+            .unwrap_err();
+        match err {
+            ToolError::InvalidArgs(msg) => assert!(msg.contains("`js` is empty")),
+            other => panic!("expected InvalidArgs, got {other:?}"),
+        }
+    }
+
+    // ── browser_wait_for_selector ─────────────────────────────────
+
+    #[test]
+    fn t21btool_wait_id_and_category() {
+        let t = BrowserWaitForSelectorTool::new(missing_script_manager());
+        assert_eq!(t.id(), "browser_wait_for_selector");
+        assert_eq!(t.category(), ToolCategory::Search);
+    }
+
+    #[test]
+    fn t21btool_wait_schema_validates_with_optional_timeout() {
+        let t = BrowserWaitForSelectorTool::new(missing_script_manager());
+        let schema = t.schema();
+        schema.validate().unwrap();
+        let sel = schema.params.iter().find(|p| p.name == "selector").unwrap();
+        let to = schema
+            .params
+            .iter()
+            .find(|p| p.name == "timeout_ms")
+            .unwrap();
+        assert!(sel.required);
+        assert!(!to.required);
+    }
+
+    #[tokio::test]
+    async fn t21btool_wait_missing_selector_returns_invalid_args() {
+        let t = BrowserWaitForSelectorTool::new(missing_script_manager());
+        let mut perms = PermissionCollector::new();
+        let err = t
+            .execute(json!({}), &make_ctx(), &mut perms)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::InvalidArgs(_)));
+    }
+
+    #[tokio::test]
+    async fn t21btool_wait_clamps_timeout_to_max() {
+        // 9_999_999_999 is way over MAX_WAIT_MS (60s). The tool
+        // accepts it (parses it) but clamps internally. The args
+        // parser doesn't surface InvalidArgs — verified indirectly
+        // by reaching the downstream missing-script error.
+        let t = BrowserWaitForSelectorTool::new(missing_script_manager());
+        let mut perms = PermissionCollector::new();
+        let err = t
+            .execute(
+                json!({"selector": ".x", "timeout_ms": 9_999_999_999u64}),
+                &make_ctx(),
+                &mut perms,
+            )
+            .await
+            .unwrap_err();
+        match err {
+            ToolError::Execution(msg) => assert!(msg.contains("playwright_sidecar.js")),
+            other => panic!("expected downstream Execution error, got {other:?}"),
+        }
     }
 }
