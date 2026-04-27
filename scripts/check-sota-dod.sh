@@ -137,7 +137,16 @@ if ! run_step "arch-contract" bash scripts/check-arch-contract.sh; then
     failed=1
 fi
 
-# (2) Size gate (T4.6) — every oversize file allowlisted with a future
+# (2) ADR coverage (Global DoD #8) — every ADR D1-D16 has at least
+#     one commit referencing one of its tied task IDs. Transitive
+#     audit because most commits cite task IDs (T0.1 / T2.1 / ...)
+#     not ADR IDs (D1 / D2 / ...) directly.
+if ! run_step "ADR coverage (D1-D16 → tasks → commits)" \
+        bash scripts/check-adr-coverage.sh; then
+    failed=1
+fi
+
+# (3) Size gate (T4.6) — every oversize file allowlisted with a future
 #     sunset. Catches file-size DoD regressions ("code-audit OK" line in
 #     each per-task DoD) before they leak past the gate.
 if ! run_step "size gate (T4.6 allowlist + sunsets)" \
@@ -176,7 +185,7 @@ declare -a DOD_ITEMS=(
     "Backward compatibility: state v1 plans/transcripts load|cargo test"
     "Per-task code-audit: file size invariant (T4.6)|size gate"
     "CHANGELOG.md updated for each phase|MANUAL"
-    "ADRs D1-D16 referenced in commits|MANUAL"
+    "ADRs D1-D16 referenced in commits|ADR coverage"
     "Architecture contract: 0 violations|arch-contract"
     "SWE-Bench-Verified or terminal-bench >= 10pt above baseline|OUT-OF-SCOPE (paid LLM API)"
     "Tier coverage measurable: T1 (7/7) + T2 (9/9)|OUT-OF-SCOPE (paid LLM API)"

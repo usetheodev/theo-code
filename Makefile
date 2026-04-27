@@ -120,6 +120,10 @@ check-sota-dod: ## SOTA Tier 1 + Tier 2 DoD report (arch + clippy + tests)
 check-sota-dod-quick: ## SOTA DoD report (arch + clippy only, no tests)
 	@bash $(SCRIPTS)/check-sota-dod.sh --quick
 
+.PHONY: check-adr-coverage
+check-adr-coverage: ## SOTA Global DoD #8: ADRs D1-D16 referenced in commits
+	@bash $(SCRIPTS)/check-adr-coverage.sh
+
 # ── Composite audit ────────────────────────────────────────────────────────
 .PHONY: audit
 audit: ## Run all 8 audit techniques
