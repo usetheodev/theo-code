@@ -880,6 +880,110 @@ mod tests {
         }
     }
 
+    /// Snapshot guard: pins the EXACT set of default-registry tool ids
+    /// by name. Catches silent renames and silent removals that the
+    /// looser `manifest_matches_default_registry_ids` test misses (it
+    /// passes whenever the manifest and registry are in lockstep, even
+    /// if both were renamed in the same edit). The agent's wire format
+    /// (state/transcripts/JSONL) is keyed by tool id, so a rename
+    /// breaks every saved session — pinning the names by snapshot
+    /// makes such a change a visible decision instead of a quiet edit.
+    ///
+    /// To intentionally add/remove a tool: update this list AND the
+    /// manifest entry in `tool_manifest.rs` AND the registry vec in
+    /// `create_default_registry`. The friction is the point.
+    #[test]
+    fn default_registry_tool_id_snapshot_is_pinned() {
+        let registry = create_default_registry();
+        let mut got: Vec<String> = registry.ids();
+        got.sort();
+        let expected: Vec<&str> = vec![
+            "apply_patch",
+            "bash",
+            "browser_click",
+            "browser_close",
+            "browser_eval",
+            "browser_open",
+            "browser_screenshot",
+            "browser_status",
+            "browser_type",
+            "browser_wait_for_selector",
+            "codebase_context",
+            "computer_action",
+            "debug_continue",
+            "debug_eval",
+            "debug_launch",
+            "debug_scopes",
+            "debug_set_breakpoint",
+            "debug_stack_trace",
+            "debug_status",
+            "debug_step",
+            "debug_terminate",
+            "debug_threads",
+            "debug_variables",
+            "docs_search",
+            "edit",
+            "env_info",
+            "gen_mutation_test",
+            "gen_property_test",
+            "git_commit",
+            "git_diff",
+            "git_log",
+            "git_status",
+            "glob",
+            "grep",
+            "http_get",
+            "http_post",
+            "lsp_definition",
+            "lsp_hover",
+            "lsp_references",
+            "lsp_rename",
+            "lsp_status",
+            "memory",
+            "plan_advance_phase",
+            "plan_create",
+            "plan_failure_status",
+            "plan_log",
+            "plan_next_task",
+            "plan_replan",
+            "plan_summary",
+            "plan_update_task",
+            "read",
+            "read_image",
+            "reflect",
+            "screenshot",
+            "task_create",
+            "task_update",
+            "think",
+            "webfetch",
+            "write",
+        ];
+        let expected: Vec<String> = expected.into_iter().map(String::from).collect();
+        let added: Vec<&String> = got.iter().filter(|id| !expected.contains(id)).collect();
+        let removed: Vec<&String> = expected.iter().filter(|id| !got.contains(id)).collect();
+        assert!(
+            added.is_empty() && removed.is_empty(),
+            "default-registry tool id snapshot drifted.\n  \
+             added (in registry, not in snapshot — update the snapshot \
+             AND tool_manifest.rs): {:?}\n  \
+             removed (in snapshot, not in registry — rename, deletion, \
+             or wiring regression): {:?}\n  \
+             got:      {:?}\n  \
+             expected: {:?}",
+            added,
+            removed,
+            got,
+            expected
+        );
+        assert_eq!(
+            got.len(),
+            expected.len(),
+            "snapshot count mismatch: registry has {} ids, snapshot lists {}",
+            got.len(),
+            expected.len()
+        );
+    }
+
     /// Guard: every SOTA-introduced default-registry tool carries an
     /// LLM-friendly description with a concrete `Example: <tool>(...)`
     /// invocation, sized for the token budget. Sidecar-backed tools
