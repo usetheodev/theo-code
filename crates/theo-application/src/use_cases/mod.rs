@@ -12,6 +12,7 @@ pub mod memory_lint;
 pub mod memory_ui;
 pub mod observability_ui;
 pub mod pipeline;
+pub mod replan_advisor;
 pub mod run_agent_session;
 pub mod skills;
 pub mod transcript_indexer_impl;
