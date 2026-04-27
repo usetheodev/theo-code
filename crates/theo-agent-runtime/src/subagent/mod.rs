@@ -1304,6 +1304,9 @@ mod tests {
         // Cache empty AND no IO attempted (env disables it) — observable
         // proof: the test finished essentially instantly with nothing cached.
         assert!(cache.cached_servers().is_empty());
+        // SAFETY: still inside the `mcp_env_lock` critical section
+        // acquired at the top of this test, so no other thread reads
+        // `THEO_MCP_AUTO_DISCOVERY` concurrently with this remove_var.
         unsafe { std::env::remove_var("THEO_MCP_AUTO_DISCOVERY"); }
     }
 

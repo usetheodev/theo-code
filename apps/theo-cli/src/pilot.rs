@@ -367,15 +367,36 @@ fn build_replan_advisor(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, MutexGuard};
+
+    /// Serializes the two tests that mutate `THEO_AUTO_REPLAN` (a
+    /// production env var read by `env_auto_replan_enabled`). Same
+    /// flake class as the wiki/compiler / onboarding / subagent
+    /// fixes (commits 8025a70 / 184ff59 / 8635f0d) — without this
+    /// lock cargo's parallel test runner would race them with each
+    /// other AND with any other test in this binary that calls
+    /// `env_auto_replan_enabled` (today none, but defending against
+    /// future regressions).
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn env_lock() -> MutexGuard<'static, ()> {
+        ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner())
+    }
 
     #[test]
     fn t61pilot_env_auto_replan_disabled_by_default() {
+        // SAFETY: holding `ENV_LOCK` serialises against the sibling
+        // test that also mutates THEO_AUTO_REPLAN, so for the
+        // duration of this test no other thread reads or writes it.
+        let _guard = env_lock();
         let prev = std::env::var_os("THEO_AUTO_REPLAN");
         unsafe {
             std::env::remove_var("THEO_AUTO_REPLAN");
         }
         assert!(!env_auto_replan_enabled());
         if let Some(v) = prev {
+            // SAFETY: see top of test — still inside the ENV_LOCK
+            // critical section.
             unsafe {
                 std::env::set_var("THEO_AUTO_REPLAN", v);
             }
@@ -384,6 +405,10 @@ mod tests {
 
     #[test]
     fn t61pilot_env_auto_replan_recognises_truthy_values() {
+        // SAFETY: holding `ENV_LOCK` serialises against the sibling
+        // env-mutating test; the inner unsafe block stays inside
+        // the same critical section.
+        let _guard = env_lock();
         let prev = std::env::var_os("THEO_AUTO_REPLAN");
         unsafe {
             for v in ["1", "true", "TRUE", "yes", "on"] {
