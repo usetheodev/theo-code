@@ -116,8 +116,10 @@ impl Tool for GenMutationTestTool {
          subdir to mutate, default `.`) and optional `existing_outcomes` \
          (path to an outcomes.json from a previous run — skips the \
          expensive subprocess and just reparses). Requires \
-         `cargo install cargo-mutants` to be installed unless \
-         `existing_outcomes` is provided. Example: \
+         `cargo install cargo-mutants` on PATH; when missing, the call \
+         returns a typed BinaryMissing error — fall back to \
+         `gen_property_test` to expand coverage with proptest \
+         scaffolding instead of mutation testing. Example: \
          gen_mutation_test({path: 'crates/theo-domain'})."
     }
 

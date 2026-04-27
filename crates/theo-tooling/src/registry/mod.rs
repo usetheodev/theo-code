@@ -880,6 +880,161 @@ mod tests {
         }
     }
 
+    /// Guard: every SOTA-introduced default-registry tool carries an
+    /// LLM-friendly description with a concrete `Example: <tool>(...)`
+    /// invocation, sized for the token budget. Sidecar-backed tools
+    /// (browser / LSP / DAP / OS-CLI wrappers) must additionally name
+    /// a fallback alternative for environments where the sidecar
+    /// isn't installed — `fall back` / `fallback` is the SOTA
+    /// convention; the original top-5 use `instead`. Self-contained
+    /// tools (pure file load, pure templating, in-memory index)
+    /// don't have a sidecar to fall back from, so the fallback
+    /// contract is targeted, not blanket.
+    ///
+    /// Locks the description-quality contract that the LLM sees when
+    /// the JSON Schema is rendered. A future change that silently
+    /// drops the steering language or the example would make the
+    /// agent retry doomed calls without an off-ramp.
+    #[test]
+    fn sota_tools_have_steering_descriptions_with_concrete_examples() {
+        let registry = create_default_registry();
+        // Tuple: (tool_id, sidecar_backed). Sidecar-backed tools wrap
+        // an external process (Playwright / LSP / DAP / xdotool /
+        // cargo-mutants / screencapture-style CLI) and MUST name a
+        // fallback. Self-contained tools (`read_image`, plan tools,
+        // `gen_property_test`, `docs_search`) load files / mutate
+        // JSON / serve an in-memory index — no sidecar, no fallback
+        // required.
+        // Tuple: (tool_id, needs_fallback_wording).
+        //
+        // Tools that REQUIRE fallback wording in the description are
+        // those the agent reads as a *decision point* — either:
+        //   - A discovery tool (`*_status`) — it's the documented
+        //     entry point for "should I even try this family?"
+        //   - A standalone sidecar wrapper without a discovery tool
+        //     (`screenshot`, `computer_action`, `gen_mutation_test`)
+        //     — the agent has nowhere else to learn the fallback.
+        //
+        // Operation tools inside a discovery-backed family
+        // (`browser_open` / `lsp_definition` / `debug_launch` etc.)
+        // delegate fallback-naming to their family's `*_status` tool
+        // and to the actionable error returned by `map_session_error`
+        // when the sidecar is missing — repeating the fallback in
+        // every operation tool's description would burn token budget
+        // for zero agent-decision benefit. Self-contained tools
+        // (pure file load, JSON manipulation, in-memory index)
+        // have no sidecar to fall back from.
+        let sota_tools: &[(&str, bool)] = &[
+            // Phase 1 — multimodal
+            ("screenshot", true),  // standalone sidecar wrapper (screencapture/gnome-screenshot/import)
+            ("read_image", false), // pure filesystem load — no sidecar
+            // Phase 2 — browser automation (Playwright sidecar)
+            ("browser_status", true), // discovery entry point
+            ("browser_open", false),  // operation; delegates to browser_status
+            ("browser_click", false),
+            ("browser_type", false),
+            ("browser_eval", false),
+            ("browser_wait_for_selector", false),
+            ("browser_screenshot", false),
+            ("browser_close", false),
+            // Phase 3 — LSP (rust-analyzer / pyright / gopls / ...)
+            ("lsp_status", true), // discovery entry point
+            ("lsp_definition", false), // operation; delegates to lsp_status
+            ("lsp_references", false),
+            ("lsp_hover", false),
+            ("lsp_rename", false),
+            // Phase 4 — Computer Use (xdotool / cliclick)
+            ("computer_action", true), // standalone — no separate `computer_status`
+            // Phase 5 — auto-test-gen
+            ("gen_property_test", false), // pure templating, no exec
+            ("gen_mutation_test", true),  // standalone wrapper around cargo-mutants binary
+            // Phase 6 — adaptive replanning (pure JSON manipulation)
+            ("plan_failure_status", false),
+            ("plan_replan", false),
+            // Phase 13 — DAP (lldb-vscode / debugpy / dlv / js-debug-adapter)
+            ("debug_status", true), // discovery entry point
+            ("debug_launch", false), // operation; delegates to debug_status
+            ("debug_set_breakpoint", false),
+            ("debug_continue", false),
+            ("debug_step", false),
+            ("debug_eval", false),
+            ("debug_stack_trace", false),
+            ("debug_variables", false),
+            ("debug_scopes", false),
+            ("debug_threads", false),
+            ("debug_terminate", false),
+            // Phase 15 — external docs RAG (in-memory index)
+            ("docs_search", false),
+        ];
+        let mut missing: Vec<&str> = Vec::new();
+        for &(tool_id, needs_fallback_wording) in sota_tools {
+            let Some(tool) = registry.get(tool_id) else {
+                missing.push(tool_id);
+                continue;
+            };
+            let desc = tool.description();
+            let lower = desc.to_lowercase();
+
+            assert!(
+                desc.len() >= 100,
+                "description for `{tool_id}` is too short ({} chars) — \
+                 SOTA tools must explain when to use them",
+                desc.len()
+            );
+            assert!(
+                desc.len() <= 1500,
+                "description for `{tool_id}` is too long ({} chars) — \
+                 keep under 1500 to preserve token budget",
+                desc.len()
+            );
+            // Concrete invocation. The convention across all SOTA tools
+            // is `Example: <tool_id>(...)` or `Examples: <tool_id>(...)`
+            // when several variants are demonstrated. Lowercased lookup
+            // accepts both `example:` and `examples:` (plural form is
+            // used by `computer_action` to show multiple action shapes).
+            assert!(
+                lower.contains("example:") || lower.contains("examples:"),
+                "description for `{tool_id}` must include a concrete \
+                 `Example: <tool_id>(...)` invocation (plural \
+                 `Examples:` is also accepted)"
+            );
+            assert!(
+                desc.contains(tool_id),
+                "the `Example:` block in `{tool_id}` must reference the \
+                 tool id itself so the LLM sees a callable invocation"
+            );
+            // Discovery-entry-point tools (`*_status`) and standalone
+            // sidecar wrappers (`screenshot`, `computer_action`,
+            // `gen_mutation_test`) MUST name a fallback in the
+            // description — those are decision points the agent reads
+            // before committing to a tool family. Operation tools
+            // inside a discovery-backed family delegate fallback
+            // naming to their `*_status` sibling (and to the
+            // actionable error the dispatch layer returns when the
+            // sidecar is missing) so the description token budget
+            // stays focused on the operation itself.
+            if needs_fallback_wording {
+                assert!(
+                    lower.contains("fall back")
+                        || lower.contains("fallback")
+                        || lower.contains("instead"),
+                    "description for `{tool_id}` must name a fallback \
+                     (`fall back to ...` is the SOTA convention; \
+                     `instead` is the legacy convention) so the agent \
+                     has an off-ramp when the underlying sidecar / \
+                     binary is unavailable"
+                );
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "SOTA tool ids missing from default registry — \
+             `manifest_matches_default_registry_ids` should have caught \
+             this first; check tool_manifest.rs and registry/mod.rs:\n{:?}",
+            missing
+        );
+    }
+
     /// Guard: the top-5 tools must have onboarding-style descriptions with
     /// NOT-usage rules and at least one concrete example.
     /// Anthropic "Writing tools for agents", principles 3 and 11.

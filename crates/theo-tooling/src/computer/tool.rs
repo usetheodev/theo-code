@@ -50,7 +50,11 @@ impl Tool for ComputerActionTool {
          `screenshot`, `mouse_move`, `click`, `double_click`, `mouse_down`, \
          `mouse_up`, `type`, `key`, `scroll`, `wait`. CAPABILITY-GATED: \
          requires Capability::ComputerUse — automation can move money, send \
-         messages, or delete data, so it's OFF by default. \
+         messages, or delete data, so it's OFF by default. When the \
+         platform driver isn't available (headless container without X11; \
+         Wayland-only without xdotool; Windows without nircmd) the call \
+         returns a typed DriverMissing error — fall back to the \
+         `browser_*` family for web UIs or `webfetch` for static HTML. \
          Examples: \
          computer_action({action: \"screenshot\"}) → base64 PNG vision block \
          computer_action({action: \"click\", x: 100, y: 200}) \
