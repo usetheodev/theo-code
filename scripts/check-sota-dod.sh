@@ -193,6 +193,20 @@ if ! run_step "coverage gate (local cobertura.xml line-rate floor)" \
     failed=1
 fi
 
+# (6) Bench infrastructure pre-flight (Global DoD #10/#11 scaffold).
+#     The empirical halves of #10/#11 require paid LLM API and are
+#     OUT-OF-SCOPE for the autonomous loop, but everything UP TO
+#     the LLM call is gate-able locally. This pre-flight validates
+#     eval.yml YAML, smoke.py imports, scenario TOML, and the
+#     report_builder import surface — so plugging in API keys
+#     yields zero scaffold surprises. --no-build mode skips the
+#     release build (cargo build --release is slow); the full job
+#     runs in audit.yml.
+if ! run_step "bench infra pre-flight (#10/#11 scaffold)" \
+        bash scripts/check-bench-preflight.sh --no-build; then
+    failed=1
+fi
+
 # (3) cargo clippy --workspace (excl. desktop/marklive) -- -D warnings
 #     Clippy on every crate the contract touches; -D warnings turns each
 #     lint into an error so the gate is honest about the lint surface.
@@ -228,6 +242,7 @@ declare -a DOD_ITEMS=(
     "CHANGELOG.md updated for each phase|CHANGELOG phase coverage"
     "ADRs D1-D16 referenced in commits|ADR coverage"
     "Architecture contract: 0 violations|arch-contract"
+    "Bench infrastructure ready for API-key plug-in|bench infra pre-flight"
     "SWE-Bench-Verified or terminal-bench >= 10pt above baseline|OUT-OF-SCOPE (paid LLM API)"
     "Tier coverage measurable: T1 (7/7) + T2 (9/9)|OUT-OF-SCOPE (paid LLM API)"
 )

@@ -144,6 +144,10 @@ check-sota-dod-test: ## Regression test for the SOTA-DoD gate scripts themselves
 check-phase-artifacts: ## SOTA Global DoD #1 (code half): every phase has its promised artifacts
 	@bash $(SCRIPTS)/check-phase-artifacts.sh
 
+.PHONY: check-bench-preflight
+check-bench-preflight: ## Pre-flight validate bench infra (eval.yml + smoke.py + scenarios)
+	@bash $(SCRIPTS)/check-bench-preflight.sh --no-build
+
 # ── Composite audit ────────────────────────────────────────────────────────
 .PHONY: audit
 audit: ## Run all 8 audit techniques

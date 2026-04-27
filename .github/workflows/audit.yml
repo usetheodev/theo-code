@@ -65,6 +65,13 @@ jobs:
       # runs) is gated by audit.yml::eval (DoD #10/#11).
       - name: Phase artifact completeness (SOTA Global DoD #1)
         run: bash scripts/check-phase-artifacts.sh
+      # Bench infrastructure pre-flight (DoD #10/#11 scaffold). The
+      # empirical halves require paid LLM API and run in eval.yml,
+      # but the scaffold (eval.yml YAML, smoke.py imports, scenario
+      # TOML, analysis/report_builder) is gate-able without keys.
+      # --no-build skips the release build (the bench-full job rebuilds).
+      - name: Bench infrastructure pre-flight (DoD #10/#11 scaffold)
+        run: bash scripts/check-bench-preflight.sh --no-build
 
   # ── Rust build + tests ──────────────────────────────────────────────────
   rust:
