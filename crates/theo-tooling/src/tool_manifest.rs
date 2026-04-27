@@ -206,6 +206,20 @@ pub const TOOL_MANIFEST: &[ToolManifestEntry] = &[
         notes: "T13.1 — DAP `continue`. Optional `thread_id` to resume one thread; default resumes all. Reports `all_threads_continued` from the response.",
     },
     ToolManifestEntry {
+        id: "debug_step",
+        exposure: ToolExposure::DefaultRegistry,
+        status: ToolStatus::Implemented,
+        owner: "theo-tooling",
+        notes: "T13.1 — DAP `next`/`stepIn`/`stepOut` via `kind` arg (`over`/`in`/`out`). thread_id REQUIRED (unlike continue) — get from the most recent `stopped` event.",
+    },
+    ToolManifestEntry {
+        id: "debug_eval",
+        exposure: ToolExposure::DefaultRegistry,
+        status: ToolStatus::Implemented,
+        owner: "theo-tooling",
+        notes: "T13.1 — DAP `evaluate` for inspecting expressions in the debuggee context. Optional `frame_id` (from debug_stack_trace) and `context` (`watch`/`repl`/`hover`). Returns result + type + variablesReference for drill-down.",
+    },
+    ToolManifestEntry {
         id: "debug_terminate",
         exposure: ToolExposure::DefaultRegistry,
         status: ToolStatus::Implemented,

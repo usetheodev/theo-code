@@ -580,6 +580,317 @@ impl Tool for DebugContinueTool {
 }
 
 // ---------------------------------------------------------------------------
+// `debug_step`
+// ---------------------------------------------------------------------------
+
+/// `debug_step` — single-step the debuggee. Three step kinds:
+///   - `over` (DAP `next`):    step the current line, skipping calls.
+///   - `in`   (DAP `stepIn`):  step into the next function call.
+///   - `out`  (DAP `stepOut`): run until the current frame returns.
+pub struct DebugStepTool {
+    manager: Arc<DapSessionManager>,
+}
+
+impl DebugStepTool {
+    pub fn new(manager: Arc<DapSessionManager>) -> Self {
+        Self { manager }
+    }
+}
+
+#[async_trait]
+impl Tool for DebugStepTool {
+    fn id(&self) -> &str {
+        "debug_step"
+    }
+
+    fn description(&self) -> &str {
+        "T13.1 — Single-step the debuggee. `kind` selects the step style: \
+         \"over\" (DAP `next`, skip calls), \"in\" (DAP `stepIn`, descend into \
+         the next call), \"out\" (DAP `stepOut`, run until current frame \
+         returns). `thread_id` IS REQUIRED by DAP for stepping (unlike \
+         continue) — get it from the most recent `stopped` event or DAP \
+         `threads` request. Watch for the next `stopped` event after stepping. \
+         Example: debug_step({session_id: \"a\", kind: \"over\", thread_id: 1})."
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            params: vec![
+                ToolParam {
+                    name: "session_id".into(),
+                    param_type: "string".into(),
+                    description: "ID of the active debug session.".into(),
+                    required: true,
+                },
+                ToolParam {
+                    name: "kind".into(),
+                    param_type: "string".into(),
+                    description:
+                        "One of: `over` (step skipping function calls), \
+                         `in` (step into the next call), `out` (run until \
+                         current frame returns)."
+                            .into(),
+                    required: true,
+                },
+                ToolParam {
+                    name: "thread_id".into(),
+                    param_type: "integer".into(),
+                    description:
+                        "Thread to step. Required by DAP — get it from the \
+                         most recent `stopped` event."
+                            .into(),
+                    required: true,
+                },
+            ],
+            input_examples: vec![
+                json!({"session_id": "a", "kind": "over", "thread_id": 1}),
+                json!({"session_id": "a", "kind": "in", "thread_id": 1}),
+                json!({"session_id": "a", "kind": "out", "thread_id": 1}),
+            ],
+        }
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Search
+    }
+
+    async fn execute(
+        &self,
+        args: Value,
+        _ctx: &ToolContext,
+        _permissions: &mut PermissionCollector,
+    ) -> Result<ToolOutput, ToolError> {
+        let session_id = parse_session_id(&args)?;
+        let kind = args
+            .get("kind")
+            .and_then(Value::as_str)
+            .ok_or_else(|| ToolError::InvalidArgs("missing string `kind`".into()))?;
+        let dap_command = match kind {
+            "over" => "next",
+            "in" => "stepIn",
+            "out" => "stepOut",
+            other => {
+                return Err(ToolError::InvalidArgs(format!(
+                    "`kind` must be one of `over`, `in`, `out` (got `{other}`)"
+                )));
+            }
+        };
+        let thread_id = args
+            .get("thread_id")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| {
+                ToolError::InvalidArgs(
+                    "missing integer `thread_id` — DAP step requires it (get it from the most recent stopped event)"
+                        .into(),
+                )
+            })?;
+
+        let client = require_session(&self.manager, &session_id).await?;
+        let resp = client
+            .request(dap_command, Some(json!({"threadId": thread_id})))
+            .await
+            .map_err(|e| ToolError::Execution(format!("{dap_command} failed: {e}")))?;
+        check_response(&resp, dap_command)?;
+        Ok(ToolOutput::new(
+            format!(
+                "debug_step: session `{session_id}` stepped {kind} (thread {thread_id})"
+            ),
+            format!(
+                "Step {kind} executed via DAP `{dap_command}`. Watch for the \
+                 next `stopped` event to inspect new state."
+            ),
+        )
+        .with_metadata(json!({
+            "type": "debug_step",
+            "session_id": session_id,
+            "kind": kind,
+            "dap_command": dap_command,
+            "thread_id": thread_id,
+        })))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// `debug_eval`
+// ---------------------------------------------------------------------------
+
+/// `debug_eval` — evaluate an expression in the debuggee's context.
+pub struct DebugEvalTool {
+    manager: Arc<DapSessionManager>,
+}
+
+impl DebugEvalTool {
+    pub fn new(manager: Arc<DapSessionManager>) -> Self {
+        Self { manager }
+    }
+}
+
+#[async_trait]
+impl Tool for DebugEvalTool {
+    fn id(&self) -> &str {
+        "debug_eval"
+    }
+
+    fn description(&self) -> &str {
+        "T13.1 — Evaluate `expression` in the debuggee's current context. \
+         Pass `frame_id` to evaluate inside a specific stack frame (get it \
+         from a future debug_stack_trace tool); omit to evaluate in the \
+         global / top frame the adapter chooses. `context` selects the eval \
+         mode: \"watch\" (default — read-only inspection), \"repl\" (allows \
+         side effects in some adapters), \"hover\" (terse). Returns the \
+         result string, type, and a variablesReference for drill-down. \
+         Example: debug_eval({session_id: \"a\", expression: \"my_var.field\"})."
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            params: vec![
+                ToolParam {
+                    name: "session_id".into(),
+                    param_type: "string".into(),
+                    description: "ID of the active debug session.".into(),
+                    required: true,
+                },
+                ToolParam {
+                    name: "expression".into(),
+                    param_type: "string".into(),
+                    description:
+                        "Expression to evaluate (language-specific syntax — \
+                         the adapter parses it with the debuggee's parser)."
+                            .into(),
+                    required: true,
+                },
+                ToolParam {
+                    name: "frame_id".into(),
+                    param_type: "integer".into(),
+                    description:
+                        "Optional stack frame to evaluate in. Get from \
+                         debug_stack_trace; omit for the adapter's default."
+                            .into(),
+                    required: false,
+                },
+                ToolParam {
+                    name: "context".into(),
+                    param_type: "string".into(),
+                    description:
+                        "DAP eval context: `watch` (default, read-only), \
+                         `repl` (may have side effects), `hover` (terse)."
+                            .into(),
+                    required: false,
+                },
+            ],
+            input_examples: vec![
+                json!({"session_id": "a", "expression": "my_var"}),
+                json!({"session_id": "a", "expression": "x + y", "frame_id": 7}),
+            ],
+        }
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Search
+    }
+
+    async fn execute(
+        &self,
+        args: Value,
+        _ctx: &ToolContext,
+        _permissions: &mut PermissionCollector,
+    ) -> Result<ToolOutput, ToolError> {
+        let session_id = parse_session_id(&args)?;
+        let expression = args
+            .get("expression")
+            .and_then(Value::as_str)
+            .ok_or_else(|| ToolError::InvalidArgs("missing string `expression`".into()))?
+            .to_string();
+        if expression.trim().is_empty() {
+            return Err(ToolError::InvalidArgs("`expression` is empty".into()));
+        }
+        let frame_id = args.get("frame_id").and_then(Value::as_u64);
+        let context = args
+            .get("context")
+            .and_then(Value::as_str)
+            .unwrap_or("watch")
+            .to_string();
+        if !["watch", "repl", "hover"].contains(&context.as_str()) {
+            return Err(ToolError::InvalidArgs(format!(
+                "`context` must be `watch`, `repl`, or `hover` (got `{context}`)"
+            )));
+        }
+
+        let client = require_session(&self.manager, &session_id).await?;
+        let mut params = json!({
+            "expression": expression,
+            "context": context,
+        });
+        if let Some(f) = frame_id {
+            params["frameId"] = json!(f);
+        }
+        let resp = client
+            .request("evaluate", Some(params))
+            .await
+            .map_err(|e| ToolError::Execution(format!("evaluate failed: {e}")))?;
+        check_response(&resp, "evaluate")?;
+        Ok(format_eval_output(&resp, &session_id, &expression, &context, frame_id))
+    }
+}
+
+fn format_eval_output(
+    resp: &DapResponse,
+    session_id: &str,
+    expression: &str,
+    context: &str,
+    frame_id: Option<u64>,
+) -> ToolOutput {
+    let body = resp.body.as_ref();
+    let result = body
+        .and_then(|b| b.get("result"))
+        .and_then(Value::as_str)
+        .unwrap_or("(no result)")
+        .to_string();
+    let ty = body
+        .and_then(|b| b.get("type"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let variables_reference = body
+        .and_then(|b| b.get("variablesReference"))
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let memory_reference = body
+        .and_then(|b| b.get("memoryReference"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+
+    let preview = result.lines().next().unwrap_or("");
+    let title = format!("debug_eval: {preview}");
+    let mut output = format!(
+        "expression: {expression}\nresult: {result}"
+    );
+    if let Some(ref t) = ty {
+        output.push_str(&format!("\ntype: {t}"));
+    }
+    if variables_reference > 0 {
+        output.push_str(&format!(
+            "\nvariablesReference: {variables_reference} (drill down with future debug_variables)"
+        ));
+    }
+    if let Some(ref m) = memory_reference {
+        output.push_str(&format!("\nmemoryReference: {m}"));
+    }
+
+    ToolOutput::new(title, output).with_metadata(json!({
+        "type": "debug_eval",
+        "session_id": session_id,
+        "expression": expression,
+        "context": context,
+        "frame_id": frame_id,
+        "result": result,
+        "value_type": ty,
+        "variables_reference": variables_reference,
+        "memory_reference": memory_reference,
+    }))
+}
+
+// ---------------------------------------------------------------------------
 // `debug_terminate`
 // ---------------------------------------------------------------------------
 
@@ -1082,6 +1393,287 @@ mod tests {
             }
             other => panic!("expected Execution error, got {other:?}"),
         }
+    }
+
+    // ── debug_step ────────────────────────────────────────────────
+
+    #[test]
+    fn t131tool_step_id_and_category() {
+        let t = DebugStepTool::new(empty_manager());
+        assert_eq!(t.id(), "debug_step");
+        assert_eq!(t.category(), ToolCategory::Search);
+    }
+
+    #[test]
+    fn t131tool_step_schema_validates_and_requires_kind_thread() {
+        let t = DebugStepTool::new(empty_manager());
+        let schema = t.schema();
+        schema.validate().unwrap();
+        let required: Vec<&str> = schema
+            .params
+            .iter()
+            .filter(|p| p.required)
+            .map(|p| p.name.as_str())
+            .collect();
+        for r in ["session_id", "kind", "thread_id"] {
+            assert!(required.contains(&r), "{r} must be required");
+        }
+    }
+
+    #[tokio::test]
+    async fn t131tool_step_missing_kind_returns_invalid_args() {
+        let t = DebugStepTool::new(empty_manager());
+        let ctx = make_ctx(PathBuf::from("/tmp"));
+        let mut perms = PermissionCollector::new();
+        let err = t
+            .execute(
+                json!({"session_id": "a", "thread_id": 1}),
+                &ctx,
+                &mut perms,
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::InvalidArgs(_)));
+    }
+
+    #[tokio::test]
+    async fn t131tool_step_invalid_kind_returns_invalid_args_with_options() {
+        let t = DebugStepTool::new(empty_manager());
+        let ctx = make_ctx(PathBuf::from("/tmp"));
+        let mut perms = PermissionCollector::new();
+        let err = t
+            .execute(
+                json!({"session_id": "a", "kind": "sideways", "thread_id": 1}),
+                &ctx,
+                &mut perms,
+            )
+            .await
+            .unwrap_err();
+        match err {
+            ToolError::InvalidArgs(msg) => {
+                assert!(msg.contains("over"));
+                assert!(msg.contains("in"));
+                assert!(msg.contains("out"));
+                assert!(msg.contains("sideways"));
+            }
+            other => panic!("expected InvalidArgs, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn t131tool_step_missing_thread_id_returns_invalid_args_with_hint() {
+        // Common bug: copying continue() args (where thread_id is
+        // optional) into step(). Error message points at the
+        // `stopped` event source.
+        let t = DebugStepTool::new(empty_manager());
+        let ctx = make_ctx(PathBuf::from("/tmp"));
+        let mut perms = PermissionCollector::new();
+        let err = t
+            .execute(
+                json!({"session_id": "a", "kind": "over"}),
+                &ctx,
+                &mut perms,
+            )
+            .await
+            .unwrap_err();
+        match err {
+            ToolError::InvalidArgs(msg) => {
+                assert!(msg.contains("thread_id"));
+                assert!(msg.contains("stopped event"));
+            }
+            other => panic!("expected InvalidArgs, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn t131tool_step_unknown_session_returns_actionable_error() {
+        let t = DebugStepTool::new(empty_manager());
+        let ctx = make_ctx(PathBuf::from("/tmp"));
+        let mut perms = PermissionCollector::new();
+        let err = t
+            .execute(
+                json!({"session_id": "ghost", "kind": "over", "thread_id": 1}),
+                &ctx,
+                &mut perms,
+            )
+            .await
+            .unwrap_err();
+        match err {
+            ToolError::Execution(msg) => assert!(msg.contains("no active debug session")),
+            other => panic!("expected Execution error, got {other:?}"),
+        }
+    }
+
+    // ── debug_eval ────────────────────────────────────────────────
+
+    #[test]
+    fn t131tool_eval_id_and_category() {
+        let t = DebugEvalTool::new(empty_manager());
+        assert_eq!(t.id(), "debug_eval");
+        assert_eq!(t.category(), ToolCategory::Search);
+    }
+
+    #[test]
+    fn t131tool_eval_schema_validates() {
+        let t = DebugEvalTool::new(empty_manager());
+        t.schema().validate().unwrap();
+    }
+
+    #[test]
+    fn t131tool_eval_schema_marks_frame_id_and_context_optional() {
+        let t = DebugEvalTool::new(empty_manager());
+        let schema = t.schema();
+        let optional: Vec<&str> = schema
+            .params
+            .iter()
+            .filter(|p| !p.required)
+            .map(|p| p.name.as_str())
+            .collect();
+        assert!(optional.contains(&"frame_id"));
+        assert!(optional.contains(&"context"));
+    }
+
+    #[tokio::test]
+    async fn t131tool_eval_missing_expression_returns_invalid_args() {
+        let t = DebugEvalTool::new(empty_manager());
+        let ctx = make_ctx(PathBuf::from("/tmp"));
+        let mut perms = PermissionCollector::new();
+        let err = t
+            .execute(json!({"session_id": "a"}), &ctx, &mut perms)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::InvalidArgs(_)));
+    }
+
+    #[tokio::test]
+    async fn t131tool_eval_empty_expression_returns_invalid_args() {
+        let t = DebugEvalTool::new(empty_manager());
+        let ctx = make_ctx(PathBuf::from("/tmp"));
+        let mut perms = PermissionCollector::new();
+        let err = t
+            .execute(
+                json!({"session_id": "a", "expression": "   "}),
+                &ctx,
+                &mut perms,
+            )
+            .await
+            .unwrap_err();
+        match err {
+            ToolError::InvalidArgs(msg) => assert!(msg.contains("`expression` is empty")),
+            other => panic!("expected InvalidArgs, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn t131tool_eval_invalid_context_returns_invalid_args() {
+        let t = DebugEvalTool::new(empty_manager());
+        let ctx = make_ctx(PathBuf::from("/tmp"));
+        let mut perms = PermissionCollector::new();
+        let err = t
+            .execute(
+                json!({
+                    "session_id": "a",
+                    "expression": "x",
+                    "context": "side_effects_pls"
+                }),
+                &ctx,
+                &mut perms,
+            )
+            .await
+            .unwrap_err();
+        match err {
+            ToolError::InvalidArgs(msg) => {
+                assert!(msg.contains("`context`"));
+                assert!(msg.contains("watch"));
+                assert!(msg.contains("repl"));
+                assert!(msg.contains("hover"));
+            }
+            other => panic!("expected InvalidArgs, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn t131tool_eval_unknown_session_returns_actionable_error() {
+        let t = DebugEvalTool::new(empty_manager());
+        let ctx = make_ctx(PathBuf::from("/tmp"));
+        let mut perms = PermissionCollector::new();
+        let err = t
+            .execute(
+                json!({"session_id": "ghost", "expression": "x"}),
+                &ctx,
+                &mut perms,
+            )
+            .await
+            .unwrap_err();
+        match err {
+            ToolError::Execution(msg) => assert!(msg.contains("no active debug session")),
+            other => panic!("expected Execution error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn t131tool_format_eval_includes_result_type_and_variables_reference() {
+        let resp = DapResponse {
+            seq: 1,
+            message_type: "response".into(),
+            request_seq: 1,
+            command: "evaluate".into(),
+            success: true,
+            message: None,
+            body: Some(json!({
+                "result": "Some(42)",
+                "type": "Option<i32>",
+                "variablesReference": 7,
+            })),
+        };
+        let out = format_eval_output(&resp, "a", "my_var", "watch", Some(3));
+        assert_eq!(out.metadata["result"], "Some(42)");
+        assert_eq!(out.metadata["value_type"], "Option<i32>");
+        assert_eq!(out.metadata["variables_reference"], 7);
+        assert_eq!(out.metadata["frame_id"], 3);
+        assert_eq!(out.metadata["context"], "watch");
+        assert!(out.output.contains("expression: my_var"));
+        assert!(out.output.contains("result: Some(42)"));
+        assert!(out.output.contains("type: Option<i32>"));
+        assert!(out.output.contains("variablesReference: 7"));
+    }
+
+    #[test]
+    fn t131tool_format_eval_handles_zero_variables_reference_silently() {
+        // Primitive values have variablesReference == 0; no drill-down hint.
+        let resp = DapResponse {
+            seq: 1,
+            message_type: "response".into(),
+            request_seq: 1,
+            command: "evaluate".into(),
+            success: true,
+            message: None,
+            body: Some(json!({
+                "result": "42",
+                "type": "i32",
+                "variablesReference": 0,
+            })),
+        };
+        let out = format_eval_output(&resp, "a", "x", "watch", None);
+        assert_eq!(out.metadata["variables_reference"], 0);
+        assert!(!out.output.contains("variablesReference:"));
+    }
+
+    #[test]
+    fn t131tool_format_eval_handles_missing_body_gracefully() {
+        let resp = DapResponse {
+            seq: 1,
+            message_type: "response".into(),
+            request_seq: 1,
+            command: "evaluate".into(),
+            success: true,
+            message: None,
+            body: None,
+        };
+        let out = format_eval_output(&resp, "a", "x", "watch", None);
+        assert_eq!(out.metadata["result"], "(no result)");
+        assert!(out.metadata["value_type"].is_null());
+        assert_eq!(out.metadata["variables_reference"], 0);
     }
 
     // Suppress unused-helper warning when no test needs make_ctx +
