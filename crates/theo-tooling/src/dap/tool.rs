@@ -1313,6 +1313,268 @@ fn format_variables_output(
 }
 
 // ---------------------------------------------------------------------------
+// `debug_scopes`
+// ---------------------------------------------------------------------------
+
+/// `debug_scopes` — list variable scopes (locals, globals, etc.) for a frame.
+pub struct DebugScopesTool {
+    manager: Arc<DapSessionManager>,
+}
+
+impl DebugScopesTool {
+    pub fn new(manager: Arc<DapSessionManager>) -> Self {
+        Self { manager }
+    }
+}
+
+#[async_trait]
+impl Tool for DebugScopesTool {
+    fn id(&self) -> &str {
+        "debug_scopes"
+    }
+
+    fn description(&self) -> &str {
+        "T13.1 — List variable scopes for a stack frame (DAP `scopes`). \
+         Each scope carries its OWN variablesReference, which `debug_variables` \
+         can drill. Typical scopes: \"Locals\", \"Globals\", \"Arguments\". \
+         Use this AFTER `debug_stack_trace` (which gave you frame_id) and \
+         BEFORE `debug_variables` (which descends into a scope). \
+         Example: debug_scopes({session_id: \"a\", frame_id: 1000})."
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            params: vec![
+                ToolParam {
+                    name: "session_id".into(),
+                    param_type: "string".into(),
+                    description: "ID of the active debug session.".into(),
+                    required: true,
+                },
+                ToolParam {
+                    name: "frame_id".into(),
+                    param_type: "integer".into(),
+                    description:
+                        "Frame to fetch scopes for. Get from debug_stack_trace."
+                            .into(),
+                    required: true,
+                },
+            ],
+            input_examples: vec![json!({"session_id": "a", "frame_id": 1000})],
+        }
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Search
+    }
+
+    async fn execute(
+        &self,
+        args: Value,
+        _ctx: &ToolContext,
+        _permissions: &mut PermissionCollector,
+    ) -> Result<ToolOutput, ToolError> {
+        let session_id = parse_session_id(&args)?;
+        let frame_id = args
+            .get("frame_id")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| {
+                ToolError::InvalidArgs("missing integer `frame_id`".into())
+            })?;
+
+        let client = require_session(&self.manager, &session_id).await?;
+        let resp = client
+            .request("scopes", Some(json!({"frameId": frame_id})))
+            .await
+            .map_err(|e| ToolError::Execution(format!("scopes failed: {e}")))?;
+        check_response(&resp, "scopes")?;
+        Ok(format_scopes_output(&resp, &session_id, frame_id))
+    }
+}
+
+fn format_scopes_output(
+    resp: &DapResponse,
+    session_id: &str,
+    frame_id: u64,
+) -> ToolOutput {
+    let scopes = resp
+        .body
+        .as_ref()
+        .and_then(|b| b.get("scopes"))
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let summary: Vec<Value> = scopes
+        .iter()
+        .map(|s| {
+            json!({
+                "name": s.get("name").and_then(Value::as_str),
+                "presentation_hint": s.get("presentationHint").and_then(Value::as_str),
+                "variables_reference": s
+                    .get("variablesReference")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0),
+                "expensive": s.get("expensive").and_then(Value::as_bool).unwrap_or(false),
+            })
+        })
+        .collect();
+
+    let mut out = format!(
+        "debug_scopes: {} scope(s) for frame {frame_id} (session=`{session_id}`)\n\n",
+        scopes.len(),
+    );
+    for s in &summary {
+        let drill = if s["variables_reference"].as_u64().unwrap_or(0) > 0 {
+            format!("  [drill: {}]", s["variables_reference"])
+        } else {
+            String::new()
+        };
+        let expensive = if s["expensive"].as_bool().unwrap_or(false) {
+            "  (EXPENSIVE — fetches over network)"
+        } else {
+            ""
+        };
+        out.push_str(&format!(
+            "  {name}{hint}{drill}{expensive}\n",
+            name = s["name"].as_str().unwrap_or("(unnamed)"),
+            hint = match s["presentation_hint"].as_str() {
+                Some(h) => format!("  ({h})"),
+                None => String::new(),
+            },
+            drill = drill,
+            expensive = expensive,
+        ));
+    }
+    if scopes.is_empty() {
+        out.push_str(
+            "(no scopes returned — frame may be invalid or thread not stopped)\n",
+        );
+    }
+
+    ToolOutput::new(
+        format!("debug_scopes: {} scope(s) for frame {frame_id}", scopes.len()),
+        out,
+    )
+    .with_metadata(json!({
+        "type": "debug_scopes",
+        "session_id": session_id,
+        "frame_id": frame_id,
+        "scope_count": scopes.len(),
+        "scopes": summary,
+    }))
+}
+
+// ---------------------------------------------------------------------------
+// `debug_threads`
+// ---------------------------------------------------------------------------
+
+/// `debug_threads` — list every thread in the debuggee.
+pub struct DebugThreadsTool {
+    manager: Arc<DapSessionManager>,
+}
+
+impl DebugThreadsTool {
+    pub fn new(manager: Arc<DapSessionManager>) -> Self {
+        Self { manager }
+    }
+}
+
+#[async_trait]
+impl Tool for DebugThreadsTool {
+    fn id(&self) -> &str {
+        "debug_threads"
+    }
+
+    fn description(&self) -> &str {
+        "T13.1 — List every thread in the debuggee (DAP `threads`). Useful \
+         when a `stopped` event didn't carry thread_id, or when you need \
+         to step through multi-threaded code and pick which thread to step. \
+         Each thread has {id, name}. \
+         Example: debug_threads({session_id: \"a\"})."
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            params: vec![ToolParam {
+                name: "session_id".into(),
+                param_type: "string".into(),
+                description: "ID of the active debug session.".into(),
+                required: true,
+            }],
+            input_examples: vec![json!({"session_id": "a"})],
+        }
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Search
+    }
+
+    async fn execute(
+        &self,
+        args: Value,
+        _ctx: &ToolContext,
+        _permissions: &mut PermissionCollector,
+    ) -> Result<ToolOutput, ToolError> {
+        let session_id = parse_session_id(&args)?;
+        let client = require_session(&self.manager, &session_id).await?;
+        let resp = client
+            .request("threads", None)
+            .await
+            .map_err(|e| ToolError::Execution(format!("threads failed: {e}")))?;
+        check_response(&resp, "threads")?;
+        Ok(format_threads_output(&resp, &session_id))
+    }
+}
+
+fn format_threads_output(resp: &DapResponse, session_id: &str) -> ToolOutput {
+    let threads = resp
+        .body
+        .as_ref()
+        .and_then(|b| b.get("threads"))
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let summary: Vec<Value> = threads
+        .iter()
+        .map(|t| {
+            json!({
+                "id": t.get("id").and_then(Value::as_u64),
+                "name": t.get("name").and_then(Value::as_str),
+            })
+        })
+        .collect();
+
+    let mut out = format!(
+        "debug_threads: {} thread(s) (session=`{session_id}`)\n\n",
+        threads.len(),
+    );
+    for t in &summary {
+        out.push_str(&format!(
+            "  id={id}  {name}\n",
+            id = t["id"],
+            name = t["name"].as_str().unwrap_or("(no name)"),
+        ));
+    }
+    if threads.is_empty() {
+        out.push_str(
+            "(no threads — adapter may have terminated; call debug_terminate \
+             and re-launch)\n",
+        );
+    }
+
+    ToolOutput::new(
+        format!("debug_threads: {} thread(s)", threads.len()),
+        out,
+    )
+    .with_metadata(json!({
+        "type": "debug_threads",
+        "session_id": session_id,
+        "thread_count": threads.len(),
+        "threads": summary,
+    }))
+}
+
+// ---------------------------------------------------------------------------
 // `debug_terminate`
 // ---------------------------------------------------------------------------
 
@@ -2399,6 +2661,181 @@ mod tests {
         let out = format_variables_output(&resp, "a", 7, 0, 50, Some("indexed"));
         assert_eq!(out.metadata["filter"], "indexed");
         assert_eq!(out.metadata["count"], 50);
+    }
+
+    // ── debug_scopes ──────────────────────────────────────────────
+
+    #[test]
+    fn t131tool_scopes_id_and_category() {
+        let t = DebugScopesTool::new(empty_manager());
+        assert_eq!(t.id(), "debug_scopes");
+        assert_eq!(t.category(), ToolCategory::Search);
+    }
+
+    #[test]
+    fn t131tool_scopes_schema_validates() {
+        let t = DebugScopesTool::new(empty_manager());
+        let schema = t.schema();
+        schema.validate().unwrap();
+        for p in &schema.params {
+            assert!(p.required, "{} should be required", p.name);
+        }
+    }
+
+    #[tokio::test]
+    async fn t131tool_scopes_missing_frame_id_returns_invalid_args() {
+        let t = DebugScopesTool::new(empty_manager());
+        let ctx = make_ctx(PathBuf::from("/tmp"));
+        let mut perms = PermissionCollector::new();
+        let err = t
+            .execute(json!({"session_id": "a"}), &ctx, &mut perms)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::InvalidArgs(_)));
+    }
+
+    #[tokio::test]
+    async fn t131tool_scopes_unknown_session_returns_actionable_error() {
+        let t = DebugScopesTool::new(empty_manager());
+        let ctx = make_ctx(PathBuf::from("/tmp"));
+        let mut perms = PermissionCollector::new();
+        let err = t
+            .execute(
+                json!({"session_id": "ghost", "frame_id": 1}),
+                &ctx,
+                &mut perms,
+            )
+            .await
+            .unwrap_err();
+        match err {
+            ToolError::Execution(msg) => assert!(msg.contains("no active debug session")),
+            other => panic!("expected Execution error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn t131tool_format_scopes_marks_drillable_children() {
+        let resp = DapResponse {
+            seq: 1,
+            message_type: "response".into(),
+            request_seq: 1,
+            command: "scopes".into(),
+            success: true,
+            message: None,
+            body: Some(json!({
+                "scopes": [
+                    {"name": "Locals", "variablesReference": 11, "expensive": false},
+                    {"name": "Globals", "variablesReference": 12, "expensive": true},
+                    {"name": "Empty", "variablesReference": 0, "expensive": false},
+                ]
+            })),
+        };
+        let out = format_scopes_output(&resp, "a", 1000);
+        assert_eq!(out.metadata["scope_count"], 3);
+        assert!(out.output.contains("Locals"));
+        assert!(out.output.contains("[drill: 11]"));
+        assert!(out.output.contains("[drill: 12]"));
+        // Expensive scopes get a clear marker so the agent knows
+        // fetching them is non-trivial.
+        assert!(out.output.contains("EXPENSIVE"));
+        // The empty scope (variablesReference == 0) gets no drill hint.
+        assert!(out.output.contains("Empty"));
+        let empty_line = out.output.lines().find(|l| l.contains("Empty")).unwrap();
+        assert!(!empty_line.contains("[drill:"));
+    }
+
+    #[test]
+    fn t131tool_format_scopes_empty_response_includes_diagnostic_hint() {
+        let resp = DapResponse {
+            seq: 1,
+            message_type: "response".into(),
+            request_seq: 1,
+            command: "scopes".into(),
+            success: true,
+            message: None,
+            body: Some(json!({"scopes": []})),
+        };
+        let out = format_scopes_output(&resp, "a", 1000);
+        assert_eq!(out.metadata["scope_count"], 0);
+        assert!(out.output.contains("no scopes returned"));
+        assert!(out.output.contains("frame may be invalid"));
+    }
+
+    // ── debug_threads ─────────────────────────────────────────────
+
+    #[test]
+    fn t131tool_threads_id_and_category() {
+        let t = DebugThreadsTool::new(empty_manager());
+        assert_eq!(t.id(), "debug_threads");
+        assert_eq!(t.category(), ToolCategory::Search);
+    }
+
+    #[test]
+    fn t131tool_threads_schema_validates_with_only_session_id() {
+        let t = DebugThreadsTool::new(empty_manager());
+        let schema = t.schema();
+        schema.validate().unwrap();
+        assert_eq!(schema.params.len(), 1);
+        assert_eq!(schema.params[0].name, "session_id");
+        assert!(schema.params[0].required);
+    }
+
+    #[tokio::test]
+    async fn t131tool_threads_unknown_session_returns_actionable_error() {
+        let t = DebugThreadsTool::new(empty_manager());
+        let ctx = make_ctx(PathBuf::from("/tmp"));
+        let mut perms = PermissionCollector::new();
+        let err = t
+            .execute(json!({"session_id": "ghost"}), &ctx, &mut perms)
+            .await
+            .unwrap_err();
+        match err {
+            ToolError::Execution(msg) => assert!(msg.contains("no active debug session")),
+            other => panic!("expected Execution error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn t131tool_format_threads_lists_each_thread() {
+        let resp = DapResponse {
+            seq: 1,
+            message_type: "response".into(),
+            request_seq: 1,
+            command: "threads".into(),
+            success: true,
+            message: None,
+            body: Some(json!({
+                "threads": [
+                    {"id": 1, "name": "main"},
+                    {"id": 2, "name": "worker-0"},
+                    {"id": 3, "name": "worker-1"},
+                ]
+            })),
+        };
+        let out = format_threads_output(&resp, "a");
+        assert_eq!(out.metadata["thread_count"], 3);
+        assert!(out.output.contains("main"));
+        assert!(out.output.contains("worker-0"));
+        assert!(out.output.contains("worker-1"));
+    }
+
+    #[test]
+    fn t131tool_format_threads_empty_response_includes_relaunch_hint() {
+        let resp = DapResponse {
+            seq: 1,
+            message_type: "response".into(),
+            request_seq: 1,
+            command: "threads".into(),
+            success: true,
+            message: None,
+            body: Some(json!({"threads": []})),
+        };
+        let out = format_threads_output(&resp, "a");
+        assert_eq!(out.metadata["thread_count"], 0);
+        // Empty → adapter probably terminated. Tell the agent to
+        // call debug_terminate + re-launch instead of looping.
+        assert!(out.output.contains("debug_terminate"));
+        assert!(out.output.contains("re-launch"));
     }
 
     // Suppress unused-helper warning when no test needs make_ctx +

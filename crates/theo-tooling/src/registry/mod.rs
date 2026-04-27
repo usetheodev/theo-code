@@ -151,8 +151,8 @@ pub fn create_default_registry() -> ToolRegistry {
     };
     use crate::dap::{
         DapSessionManager, DebugContinueTool, DebugEvalTool, DebugLaunchTool,
-        DebugSetBreakpointTool, DebugStackTraceTool, DebugStepTool, DebugTerminateTool,
-        DebugVariablesTool,
+        DebugScopesTool, DebugSetBreakpointTool, DebugStackTraceTool, DebugStepTool,
+        DebugTerminateTool, DebugThreadsTool, DebugVariablesTool,
     };
     use crate::edit::EditTool;
     use crate::glob::GlobTool;
@@ -287,6 +287,12 @@ pub fn create_default_registry() -> ToolRegistry {
         Box::new(DebugVariablesTool::new(std::sync::Arc::new(
             DapSessionManager::from_catalogue(std::collections::HashMap::new()),
         ))),
+        Box::new(DebugScopesTool::new(std::sync::Arc::new(
+            DapSessionManager::from_catalogue(std::collections::HashMap::new()),
+        ))),
+        Box::new(DebugThreadsTool::new(std::sync::Arc::new(
+            DapSessionManager::from_catalogue(std::collections::HashMap::new()),
+        ))),
         Box::new(DebugTerminateTool::new(std::sync::Arc::new(
             DapSessionManager::from_catalogue(std::collections::HashMap::new()),
         ))),
@@ -362,8 +368,8 @@ pub fn create_default_registry_with_project(
     };
     use crate::dap::{
         DapSessionManager, DebugContinueTool, DebugEvalTool, DebugLaunchTool,
-        DebugSetBreakpointTool, DebugStackTraceTool, DebugStepTool, DebugTerminateTool,
-        DebugVariablesTool,
+        DebugScopesTool, DebugSetBreakpointTool, DebugStackTraceTool, DebugStepTool,
+        DebugTerminateTool, DebugThreadsTool, DebugVariablesTool,
     };
     use crate::docs_search::{DocsSearchTool, bootstrap_docs_index};
     use crate::lsp::{
@@ -417,6 +423,8 @@ pub fn create_default_registry_with_project(
         "debug_eval",
         "debug_stack_trace",
         "debug_variables",
+        "debug_scopes",
+        "debug_threads",
         "debug_terminate",
     ] {
         registry.unregister(tool_id);
@@ -442,6 +450,12 @@ pub fn create_default_registry_with_project(
     registry
         .register(Box::new(DebugVariablesTool::new(dap_manager.clone())))
         .expect("debug_variables tool schema is valid");
+    registry
+        .register(Box::new(DebugScopesTool::new(dap_manager.clone())))
+        .expect("debug_scopes tool schema is valid");
+    registry
+        .register(Box::new(DebugThreadsTool::new(dap_manager.clone())))
+        .expect("debug_threads tool schema is valid");
     registry
         .register(Box::new(DebugTerminateTool::new(dap_manager.clone())))
         .expect("debug_terminate tool schema is valid");

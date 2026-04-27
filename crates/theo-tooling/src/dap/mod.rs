@@ -24,6 +24,7 @@ pub use protocol::{
 };
 pub use session_manager::{DapSessionError, DapSessionManager};
 pub use tool::{
-    DebugContinueTool, DebugEvalTool, DebugLaunchTool, DebugSetBreakpointTool,
-    DebugStackTraceTool, DebugStepTool, DebugTerminateTool, DebugVariablesTool,
+    DebugContinueTool, DebugEvalTool, DebugLaunchTool, DebugScopesTool,
+    DebugSetBreakpointTool, DebugStackTraceTool, DebugStepTool, DebugTerminateTool,
+    DebugThreadsTool, DebugVariablesTool,
 };

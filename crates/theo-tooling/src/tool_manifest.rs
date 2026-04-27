@@ -231,7 +231,21 @@ pub const TOOL_MANIFEST: &[ToolManifestEntry] = &[
         exposure: ToolExposure::DefaultRegistry,
         status: ToolStatus::Implemented,
         owner: "theo-tooling",
-        notes: "T13.1 — DAP `variables`. Drills into a variablesReference (from debug_eval / future debug_scopes). Each child carries its OWN variables_reference for recursive descent. Rejects reference == 0 with explanation (scalar values are non-drillable). Optional `start`/`count`/`filter` for paginating large containers.",
+        notes: "T13.1 — DAP `variables`. Drills into a variablesReference (from debug_eval / debug_scopes). Each child carries its OWN variables_reference for recursive descent. Rejects reference == 0 with explanation (scalar values are non-drillable). Optional `start`/`count`/`filter` for paginating large containers.",
+    },
+    ToolManifestEntry {
+        id: "debug_scopes",
+        exposure: ToolExposure::DefaultRegistry,
+        status: ToolStatus::Implemented,
+        owner: "theo-tooling",
+        notes: "T13.1 — DAP `scopes` for a frame. Each scope (Locals, Globals, ...) carries its own variablesReference for debug_variables to drill. Marks expensive scopes with an EXPENSIVE label so the agent knows fetching them is non-trivial.",
+    },
+    ToolManifestEntry {
+        id: "debug_threads",
+        exposure: ToolExposure::DefaultRegistry,
+        status: ToolStatus::Implemented,
+        owner: "theo-tooling",
+        notes: "T13.1 — DAP `threads`. Useful when a `stopped` event didn't carry thread_id, or when stepping through multi-threaded code. Empty result triggers a re-launch hint (adapter likely terminated).",
     },
     ToolManifestEntry {
         id: "browser_open",
