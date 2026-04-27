@@ -388,6 +388,13 @@ pub const TOOL_MANIFEST: &[ToolManifestEntry] = &[
         notes: "T1.2 — load PNG/JPEG/WebP/GIF as base64 vision block; magic-byte MIME detection; 20 MiB cap.",
     },
     ToolManifestEntry {
+        id: "screenshot",
+        exposure: ToolExposure::DefaultRegistry,
+        status: ToolStatus::Implemented,
+        owner: "theo-tooling",
+        notes: "T1.1 — capture local screen via platform CLI (macOS screencapture; Linux gnome-screenshot → import fallback). No xcap dep. Returns base64 PNG vision block. Headless / no-display contexts surface a typed NoDisplay error with actionable webfetch fallback hint.",
+    },
+    ToolManifestEntry {
         id: "docs_search",
         exposure: ToolExposure::DefaultRegistry,
         status: ToolStatus::Implemented,

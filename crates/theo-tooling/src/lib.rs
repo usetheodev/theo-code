@@ -34,6 +34,7 @@ pub mod read_image;
 pub mod reflect;
 pub mod registry;
 pub mod sandbox;
+pub mod screenshot;
 pub mod shell_tool;
 pub mod skill;
 pub mod task;

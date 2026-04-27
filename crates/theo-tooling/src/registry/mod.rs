@@ -170,6 +170,7 @@ pub fn create_default_registry() -> ToolRegistry {
     use crate::read::ReadTool;
     use crate::read_image::ReadImageTool;
     use crate::reflect::ReflectTool;
+    use crate::screenshot::ScreenshotTool;
     use crate::test_gen::{GenMutationTestTool, GenPropertyTestTool};
     use crate::think::ThinkTool;
     use crate::todo::{TaskCreateTool, TaskUpdateTool};
@@ -241,6 +242,10 @@ pub fn create_default_registry() -> ToolRegistry {
         Box::new(GenMutationTestTool::new()),
         // T1.2 — multimodal: load images as vision blocks
         Box::new(ReadImageTool::new()),
+        // T1.1 — multimodal: capture local screen via platform CLI
+        // (screencapture / gnome-screenshot / import). Gracefully
+        // degrades to typed `no display` error in headless contexts.
+        Box::new(ScreenshotTool::new()),
         // T15.1 — external docs RAG (empty index by default; populated
         // by future commits that wire crates.io/MDN/npm sources)
         Box::new(DocsSearchTool::new()),
