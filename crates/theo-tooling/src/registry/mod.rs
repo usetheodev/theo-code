@@ -597,7 +597,63 @@ mod tests {
     use crate::bash::BashTool;
     use crate::grep::GrepTool;
     use crate::read::ReadTool;
-    use theo_domain::tool::ToolCategory;
+    use theo_domain::tool::{PermissionCollector, ToolCategory, ToolContext};
+
+    /// Locks the discovery-tool family contract: `lsp_status`,
+    /// `debug_status`, and `browser_status` must each ship as
+    /// zero-arg, `Search`-category, schema-validated read-only tools
+    /// in the default registry, and each `execute({})` must return a
+    /// JSON metadata object whose `type` matches the tool id. Pairs
+    /// the LSP / DAP / Browser sidecar-backed families so a future
+    /// change that breaks the symmetry (eg. silently adds a required
+    /// arg, drops one of the tools, or renames the metadata `type`
+    /// discriminator) surfaces immediately instead of leaking out as
+    /// an agent-side regression.
+    #[tokio::test]
+    async fn discovery_tool_family_lsp_dap_browser_share_zero_arg_search_contract() {
+        let registry = create_default_registry();
+        let ctx = ToolContext::test_context(std::path::PathBuf::from("/tmp"));
+        for id in ["lsp_status", "debug_status", "browser_status"] {
+            let tool = registry
+                .get(id)
+                .unwrap_or_else(|| panic!("`{id}` missing from default registry"));
+            // (1) Zero-arg + at least one example so the LLM sees an
+            //     invocation in the JSON Schema.
+            let schema = tool.schema();
+            assert!(schema.params.is_empty(), "`{id}` must take zero args");
+            assert!(
+                !schema.input_examples.is_empty(),
+                "`{id}` must declare at least one input example"
+            );
+            schema
+                .validate()
+                .unwrap_or_else(|e| panic!("`{id}` schema invalid: {e}"));
+            // (2) Search category — these are read-only discovery tools,
+            //     not file-ops or network.
+            assert_eq!(
+                tool.category(),
+                ToolCategory::Search,
+                "`{id}` must declare ToolCategory::Search"
+            );
+            // (3) Default registry stub MUST execute successfully (no
+            //     ToolError) so the agent always gets actionable
+            //     output even when the underlying sidecar isn't
+            //     installed.
+            let mut perms = PermissionCollector::new();
+            let out = tool
+                .execute(serde_json::json!({}), &ctx, &mut perms)
+                .await
+                .unwrap_or_else(|e| panic!("`{id}` execute({{}}) failed: {e:?}"));
+            // (4) Metadata `type` discriminator MUST equal the tool id
+            //     so JSONL trajectory consumers can filter on a stable
+            //     key.
+            assert_eq!(
+                out.metadata["type"],
+                serde_json::json!(id),
+                "`{id}` metadata.type must equal the tool id"
+            );
+        }
+    }
 
     #[test]
     fn registers_and_retrieves_tools() {
@@ -704,9 +760,7 @@ mod tests {
 
     use async_trait::async_trait;
     use theo_domain::error::ToolError;
-    use theo_domain::tool::{
-        PermissionCollector, Tool as DomainTool, ToolContext, ToolOutput as DomainOutput,
-    };
+    use theo_domain::tool::{Tool as DomainTool, ToolOutput as DomainOutput};
 
     struct DeferredStub {
         id: &'static str,
