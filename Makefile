@@ -148,6 +148,10 @@ check-phase-artifacts: ## SOTA Global DoD #1 (code half): every phase has its pr
 check-bench-preflight: ## Pre-flight validate bench infra (eval.yml + smoke.py + scenarios)
 	@bash $(SCRIPTS)/check-bench-preflight.sh --no-build
 
+.PHONY: check-allowlist-paths
+check-allowlist-paths: ## Structural audit — every allowlist path/crate resolves
+	@bash $(SCRIPTS)/check-allowlist-paths.sh
+
 # ── Composite audit ────────────────────────────────────────────────────────
 .PHONY: audit
 audit: ## Run all 8 audit techniques

@@ -39,6 +39,11 @@ jobs:
         run: bash scripts/check-arch-contract.sh
       - name: size (T4.6)
         run: bash scripts/check-sizes.sh
+      # Structural complement to size + complexity allowlists:
+      # every entry must reference an existing file/crate. Stale
+      # entries silently disable the gate.
+      - name: allowlist paths (structural)
+        run: bash scripts/check-allowlist-paths.sh
       - name: unwrap/expect (T2.5)
         run: bash scripts/check-unwrap.sh
       - name: panic/todo/unimplemented (T2.6)

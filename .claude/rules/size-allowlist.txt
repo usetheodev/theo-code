@@ -45,7 +45,11 @@ crates/theo-engine-retrieval/src/wiki/runtime.rs|1100|2026-07-23|Phase 4 debt
 crates/theo-infra-llm/src/providers/anthropic.rs|1100|2026-07-23|Phase 4 debt
 crates/theo-domain/src/tool.rs|1100|2026-07-23|Phase 4 debt
 crates/theo-agent-runtime/src/tool_bridge/mod.rs|1100|2026-07-23|Phase 4 debt (refactored to module-dir)
-crates/theo-agent-runtime/src/memory_lifecycle.rs|1050|2026-07-23|Phase 4 debt
+# crates/theo-agent-runtime/src/memory_lifecycle.rs — refactored
+# into module-dir form `memory_lifecycle/mod.rs` (726 LOC) + sibling
+# files; post-refactor mod.rs is below the 800-LOC default ceiling
+# so no allowlist entry needed. Removed 2026-04-27 after stale-path
+# audit (`scripts/check-allowlist-paths.sh`).
 apps/theo-cli/src/main.rs|1500|2026-07-23|Phase 4 debt + T1.2 decouple (ceiling raised from 1050 → 1500 post-SOTA CLI subcommand additions: skill, replan opt-in, partial-progress wiring, T16.1 trajectory export-rlhf)
 crates/theo-application/src/use_cases/pipeline.rs|1000|2026-07-23|Phase 4 debt
 crates/theo-engine-parser/src/extractors/python.rs|1000|2026-07-23|Phase 4 debt
@@ -61,7 +65,11 @@ crates/theo-engine-parser/src/tree_sitter.rs|900|2026-07-23|Phase 4 debt
 crates/theo-engine-graph/src/git.rs|900|2026-07-23|Phase 4 debt
 crates/theo-engine-retrieval/src/wiki/model.rs|900|2026-07-23|Phase 4 debt
 crates/theo-tooling/src/apply_patch/mod.rs|920|2026-07-23|Phase 4 debt (T2.3 adoption raised ceiling by ~20 LOC for canonicalize + permission hardening)
-crates/theo-agent-runtime/src/observability/report.rs|900|2026-07-23|Phase 4 debt
+# crates/theo-agent-runtime/src/observability/report.rs — refactored
+# into module-dir form `observability/report/mod.rs` (412 LOC) +
+# `observability/report/metrics.rs`; post-refactor mod.rs is well
+# below the 800-LOC default ceiling so no allowlist entry needed.
+# Removed 2026-04-27 after stale-path audit.
 crates/theo-infra-memory/src/security.rs|850|2026-07-23|Phase 4 debt
 
 # ── SOTA Tier 1 + Tier 2 god-files (added 2026-04-27) ──────────────────

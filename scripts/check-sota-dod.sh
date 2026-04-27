@@ -172,6 +172,17 @@ if ! run_step "size gate (T4.6 allowlist + sunsets)" \
     failed=1
 fi
 
+# (3b) Allowlist structural audit — every entry in size-allowlist /
+#      complexity-allowlist references an existing path / crate. A
+#      stale entry silently disables the gate for that target. The
+#      content gate is run by check-sizes.sh / check-complexity.sh
+#      above; this is the structural complement (lesson from
+#      iter-25 / iter-26 / iter-27: CONTENT ≠ STRUCTURAL).
+if ! run_step "allowlist paths (structural)" \
+        bash scripts/check-allowlist-paths.sh; then
+    failed=1
+fi
+
 # (4) Complexity gate — clippy::too_many_lines per-crate ceiling.
 #     Same baseline-allowlist pattern as size gate: existing 75-function
 #     debt is locked at the current per-crate count; future regressions
