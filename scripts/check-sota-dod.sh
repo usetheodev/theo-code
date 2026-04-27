@@ -137,7 +137,15 @@ if ! run_step "arch-contract" bash scripts/check-arch-contract.sh; then
     failed=1
 fi
 
-# (2) cargo clippy --workspace (excl. desktop/marklive) -- -D warnings
+# (2) Size gate (T4.6) — every oversize file allowlisted with a future
+#     sunset. Catches file-size DoD regressions ("code-audit OK" line in
+#     each per-task DoD) before they leak past the gate.
+if ! run_step "size gate (T4.6 allowlist + sunsets)" \
+        bash scripts/check-sizes.sh; then
+    failed=1
+fi
+
+# (3) cargo clippy --workspace (excl. desktop/marklive) -- -D warnings
 #     Clippy on every crate the contract touches; -D warnings turns each
 #     lint into an error so the gate is honest about the lint surface.
 if ! run_step "clippy -D warnings (16 crates)" \
@@ -146,7 +154,7 @@ if ! run_step "clippy -D warnings (16 crates)" \
 fi
 
 if [[ $QUICK -eq 0 ]]; then
-    # (3) cargo test on the 5 SOTA-touched crates. The plan's DoD
+    # (4) cargo test on the 5 SOTA-touched crates. The plan's DoD
     #     calls for "cargo test --workspace green" — this is the
     #     evidence-bearing subset (every crate the plan modified).
     if ! run_step "cargo test --lib (5 SOTA-touched crates)" \
@@ -166,6 +174,7 @@ declare -a DOD_ITEMS=(
     "cargo test --workspace green (excl. desktop/marklive)|cargo test"
     "cargo clippy --workspace -- -D warnings green|clippy"
     "Backward compatibility: state v1 plans/transcripts load|cargo test"
+    "Per-task code-audit: file size invariant (T4.6)|size gate"
     "CHANGELOG.md updated for each phase|MANUAL"
     "ADRs D1-D16 referenced in commits|MANUAL"
     "Architecture contract: 0 violations|arch-contract"
