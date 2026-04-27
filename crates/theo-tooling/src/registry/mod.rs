@@ -880,6 +880,67 @@ mod tests {
         }
     }
 
+    /// Locks the schema-vs-input_examples consistency for every
+    /// default-registry tool: each declared `input_examples[i]`
+    /// (when present) MUST be a JSON object that includes every
+    /// REQUIRED param the tool declares. Otherwise the JSON Schema
+    /// rendered to the LLM advertises an example invocation that
+    /// the tool itself would reject as `InvalidArgs` — a silent
+    /// quality bug that wastes turns when the LLM copies the
+    /// example.
+    ///
+    /// Same lesson as commits 86165f8 / 3c0f73c (CLI surface
+    /// invokability): a CONTENT audit (does the example exist?)
+    /// doesn't substitute for a STRUCTURAL audit (does the example
+    /// satisfy the declared contract?). The `complex_tools_declare_
+    /// input_examples` test only checks the array is non-empty;
+    /// this test checks the array's CONTENTS are well-formed.
+    #[test]
+    fn every_tool_input_example_satisfies_declared_required_params() {
+        let registry = create_default_registry();
+        let mut violations: Vec<String> = Vec::new();
+        for tool_id in registry.ids() {
+            let tool = registry
+                .get(&tool_id)
+                .unwrap_or_else(|| panic!("tool `{tool_id}` missing"));
+            let schema = tool.schema();
+            let required: Vec<&str> = schema
+                .params
+                .iter()
+                .filter(|p| p.required)
+                .map(|p| p.name.as_str())
+                .collect();
+            for (i, example) in schema.input_examples.iter().enumerate() {
+                let obj = match example.as_object() {
+                    Some(o) => o,
+                    None => {
+                        violations.push(format!(
+                            "tool `{tool_id}` input_examples[{i}] is not a \
+                             JSON object: {example:?}"
+                        ));
+                        continue;
+                    }
+                };
+                for req in &required {
+                    if !obj.contains_key(*req) {
+                        violations.push(format!(
+                            "tool `{tool_id}` input_examples[{i}] missing \
+                             required param `{req}` (declared in schema). \
+                             The LLM would copy this example and get \
+                             InvalidArgs back. Update the example or \
+                             relax the param to optional."
+                        ));
+                    }
+                }
+            }
+        }
+        assert!(
+            violations.is_empty(),
+            "schema-vs-examples consistency violations:\n  {}",
+            violations.join("\n  ")
+        );
+    }
+
     /// Snapshot guard: pins the EXACT set of default-registry tool ids
     /// by name. Catches silent renames and silent removals that the
     /// looser `manifest_matches_default_registry_ids` test misses (it

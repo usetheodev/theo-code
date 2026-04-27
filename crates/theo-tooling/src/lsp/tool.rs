@@ -396,7 +396,7 @@ impl Tool for LspRenameTool {
     }
 
     fn schema(&self) -> ToolSchema {
-        position_schema(vec![ToolParam {
+        let mut s = position_schema(vec![ToolParam {
             name: "new_name".into(),
             param_type: "string".into(),
             description:
@@ -405,7 +405,19 @@ impl Tool for LspRenameTool {
                  empty and the server may include an error message."
                     .into(),
             required: true,
-        }])
+        }]);
+        // Override the inherited position-only example so the LLM sees a
+        // complete invocation including the rename-specific `new_name`
+        // arg. Without this override the JSON Schema would advertise
+        // `{file_path, line, character}` and the LLM would copy it,
+        // omitting `new_name`, and get InvalidArgs back.
+        s.input_examples = vec![json!({
+            "file_path": "/abs/src/lib.rs",
+            "line": 42,
+            "character": 12,
+            "new_name": "foo_v2",
+        })];
+        s
     }
 
     fn category(&self) -> ToolCategory {
