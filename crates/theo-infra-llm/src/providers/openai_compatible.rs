@@ -427,11 +427,10 @@ pub fn from_chunk(chunk: &str) -> Result<CommonChunk, String> {
             .map_err(|_| chunk.to_string())?;
 
     let choices = json.get("choices").and_then(|c| c.as_array());
-    if choices.is_none() || choices.unwrap().is_empty() {
-        return Err(chunk.to_string());
-    }
-
-    let choice = &choices.unwrap()[0];
+    let choice = match choices.and_then(|c| c.first()) {
+        Some(c) => c,
+        None => return Err(chunk.to_string()),
+    };
     let delta = choice.get("delta");
 
     let mut out = CommonChunk {
