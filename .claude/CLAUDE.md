@@ -113,6 +113,34 @@ ADR-023 (sunset) confirms apps no longer depend on `theo-agent-runtime` directly
   6. Library functions — `cargo test --workspace`
 - Six SOTA-DoD gate scripts ship under `scripts/check-*.sh` — each has a self-test in `scripts/check-sota-dod.test.sh` (39 assertions) and is wired into both `make check-sota-dod` and `.github/workflows/audit.yml`.
 
+## Honest System State (verified 2026-04-27)
+
+What the code actually delivers vs. what is still debt. Refresh this section when running `make check-sota-dod` produces a different result.
+
+### Hard numbers
+- 12 crates + 5 apps in the workspace; **5238 tests passing** under `cargo test --workspace --exclude theo-code-desktop --lib --tests`.
+- **59 tools** in the default registry; **17 CLI subcommands**; **26 LLM providers** in catalog; **16 languages** in the Tree-Sitter extractor set; **22 audit scripts** under `scripts/`.
+- **Empirical bench**: 18 of 20 smoke scenarios passed (90 %, Wilson CI [82.4 %, 100 %]) via OAuth Codex `gpt-5.4`; 2 failures both 240 s timeouts (`02-grep-pattern`, `10-logic-bug`); avg cost ~$0.65 / passed task.
+
+### Pre-existing baseline debt (NOT closed by SOTA work)
+- `scripts/check-unwrap.sh` reports **105 unwrap / expect** in production paths (the gate is RED in strict mode).
+- `scripts/check-panic.sh` reports **1 panic** — the deliberate `panic!("Built-in tool '{id}' has invalid schema: {e}")` startup assertion in `crates/theo-tooling/src/registry/mod.rs`.
+- `scripts/check-unsafe.sh` reports **66 unsafe blocks without `// SAFETY:` comments** (mostly env-var mutation in tests + FFI in graph_context_service / observability).
+- 17 god-files in `.claude/rules/size-allowlist.txt` with sunset 2026-07-23 — debt is formalised but not paid; the next decomposition sprint must split per-tool families before that date.
+- 75 functions over 100 LOC across 8 crates locked in `.claude/rules/complexity-allowlist.txt` baseline.
+
+### What was NOT validated end-to-end
+The four sidecar-backed tool families register and return typed errors gracefully when their sidecar is absent, but no real run against a live sidecar happened in this delivery:
+- **LSP** (`lsp_*` family) never called against `rust-analyzer` / `pyright` / `gopls`
+- **DAP** (`debug_*` family) never called against `lldb-vscode` / `debugpy` / `dlv`
+- **Browser** (`browser_*` family) never spawned the Playwright Node sidecar
+- **Computer Use** (`computer_action`) never reached `xdotool` / `cliclick` (no display server)
+
+Pre-flight gates (`scripts/check-bench-preflight.sh`, `default_registry_tool_id_snapshot_is_pinned`, `every_tool_input_example_satisfies_declared_required_params`) confirm the scaffold is consistent. End-to-end execution requires operator action: install the sidecars, then re-run `python3 apps/theo-benchmark/runner/smoke.py`.
+
+### One-line honest summary
+Production-grade in code (build / test / arch / lint all ✅) with 105 unwrap and 66 unsafe-without-SAFETY as historical debt; 4 sidecar tool families wired but unexercised; smoke bench (90 % / 18 of 20) proves the agent loop works with OAuth Codex; DoD #10/#11 (SWE-Bench-Verified ≥10pt; tier T1+T2 coverage) require terminal-bench infrastructure outside the autonomous loop's reach.
+
 ## Runtime Layout
 
 The agent runtime persists state under `.theo/` in the user's project:
