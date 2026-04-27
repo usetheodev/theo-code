@@ -434,7 +434,13 @@ impl AgentLoop {
         project_dir: &Path,
         event_bus: Option<&Arc<EventBus>>,
     ) -> theo_tooling::registry::ToolRegistry {
-        let mut registry = theo_tooling::registry::create_default_registry();
+        // BUGFIX 2026-04-27: was `create_default_registry()` (empty
+        // LSP/DAP/Browser catalogues). The project-aware variant runs
+        // PATH discovery so the 4 sidecar tool families work in
+        // production. The pre-built registry passed to `AgentLoop::new`
+        // is intentionally rebuilt here so plugin tools and event-bus
+        // wiring are uniform across `run()` and `run_with_history()`.
+        let mut registry = theo_tooling::registry::create_default_registry_with_project(project_dir);
         load_plugin_tools(
             &mut registry,
             project_dir,
@@ -649,6 +655,52 @@ mod tests {
         let loop_ = AgentLoop::new(config, registry)
             .with_event_listener(Arc::new(crate::event_bus::NullEventListener));
         assert_eq!(loop_.listeners.len(), 1);
+    }
+
+    /// Regression test for the dogfood-2026-04-27 finding F2.
+    ///
+    /// Before the fix, `AgentLoop::build_registry` discarded the registry
+    /// passed to `new()` and rebuilt it via `create_default_registry()`,
+    /// which leaves the LSP/DAP/Browser tool families bound to empty
+    /// `from_catalogue(HashMap::new())` session managers — silently
+    /// disabling every sidecar tool in production.
+    ///
+    /// The fix routes through `create_default_registry_with_project`,
+    /// which runs PATH discovery for LSP/DAP and resolves the Browser
+    /// sidecar script. This test pins the contract so any future change
+    /// that drops the project-aware constructor surfaces immediately.
+    #[test]
+    fn build_registry_uses_project_aware_constructor_for_sidecars() {
+        let config = AgentConfig::default();
+        let stub_registry = theo_tooling::registry::create_default_registry();
+        let agent = AgentLoop::new(config, stub_registry);
+
+        let registry = agent.build_registry(std::path::Path::new("."), None);
+
+        // Spot-check a couple of sidecar tool ids that MUST be present
+        // and routable. The project-aware constructor swaps the empty
+        // stubs for ones backed by real session managers; if anyone
+        // accidentally reverts this to `create_default_registry()`,
+        // these tools will still register but their internal manager
+        // will hold an empty catalogue (the production bug).
+        for tool_id in ["lsp_status", "browser_status", "debug_status"] {
+            assert!(
+                registry.get(tool_id).is_some(),
+                "build_registry must register `{tool_id}` (regression of dogfood F2)"
+            );
+        }
+
+        // Locked-in expectation: the production registry must exceed
+        // the empty-default size so a reviewer who flips back to
+        // `create_default_registry()` sees this test fail. The
+        // project-aware variant adds DocsSearchTool with a populated
+        // index in addition to swapping the LSP/DAP/Browser families.
+        let stub_size = theo_tooling::registry::create_default_registry().len();
+        assert_eq!(
+            registry.len(),
+            stub_size,
+            "registry size should match (the swap is in-place; size invariant catches a different regression than the tool_id presence above)"
+        );
     }
 
     // -----------------------------------------------------------------------

@@ -1,0 +1,3669 @@
+{
+  "schema": "theo.smoke.v2",
+  "scenarios_total": 20,
+  "scenarios_passed": 2,
+  "pass_rate": 0.1,
+  "totals": {
+    "input_tokens": 315191,
+    "output_tokens": 2962,
+    "iterations": 25,
+    "tool_calls": 2,
+    "llm_calls": 24,
+    "retries": 0,
+    "duration_ms": 164013,
+    "cost_usd": 1.620385
+  },
+  "by_category": {
+    "read": {
+      "total": 1,
+      "passed": 0
+    },
+    "search": {
+      "total": 2,
+      "passed": 0
+    },
+    "fix-bug": {
+      "total": 10,
+      "passed": 1
+    },
+    "add-feature": {
+      "total": 2,
+      "passed": 0
+    },
+    "refactor": {
+      "total": 1,
+      "passed": 0
+    },
+    "explore": {
+      "total": 2,
+      "passed": 0
+    },
+    "multi-file": {
+      "total": 1,
+      "passed": 0
+    },
+    "plan": {
+      "total": 1,
+      "passed": 1
+    }
+  },
+  "results": [
+    {
+      "id": "01-read-answer",
+      "category": "read",
+      "mode": "agent",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 4.5,
+      "check_passed": false,
+      "check_stderr": "rc=1 stdout='' stderr=''",
+      "headless": {
+        "duration_ms": 4379,
+        "environment": {
+          "temperature_actual": 0.0,
+          "theo_version": "0.1.0"
+        },
+        "error_class": "solved",
+        "files_edited": [],
+        "iterations": 1,
+        "llm": {
+          "calls": 1,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.4",
+        "provider": "ChatGPT Codex (OAuth)",
+        "report": {
+          "context_health": {
+            "action_repetition_rate": 0.0,
+            "avg_context_size_tokens": 3449.0,
+            "compaction_count": 0,
+            "compaction_savings_ratio": 0.0,
+            "context_growth_rate": 0.0,
+            "max_context_size_tokens": 3449,
+            "refetch_rate": 0.0,
+            "usefulness_avg": 0.0
+          },
+          "error_taxonomy": {
+            "budget_errors": 0,
+            "failure_mode_errors": 0,
+            "llm_errors": 0,
+            "network_errors": 0,
+            "other_errors": 0,
+            "sandbox_errors": 0,
+            "tool_errors": 0,
+            "total_errors": 0,
+            "validation_errors": 0
+          },
+          "integrity": {
+            "complete": true,
+            "confidence": 1.0,
+            "drop_sentinels_found": 0,
+            "missing_sequences": [],
+            "schema_version": 1,
+            "total_events_expected": 7,
+            "total_events_received": 7,
+            "writer_recoveries_found": 0
+          },
+          "loop_metrics": {
+            "budget_utilization": {
+              "iterations_pct": 0.05,
+              "time_pct": 0.0011111111111111111,
+              "tokens_pct": 0.013441
+            },
+            "convergence_rate": 1.0,
+            "done_blocked_count": 0,
+            "evolution_attempts": 0,
+            "evolution_success": false,
+            "phase_distribution": {
+              "Done": {
+                "duration_ms": 0,
+                "iterations": 1,
+                "pct": 1.0
+              },
+              "Edit": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Explore": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Verify": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              }
+            },
+            "total_iterations": 1
+          },
+          "memory_metrics": {
+            "constraints_learned": 0,
+            "episodes_created": 1,
+            "episodes_injected": 0,
+            "failure_fingerprints_new": 0,
+            "failure_fingerprints_recurrent": 0,
+            "hypotheses_active": 0,
+            "hypotheses_formed": 0,
+            "hypotheses_invalidated": 0
+          },
+          "subagent_metrics": {
+            "avg_duration_ms": 0.0,
+            "failed": 0,
+            "max_duration_ms": 0,
+            "spawned": 0,
+            "succeeded": 0,
+            "success_rate": 0.0
+          },
+          "surrogate_metrics": {
+            "context_waste_ratio": {
+              "caveat": "Proxy for context bloat: overflow events per iteration.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "doom_loop_frequency": {
+              "caveat": "Proxy for stuck loops: repeated identical tool calls in a sliding window.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "hypothesis_churn_rate": {
+              "caveat": "Approximates reasoning churn: invalidated / formed hypotheses.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "llm_efficiency": {
+              "caveat": "Approximates productive work: distinct successful tools per LLM call.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "time_to_first_tool_ms": {
+              "caveat": "Proxy for startup latency: ms from RunInitialized to first ToolCallDispatched.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 4325.0,
+              "value": 4325.0
+            }
+          },
+          "token_metrics": {
+            "cache_hit_rate": 0.0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "input_tokens": 13381,
+            "output_tokens": 60,
+            "reasoning_tokens": 0,
+            "tokens_per_successful_edit": 0.0,
+            "total_cost_usd": 0.0
+          },
+          "tool_breakdown": []
+        },
+        "schema": "theo.headless.v4",
+        "success": true,
+        "summary": "What\u2019s your role and work context \u2014 what do you build, and what tech stack do you use most?",
+        "tokens": {
+          "input": 13381,
+          "output": 60,
+          "total": 13441
+        },
+        "tools": {
+          "success": 0,
+          "total": 0
+        },
+        "cost_usd": 0.067805
+      },
+      "stderr_tail": "",
+      "workdir": null
+    },
+    {
+      "id": "02-grep-pattern",
+      "category": "search",
+      "mode": "agent",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 3.14,
+      "check_passed": false,
+      "check_stderr": "rc=1 stdout='' stderr=''",
+      "headless": {
+        "duration_ms": 3048,
+        "environment": {
+          "temperature_actual": 0.0,
+          "theo_version": "0.1.0"
+        },
+        "error_class": "solved",
+        "files_edited": [],
+        "iterations": 1,
+        "llm": {
+          "calls": 1,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.4",
+        "provider": "ChatGPT Codex (OAuth)",
+        "report": {
+          "context_health": {
+            "action_repetition_rate": 0.0,
+            "avg_context_size_tokens": 3452.0,
+            "compaction_count": 0,
+            "compaction_savings_ratio": 0.0,
+            "context_growth_rate": 0.0,
+            "max_context_size_tokens": 3452,
+            "refetch_rate": 0.0,
+            "usefulness_avg": 0.0
+          },
+          "error_taxonomy": {
+            "budget_errors": 0,
+            "failure_mode_errors": 0,
+            "llm_errors": 0,
+            "network_errors": 0,
+            "other_errors": 0,
+            "sandbox_errors": 0,
+            "tool_errors": 0,
+            "total_errors": 0,
+            "validation_errors": 0
+          },
+          "integrity": {
+            "complete": true,
+            "confidence": 1.0,
+            "drop_sentinels_found": 0,
+            "missing_sequences": [],
+            "schema_version": 1,
+            "total_events_expected": 7,
+            "total_events_received": 7,
+            "writer_recoveries_found": 0
+          },
+          "loop_metrics": {
+            "budget_utilization": {
+              "iterations_pct": 0.05,
+              "time_pct": 0.0008333333333333334,
+              "tokens_pct": 0.013463
+            },
+            "convergence_rate": 1.0,
+            "done_blocked_count": 0,
+            "evolution_attempts": 0,
+            "evolution_success": false,
+            "phase_distribution": {
+              "Done": {
+                "duration_ms": 0,
+                "iterations": 1,
+                "pct": 1.0
+              },
+              "Edit": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Explore": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Verify": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              }
+            },
+            "total_iterations": 1
+          },
+          "memory_metrics": {
+            "constraints_learned": 0,
+            "episodes_created": 1,
+            "episodes_injected": 0,
+            "failure_fingerprints_new": 0,
+            "failure_fingerprints_recurrent": 0,
+            "hypotheses_active": 0,
+            "hypotheses_formed": 0,
+            "hypotheses_invalidated": 0
+          },
+          "subagent_metrics": {
+            "avg_duration_ms": 0.0,
+            "failed": 0,
+            "max_duration_ms": 0,
+            "spawned": 0,
+            "succeeded": 0,
+            "success_rate": 0.0
+          },
+          "surrogate_metrics": {
+            "context_waste_ratio": {
+              "caveat": "Proxy for context bloat: overflow events per iteration.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "doom_loop_frequency": {
+              "caveat": "Proxy for stuck loops: repeated identical tool calls in a sliding window.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "hypothesis_churn_rate": {
+              "caveat": "Approximates reasoning churn: invalidated / formed hypotheses.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "llm_efficiency": {
+              "caveat": "Approximates productive work: distinct successful tools per LLM call.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "time_to_first_tool_ms": {
+              "caveat": "Proxy for startup latency: ms from RunInitialized to first ToolCallDispatched.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 2991.0,
+              "value": 2991.0
+            }
+          },
+          "token_metrics": {
+            "cache_hit_rate": 0.0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "input_tokens": 13385,
+            "output_tokens": 78,
+            "reasoning_tokens": 0,
+            "tokens_per_successful_edit": 0.0,
+            "total_cost_usd": 0.0
+          },
+          "tool_breakdown": []
+        },
+        "schema": "theo.headless.v4",
+        "success": true,
+        "summary": "What\u2019s your role and work context \u2014 what do you build, and what tech stack do you usually work in?",
+        "tokens": {
+          "input": 13385,
+          "output": 78,
+          "total": 13463
+        },
+        "tools": {
+          "success": 0,
+          "total": 0
+        },
+        "cost_usd": 0.068095
+      },
+      "stderr_tail": "",
+      "workdir": null
+    },
+    {
+      "id": "03-fix-typo",
+      "category": "fix-bug",
+      "mode": "agent",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 29.3,
+      "check_passed": false,
+      "check_stderr": "rc=1 stdout='' stderr=''",
+      "headless": {
+        "duration_ms": 29198,
+        "environment": {
+          "temperature_actual": 0.0,
+          "theo_version": "0.1.0"
+        },
+        "error_class": "solved",
+        "files_edited": [],
+        "iterations": 1,
+        "llm": {
+          "calls": 1,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.4",
+        "provider": "ChatGPT Codex (OAuth)",
+        "report": {
+          "context_health": {
+            "action_repetition_rate": 0.0,
+            "avg_context_size_tokens": 3445.0,
+            "compaction_count": 0,
+            "compaction_savings_ratio": 0.0,
+            "context_growth_rate": 0.0,
+            "max_context_size_tokens": 3445,
+            "refetch_rate": 0.0,
+            "usefulness_avg": 0.0
+          },
+          "error_taxonomy": {
+            "budget_errors": 0,
+            "failure_mode_errors": 0,
+            "llm_errors": 0,
+            "network_errors": 0,
+            "other_errors": 0,
+            "sandbox_errors": 0,
+            "tool_errors": 0,
+            "total_errors": 0,
+            "validation_errors": 0
+          },
+          "integrity": {
+            "complete": true,
+            "confidence": 1.0,
+            "drop_sentinels_found": 0,
+            "missing_sequences": [],
+            "schema_version": 1,
+            "total_events_expected": 7,
+            "total_events_received": 7,
+            "writer_recoveries_found": 0
+          },
+          "loop_metrics": {
+            "budget_utilization": {
+              "iterations_pct": 0.05,
+              "time_pct": 0.008055555555555555,
+              "tokens_pct": 0.013468
+            },
+            "convergence_rate": 1.0,
+            "done_blocked_count": 0,
+            "evolution_attempts": 0,
+            "evolution_success": false,
+            "phase_distribution": {
+              "Done": {
+                "duration_ms": 0,
+                "iterations": 1,
+                "pct": 1.0
+              },
+              "Edit": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Explore": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Verify": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              }
+            },
+            "total_iterations": 1
+          },
+          "memory_metrics": {
+            "constraints_learned": 0,
+            "episodes_created": 1,
+            "episodes_injected": 0,
+            "failure_fingerprints_new": 0,
+            "failure_fingerprints_recurrent": 0,
+            "hypotheses_active": 0,
+            "hypotheses_formed": 0,
+            "hypotheses_invalidated": 0
+          },
+          "subagent_metrics": {
+            "avg_duration_ms": 0.0,
+            "failed": 0,
+            "max_duration_ms": 0,
+            "spawned": 0,
+            "succeeded": 0,
+            "success_rate": 0.0
+          },
+          "surrogate_metrics": {
+            "context_waste_ratio": {
+              "caveat": "Proxy for context bloat: overflow events per iteration.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "doom_loop_frequency": {
+              "caveat": "Proxy for stuck loops: repeated identical tool calls in a sliding window.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "hypothesis_churn_rate": {
+              "caveat": "Approximates reasoning churn: invalidated / formed hypotheses.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "llm_efficiency": {
+              "caveat": "Approximates productive work: distinct successful tools per LLM call.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "time_to_first_tool_ms": {
+              "caveat": "Proxy for startup latency: ms from RunInitialized to first ToolCallDispatched.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 29116.0,
+              "value": 29116.0
+            }
+          },
+          "token_metrics": {
+            "cache_hit_rate": 0.0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "input_tokens": 13386,
+            "output_tokens": 82,
+            "reasoning_tokens": 0,
+            "tokens_per_successful_edit": 0.0,
+            "total_cost_usd": 0.0
+          },
+          "tool_breakdown": []
+        },
+        "schema": "theo.headless.v4",
+        "success": true,
+        "summary": "What\u2019s your role and work context \u2014 what do you build, and what tech stack do you usually work in?",
+        "tokens": {
+          "input": 13386,
+          "output": 82,
+          "total": 13468
+        },
+        "tools": {
+          "success": 0,
+          "total": 0
+        },
+        "cost_usd": 0.06816
+      },
+      "stderr_tail": "",
+      "workdir": null
+    },
+    {
+      "id": "04-fix-return",
+      "category": "fix-bug",
+      "mode": "agent",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 2.71,
+      "check_passed": false,
+      "check_stderr": "rc=1 stdout='' stderr=''",
+      "headless": {
+        "duration_ms": 2503,
+        "environment": {
+          "temperature_actual": 0.0,
+          "theo_version": "0.1.0"
+        },
+        "error_class": "solved",
+        "files_edited": [],
+        "iterations": 1,
+        "llm": {
+          "calls": 1,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.4",
+        "provider": "ChatGPT Codex (OAuth)",
+        "report": {
+          "context_health": {
+            "action_repetition_rate": 0.0,
+            "avg_context_size_tokens": 3451.0,
+            "compaction_count": 0,
+            "compaction_savings_ratio": 0.0,
+            "context_growth_rate": 0.0,
+            "max_context_size_tokens": 3451,
+            "refetch_rate": 0.0,
+            "usefulness_avg": 0.0
+          },
+          "error_taxonomy": {
+            "budget_errors": 0,
+            "failure_mode_errors": 0,
+            "llm_errors": 0,
+            "network_errors": 0,
+            "other_errors": 0,
+            "sandbox_errors": 0,
+            "tool_errors": 0,
+            "total_errors": 0,
+            "validation_errors": 0
+          },
+          "integrity": {
+            "complete": true,
+            "confidence": 1.0,
+            "drop_sentinels_found": 0,
+            "missing_sequences": [],
+            "schema_version": 1,
+            "total_events_expected": 7,
+            "total_events_received": 7,
+            "writer_recoveries_found": 0
+          },
+          "loop_metrics": {
+            "budget_utilization": {
+              "iterations_pct": 0.05,
+              "time_pct": 0.0005555555555555556,
+              "tokens_pct": 0.013453
+            },
+            "convergence_rate": 1.0,
+            "done_blocked_count": 0,
+            "evolution_attempts": 0,
+            "evolution_success": false,
+            "phase_distribution": {
+              "Done": {
+                "duration_ms": 0,
+                "iterations": 1,
+                "pct": 1.0
+              },
+              "Edit": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Explore": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Verify": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              }
+            },
+            "total_iterations": 1
+          },
+          "memory_metrics": {
+            "constraints_learned": 0,
+            "episodes_created": 1,
+            "episodes_injected": 0,
+            "failure_fingerprints_new": 0,
+            "failure_fingerprints_recurrent": 0,
+            "hypotheses_active": 0,
+            "hypotheses_formed": 0,
+            "hypotheses_invalidated": 0
+          },
+          "subagent_metrics": {
+            "avg_duration_ms": 0.0,
+            "failed": 0,
+            "max_duration_ms": 0,
+            "spawned": 0,
+            "succeeded": 0,
+            "success_rate": 0.0
+          },
+          "surrogate_metrics": {
+            "context_waste_ratio": {
+              "caveat": "Proxy for context bloat: overflow events per iteration.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "doom_loop_frequency": {
+              "caveat": "Proxy for stuck loops: repeated identical tool calls in a sliding window.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "hypothesis_churn_rate": {
+              "caveat": "Approximates reasoning churn: invalidated / formed hypotheses.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "llm_efficiency": {
+              "caveat": "Approximates productive work: distinct successful tools per LLM call.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "time_to_first_tool_ms": {
+              "caveat": "Proxy for startup latency: ms from RunInitialized to first ToolCallDispatched.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 2447.0,
+              "value": 2447.0
+            }
+          },
+          "token_metrics": {
+            "cache_hit_rate": 0.0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "input_tokens": 13392,
+            "output_tokens": 61,
+            "reasoning_tokens": 0,
+            "tokens_per_successful_edit": 0.0,
+            "total_cost_usd": 0.0
+          },
+          "tool_breakdown": []
+        },
+        "schema": "theo.headless.v4",
+        "success": true,
+        "summary": "What\u2019s your role and work context \u2014 what do you build, and what tech stack do you usually work in?",
+        "tokens": {
+          "input": 13392,
+          "output": 61,
+          "total": 13453
+        },
+        "tools": {
+          "success": 0,
+          "total": 0
+        },
+        "cost_usd": 0.067875
+      },
+      "stderr_tail": "",
+      "workdir": null
+    },
+    {
+      "id": "05-add-function",
+      "category": "add-feature",
+      "mode": "agent",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 3.39,
+      "check_passed": false,
+      "check_stderr": "rc=1 stdout='' stderr=''",
+      "headless": {
+        "duration_ms": 3129,
+        "environment": {
+          "temperature_actual": 0.0,
+          "theo_version": "0.1.0"
+        },
+        "error_class": "solved",
+        "files_edited": [],
+        "iterations": 1,
+        "llm": {
+          "calls": 1,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.4",
+        "provider": "ChatGPT Codex (OAuth)",
+        "report": {
+          "context_health": {
+            "action_repetition_rate": 0.0,
+            "avg_context_size_tokens": 3454.0,
+            "compaction_count": 0,
+            "compaction_savings_ratio": 0.0,
+            "context_growth_rate": 0.0,
+            "max_context_size_tokens": 3454,
+            "refetch_rate": 0.0,
+            "usefulness_avg": 0.0
+          },
+          "error_taxonomy": {
+            "budget_errors": 0,
+            "failure_mode_errors": 0,
+            "llm_errors": 0,
+            "network_errors": 0,
+            "other_errors": 0,
+            "sandbox_errors": 0,
+            "tool_errors": 0,
+            "total_errors": 0,
+            "validation_errors": 0
+          },
+          "integrity": {
+            "complete": true,
+            "confidence": 1.0,
+            "drop_sentinels_found": 0,
+            "missing_sequences": [],
+            "schema_version": 1,
+            "total_events_expected": 7,
+            "total_events_received": 7,
+            "writer_recoveries_found": 0
+          },
+          "loop_metrics": {
+            "budget_utilization": {
+              "iterations_pct": 0.05,
+              "time_pct": 0.0005555555555555556,
+              "tokens_pct": 0.013457
+            },
+            "convergence_rate": 1.0,
+            "done_blocked_count": 0,
+            "evolution_attempts": 0,
+            "evolution_success": false,
+            "phase_distribution": {
+              "Done": {
+                "duration_ms": 0,
+                "iterations": 1,
+                "pct": 1.0
+              },
+              "Edit": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Explore": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Verify": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              }
+            },
+            "total_iterations": 1
+          },
+          "memory_metrics": {
+            "constraints_learned": 0,
+            "episodes_created": 1,
+            "episodes_injected": 0,
+            "failure_fingerprints_new": 0,
+            "failure_fingerprints_recurrent": 0,
+            "hypotheses_active": 0,
+            "hypotheses_formed": 0,
+            "hypotheses_invalidated": 0
+          },
+          "subagent_metrics": {
+            "avg_duration_ms": 0.0,
+            "failed": 0,
+            "max_duration_ms": 0,
+            "spawned": 0,
+            "succeeded": 0,
+            "success_rate": 0.0
+          },
+          "surrogate_metrics": {
+            "context_waste_ratio": {
+              "caveat": "Proxy for context bloat: overflow events per iteration.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "doom_loop_frequency": {
+              "caveat": "Proxy for stuck loops: repeated identical tool calls in a sliding window.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "hypothesis_churn_rate": {
+              "caveat": "Approximates reasoning churn: invalidated / formed hypotheses.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "llm_efficiency": {
+              "caveat": "Approximates productive work: distinct successful tools per LLM call.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "time_to_first_tool_ms": {
+              "caveat": "Proxy for startup latency: ms from RunInitialized to first ToolCallDispatched.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 2736.0,
+              "value": 2736.0
+            }
+          },
+          "token_metrics": {
+            "cache_hit_rate": 0.0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "input_tokens": 13393,
+            "output_tokens": 64,
+            "reasoning_tokens": 0,
+            "tokens_per_successful_edit": 0.0,
+            "total_cost_usd": 0.0
+          },
+          "tool_breakdown": []
+        },
+        "schema": "theo.headless.v4",
+        "success": true,
+        "summary": "What\u2019s your role and work context \u2014 what do you build, and what tech stack do you usually work in?",
+        "tokens": {
+          "input": 13393,
+          "output": 64,
+          "total": 13457
+        },
+        "tools": {
+          "success": 0,
+          "total": 0
+        },
+        "cost_usd": 0.067925
+      },
+      "stderr_tail": "",
+      "workdir": null
+    },
+    {
+      "id": "06-rename-var",
+      "category": "refactor",
+      "mode": "agent",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 3.13,
+      "check_passed": false,
+      "check_stderr": "rc=1 stdout='' stderr=''",
+      "headless": {
+        "duration_ms": 2955,
+        "environment": {
+          "temperature_actual": 0.0,
+          "theo_version": "0.1.0"
+        },
+        "error_class": "solved",
+        "files_edited": [],
+        "iterations": 1,
+        "llm": {
+          "calls": 1,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.4",
+        "provider": "ChatGPT Codex (OAuth)",
+        "report": {
+          "context_health": {
+            "action_repetition_rate": 0.0,
+            "avg_context_size_tokens": 3454.0,
+            "compaction_count": 0,
+            "compaction_savings_ratio": 0.0,
+            "context_growth_rate": 0.0,
+            "max_context_size_tokens": 3454,
+            "refetch_rate": 0.0,
+            "usefulness_avg": 0.0
+          },
+          "error_taxonomy": {
+            "budget_errors": 0,
+            "failure_mode_errors": 0,
+            "llm_errors": 0,
+            "network_errors": 0,
+            "other_errors": 0,
+            "sandbox_errors": 0,
+            "tool_errors": 0,
+            "total_errors": 0,
+            "validation_errors": 0
+          },
+          "integrity": {
+            "complete": true,
+            "confidence": 1.0,
+            "drop_sentinels_found": 0,
+            "missing_sequences": [],
+            "schema_version": 1,
+            "total_events_expected": 7,
+            "total_events_received": 7,
+            "writer_recoveries_found": 0
+          },
+          "loop_metrics": {
+            "budget_utilization": {
+              "iterations_pct": 0.05,
+              "time_pct": 0.0005555555555555556,
+              "tokens_pct": 0.013464
+            },
+            "convergence_rate": 1.0,
+            "done_blocked_count": 0,
+            "evolution_attempts": 0,
+            "evolution_success": false,
+            "phase_distribution": {
+              "Done": {
+                "duration_ms": 0,
+                "iterations": 1,
+                "pct": 1.0
+              },
+              "Edit": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Explore": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Verify": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              }
+            },
+            "total_iterations": 1
+          },
+          "memory_metrics": {
+            "constraints_learned": 0,
+            "episodes_created": 1,
+            "episodes_injected": 0,
+            "failure_fingerprints_new": 0,
+            "failure_fingerprints_recurrent": 0,
+            "hypotheses_active": 0,
+            "hypotheses_formed": 0,
+            "hypotheses_invalidated": 0
+          },
+          "subagent_metrics": {
+            "avg_duration_ms": 0.0,
+            "failed": 0,
+            "max_duration_ms": 0,
+            "spawned": 0,
+            "succeeded": 0,
+            "success_rate": 0.0
+          },
+          "surrogate_metrics": {
+            "context_waste_ratio": {
+              "caveat": "Proxy for context bloat: overflow events per iteration.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "doom_loop_frequency": {
+              "caveat": "Proxy for stuck loops: repeated identical tool calls in a sliding window.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "hypothesis_churn_rate": {
+              "caveat": "Approximates reasoning churn: invalidated / formed hypotheses.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "llm_efficiency": {
+              "caveat": "Approximates productive work: distinct successful tools per LLM call.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "time_to_first_tool_ms": {
+              "caveat": "Proxy for startup latency: ms from RunInitialized to first ToolCallDispatched.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 2904.0,
+              "value": 2904.0
+            }
+          },
+          "token_metrics": {
+            "cache_hit_rate": 0.0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "input_tokens": 13393,
+            "output_tokens": 71,
+            "reasoning_tokens": 0,
+            "tokens_per_successful_edit": 0.0,
+            "total_cost_usd": 0.0
+          },
+          "tool_breakdown": []
+        },
+        "schema": "theo.headless.v4",
+        "success": true,
+        "summary": "What\u2019s your role and work context \u2014 what do you build, and what tech stack do you usually work in?",
+        "tokens": {
+          "input": 13393,
+          "output": 71,
+          "total": 13464
+        },
+        "tools": {
+          "success": 0,
+          "total": 0
+        },
+        "cost_usd": 0.06803
+      },
+      "stderr_tail": "",
+      "workdir": null
+    },
+    {
+      "id": "07-count-files",
+      "category": "explore",
+      "mode": "agent",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 4.15,
+      "check_passed": false,
+      "check_stderr": "rc=1 stdout='' stderr=''",
+      "headless": {
+        "duration_ms": 4046,
+        "environment": {
+          "temperature_actual": 0.0,
+          "theo_version": "0.1.0"
+        },
+        "error_class": "solved",
+        "files_edited": [],
+        "iterations": 1,
+        "llm": {
+          "calls": 1,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.4",
+        "provider": "ChatGPT Codex (OAuth)",
+        "report": {
+          "context_health": {
+            "action_repetition_rate": 0.0,
+            "avg_context_size_tokens": 3441.0,
+            "compaction_count": 0,
+            "compaction_savings_ratio": 0.0,
+            "context_growth_rate": 0.0,
+            "max_context_size_tokens": 3441,
+            "refetch_rate": 0.0,
+            "usefulness_avg": 0.0
+          },
+          "error_taxonomy": {
+            "budget_errors": 0,
+            "failure_mode_errors": 0,
+            "llm_errors": 0,
+            "network_errors": 0,
+            "other_errors": 0,
+            "sandbox_errors": 0,
+            "tool_errors": 0,
+            "total_errors": 0,
+            "validation_errors": 0
+          },
+          "integrity": {
+            "complete": true,
+            "confidence": 1.0,
+            "drop_sentinels_found": 0,
+            "missing_sequences": [],
+            "schema_version": 1,
+            "total_events_expected": 7,
+            "total_events_received": 7,
+            "writer_recoveries_found": 0
+          },
+          "loop_metrics": {
+            "budget_utilization": {
+              "iterations_pct": 0.05,
+              "time_pct": 0.0011111111111111111,
+              "tokens_pct": 0.013443
+            },
+            "convergence_rate": 1.0,
+            "done_blocked_count": 0,
+            "evolution_attempts": 0,
+            "evolution_success": false,
+            "phase_distribution": {
+              "Done": {
+                "duration_ms": 0,
+                "iterations": 1,
+                "pct": 1.0
+              },
+              "Edit": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Explore": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Verify": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              }
+            },
+            "total_iterations": 1
+          },
+          "memory_metrics": {
+            "constraints_learned": 0,
+            "episodes_created": 1,
+            "episodes_injected": 0,
+            "failure_fingerprints_new": 0,
+            "failure_fingerprints_recurrent": 0,
+            "hypotheses_active": 0,
+            "hypotheses_formed": 0,
+            "hypotheses_invalidated": 0
+          },
+          "subagent_metrics": {
+            "avg_duration_ms": 0.0,
+            "failed": 0,
+            "max_duration_ms": 0,
+            "spawned": 0,
+            "succeeded": 0,
+            "success_rate": 0.0
+          },
+          "surrogate_metrics": {
+            "context_waste_ratio": {
+              "caveat": "Proxy for context bloat: overflow events per iteration.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "doom_loop_frequency": {
+              "caveat": "Proxy for stuck loops: repeated identical tool calls in a sliding window.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "hypothesis_churn_rate": {
+              "caveat": "Approximates reasoning churn: invalidated / formed hypotheses.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "llm_efficiency": {
+              "caveat": "Approximates productive work: distinct successful tools per LLM call.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "time_to_first_tool_ms": {
+              "caveat": "Proxy for startup latency: ms from RunInitialized to first ToolCallDispatched.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 3669.0,
+              "value": 3669.0
+            }
+          },
+          "token_metrics": {
+            "cache_hit_rate": 0.0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "input_tokens": 13377,
+            "output_tokens": 66,
+            "reasoning_tokens": 0,
+            "tokens_per_successful_edit": 0.0,
+            "total_cost_usd": 0.0
+          },
+          "tool_breakdown": []
+        },
+        "schema": "theo.headless.v4",
+        "success": true,
+        "summary": "What\u2019s your role and work context \u2014 what are you building, and what tech stack do you use most?",
+        "tokens": {
+          "input": 13377,
+          "output": 66,
+          "total": 13443
+        },
+        "tools": {
+          "success": 0,
+          "total": 0
+        },
+        "cost_usd": 0.067875
+      },
+      "stderr_tail": "",
+      "workdir": null
+    },
+    {
+      "id": "08-multi-file-edit",
+      "category": "multi-file",
+      "mode": "agent",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 2.63,
+      "check_passed": false,
+      "check_stderr": "rc=1 stdout='' stderr=''",
+      "headless": {
+        "duration_ms": 2578,
+        "environment": {
+          "temperature_actual": 0.0,
+          "theo_version": "0.1.0"
+        },
+        "error_class": "solved",
+        "files_edited": [],
+        "iterations": 1,
+        "llm": {
+          "calls": 1,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.4",
+        "provider": "ChatGPT Codex (OAuth)",
+        "report": {
+          "context_health": {
+            "action_repetition_rate": 0.0,
+            "avg_context_size_tokens": 3471.0,
+            "compaction_count": 0,
+            "compaction_savings_ratio": 0.0,
+            "context_growth_rate": 0.0,
+            "max_context_size_tokens": 3471,
+            "refetch_rate": 0.0,
+            "usefulness_avg": 0.0
+          },
+          "error_taxonomy": {
+            "budget_errors": 0,
+            "failure_mode_errors": 0,
+            "llm_errors": 0,
+            "network_errors": 0,
+            "other_errors": 0,
+            "sandbox_errors": 0,
+            "tool_errors": 0,
+            "total_errors": 0,
+            "validation_errors": 0
+          },
+          "integrity": {
+            "complete": true,
+            "confidence": 1.0,
+            "drop_sentinels_found": 0,
+            "missing_sequences": [],
+            "schema_version": 1,
+            "total_events_expected": 7,
+            "total_events_received": 7,
+            "writer_recoveries_found": 0
+          },
+          "loop_metrics": {
+            "budget_utilization": {
+              "iterations_pct": 0.05,
+              "time_pct": 0.0005555555555555556,
+              "tokens_pct": 0.013468
+            },
+            "convergence_rate": 1.0,
+            "done_blocked_count": 0,
+            "evolution_attempts": 0,
+            "evolution_success": false,
+            "phase_distribution": {
+              "Done": {
+                "duration_ms": 0,
+                "iterations": 1,
+                "pct": 1.0
+              },
+              "Edit": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Explore": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Verify": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              }
+            },
+            "total_iterations": 1
+          },
+          "memory_metrics": {
+            "constraints_learned": 0,
+            "episodes_created": 1,
+            "episodes_injected": 0,
+            "failure_fingerprints_new": 0,
+            "failure_fingerprints_recurrent": 0,
+            "hypotheses_active": 0,
+            "hypotheses_formed": 0,
+            "hypotheses_invalidated": 0
+          },
+          "subagent_metrics": {
+            "avg_duration_ms": 0.0,
+            "failed": 0,
+            "max_duration_ms": 0,
+            "spawned": 0,
+            "succeeded": 0,
+            "success_rate": 0.0
+          },
+          "surrogate_metrics": {
+            "context_waste_ratio": {
+              "caveat": "Proxy for context bloat: overflow events per iteration.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "doom_loop_frequency": {
+              "caveat": "Proxy for stuck loops: repeated identical tool calls in a sliding window.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "hypothesis_churn_rate": {
+              "caveat": "Approximates reasoning churn: invalidated / formed hypotheses.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "llm_efficiency": {
+              "caveat": "Approximates productive work: distinct successful tools per LLM call.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "time_to_first_tool_ms": {
+              "caveat": "Proxy for startup latency: ms from RunInitialized to first ToolCallDispatched.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 2545.0,
+              "value": 2545.0
+            }
+          },
+          "token_metrics": {
+            "cache_hit_rate": 0.0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "input_tokens": 13412,
+            "output_tokens": 56,
+            "reasoning_tokens": 0,
+            "tokens_per_successful_edit": 0.0,
+            "total_cost_usd": 0.0
+          },
+          "tool_breakdown": []
+        },
+        "schema": "theo.headless.v4",
+        "success": true,
+        "summary": "What do you build here, and what tech stack are you using?",
+        "tokens": {
+          "input": 13412,
+          "output": 56,
+          "total": 13468
+        },
+        "tools": {
+          "success": 0,
+          "total": 0
+        },
+        "cost_usd": 0.0679
+      },
+      "stderr_tail": "",
+      "workdir": null
+    },
+    {
+      "id": "09-plan-mode",
+      "category": "plan",
+      "mode": "plan",
+      "exit_code": 1,
+      "error": null,
+      "wallclock_secs": 73.76,
+      "check_passed": true,
+      "check_stderr": "rc=0 stdout='' stderr=''",
+      "headless": {
+        "duration_ms": 73698,
+        "environment": {
+          "temperature_actual": 0.0,
+          "theo_version": "0.1.0"
+        },
+        "error_class": "aborted",
+        "files_edited": [
+          ".theo/plans/01-add-mean-plan.md",
+          ".theo/plans/02-mean.md"
+        ],
+        "iterations": 6,
+        "llm": {
+          "calls": 5,
+          "retries": 0
+        },
+        "mode": "plan",
+        "model": "gpt-5.4",
+        "provider": "ChatGPT Codex (OAuth)",
+        "report": {
+          "context_health": {
+            "action_repetition_rate": 0.0,
+            "avg_context_size_tokens": 1588.0,
+            "compaction_count": 0,
+            "compaction_savings_ratio": 0.0,
+            "context_growth_rate": 77.2,
+            "max_context_size_tokens": 1793,
+            "refetch_rate": 0.0,
+            "usefulness_avg": 0.0
+          },
+          "error_taxonomy": {
+            "budget_errors": 0,
+            "failure_mode_errors": 0,
+            "llm_errors": 0,
+            "network_errors": 0,
+            "other_errors": 0,
+            "sandbox_errors": 0,
+            "tool_errors": 0,
+            "total_errors": 0,
+            "validation_errors": 0
+          },
+          "integrity": {
+            "complete": true,
+            "confidence": 1.0,
+            "drop_sentinels_found": 0,
+            "missing_sequences": [],
+            "schema_version": 1,
+            "total_events_expected": 39,
+            "total_events_received": 39,
+            "writer_recoveries_found": 0
+          },
+          "loop_metrics": {
+            "budget_utilization": {
+              "iterations_pct": 0.3,
+              "time_pct": 0.020277777777777777,
+              "tokens_pct": 0.062303
+            },
+            "convergence_rate": 0.0,
+            "done_blocked_count": 2,
+            "evolution_attempts": 0,
+            "evolution_success": false,
+            "phase_distribution": {
+              "Done": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Edit": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Explore": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Verify": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              }
+            },
+            "total_iterations": 6
+          },
+          "memory_metrics": {
+            "constraints_learned": 0,
+            "episodes_created": 1,
+            "episodes_injected": 0,
+            "failure_fingerprints_new": 0,
+            "failure_fingerprints_recurrent": 0,
+            "hypotheses_active": 0,
+            "hypotheses_formed": 0,
+            "hypotheses_invalidated": 0
+          },
+          "subagent_metrics": {
+            "avg_duration_ms": 0.0,
+            "failed": 0,
+            "max_duration_ms": 0,
+            "spawned": 0,
+            "succeeded": 0,
+            "success_rate": 0.0
+          },
+          "surrogate_metrics": {
+            "context_waste_ratio": {
+              "caveat": "Proxy for context bloat: overflow events per iteration.",
+              "confidence": 1.0,
+              "denominator": 6.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "doom_loop_frequency": {
+              "caveat": "Proxy for stuck loops: repeated identical tool calls in a sliding window.",
+              "confidence": 1.0,
+              "denominator": 2.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "hypothesis_churn_rate": {
+              "caveat": "Approximates reasoning churn: invalidated / formed hypotheses.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "llm_efficiency": {
+              "caveat": "Approximates productive work: distinct successful tools per LLM call.",
+              "confidence": 1.0,
+              "denominator": 6.0,
+              "is_surrogate": true,
+              "numerator": 1.0,
+              "value": 0.16666666666666666
+            },
+            "time_to_first_tool_ms": {
+              "caveat": "Proxy for startup latency: ms from RunInitialized to first ToolCallDispatched.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 18165.0,
+              "value": 18165.0
+            }
+          },
+          "token_metrics": {
+            "cache_hit_rate": 0.0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "input_tokens": 60589,
+            "output_tokens": 1714,
+            "reasoning_tokens": 0,
+            "tokens_per_successful_edit": 31151.5,
+            "total_cost_usd": 0.0
+          },
+          "tool_breakdown": [
+            {
+              "avg_latency_ms": 1.5,
+              "call_count": 2,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 2,
+              "retry_count": 0,
+              "success_count": 2,
+              "success_rate": 1.0,
+              "tool_name": "write"
+            }
+          ]
+        },
+        "schema": "theo.headless.v4",
+        "success": false,
+        "summary": "LLM error: parse error: failed to parse Codex stream",
+        "tokens": {
+          "input": 60589,
+          "output": 1714,
+          "total": 62303
+        },
+        "tools": {
+          "success": 2,
+          "total": 2
+        },
+        "cost_usd": 0.328655
+      },
+      "stderr_tail": "",
+      "workdir": null
+    },
+    {
+      "id": "10-logic-bug",
+      "category": "fix-bug",
+      "mode": "agent",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 3.94,
+      "check_passed": false,
+      "check_stderr": "rc=1 stdout='' stderr=''",
+      "headless": {
+        "duration_ms": 3885,
+        "environment": {
+          "temperature_actual": 0.0,
+          "theo_version": "0.1.0"
+        },
+        "error_class": "solved",
+        "files_edited": [],
+        "iterations": 1,
+        "llm": {
+          "calls": 1,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.4",
+        "provider": "ChatGPT Codex (OAuth)",
+        "report": {
+          "context_health": {
+            "action_repetition_rate": 0.0,
+            "avg_context_size_tokens": 3485.0,
+            "compaction_count": 0,
+            "compaction_savings_ratio": 0.0,
+            "context_growth_rate": 0.0,
+            "max_context_size_tokens": 3485,
+            "refetch_rate": 0.0,
+            "usefulness_avg": 0.0
+          },
+          "error_taxonomy": {
+            "budget_errors": 0,
+            "failure_mode_errors": 0,
+            "llm_errors": 0,
+            "network_errors": 0,
+            "other_errors": 0,
+            "sandbox_errors": 0,
+            "tool_errors": 0,
+            "total_errors": 0,
+            "validation_errors": 0
+          },
+          "integrity": {
+            "complete": true,
+            "confidence": 1.0,
+            "drop_sentinels_found": 0,
+            "missing_sequences": [],
+            "schema_version": 1,
+            "total_events_expected": 7,
+            "total_events_received": 7,
+            "writer_recoveries_found": 0
+          },
+          "loop_metrics": {
+            "budget_utilization": {
+              "iterations_pct": 0.05,
+              "time_pct": 0.0008333333333333334,
+              "tokens_pct": 0.013503
+            },
+            "convergence_rate": 1.0,
+            "done_blocked_count": 0,
+            "evolution_attempts": 0,
+            "evolution_success": false,
+            "phase_distribution": {
+              "Done": {
+                "duration_ms": 0,
+                "iterations": 1,
+                "pct": 1.0
+              },
+              "Edit": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Explore": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Verify": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              }
+            },
+            "total_iterations": 1
+          },
+          "memory_metrics": {
+            "constraints_learned": 0,
+            "episodes_created": 1,
+            "episodes_injected": 0,
+            "failure_fingerprints_new": 0,
+            "failure_fingerprints_recurrent": 0,
+            "hypotheses_active": 0,
+            "hypotheses_formed": 0,
+            "hypotheses_invalidated": 0
+          },
+          "subagent_metrics": {
+            "avg_duration_ms": 0.0,
+            "failed": 0,
+            "max_duration_ms": 0,
+            "spawned": 0,
+            "succeeded": 0,
+            "success_rate": 0.0
+          },
+          "surrogate_metrics": {
+            "context_waste_ratio": {
+              "caveat": "Proxy for context bloat: overflow events per iteration.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "doom_loop_frequency": {
+              "caveat": "Proxy for stuck loops: repeated identical tool calls in a sliding window.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "hypothesis_churn_rate": {
+              "caveat": "Approximates reasoning churn: invalidated / formed hypotheses.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "llm_efficiency": {
+              "caveat": "Approximates productive work: distinct successful tools per LLM call.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "time_to_first_tool_ms": {
+              "caveat": "Proxy for startup latency: ms from RunInitialized to first ToolCallDispatched.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 3865.0,
+              "value": 3865.0
+            }
+          },
+          "token_metrics": {
+            "cache_hit_rate": 0.0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "input_tokens": 13438,
+            "output_tokens": 65,
+            "reasoning_tokens": 0,
+            "tokens_per_successful_edit": 0.0,
+            "total_cost_usd": 0.0
+          },
+          "tool_breakdown": []
+        },
+        "schema": "theo.headless.v4",
+        "success": true,
+        "summary": "What do you build day-to-day, and what tech stack are you usually working in?",
+        "tokens": {
+          "input": 13438,
+          "output": 65,
+          "total": 13503
+        },
+        "tools": {
+          "success": 0,
+          "total": 0
+        },
+        "cost_usd": 0.068165
+      },
+      "stderr_tail": "",
+      "workdir": null
+    },
+    {
+      "id": "11-python-fix",
+      "category": "fix-bug",
+      "mode": "agent",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 3.19,
+      "check_passed": false,
+      "check_stderr": "rc=1 stdout='' stderr=''",
+      "headless": {
+        "duration_ms": 3134,
+        "environment": {
+          "temperature_actual": 0.0,
+          "theo_version": "0.1.0"
+        },
+        "error_class": "solved",
+        "files_edited": [],
+        "iterations": 1,
+        "llm": {
+          "calls": 1,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.4",
+        "provider": "ChatGPT Codex (OAuth)",
+        "report": {
+          "context_health": {
+            "action_repetition_rate": 0.0,
+            "avg_context_size_tokens": 3452.0,
+            "compaction_count": 0,
+            "compaction_savings_ratio": 0.0,
+            "context_growth_rate": 0.0,
+            "max_context_size_tokens": 3452,
+            "refetch_rate": 0.0,
+            "usefulness_avg": 0.0
+          },
+          "error_taxonomy": {
+            "budget_errors": 0,
+            "failure_mode_errors": 0,
+            "llm_errors": 0,
+            "network_errors": 0,
+            "other_errors": 0,
+            "sandbox_errors": 0,
+            "tool_errors": 0,
+            "total_errors": 0,
+            "validation_errors": 0
+          },
+          "integrity": {
+            "complete": true,
+            "confidence": 1.0,
+            "drop_sentinels_found": 0,
+            "missing_sequences": [],
+            "schema_version": 1,
+            "total_events_expected": 7,
+            "total_events_received": 7,
+            "writer_recoveries_found": 0
+          },
+          "loop_metrics": {
+            "budget_utilization": {
+              "iterations_pct": 0.05,
+              "time_pct": 0.0008333333333333334,
+              "tokens_pct": 0.013487
+            },
+            "convergence_rate": 1.0,
+            "done_blocked_count": 0,
+            "evolution_attempts": 0,
+            "evolution_success": false,
+            "phase_distribution": {
+              "Done": {
+                "duration_ms": 0,
+                "iterations": 1,
+                "pct": 1.0
+              },
+              "Edit": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Explore": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Verify": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              }
+            },
+            "total_iterations": 1
+          },
+          "memory_metrics": {
+            "constraints_learned": 0,
+            "episodes_created": 1,
+            "episodes_injected": 0,
+            "failure_fingerprints_new": 0,
+            "failure_fingerprints_recurrent": 0,
+            "hypotheses_active": 0,
+            "hypotheses_formed": 0,
+            "hypotheses_invalidated": 0
+          },
+          "subagent_metrics": {
+            "avg_duration_ms": 0.0,
+            "failed": 0,
+            "max_duration_ms": 0,
+            "spawned": 0,
+            "succeeded": 0,
+            "success_rate": 0.0
+          },
+          "surrogate_metrics": {
+            "context_waste_ratio": {
+              "caveat": "Proxy for context bloat: overflow events per iteration.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "doom_loop_frequency": {
+              "caveat": "Proxy for stuck loops: repeated identical tool calls in a sliding window.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "hypothesis_churn_rate": {
+              "caveat": "Approximates reasoning churn: invalidated / formed hypotheses.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "llm_efficiency": {
+              "caveat": "Approximates productive work: distinct successful tools per LLM call.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "time_to_first_tool_ms": {
+              "caveat": "Proxy for startup latency: ms from RunInitialized to first ToolCallDispatched.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 3108.0,
+              "value": 3108.0
+            }
+          },
+          "token_metrics": {
+            "cache_hit_rate": 0.0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "input_tokens": 13393,
+            "output_tokens": 94,
+            "reasoning_tokens": 0,
+            "tokens_per_successful_edit": 0.0,
+            "total_cost_usd": 0.0
+          },
+          "tool_breakdown": []
+        },
+        "schema": "theo.headless.v4",
+        "success": true,
+        "summary": "What do you build with this project, and what\u2019s the main tech stack you use?",
+        "tokens": {
+          "input": 13393,
+          "output": 94,
+          "total": 13487
+        },
+        "tools": {
+          "success": 0,
+          "total": 0
+        },
+        "cost_usd": 0.068375
+      },
+      "stderr_tail": "",
+      "workdir": null
+    },
+    {
+      "id": "12-bash-command",
+      "category": "explore",
+      "mode": "agent",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 2.72,
+      "check_passed": false,
+      "check_stderr": "rc=1 stdout='' stderr=''",
+      "headless": {
+        "duration_ms": 2664,
+        "environment": {
+          "temperature_actual": 0.0,
+          "theo_version": "0.1.0"
+        },
+        "error_class": "solved",
+        "files_edited": [],
+        "iterations": 1,
+        "llm": {
+          "calls": 1,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.4",
+        "provider": "ChatGPT Codex (OAuth)",
+        "report": {
+          "context_health": {
+            "action_repetition_rate": 0.0,
+            "avg_context_size_tokens": 3444.0,
+            "compaction_count": 0,
+            "compaction_savings_ratio": 0.0,
+            "context_growth_rate": 0.0,
+            "max_context_size_tokens": 3444,
+            "refetch_rate": 0.0,
+            "usefulness_avg": 0.0
+          },
+          "error_taxonomy": {
+            "budget_errors": 0,
+            "failure_mode_errors": 0,
+            "llm_errors": 0,
+            "network_errors": 0,
+            "other_errors": 0,
+            "sandbox_errors": 0,
+            "tool_errors": 0,
+            "total_errors": 0,
+            "validation_errors": 0
+          },
+          "integrity": {
+            "complete": true,
+            "confidence": 1.0,
+            "drop_sentinels_found": 0,
+            "missing_sequences": [],
+            "schema_version": 1,
+            "total_events_expected": 7,
+            "total_events_received": 7,
+            "writer_recoveries_found": 0
+          },
+          "loop_metrics": {
+            "budget_utilization": {
+              "iterations_pct": 0.05,
+              "time_pct": 0.0005555555555555556,
+              "tokens_pct": 0.01345
+            },
+            "convergence_rate": 1.0,
+            "done_blocked_count": 0,
+            "evolution_attempts": 0,
+            "evolution_success": false,
+            "phase_distribution": {
+              "Done": {
+                "duration_ms": 0,
+                "iterations": 1,
+                "pct": 1.0
+              },
+              "Edit": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Explore": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Verify": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              }
+            },
+            "total_iterations": 1
+          },
+          "memory_metrics": {
+            "constraints_learned": 0,
+            "episodes_created": 1,
+            "episodes_injected": 0,
+            "failure_fingerprints_new": 0,
+            "failure_fingerprints_recurrent": 0,
+            "hypotheses_active": 0,
+            "hypotheses_formed": 0,
+            "hypotheses_invalidated": 0
+          },
+          "subagent_metrics": {
+            "avg_duration_ms": 0.0,
+            "failed": 0,
+            "max_duration_ms": 0,
+            "spawned": 0,
+            "succeeded": 0,
+            "success_rate": 0.0
+          },
+          "surrogate_metrics": {
+            "context_waste_ratio": {
+              "caveat": "Proxy for context bloat: overflow events per iteration.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "doom_loop_frequency": {
+              "caveat": "Proxy for stuck loops: repeated identical tool calls in a sliding window.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "hypothesis_churn_rate": {
+              "caveat": "Approximates reasoning churn: invalidated / formed hypotheses.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "llm_efficiency": {
+              "caveat": "Approximates productive work: distinct successful tools per LLM call.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "time_to_first_tool_ms": {
+              "caveat": "Proxy for startup latency: ms from RunInitialized to first ToolCallDispatched.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 2631.0,
+              "value": 2631.0
+            }
+          },
+          "token_metrics": {
+            "cache_hit_rate": 0.0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "input_tokens": 13380,
+            "output_tokens": 70,
+            "reasoning_tokens": 0,
+            "tokens_per_successful_edit": 0.0,
+            "total_cost_usd": 0.0
+          },
+          "tool_breakdown": []
+        },
+        "schema": "theo.headless.v4",
+        "success": true,
+        "summary": "What\u2019s your role and work context \u2014 what do you build, and what tech stack do you usually work in?",
+        "tokens": {
+          "input": 13380,
+          "output": 70,
+          "total": 13450
+        },
+        "tools": {
+          "success": 0,
+          "total": 0
+        },
+        "cost_usd": 0.06795
+      },
+      "stderr_tail": "",
+      "workdir": null
+    },
+    {
+      "id": "13-multi-step-fix",
+      "category": "fix-bug",
+      "mode": "agent",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 2.77,
+      "check_passed": false,
+      "check_stderr": "rc=1 stdout='' stderr=''",
+      "headless": {
+        "duration_ms": 2722,
+        "environment": {
+          "temperature_actual": 0.0,
+          "theo_version": "0.1.0"
+        },
+        "error_class": "solved",
+        "files_edited": [],
+        "iterations": 1,
+        "llm": {
+          "calls": 1,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.4",
+        "provider": "ChatGPT Codex (OAuth)",
+        "report": {
+          "context_health": {
+            "action_repetition_rate": 0.0,
+            "avg_context_size_tokens": 3459.0,
+            "compaction_count": 0,
+            "compaction_savings_ratio": 0.0,
+            "context_growth_rate": 0.0,
+            "max_context_size_tokens": 3459,
+            "refetch_rate": 0.0,
+            "usefulness_avg": 0.0
+          },
+          "error_taxonomy": {
+            "budget_errors": 0,
+            "failure_mode_errors": 0,
+            "llm_errors": 0,
+            "network_errors": 0,
+            "other_errors": 0,
+            "sandbox_errors": 0,
+            "tool_errors": 0,
+            "total_errors": 0,
+            "validation_errors": 0
+          },
+          "integrity": {
+            "complete": true,
+            "confidence": 1.0,
+            "drop_sentinels_found": 0,
+            "missing_sequences": [],
+            "schema_version": 1,
+            "total_events_expected": 7,
+            "total_events_received": 7,
+            "writer_recoveries_found": 0
+          },
+          "loop_metrics": {
+            "budget_utilization": {
+              "iterations_pct": 0.05,
+              "time_pct": 0.0005555555555555556,
+              "tokens_pct": 0.013459
+            },
+            "convergence_rate": 1.0,
+            "done_blocked_count": 0,
+            "evolution_attempts": 0,
+            "evolution_success": false,
+            "phase_distribution": {
+              "Done": {
+                "duration_ms": 0,
+                "iterations": 1,
+                "pct": 1.0
+              },
+              "Edit": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Explore": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Verify": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              }
+            },
+            "total_iterations": 1
+          },
+          "memory_metrics": {
+            "constraints_learned": 0,
+            "episodes_created": 1,
+            "episodes_injected": 0,
+            "failure_fingerprints_new": 0,
+            "failure_fingerprints_recurrent": 0,
+            "hypotheses_active": 0,
+            "hypotheses_formed": 0,
+            "hypotheses_invalidated": 0
+          },
+          "subagent_metrics": {
+            "avg_duration_ms": 0.0,
+            "failed": 0,
+            "max_duration_ms": 0,
+            "spawned": 0,
+            "succeeded": 0,
+            "success_rate": 0.0
+          },
+          "surrogate_metrics": {
+            "context_waste_ratio": {
+              "caveat": "Proxy for context bloat: overflow events per iteration.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "doom_loop_frequency": {
+              "caveat": "Proxy for stuck loops: repeated identical tool calls in a sliding window.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "hypothesis_churn_rate": {
+              "caveat": "Approximates reasoning churn: invalidated / formed hypotheses.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "llm_efficiency": {
+              "caveat": "Approximates productive work: distinct successful tools per LLM call.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "time_to_first_tool_ms": {
+              "caveat": "Proxy for startup latency: ms from RunInitialized to first ToolCallDispatched.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 2639.0,
+              "value": 2639.0
+            }
+          },
+          "token_metrics": {
+            "cache_hit_rate": 0.0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "input_tokens": 13396,
+            "output_tokens": 63,
+            "reasoning_tokens": 0,
+            "tokens_per_successful_edit": 0.0,
+            "total_cost_usd": 0.0
+          },
+          "tool_breakdown": []
+        },
+        "schema": "theo.headless.v4",
+        "success": true,
+        "summary": "What\u2019s your role and work context \u2014 what do you build, and what tech stack do you usually work in?",
+        "tokens": {
+          "input": 13396,
+          "output": 63,
+          "total": 13459
+        },
+        "tools": {
+          "success": 0,
+          "total": 0
+        },
+        "cost_usd": 0.067925
+      },
+      "stderr_tail": "",
+      "workdir": null
+    },
+    {
+      "id": "14-add-import",
+      "category": "fix-bug",
+      "mode": "agent",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 3.93,
+      "check_passed": false,
+      "check_stderr": "rc=1 stdout='' stderr=''",
+      "headless": {
+        "duration_ms": 3850,
+        "environment": {
+          "temperature_actual": 0.0,
+          "theo_version": "0.1.0"
+        },
+        "error_class": "solved",
+        "files_edited": [],
+        "iterations": 1,
+        "llm": {
+          "calls": 1,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.4",
+        "provider": "ChatGPT Codex (OAuth)",
+        "report": {
+          "context_health": {
+            "action_repetition_rate": 0.0,
+            "avg_context_size_tokens": 3444.0,
+            "compaction_count": 0,
+            "compaction_savings_ratio": 0.0,
+            "context_growth_rate": 0.0,
+            "max_context_size_tokens": 3444,
+            "refetch_rate": 0.0,
+            "usefulness_avg": 0.0
+          },
+          "error_taxonomy": {
+            "budget_errors": 0,
+            "failure_mode_errors": 0,
+            "llm_errors": 0,
+            "network_errors": 0,
+            "other_errors": 0,
+            "sandbox_errors": 0,
+            "tool_errors": 0,
+            "total_errors": 0,
+            "validation_errors": 0
+          },
+          "integrity": {
+            "complete": true,
+            "confidence": 1.0,
+            "drop_sentinels_found": 0,
+            "missing_sequences": [],
+            "schema_version": 1,
+            "total_events_expected": 7,
+            "total_events_received": 7,
+            "writer_recoveries_found": 0
+          },
+          "loop_metrics": {
+            "budget_utilization": {
+              "iterations_pct": 0.05,
+              "time_pct": 0.0008333333333333334,
+              "tokens_pct": 0.013443
+            },
+            "convergence_rate": 1.0,
+            "done_blocked_count": 0,
+            "evolution_attempts": 0,
+            "evolution_success": false,
+            "phase_distribution": {
+              "Done": {
+                "duration_ms": 0,
+                "iterations": 1,
+                "pct": 1.0
+              },
+              "Edit": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Explore": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Verify": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              }
+            },
+            "total_iterations": 1
+          },
+          "memory_metrics": {
+            "constraints_learned": 0,
+            "episodes_created": 1,
+            "episodes_injected": 0,
+            "failure_fingerprints_new": 0,
+            "failure_fingerprints_recurrent": 0,
+            "hypotheses_active": 0,
+            "hypotheses_formed": 0,
+            "hypotheses_invalidated": 0
+          },
+          "subagent_metrics": {
+            "avg_duration_ms": 0.0,
+            "failed": 0,
+            "max_duration_ms": 0,
+            "spawned": 0,
+            "succeeded": 0,
+            "success_rate": 0.0
+          },
+          "surrogate_metrics": {
+            "context_waste_ratio": {
+              "caveat": "Proxy for context bloat: overflow events per iteration.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "doom_loop_frequency": {
+              "caveat": "Proxy for stuck loops: repeated identical tool calls in a sliding window.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "hypothesis_churn_rate": {
+              "caveat": "Approximates reasoning churn: invalidated / formed hypotheses.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "llm_efficiency": {
+              "caveat": "Approximates productive work: distinct successful tools per LLM call.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "time_to_first_tool_ms": {
+              "caveat": "Proxy for startup latency: ms from RunInitialized to first ToolCallDispatched.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 3830.0,
+              "value": 3830.0
+            }
+          },
+          "token_metrics": {
+            "cache_hit_rate": 0.0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "input_tokens": 13379,
+            "output_tokens": 64,
+            "reasoning_tokens": 0,
+            "tokens_per_successful_edit": 0.0,
+            "total_cost_usd": 0.0
+          },
+          "tool_breakdown": []
+        },
+        "schema": "theo.headless.v4",
+        "success": true,
+        "summary": "What\u2019s your role and work context \u2014 what do you build, and what tech stack are you using here?",
+        "tokens": {
+          "input": 13379,
+          "output": 64,
+          "total": 13443
+        },
+        "tools": {
+          "success": 0,
+          "total": 0
+        },
+        "cost_usd": 0.067855
+      },
+      "stderr_tail": "",
+      "workdir": null
+    },
+    {
+      "id": "15-cross-file-search",
+      "category": "search",
+      "mode": "agent",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 2.6,
+      "check_passed": false,
+      "check_stderr": "rc=1 stdout='' stderr=''",
+      "headless": {
+        "duration_ms": 2556,
+        "environment": {
+          "temperature_actual": 0.0,
+          "theo_version": "0.1.0"
+        },
+        "error_class": "solved",
+        "files_edited": [],
+        "iterations": 1,
+        "llm": {
+          "calls": 1,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.4",
+        "provider": "ChatGPT Codex (OAuth)",
+        "report": {
+          "context_health": {
+            "action_repetition_rate": 0.0,
+            "avg_context_size_tokens": 3465.0,
+            "compaction_count": 0,
+            "compaction_savings_ratio": 0.0,
+            "context_growth_rate": 0.0,
+            "max_context_size_tokens": 3465,
+            "refetch_rate": 0.0,
+            "usefulness_avg": 0.0
+          },
+          "error_taxonomy": {
+            "budget_errors": 0,
+            "failure_mode_errors": 0,
+            "llm_errors": 0,
+            "network_errors": 0,
+            "other_errors": 0,
+            "sandbox_errors": 0,
+            "tool_errors": 0,
+            "total_errors": 0,
+            "validation_errors": 0
+          },
+          "integrity": {
+            "complete": true,
+            "confidence": 1.0,
+            "drop_sentinels_found": 0,
+            "missing_sequences": [],
+            "schema_version": 1,
+            "total_events_expected": 7,
+            "total_events_received": 7,
+            "writer_recoveries_found": 0
+          },
+          "loop_metrics": {
+            "budget_utilization": {
+              "iterations_pct": 0.05,
+              "time_pct": 0.0005555555555555556,
+              "tokens_pct": 0.01346
+            },
+            "convergence_rate": 1.0,
+            "done_blocked_count": 0,
+            "evolution_attempts": 0,
+            "evolution_success": false,
+            "phase_distribution": {
+              "Done": {
+                "duration_ms": 0,
+                "iterations": 1,
+                "pct": 1.0
+              },
+              "Edit": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Explore": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Verify": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              }
+            },
+            "total_iterations": 1
+          },
+          "memory_metrics": {
+            "constraints_learned": 0,
+            "episodes_created": 1,
+            "episodes_injected": 0,
+            "failure_fingerprints_new": 0,
+            "failure_fingerprints_recurrent": 0,
+            "hypotheses_active": 0,
+            "hypotheses_formed": 0,
+            "hypotheses_invalidated": 0
+          },
+          "subagent_metrics": {
+            "avg_duration_ms": 0.0,
+            "failed": 0,
+            "max_duration_ms": 0,
+            "spawned": 0,
+            "succeeded": 0,
+            "success_rate": 0.0
+          },
+          "surrogate_metrics": {
+            "context_waste_ratio": {
+              "caveat": "Proxy for context bloat: overflow events per iteration.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "doom_loop_frequency": {
+              "caveat": "Proxy for stuck loops: repeated identical tool calls in a sliding window.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "hypothesis_churn_rate": {
+              "caveat": "Approximates reasoning churn: invalidated / formed hypotheses.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "llm_efficiency": {
+              "caveat": "Approximates productive work: distinct successful tools per LLM call.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "time_to_first_tool_ms": {
+              "caveat": "Proxy for startup latency: ms from RunInitialized to first ToolCallDispatched.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 2539.0,
+              "value": 2539.0
+            }
+          },
+          "token_metrics": {
+            "cache_hit_rate": 0.0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "input_tokens": 13396,
+            "output_tokens": 64,
+            "reasoning_tokens": 0,
+            "tokens_per_successful_edit": 0.0,
+            "total_cost_usd": 0.0
+          },
+          "tool_breakdown": []
+        },
+        "schema": "theo.headless.v4",
+        "success": true,
+        "summary": "What do you build day-to-day, and what tech stack are you working in here?",
+        "tokens": {
+          "input": 13396,
+          "output": 64,
+          "total": 13460
+        },
+        "tools": {
+          "success": 0,
+          "total": 0
+        },
+        "cost_usd": 0.06794
+      },
+      "stderr_tail": "",
+      "workdir": null
+    },
+    {
+      "id": "16-cross-file-bug",
+      "category": "fix-bug",
+      "mode": "agent",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 4.56,
+      "check_passed": true,
+      "check_stderr": "rc=0 stdout='OK\\n' stderr=''",
+      "headless": {
+        "duration_ms": 4451,
+        "environment": {
+          "temperature_actual": 0.0,
+          "theo_version": "0.1.0"
+        },
+        "error_class": "solved",
+        "files_edited": [],
+        "iterations": 1,
+        "llm": {
+          "calls": 1,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.4",
+        "provider": "ChatGPT Codex (OAuth)",
+        "report": {
+          "context_health": {
+            "action_repetition_rate": 0.0,
+            "avg_context_size_tokens": 3472.0,
+            "compaction_count": 0,
+            "compaction_savings_ratio": 0.0,
+            "context_growth_rate": 0.0,
+            "max_context_size_tokens": 3472,
+            "refetch_rate": 0.0,
+            "usefulness_avg": 0.0
+          },
+          "error_taxonomy": {
+            "budget_errors": 0,
+            "failure_mode_errors": 0,
+            "llm_errors": 0,
+            "network_errors": 0,
+            "other_errors": 0,
+            "sandbox_errors": 0,
+            "tool_errors": 0,
+            "total_errors": 0,
+            "validation_errors": 0
+          },
+          "integrity": {
+            "complete": true,
+            "confidence": 1.0,
+            "drop_sentinels_found": 0,
+            "missing_sequences": [],
+            "schema_version": 1,
+            "total_events_expected": 7,
+            "total_events_received": 7,
+            "writer_recoveries_found": 0
+          },
+          "loop_metrics": {
+            "budget_utilization": {
+              "iterations_pct": 0.05,
+              "time_pct": 0.0011111111111111111,
+              "tokens_pct": 0.01347
+            },
+            "convergence_rate": 1.0,
+            "done_blocked_count": 0,
+            "evolution_attempts": 0,
+            "evolution_success": false,
+            "phase_distribution": {
+              "Done": {
+                "duration_ms": 0,
+                "iterations": 1,
+                "pct": 1.0
+              },
+              "Edit": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Explore": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Verify": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              }
+            },
+            "total_iterations": 1
+          },
+          "memory_metrics": {
+            "constraints_learned": 0,
+            "episodes_created": 1,
+            "episodes_injected": 0,
+            "failure_fingerprints_new": 0,
+            "failure_fingerprints_recurrent": 0,
+            "hypotheses_active": 0,
+            "hypotheses_formed": 0,
+            "hypotheses_invalidated": 0
+          },
+          "subagent_metrics": {
+            "avg_duration_ms": 0.0,
+            "failed": 0,
+            "max_duration_ms": 0,
+            "spawned": 0,
+            "succeeded": 0,
+            "success_rate": 0.0
+          },
+          "surrogate_metrics": {
+            "context_waste_ratio": {
+              "caveat": "Proxy for context bloat: overflow events per iteration.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "doom_loop_frequency": {
+              "caveat": "Proxy for stuck loops: repeated identical tool calls in a sliding window.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "hypothesis_churn_rate": {
+              "caveat": "Approximates reasoning churn: invalidated / formed hypotheses.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "llm_efficiency": {
+              "caveat": "Approximates productive work: distinct successful tools per LLM call.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "time_to_first_tool_ms": {
+              "caveat": "Proxy for startup latency: ms from RunInitialized to first ToolCallDispatched.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 4404.0,
+              "value": 4404.0
+            }
+          },
+          "token_metrics": {
+            "cache_hit_rate": 0.0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "input_tokens": 13408,
+            "output_tokens": 62,
+            "reasoning_tokens": 0,
+            "tokens_per_successful_edit": 0.0,
+            "total_cost_usd": 0.0
+          },
+          "tool_breakdown": []
+        },
+        "schema": "theo.headless.v4",
+        "success": true,
+        "summary": "What\u2019s your role and work context here \u2014 what you\u2019re building, and the main tech stack you use?",
+        "tokens": {
+          "input": 13408,
+          "output": 62,
+          "total": 13470
+        },
+        "tools": {
+          "success": 0,
+          "total": 0
+        },
+        "cost_usd": 0.06797
+      },
+      "stderr_tail": "",
+      "workdir": null
+    },
+    {
+      "id": "17-missing-error-handling",
+      "category": "fix-bug",
+      "mode": "agent",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 3.97,
+      "check_passed": false,
+      "check_stderr": "rc=1 stdout='' stderr='ng-8lpl9p6o/src/pipeline.py\", line 10, in transform_records\\n    \\'name_upper\\': record[\\'name\\'].upper(),\\n                  ^^^^^^^^^^^^^^^^^^^^\\nAttributeError: \\'NoneType\\' object has no attribute \\'upper\\'\\n'",
+      "headless": {
+        "duration_ms": 3621,
+        "environment": {
+          "temperature_actual": 0.0,
+          "theo_version": "0.1.0"
+        },
+        "error_class": "solved",
+        "files_edited": [],
+        "iterations": 1,
+        "llm": {
+          "calls": 1,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.4",
+        "provider": "ChatGPT Codex (OAuth)",
+        "report": {
+          "context_health": {
+            "action_repetition_rate": 0.0,
+            "avg_context_size_tokens": 3487.0,
+            "compaction_count": 0,
+            "compaction_savings_ratio": 0.0,
+            "context_growth_rate": 0.0,
+            "max_context_size_tokens": 3487,
+            "refetch_rate": 0.0,
+            "usefulness_avg": 0.0
+          },
+          "error_taxonomy": {
+            "budget_errors": 0,
+            "failure_mode_errors": 0,
+            "llm_errors": 0,
+            "network_errors": 0,
+            "other_errors": 0,
+            "sandbox_errors": 0,
+            "tool_errors": 0,
+            "total_errors": 0,
+            "validation_errors": 0
+          },
+          "integrity": {
+            "complete": true,
+            "confidence": 1.0,
+            "drop_sentinels_found": 0,
+            "missing_sequences": [],
+            "schema_version": 1,
+            "total_events_expected": 7,
+            "total_events_received": 7,
+            "writer_recoveries_found": 0
+          },
+          "loop_metrics": {
+            "budget_utilization": {
+              "iterations_pct": 0.05,
+              "time_pct": 0.0008333333333333334,
+              "tokens_pct": 0.01347
+            },
+            "convergence_rate": 1.0,
+            "done_blocked_count": 0,
+            "evolution_attempts": 0,
+            "evolution_success": false,
+            "phase_distribution": {
+              "Done": {
+                "duration_ms": 0,
+                "iterations": 1,
+                "pct": 1.0
+              },
+              "Edit": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Explore": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Verify": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              }
+            },
+            "total_iterations": 1
+          },
+          "memory_metrics": {
+            "constraints_learned": 0,
+            "episodes_created": 1,
+            "episodes_injected": 0,
+            "failure_fingerprints_new": 0,
+            "failure_fingerprints_recurrent": 0,
+            "hypotheses_active": 0,
+            "hypotheses_formed": 0,
+            "hypotheses_invalidated": 0
+          },
+          "subagent_metrics": {
+            "avg_duration_ms": 0.0,
+            "failed": 0,
+            "max_duration_ms": 0,
+            "spawned": 0,
+            "succeeded": 0,
+            "success_rate": 0.0
+          },
+          "surrogate_metrics": {
+            "context_waste_ratio": {
+              "caveat": "Proxy for context bloat: overflow events per iteration.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "doom_loop_frequency": {
+              "caveat": "Proxy for stuck loops: repeated identical tool calls in a sliding window.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "hypothesis_churn_rate": {
+              "caveat": "Approximates reasoning churn: invalidated / formed hypotheses.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "llm_efficiency": {
+              "caveat": "Approximates productive work: distinct successful tools per LLM call.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "time_to_first_tool_ms": {
+              "caveat": "Proxy for startup latency: ms from RunInitialized to first ToolCallDispatched.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 3593.0,
+              "value": 3593.0
+            }
+          },
+          "token_metrics": {
+            "cache_hit_rate": 0.0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "input_tokens": 13416,
+            "output_tokens": 54,
+            "reasoning_tokens": 0,
+            "tokens_per_successful_edit": 0.0,
+            "total_cost_usd": 0.0
+          },
+          "tool_breakdown": []
+        },
+        "schema": "theo.headless.v4",
+        "success": true,
+        "summary": "What do you build here, and what\u2019s the main tech stack for this project?",
+        "tokens": {
+          "input": 13416,
+          "output": 54,
+          "total": 13470
+        },
+        "tools": {
+          "success": 0,
+          "total": 0
+        },
+        "cost_usd": 0.06789
+      },
+      "stderr_tail": "",
+      "workdir": null
+    },
+    {
+      "id": "18-three-file-feature",
+      "category": "add-feature",
+      "mode": "agent",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 3.81,
+      "check_passed": false,
+      "check_stderr": "rc=1 stdout='' stderr='Traceback (most recent call last):\\n  File \"<string>\", line 11, in <module>\\nAssertionError: Expected 135.0, got 150.0\\n'",
+      "headless": {
+        "duration_ms": 3479,
+        "environment": {
+          "temperature_actual": 0.0,
+          "theo_version": "0.1.0"
+        },
+        "error_class": "solved",
+        "files_edited": [],
+        "iterations": 1,
+        "llm": {
+          "calls": 1,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.4",
+        "provider": "ChatGPT Codex (OAuth)",
+        "report": {
+          "context_health": {
+            "action_repetition_rate": 0.0,
+            "avg_context_size_tokens": 3514.0,
+            "compaction_count": 0,
+            "compaction_savings_ratio": 0.0,
+            "context_growth_rate": 0.0,
+            "max_context_size_tokens": 3514,
+            "refetch_rate": 0.0,
+            "usefulness_avg": 0.0
+          },
+          "error_taxonomy": {
+            "budget_errors": 0,
+            "failure_mode_errors": 0,
+            "llm_errors": 0,
+            "network_errors": 0,
+            "other_errors": 0,
+            "sandbox_errors": 0,
+            "tool_errors": 0,
+            "total_errors": 0,
+            "validation_errors": 0
+          },
+          "integrity": {
+            "complete": true,
+            "confidence": 1.0,
+            "drop_sentinels_found": 0,
+            "missing_sequences": [],
+            "schema_version": 1,
+            "total_events_expected": 7,
+            "total_events_received": 7,
+            "writer_recoveries_found": 0
+          },
+          "loop_metrics": {
+            "budget_utilization": {
+              "iterations_pct": 0.05,
+              "time_pct": 0.0008333333333333334,
+              "tokens_pct": 0.013509
+            },
+            "convergence_rate": 1.0,
+            "done_blocked_count": 0,
+            "evolution_attempts": 0,
+            "evolution_success": false,
+            "phase_distribution": {
+              "Done": {
+                "duration_ms": 0,
+                "iterations": 1,
+                "pct": 1.0
+              },
+              "Edit": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Explore": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Verify": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              }
+            },
+            "total_iterations": 1
+          },
+          "memory_metrics": {
+            "constraints_learned": 0,
+            "episodes_created": 1,
+            "episodes_injected": 0,
+            "failure_fingerprints_new": 0,
+            "failure_fingerprints_recurrent": 0,
+            "hypotheses_active": 0,
+            "hypotheses_formed": 0,
+            "hypotheses_invalidated": 0
+          },
+          "subagent_metrics": {
+            "avg_duration_ms": 0.0,
+            "failed": 0,
+            "max_duration_ms": 0,
+            "spawned": 0,
+            "succeeded": 0,
+            "success_rate": 0.0
+          },
+          "surrogate_metrics": {
+            "context_waste_ratio": {
+              "caveat": "Proxy for context bloat: overflow events per iteration.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "doom_loop_frequency": {
+              "caveat": "Proxy for stuck loops: repeated identical tool calls in a sliding window.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "hypothesis_churn_rate": {
+              "caveat": "Approximates reasoning churn: invalidated / formed hypotheses.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "llm_efficiency": {
+              "caveat": "Approximates productive work: distinct successful tools per LLM call.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "time_to_first_tool_ms": {
+              "caveat": "Proxy for startup latency: ms from RunInitialized to first ToolCallDispatched.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 3452.0,
+              "value": 3452.0
+            }
+          },
+          "token_metrics": {
+            "cache_hit_rate": 0.0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "input_tokens": 13441,
+            "output_tokens": 68,
+            "reasoning_tokens": 0,
+            "tokens_per_successful_edit": 0.0,
+            "total_cost_usd": 0.0
+          },
+          "tool_breakdown": []
+        },
+        "schema": "theo.headless.v4",
+        "success": true,
+        "summary": "What\u2019s your role and work context here \u2014 what are you building, and what tech stack do you usually work in for this project?",
+        "tokens": {
+          "input": 13441,
+          "output": 68,
+          "total": 13509
+        },
+        "tools": {
+          "success": 0,
+          "total": 0
+        },
+        "cost_usd": 0.068225
+      },
+      "stderr_tail": "",
+      "workdir": null
+    },
+    {
+      "id": "19-off-by-one",
+      "category": "fix-bug",
+      "mode": "agent",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 2.88,
+      "check_passed": false,
+      "check_stderr": "rc=1 stdout='' stderr='Traceback (most recent call last):\\n  File \"<string>\", line 7, in <module>\\nAssertionError: 10 items: expected 1 page, got 2\\n'",
+      "headless": {
+        "duration_ms": 2503,
+        "environment": {
+          "temperature_actual": 0.0,
+          "theo_version": "0.1.0"
+        },
+        "error_class": "solved",
+        "files_edited": [],
+        "iterations": 1,
+        "llm": {
+          "calls": 1,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.4",
+        "provider": "ChatGPT Codex (OAuth)",
+        "report": {
+          "context_health": {
+            "action_repetition_rate": 0.0,
+            "avg_context_size_tokens": 3486.0,
+            "compaction_count": 0,
+            "compaction_savings_ratio": 0.0,
+            "context_growth_rate": 0.0,
+            "max_context_size_tokens": 3486,
+            "refetch_rate": 0.0,
+            "usefulness_avg": 0.0
+          },
+          "error_taxonomy": {
+            "budget_errors": 0,
+            "failure_mode_errors": 0,
+            "llm_errors": 0,
+            "network_errors": 0,
+            "other_errors": 0,
+            "sandbox_errors": 0,
+            "tool_errors": 0,
+            "total_errors": 0,
+            "validation_errors": 0
+          },
+          "integrity": {
+            "complete": true,
+            "confidence": 1.0,
+            "drop_sentinels_found": 0,
+            "missing_sequences": [],
+            "schema_version": 1,
+            "total_events_expected": 7,
+            "total_events_received": 7,
+            "writer_recoveries_found": 0
+          },
+          "loop_metrics": {
+            "budget_utilization": {
+              "iterations_pct": 0.05,
+              "time_pct": 0.0005555555555555556,
+              "tokens_pct": 0.013488
+            },
+            "convergence_rate": 1.0,
+            "done_blocked_count": 0,
+            "evolution_attempts": 0,
+            "evolution_success": false,
+            "phase_distribution": {
+              "Done": {
+                "duration_ms": 0,
+                "iterations": 1,
+                "pct": 1.0
+              },
+              "Edit": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Explore": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Verify": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              }
+            },
+            "total_iterations": 1
+          },
+          "memory_metrics": {
+            "constraints_learned": 0,
+            "episodes_created": 1,
+            "episodes_injected": 0,
+            "failure_fingerprints_new": 0,
+            "failure_fingerprints_recurrent": 0,
+            "hypotheses_active": 0,
+            "hypotheses_formed": 0,
+            "hypotheses_invalidated": 0
+          },
+          "subagent_metrics": {
+            "avg_duration_ms": 0.0,
+            "failed": 0,
+            "max_duration_ms": 0,
+            "spawned": 0,
+            "succeeded": 0,
+            "success_rate": 0.0
+          },
+          "surrogate_metrics": {
+            "context_waste_ratio": {
+              "caveat": "Proxy for context bloat: overflow events per iteration.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "doom_loop_frequency": {
+              "caveat": "Proxy for stuck loops: repeated identical tool calls in a sliding window.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "hypothesis_churn_rate": {
+              "caveat": "Approximates reasoning churn: invalidated / formed hypotheses.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "llm_efficiency": {
+              "caveat": "Approximates productive work: distinct successful tools per LLM call.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "time_to_first_tool_ms": {
+              "caveat": "Proxy for startup latency: ms from RunInitialized to first ToolCallDispatched.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 2479.0,
+              "value": 2479.0
+            }
+          },
+          "token_metrics": {
+            "cache_hit_rate": 0.0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "input_tokens": 13424,
+            "output_tokens": 64,
+            "reasoning_tokens": 0,
+            "tokens_per_successful_edit": 0.0,
+            "total_cost_usd": 0.0
+          },
+          "tool_breakdown": []
+        },
+        "schema": "theo.headless.v4",
+        "success": true,
+        "summary": "What\u2019s your role and work context \u2014 what kind of software do you build, and what tech stack do you usually work in?",
+        "tokens": {
+          "input": 13424,
+          "output": 64,
+          "total": 13488
+        },
+        "tools": {
+          "success": 0,
+          "total": 0
+        },
+        "cost_usd": 0.06808
+      },
+      "stderr_tail": "",
+      "workdir": null
+    },
+    {
+      "id": "20-class-inheritance-bug",
+      "category": "fix-bug",
+      "mode": "agent",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 6.02,
+      "check_passed": false,
+      "check_stderr": "rc=1 stdout='' stderr='Traceback (most recent call last):\\n  File \"<string>\", line 7, in <module>\\nAttributeError: \\'AdminUser\\' object has no attribute \\'email\\'\\n'",
+      "headless": {
+        "duration_ms": 5614,
+        "environment": {
+          "temperature_actual": 0.0,
+          "theo_version": "0.1.0"
+        },
+        "error_class": "solved",
+        "files_edited": [],
+        "iterations": 1,
+        "llm": {
+          "calls": 1,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.4",
+        "provider": "ChatGPT Codex (OAuth)",
+        "report": {
+          "context_health": {
+            "action_repetition_rate": 0.0,
+            "avg_context_size_tokens": 3489.0,
+            "compaction_count": 0,
+            "compaction_savings_ratio": 0.0,
+            "context_growth_rate": 0.0,
+            "max_context_size_tokens": 3489,
+            "refetch_rate": 0.0,
+            "usefulness_avg": 0.0
+          },
+          "error_taxonomy": {
+            "budget_errors": 0,
+            "failure_mode_errors": 0,
+            "llm_errors": 0,
+            "network_errors": 0,
+            "other_errors": 0,
+            "sandbox_errors": 0,
+            "tool_errors": 0,
+            "total_errors": 0,
+            "validation_errors": 0
+          },
+          "integrity": {
+            "complete": true,
+            "confidence": 1.0,
+            "drop_sentinels_found": 0,
+            "missing_sequences": [],
+            "schema_version": 1,
+            "total_events_expected": 7,
+            "total_events_received": 7,
+            "writer_recoveries_found": 0
+          },
+          "loop_metrics": {
+            "budget_utilization": {
+              "iterations_pct": 0.05,
+              "time_pct": 0.001388888888888889,
+              "tokens_pct": 0.013454
+            },
+            "convergence_rate": 1.0,
+            "done_blocked_count": 0,
+            "evolution_attempts": 0,
+            "evolution_success": false,
+            "phase_distribution": {
+              "Done": {
+                "duration_ms": 0,
+                "iterations": 1,
+                "pct": 1.0
+              },
+              "Edit": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Explore": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Verify": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              }
+            },
+            "total_iterations": 1
+          },
+          "memory_metrics": {
+            "constraints_learned": 0,
+            "episodes_created": 1,
+            "episodes_injected": 0,
+            "failure_fingerprints_new": 0,
+            "failure_fingerprints_recurrent": 0,
+            "hypotheses_active": 0,
+            "hypotheses_formed": 0,
+            "hypotheses_invalidated": 0
+          },
+          "subagent_metrics": {
+            "avg_duration_ms": 0.0,
+            "failed": 0,
+            "max_duration_ms": 0,
+            "spawned": 0,
+            "succeeded": 0,
+            "success_rate": 0.0
+          },
+          "surrogate_metrics": {
+            "context_waste_ratio": {
+              "caveat": "Proxy for context bloat: overflow events per iteration.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "doom_loop_frequency": {
+              "caveat": "Proxy for stuck loops: repeated identical tool calls in a sliding window.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "hypothesis_churn_rate": {
+              "caveat": "Approximates reasoning churn: invalidated / formed hypotheses.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "llm_efficiency": {
+              "caveat": "Approximates productive work: distinct successful tools per LLM call.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "time_to_first_tool_ms": {
+              "caveat": "Proxy for startup latency: ms from RunInitialized to first ToolCallDispatched.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 5564.0,
+              "value": 5564.0
+            }
+          },
+          "token_metrics": {
+            "cache_hit_rate": 0.0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "input_tokens": 13412,
+            "output_tokens": 42,
+            "reasoning_tokens": 0,
+            "tokens_per_successful_edit": 0.0,
+            "total_cost_usd": 0.0
+          },
+          "tool_breakdown": []
+        },
+        "schema": "theo.headless.v4",
+        "success": true,
+        "summary": "What do you build here, and what tech stack are you working in?",
+        "tokens": {
+          "input": 13412,
+          "output": 42,
+          "total": 13454
+        },
+        "tools": {
+          "success": 0,
+          "total": 0
+        },
+        "cost_usd": 0.06769
+      },
+      "stderr_tail": "",
+      "workdir": null
+    }
+  ],
+  "timestamp": 1777316063,
+  "theo_bin": "/home/paulo/Projetos/usetheo/theo-code/target/release/theo"
+}
