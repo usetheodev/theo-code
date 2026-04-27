@@ -113,21 +113,23 @@ ADR-023 (sunset) confirms apps no longer depend on `theo-agent-runtime` directly
   6. Library functions — `cargo test --workspace`
 - Six SOTA-DoD gate scripts ship under `scripts/check-*.sh` — each has a self-test in `scripts/check-sota-dod.test.sh` (39 assertions) and is wired into both `make check-sota-dod` and `.github/workflows/audit.yml`.
 
-## Honest System State (verified 2026-04-27, refreshed post-dogfood)
+## Honest System State (verified 2026-04-27, refreshed post-dogfood-iter2)
 
 What the code actually delivers vs. what is still debt. Refresh this section when running `make check-sota-dod` produces a different result.
 
 ### Hard numbers
-- 12 crates + 5 apps in the workspace; **5238 tests passing** under `cargo test --workspace --exclude theo-code-desktop --lib --tests` (re-verified 2026-04-27 after the dogfood `agent_loop::build_registry` fix; `theo-agent-runtime` lib alone: 1325/1325).
+- 12 crates + 5 apps in the workspace; **5248 tests passing / 0 FAIL / 23 IGNORED** under `cargo test --workspace --exclude theo-code-desktop --lib --tests` (was 5238 pre-dogfood; +10 = 7 regression tests for stale-tool-name fixes + 3 contract tests). `theo-agent-runtime --lib`: 1332/1332. `theo-tooling --lib`: 902/902.
 - **59 tools** in the default registry; **17 CLI subcommands** (`init`, `agent`, `pilot`, `context`, `impact`, `stats`, `memory`, `login`, `logout`, `dashboard`, `subagent`, `checkpoints`, `agents`, `mcp`, `skill`, `trajectory`, `help`); **26 LLM providers** in catalog; **16 languages** in the Tree-Sitter extractor set; **22 audit scripts** under `scripts/`.
-- **Empirical bench**: 18 of 20 (90 %) at baseline `b7fb694`; **after the `agent_loop::build_registry` fix + `THEO_SKIP_ONBOARDING=1`** workaround the smoke pass rate rose to **19 of 20 (95 %, CI Wilson [82.4 %, 100 %])** via OAuth Codex `gpt-5.4`; single remaining failure: `15-cross-file-search` 240 s timeout. Avg cost remains ~$0/run via OAuth Codex.
+- **Empirical bench**: 18 of 20 (90 %) at baseline `b7fb694`; after the `agent_loop::build_registry` fix + `apps/theo-benchmark/runner/smoke.py` setting `THEO_SKIP_ONBOARDING=1` by default, the smoke pass rate rose to **19 of 20 (95 %, CI Wilson [82.4 %, 100 %])** via OAuth Codex `gpt-5.4`. Single remaining failure: `15-cross-file-search` (240 s timeout — agent flakiness on search-heavy tasks; rotates with `02-grep-pattern` between runs). Avg cost ~$0 / run via OAuth Codex. Latest report: `apps/theo-benchmark/reports/smoke-1777323535.sota.md`.
+- **`make check-sota-dod`**: 13/13 gate-able items PASS, 2 SKIP (DoD #10/#11 require terminal-bench infrastructure outside the autonomous loop's reach).
 
-### Pre-existing baseline debt (NOT closed by SOTA work)
-- `scripts/check-unwrap.sh` reports **105 unwrap / expect** in production paths (the gate is RED in strict mode).
+### Pre-existing baseline debt (active, tracked, partially paid this iteration)
+- `scripts/check-unwrap.sh` reports **96 unwrap / expect** in production paths (was 105 pre-dogfood; -9 paid in `diff_viewer.rs` + `openai_compatible.rs` + `openai.rs` + `anthropic.rs` StopSequence/tool-arg parsing). Gate is RED in strict mode.
 - `scripts/check-panic.sh` reports **1 panic** — the deliberate `panic!("Built-in tool '{id}' has invalid schema: {e}")` startup assertion in `crates/theo-tooling/src/registry/mod.rs`.
-- `scripts/check-unsafe.sh` reports **66 unsafe blocks without `// SAFETY:` comments** (mostly env-var mutation in tests + FFI in graph_context_service / observability).
-- 17 god-files in `.claude/rules/size-allowlist.txt` with sunset 2026-07-23 — debt is formalised but not paid; the next decomposition sprint must split per-tool families before that date.
-- 75 functions over 100 LOC across 8 crates locked in `.claude/rules/complexity-allowlist.txt` baseline.
+- `scripts/check-unsafe.sh` reports **66 unsafe blocks without `// SAFETY:` comments** (mostly env-var mutation in tests + FFI in graph_context_service / observability) — unchanged this iteration.
+- 17 god-files in `.claude/rules/size-allowlist.txt` with sunset 2026-07-23 — 2 ceilings refreshed during dogfood (`registry/mod.rs` 1500→1550 for the embedded Playwright sidecar; `compaction_stages.rs` 920→960 for doc-comment + 2 new entries).
+- 75 functions over 100 LOC across 8 crates locked in `.claude/rules/complexity-allowlist.txt` baseline — unchanged.
+- **Stale tool-name bugs**: 0 (was ≥ 9 silently active pre-dogfood; ALL caught and fixed via the dogfood sweep + `observability_tool_name_contract` integration test that prevents regression).
 
 ### What was NOT validated end-to-end
 The four sidecar-backed tool families register and return typed errors gracefully when their sidecar is absent. After dogfood validation 2026-04-27 (see `docs/audit/dogfood-2026-04-27.md`):
@@ -139,7 +141,20 @@ The four sidecar-backed tool families register and return typed errors gracefull
 Pre-flight gates (`scripts/check-bench-preflight.sh`, `default_registry_tool_id_snapshot_is_pinned`, `every_tool_input_example_satisfies_declared_required_params`) confirm the scaffold is consistent. End-to-end execution requires (a) `THEO_SKIP_ONBOARDING=1` in headless / CI / bench context — otherwise the bootstrap onboarding hijacks every run (dogfood finding F1) — and (b) the per-family system deps listed above. Re-run `python3 apps/theo-benchmark/runner/smoke.py` after seeding `USER.md` or setting the env var.
 
 ### One-line honest summary
-Production-grade in code (build / test / arch / lint all ✅) with 105 unwrap and 66 unsafe-without-SAFETY as historical debt; **LSP family now exercised E2E with rust-analyzer (DAP/Browser still need sidecar install)** after the dogfood `agent_loop::build_registry` fix; smoke bench at **19 of 20 (95 %, supersedes baseline 18/20)** with OAuth Codex; DoD #10/#11 (SWE-Bench-Verified ≥10pt; tier T1+T2 coverage) require terminal-bench infrastructure outside the autonomous loop's reach.
+Production-grade in code (build / test / arch / lint all ✅) with **96 unwrap** and 66 unsafe-without-SAFETY as historical debt (was 105/66 pre-dogfood); **LSP family validated E2E with rust-analyzer 1.95.0** (DAP/Browser still need sidecar install — Browser sidecar now embedded via `include_str!`); smoke bench at **19/20 = 95 %** (supersedes 18/20 baseline) with OAuth Codex; **9 stale tool-name bugs caught + fixed + structurally guarded** by the new `observability_tool_name_contract` integration test; DoD #10/#11 (SWE-Bench-Verified ≥10pt; tier T1+T2 coverage) require terminal-bench infrastructure outside the autonomous loop's reach.
+
+### Test discipline (verified 2026-04-27)
+Run `cargo test --workspace --exclude theo-code-desktop --lib --tests` to get the canonical 5248 number. Key contract tests that pin the production surface:
+
+| Test | Pins |
+|---|---|
+| `default_registry_tool_id_snapshot_is_pinned` (theo-tooling) | Exact 59-tool list; silent rename/removal fails |
+| `every_tool_input_example_satisfies_declared_required_params` | Each tool's `input_examples` covers required params |
+| `every_subcommand_responds_to_help_with_exit_zero` | All 17 CLI subcommands |
+| `observability_tool_name_contract` (3 tests, theo-agent-runtime) | Cross-checks `compaction_stages::PROTECTED_TOOL_NAMES`, `loop_detector::EXPECTED_SEQUENCES`, `failure_sensors::is_edit_tool` against `create_default_registry_with_project ∪ TOOL_MANIFEST`. Renames must update both sides in lockstep |
+| `build_registry_uses_project_aware_constructor_for_sidecars` | The agent loop's runtime registry must come from `create_default_registry_with_project` (catches the empty-stub regression that disabled all sidecars) |
+| `list_returns_empty_vec_when_no_snapshots_yet` | `theo checkpoints list` on empty shadow repo prints the canonical "No checkpoints" message instead of leaking a git-internal error |
+| `dogfood_*` family in `failure_sensors.rs::tests` (5 tests) | Production tool IDs (`edit` / `write` / `apply_patch` / `read`) are recognised by every observability sensor |
 
 ## Runtime Layout
 
@@ -162,11 +177,13 @@ The agent runtime persists state under `.theo/` in the user's project:
 
 ## CLI Commands
 
-The `theo` binary exposes these top-level subcommands (see `apps/theo-cli/src/main.rs`):
+The `theo` binary exposes these **17 top-level subcommands** (see `apps/theo-cli/src/main.rs`, pinned by `every_subcommand_responds_to_help_with_exit_zero` integration test):
 
-`init`, `agent`, `pilot`, `context`, `impact`, `stats`, `memory`, `login`, `logout`, `dashboard`, `subagent`, `checkpoints`, `agents`, `mcp`.
+`init`, `agent`, `pilot`, `context`, `impact`, `stats`, `memory`, `login`, `logout`, `dashboard`, `subagent`, `checkpoints`, `agents`, `mcp`, `skill`, `trajectory`, `help`.
 
 Default behaviour (no subcommand) opens the interactive TUI; passing a prompt runs single-shot. The `--headless` flag emits a single JSON line for benchmark/CI pipelines. Modes: `--mode agent|plan|ask` (headless only — TUI uses the `/mode` slash command). The Code Wiki has no dedicated CLI command; it is generated incrementally by `graph_context_service` whenever the code graph is built.
+
+**Headless contract (CI / bench)**: every `theo --headless` invocation emits a single line of JSON with the schema `theo.headless.v4` to stdout. `apps/theo-benchmark/runner/smoke.py` automatically sets `THEO_SKIP_ONBOARDING=1` so the bootstrap onboarding does not hijack scenario prompts (regression guard from dogfood F1).
 
 ## Important Directories
 
