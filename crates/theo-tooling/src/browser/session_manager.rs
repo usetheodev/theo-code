@@ -36,6 +36,21 @@ struct State {
     script_path: PathBuf,
 }
 
+/// Snapshot of `BrowserSessionManager` for the `browser_status` tool.
+/// Pure data — safe to serialise into a tool result without leaking
+/// the session manager's internal lock.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BrowserStatus {
+    /// The Node.js binary the manager is configured to spawn.
+    pub node_program: String,
+    /// Configured Playwright sidecar script path.
+    pub script_path: PathBuf,
+    /// `true` when the configured script exists on disk at probe time.
+    pub script_present: bool,
+    /// `true` when a sidecar has been spawned and is alive.
+    pub session_active: bool,
+}
+
 /// Cheap to clone — internal state lives behind `Arc<Mutex<...>>`.
 #[derive(Clone)]
 pub struct BrowserSessionManager {
@@ -60,6 +75,20 @@ impl BrowserSessionManager {
     /// Returns true when a sidecar has been spawned and is alive.
     pub async fn is_active(&self) -> bool {
         self.state.lock().await.client.is_some()
+    }
+
+    /// Snapshot of the manager state for `browser_status`. The
+    /// `script_present` flag is probed under the same lock so the
+    /// snapshot is internally consistent (no TOCTOU between
+    /// `script_path` and `script_present`).
+    pub async fn status(&self) -> BrowserStatus {
+        let s = self.state.lock().await;
+        BrowserStatus {
+            node_program: s.node_program.clone(),
+            script_path: s.script_path.clone(),
+            script_present: s.script_path.exists(),
+            session_active: s.client.is_some(),
+        }
     }
 
     /// Lazy spawn: returns the existing client or creates one.
@@ -172,5 +201,33 @@ mod tests {
         // Both clones see the same is_active result because they
         // share the inner Arc<Mutex<...>>.
         assert_eq!(mgr.is_active().await, cloned.is_active().await);
+    }
+
+    // ── browser_status snapshot ──────────────────────────────────
+
+    #[tokio::test]
+    async fn t21bsm_status_reports_missing_script_when_path_does_not_exist() {
+        let mgr = BrowserSessionManager::new(
+            "node",
+            PathBuf::from("/__theo_no_browser__/playwright_sidecar.js"),
+        );
+        let status = mgr.status().await;
+        assert_eq!(status.node_program, "node");
+        assert!(!status.script_present);
+        assert!(!status.session_active);
+        assert!(status.script_path.to_string_lossy().contains("playwright_sidecar.js"));
+    }
+
+    #[tokio::test]
+    async fn t21bsm_status_reports_present_script_when_file_exists() {
+        // Create a temp file so script_present == true.
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("playwright_sidecar.js");
+        std::fs::write(&script, b"// stub sidecar - never executed").unwrap();
+        let mgr = BrowserSessionManager::new("node", script.clone());
+        let status = mgr.status().await;
+        assert!(status.script_present);
+        assert!(!status.session_active, "no spawn yet → session_active=false");
+        assert_eq!(status.script_path, script);
     }
 }

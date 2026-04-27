@@ -262,6 +262,13 @@ pub const TOOL_MANIFEST: &[ToolManifestEntry] = &[
         notes: "T13.1 — DAP `threads`. Useful when a `stopped` event didn't carry thread_id, or when stepping through multi-threaded code. Empty result triggers a re-launch hint (adapter likely terminated).",
     },
     ToolManifestEntry {
+        id: "browser_status",
+        exposure: ToolExposure::DefaultRegistry,
+        status: ToolStatus::Implemented,
+        owner: "theo-tooling",
+        notes: "T2.1 — report whether the Playwright sidecar script is reachable AND whether a browser session is currently active. Use BEFORE `browser_open` / `browser_click` / `browser_screenshot` / `browser_eval` to know whether the environment can drive a browser; when the script is missing, fall back to `webfetch` for static HTML. Default registry stub points at a sentinel `/__theo_no_browser__/playwright_sidecar.js` (always reports script_present=false); create_default_registry_with_project swaps in the resolved sidecar path shared across the browser_* family.",
+    },
+    ToolManifestEntry {
         id: "browser_open",
         exposure: ToolExposure::DefaultRegistry,
         status: ToolStatus::Implemented,

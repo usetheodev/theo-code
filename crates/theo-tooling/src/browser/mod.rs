@@ -31,9 +31,9 @@ pub use client::{BrowserClient, BrowserClientError, NoopWriter, SidecarWriter};
 pub use protocol::{
     BrowserAction, BrowserError, BrowserRequest, BrowserResponse, BrowserResult, ScreenshotFormat,
 };
-pub use session_manager::{BrowserSessionError, BrowserSessionManager};
+pub use session_manager::{BrowserSessionError, BrowserSessionManager, BrowserStatus};
 pub use sidecar::{SidecarError, SidecarSession};
 pub use tool::{
     BrowserClickTool, BrowserCloseTool, BrowserEvalTool, BrowserOpenTool,
-    BrowserScreenshotTool, BrowserTypeTool, BrowserWaitForSelectorTool,
+    BrowserScreenshotTool, BrowserStatusTool, BrowserTypeTool, BrowserWaitForSelectorTool,
 };

@@ -146,7 +146,7 @@ pub fn create_default_registry() -> ToolRegistry {
     use crate::bash::BashTool;
     use crate::browser::{
         BrowserClickTool, BrowserCloseTool, BrowserEvalTool, BrowserOpenTool,
-        BrowserScreenshotTool, BrowserSessionManager, BrowserTypeTool,
+        BrowserScreenshotTool, BrowserSessionManager, BrowserStatusTool, BrowserTypeTool,
         BrowserWaitForSelectorTool,
     };
     use crate::dap::{
@@ -318,6 +318,9 @@ pub fn create_default_registry() -> ToolRegistry {
         // pointing at a non-existent script path so every call
         // surfaces the same actionable "missing script" error until
         // the project-aware constructor swaps in real managers.
+        Box::new(BrowserStatusTool::new(std::sync::Arc::new(
+            BrowserSessionManager::new("node", "/__theo_no_browser__/playwright_sidecar.js"),
+        ))),
         Box::new(BrowserOpenTool::new(std::sync::Arc::new(
             BrowserSessionManager::new("node", "/__theo_no_browser__/playwright_sidecar.js"),
         ))),
@@ -381,7 +384,7 @@ pub fn create_default_registry_with_project(
 
     use crate::browser::{
         BrowserClickTool, BrowserCloseTool, BrowserEvalTool, BrowserOpenTool,
-        BrowserScreenshotTool, BrowserSessionManager, BrowserTypeTool,
+        BrowserScreenshotTool, BrowserSessionManager, BrowserStatusTool, BrowserTypeTool,
         BrowserWaitForSelectorTool,
     };
     use crate::dap::{
@@ -508,6 +511,7 @@ pub fn create_default_registry_with_project(
         browser_script,
     ));
     for tool_id in [
+        "browser_status",
         "browser_open",
         "browser_click",
         "browser_type",
@@ -518,6 +522,9 @@ pub fn create_default_registry_with_project(
     ] {
         registry.unregister(tool_id);
     }
+    registry
+        .register(Box::new(BrowserStatusTool::new(browser_manager.clone())))
+        .expect("browser_status tool schema is valid");
     registry
         .register(Box::new(BrowserOpenTool::new(browser_manager.clone())))
         .expect("browser_open tool schema is valid");
