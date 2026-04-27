@@ -164,7 +164,7 @@ pub fn create_default_registry() -> ToolRegistry {
     use crate::memory::MemoryTool;
     use crate::plan::{
         AdvancePhaseTool, CreatePlanTool, GetNextTaskTool, GetPlanSummaryTool, LogEntryTool,
-        ReplanTool, UpdateTaskTool,
+        PlanFailureStatusTool, ReplanTool, UpdateTaskTool,
     };
     use crate::docs_search::DocsSearchTool;
     use crate::read::ReadTool;
@@ -234,6 +234,8 @@ pub fn create_default_registry() -> ToolRegistry {
         Box::new(GetPlanSummaryTool::new()),
         Box::new(GetNextTaskTool::new()),
         Box::new(ReplanTool::new()),
+        // T6.1 part 4 — agent-callable view of failure_count state
+        Box::new(PlanFailureStatusTool::new()),
         // T5.1 / T5.2 — auto-test-generation
         Box::new(GenPropertyTestTool::new()),
         Box::new(GenMutationTestTool::new()),

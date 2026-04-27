@@ -360,6 +360,13 @@ pub const TOOL_MANIFEST: &[ToolManifestEntry] = &[
         notes: "T6.1 — apply a typed PlanPatch (AddTask/RemoveTask/EditTask/ReorderDeps/SkipTask) atomically.",
     },
     ToolManifestEntry {
+        id: "plan_failure_status",
+        exposure: ToolExposure::DefaultRegistry,
+        status: ToolStatus::Implemented,
+        owner: "theo-tooling",
+        notes: "T6.1 part 4 — list tasks whose failure_count >= threshold (default 3). Lets the agent itself decide when to call plan_replan with a SkipTask/EditTask/RemoveTask patch — no LLM advisor round-trip required.",
+    },
+    ToolManifestEntry {
         id: "gen_property_test",
         exposure: ToolExposure::DefaultRegistry,
         status: ToolStatus::Implemented,
