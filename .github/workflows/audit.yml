@@ -44,6 +44,12 @@ jobs:
       # entries silently disable the gate.
       - name: allowlist paths (structural)
         run: bash scripts/check-allowlist-paths.sh
+      # Structural complement to CHANGELOG env-var docs: every
+      # documented THEO_* env var must be referenced somewhere in
+      # production source. Dead documentation misleads users into
+      # setting flags that do nothing.
+      - name: SOTA env-var coverage (CHANGELOG → source)
+        run: bash scripts/check-env-var-coverage.sh
       - name: unwrap/expect (T2.5)
         run: bash scripts/check-unwrap.sh
       - name: panic/todo/unimplemented (T2.6)

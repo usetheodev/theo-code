@@ -93,7 +93,8 @@ assert_json_parseable() {
 for s in check-adr-coverage.sh check-complexity.sh \
          check-coverage-status.sh check-changelog-phase-coverage.sh \
          check-phase-artifacts.sh check-bench-preflight.sh \
-         check-allowlist-paths.sh check-sota-dod.sh; do
+         check-allowlist-paths.sh check-env-var-coverage.sh \
+         check-sota-dod.sh; do
     if [[ ! -x "scripts/$s" ]]; then
         echo "FATAL: scripts/$s missing or not executable" >&2
         exit 1
@@ -122,6 +123,8 @@ assert_exits "check-bench-preflight.sh --no-build" 0 \
     bash scripts/check-bench-preflight.sh --no-build
 assert_exits "check-allowlist-paths.sh"            0 \
     bash scripts/check-allowlist-paths.sh
+assert_exits "check-env-var-coverage.sh"           0 \
+    bash scripts/check-env-var-coverage.sh
 
 # ---------------------------------------------------------------------------
 # 2. --help mode (exit 0, non-empty output)
@@ -135,6 +138,7 @@ assert_help_nonempty "check-changelog-phase-coverage.sh" scripts/check-changelog
 assert_help_nonempty "check-phase-artifacts.sh"          scripts/check-phase-artifacts.sh
 assert_help_nonempty "check-bench-preflight.sh"          scripts/check-bench-preflight.sh
 assert_help_nonempty "check-allowlist-paths.sh"          scripts/check-allowlist-paths.sh
+assert_help_nonempty "check-env-var-coverage.sh"         scripts/check-env-var-coverage.sh
 
 # ---------------------------------------------------------------------------
 # 3. Bogus argument (exit 2 = invocation error)
@@ -155,6 +159,8 @@ assert_exits "check-bench-preflight.sh --bogus"          2 \
     bash scripts/check-bench-preflight.sh --bogus
 assert_exits "check-allowlist-paths.sh --bogus"          2 \
     bash scripts/check-allowlist-paths.sh --bogus
+assert_exits "check-env-var-coverage.sh --bogus"         2 \
+    bash scripts/check-env-var-coverage.sh --bogus
 
 # ---------------------------------------------------------------------------
 # 4. Per-gate semantic tests
@@ -181,6 +187,10 @@ assert_json_parseable "Bench preflight --no-build --json" \
 # Allowlist paths --json must be parseable JSON.
 assert_json_parseable "Allowlist paths --json" \
     bash scripts/check-allowlist-paths.sh --json
+
+# Env-var coverage --json must be parseable JSON.
+assert_json_parseable "Env-var coverage --json" \
+    bash scripts/check-env-var-coverage.sh --json
 
 # Complexity gate --report mode never fails (always exit 0).
 assert_exits "complexity --report never fails"           0 \

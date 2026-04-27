@@ -183,6 +183,15 @@ if ! run_step "allowlist paths (structural)" \
     failed=1
 fi
 
+# (3c) SOTA env-var coverage — every documented `THEO_*` env var
+#      MUST be referenced somewhere in production source. Catches
+#      dead documentation that misleads users into setting flags
+#      that do nothing. Same iter-25-onward lesson, fourth surface.
+if ! run_step "SOTA env-var coverage (CHANGELOG → source)" \
+        bash scripts/check-env-var-coverage.sh; then
+    failed=1
+fi
+
 # (4) Complexity gate — clippy::too_many_lines per-crate ceiling.
 #     Same baseline-allowlist pattern as size gate: existing 75-function
 #     debt is locked at the current per-crate count; future regressions

@@ -152,6 +152,10 @@ check-bench-preflight: ## Pre-flight validate bench infra (eval.yml + smoke.py +
 check-allowlist-paths: ## Structural audit — every allowlist path/crate resolves
 	@bash $(SCRIPTS)/check-allowlist-paths.sh
 
+.PHONY: check-env-var-coverage
+check-env-var-coverage: ## Structural audit — every documented THEO_* env var is read in source
+	@bash $(SCRIPTS)/check-env-var-coverage.sh
+
 # ── Composite audit ────────────────────────────────────────────────────────
 .PHONY: audit
 audit: ## Run all 8 audit techniques
