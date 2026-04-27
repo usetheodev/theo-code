@@ -191,14 +191,14 @@ mod tests {
     #[test]
     fn test_per_tool_counts_correct() {
         let s = vec![
-            step(0, 0, "ToolCallCompleted", Some("read_file"), Some(StepOutcome::Success), Some(10)),
-            step(1, 1, "ToolCallCompleted", Some("read_file"), Some(StepOutcome::Success), Some(20)),
-            step(2, 2, "ToolCallCompleted", Some("read_file"), Some(StepOutcome::Success), Some(30)),
-            step(3, 3, "ToolCallCompleted", Some("read_file"), Some(StepOutcome::Success), None),
-            step(4, 4, "ToolCallCompleted", Some("read_file"), Some(StepOutcome::Failure { retryable: false }), None),
+            step(0, 0, "ToolCallCompleted", Some("read"), Some(StepOutcome::Success), Some(10)),
+            step(1, 1, "ToolCallCompleted", Some("read"), Some(StepOutcome::Success), Some(20)),
+            step(2, 2, "ToolCallCompleted", Some("read"), Some(StepOutcome::Success), Some(30)),
+            step(3, 3, "ToolCallCompleted", Some("read"), Some(StepOutcome::Success), None),
+            step(4, 4, "ToolCallCompleted", Some("read"), Some(StepOutcome::Failure { retryable: false }), None),
         ];
         let b = compute_tool_breakdown(&s);
-        let r = b.iter().find(|b| b.tool_name == "read_file").unwrap();
+        let r = b.iter().find(|b| b.tool_name == "read").unwrap();
         assert_eq!(r.call_count, 5);
         assert_eq!(r.success_count, 4);
         assert_eq!(r.failure_count, 1);

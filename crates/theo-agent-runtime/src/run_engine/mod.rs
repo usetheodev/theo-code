@@ -1473,7 +1473,7 @@ mod tests {
                 "c-known".to_string(),
                 theo_infra_llm::types::Message::tool_result(
                     "c-known",
-                    "write_file",
+                    "write",
                     "{\"ok\":true}",
                 ),
             );

@@ -550,18 +550,83 @@ pub fn create_default_registry_with_project(
     registry
 }
 
+/// Sidecar script source — embedded at compile time so the binary is
+/// self-contained. Materialised to disk by
+/// [`resolve_browser_sidecar_script`] on first use.
+///
+/// Bug 2026-04-27 (dogfood F3): the previous resolver only succeeded
+/// when the user ran `theo` from inside the source checkout; external
+/// projects had to set `THEO_BROWSER_SIDECAR` or hand-copy the script
+/// into `<project>/.theo/playwright_sidecar.js`. Embedding makes the
+/// `browser_*` family work out of the box (after the operator runs
+/// `npx playwright install chromium` plus the OS deps).
+pub const EMBEDDED_BROWSER_SIDECAR: &str =
+    include_str!("../../scripts/playwright_sidecar.js");
+
 /// Resolve the Playwright sidecar script path for a project.
-/// Order: env override → in-repo source path → per-project bundle.
+///
+/// Resolution order (first match wins):
+///   1. `THEO_BROWSER_SIDECAR` env var (operator override)
+///   2. `<project>/.theo/playwright_sidecar.js` (per-project, persists)
+///   3. `<project>/crates/theo-tooling/scripts/playwright_sidecar.js`
+///      (developer running theo from the source checkout)
+///   4. Materialised copy of the embedded script under
+///      `~/.cache/theo/playwright_sidecar.js` (default for end users —
+///      written on first call, idempotent)
 fn resolve_browser_sidecar_script(project_dir: &std::path::Path) -> std::path::PathBuf {
     if let Ok(p) = std::env::var("THEO_BROWSER_SIDECAR") {
         return std::path::PathBuf::from(p);
     }
-    let in_repo = project_dir
-        .join("crates/theo-tooling/scripts/playwright_sidecar.js");
+    let per_project = project_dir.join(".theo/playwright_sidecar.js");
+    if per_project.exists() {
+        return per_project;
+    }
+    let in_repo = project_dir.join("crates/theo-tooling/scripts/playwright_sidecar.js");
     if in_repo.exists() {
         return in_repo;
     }
-    project_dir.join(".theo/playwright_sidecar.js")
+    materialize_embedded_browser_sidecar().unwrap_or_else(|_| {
+        // Materialisation can only fail when the cache directory cannot
+        // be created (read-only home, sandbox, etc.). Fall back to the
+        // historical per-project path so the operator still gets a clear
+        // "missing sidecar" error pointing at a writable location.
+        project_dir.join(".theo/playwright_sidecar.js")
+    })
+}
+
+/// Write the embedded sidecar script to `~/.cache/theo/playwright_sidecar.js`
+/// when missing or out-of-date and return its path. Idempotent: rewrites
+/// only when the on-disk content differs from the embedded source so
+/// upgrades land automatically when the binary is reinstalled.
+fn materialize_embedded_browser_sidecar() -> std::io::Result<std::path::PathBuf> {
+    let cache_dir = browser_sidecar_cache_dir()?;
+    std::fs::create_dir_all(&cache_dir)?;
+    let path = cache_dir.join("playwright_sidecar.js");
+    let needs_write = match std::fs::read_to_string(&path) {
+        Ok(existing) => existing != EMBEDDED_BROWSER_SIDECAR,
+        Err(_) => true,
+    };
+    if needs_write {
+        std::fs::write(&path, EMBEDDED_BROWSER_SIDECAR)?;
+    }
+    Ok(path)
+}
+
+/// Cache dir for binary-shipped scripts. Honors `XDG_CACHE_HOME` and
+/// falls back to `$HOME/.cache/theo`.
+fn browser_sidecar_cache_dir() -> std::io::Result<std::path::PathBuf> {
+    if let Ok(xdg) = std::env::var("XDG_CACHE_HOME")
+        && !xdg.is_empty()
+    {
+        return Ok(std::path::PathBuf::from(xdg).join("theo"));
+    }
+    let home = std::env::var("HOME").map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "neither XDG_CACHE_HOME nor HOME is set; cannot locate cache dir",
+        )
+    })?;
+    Ok(std::path::PathBuf::from(home).join(".cache/theo"))
 }
 
 /// Load plugin tools into an existing registry.

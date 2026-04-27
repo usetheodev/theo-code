@@ -206,7 +206,7 @@ mod tests {
             entity_id: "e".into(),
             payload_summary: "p".into(),
             duration_ms: Some(50),
-            tool_name: Some("read_file".into()),
+            tool_name: Some("read".into()),
             outcome: Some(StepOutcome::Success),
         };
         let j = serde_json::to_string(&s).unwrap();

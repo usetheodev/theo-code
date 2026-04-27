@@ -109,8 +109,17 @@ pub fn compute_loop_metrics(
     let edit = steps
         .iter()
         .filter(|s| {
+            // Bug 2026-04-27 (dogfood): was `edit_file | write_file`,
+            // names that haven't existed in the production registry
+            // since at least the snapshot-pin contract test
+            // (`default_registry_tool_id_snapshot_is_pinned`). The
+            // mismatch made `phase_distribution.Edit` always 0, which
+            // skewed every report cohort downstream.
             s.event_type == "ToolCallCompleted"
-                && matches!(s.tool_name.as_deref(), Some("edit_file" | "write_file"))
+                && matches!(
+                    s.tool_name.as_deref(),
+                    Some("edit" | "write" | "apply_patch")
+                )
         })
         .count() as u32;
     let verify = steps.iter().filter(|s| s.event_type == "SensorExecuted").count() as u32;

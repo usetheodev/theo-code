@@ -124,7 +124,7 @@ fn bench_record_session_exit_large_log(c: &mut Criterion) {
     for i in 0..10_000 {
         bus.publish(DomainEvent::new(
             EventType::ToolCallQueued,
-            &format!("call-{i}"),
+            format!("call-{i}"),
             serde_json::json!({}),
         ));
     }

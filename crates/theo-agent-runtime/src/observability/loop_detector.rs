@@ -14,12 +14,22 @@ use std::hash::{Hash, Hasher};
 const WINDOW_SIZE: usize = 10;
 
 /// Expected tool-pair whitelist (A immediately followed by B is benign).
+///
+/// Bug 2026-04-27 (dogfood): pairs used `edit_file` / `write_file` /
+/// `read_file` — names not present in the production registry since
+/// at least `default_registry_tool_id_snapshot_is_pinned` shipped.
+/// As a result EVERY edit→read or write→read pair was treated as a
+/// suspicious repetition rather than benign workflow, inflating the
+/// loop detector's noise floor. The pairs now mirror the production
+/// IDs (`edit`, `write`, `read`).
 const EXPECTED_SEQUENCES: &[(&str, &str)] = &[
-    ("write_file", "read_file"),
-    ("edit_file", "bash"),
-    ("edit_file", "read_file"),
-    ("bash", "read_file"),
-    ("grep", "read_file"),
+    ("write", "read"),
+    ("edit", "bash"),
+    ("edit", "read"),
+    ("bash", "read"),
+    ("grep", "read"),
+    ("apply_patch", "bash"),
+    ("apply_patch", "read"),
 ];
 
 /// Verdict returned by [`LoopDetector::record`].
@@ -270,15 +280,15 @@ mod tests {
     #[test]
     fn test_write_then_read_not_flagged() {
         let mut d = LoopDetector::new();
-        d.record("write_file", &json!({"path": "a"}), "");
-        let v = d.record("read_file", &json!({"path": "a"}), "");
+        d.record("write", &json!({"path": "a"}), "");
+        let v = d.record("read", &json!({"path": "a"}), "");
         assert_eq!(v, LoopVerdict::Ok);
     }
 
     #[test]
     fn test_edit_then_bash_not_flagged() {
         let mut d = LoopDetector::new();
-        d.record("edit_file", &json!({"path": "a"}), "");
+        d.record("edit", &json!({"path": "a"}), "");
         let v = d.record("bash", &json!({"cmd": "cargo test"}), "");
         assert_eq!(v, LoopVerdict::Ok);
     }

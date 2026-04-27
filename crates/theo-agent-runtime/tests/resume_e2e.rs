@@ -85,7 +85,7 @@ fn resume_e2e_replays_completed_tools_and_reuses_worktree() {
             event_type: "tool_dispatched".into(),
             payload: json!({
                 "call_id": "c1",
-                "name": "write_file",
+                "name": "write",
                 "args": {"path": "/tmp/x.txt", "content": "ok"},
             }),
         },
@@ -94,7 +94,7 @@ fn resume_e2e_replays_completed_tools_and_reuses_worktree() {
             event_type: "tool_result".into(),
             payload: json!({
                 "call_id": "c1",
-                "name": "write_file",
+                "name": "write",
                 "content": "{\"ok\":true,\"bytes_written\":2}",
             }),
         },

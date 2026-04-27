@@ -32,8 +32,24 @@ pub const MASK_SENTINEL_PREFIX: &str = "[ref: tool result ";
 
 /// Tool categories that must NEVER be masked/pruned (opendev
 /// `PROTECTED_TOOL_TYPES`). These results carry irreducible signal.
-pub const PROTECTED_TOOL_NAMES: &[&str] =
-    &["read_file", "graph_context", "skill", "invoke_skill", "present_plan"];
+///
+/// Bug 2026-04-27 (dogfood): the list referenced `read_file`, a name
+/// that has not existed in the production registry since at least the
+/// snapshot-pin contract test (`default_registry_tool_id_snapshot_is_pinned`).
+/// As a result file-read tool results were not protected from compaction
+/// despite being one of the most expensive things to re-fetch. Now
+/// also includes `read` (production ID) plus `lsp_definition` and
+/// `lsp_references` whose source-graph anchors are equally expensive
+/// to recompute.
+pub const PROTECTED_TOOL_NAMES: &[&str] = &[
+    "read",
+    "graph_context",
+    "skill",
+    "invoke_skill",
+    "present_plan",
+    "lsp_definition",
+    "lsp_references",
+];
 
 /// Build the canonical Mask sentinel for a tool result.
 ///
@@ -527,7 +543,7 @@ mod tests {
 
     #[test]
     fn protected_names_covered() {
-        assert!(is_protected(Some("read_file")));
+        assert!(is_protected(Some("read")));
         assert!(is_protected(Some("skill")));
         assert!(!is_protected(Some("bash")));
         assert!(!is_protected(None));
@@ -618,9 +634,9 @@ mod tests {
             let id = format!("rf{i}");
             msgs.push(Message::assistant_with_tool_calls(
                 None,
-                vec![ToolCall::new(id.clone(), "read_file", "{}")],
+                vec![ToolCall::new(id.clone(), "read", "{}")],
             ));
-            msgs.push(Message::tool_result(&id, "read_file", format!("file_content{i}")));
+            msgs.push(Message::tool_result(&id, "read", format!("file_content{i}")));
         }
         for i in 1..=3 {
             let id = format!("b{i}");
@@ -637,7 +653,7 @@ mod tests {
         // read_file results should be preserved (protected).
         let read_file_tools: Vec<_> = msgs
             .iter()
-            .filter(|m| m.role == Role::Tool && m.name.as_deref() == Some("read_file"))
+            .filter(|m| m.role == Role::Tool && m.name.as_deref() == Some("read"))
             .collect();
         for t in &read_file_tools {
             assert!(

@@ -63,13 +63,13 @@ fn publish_sequence(bus: &EventBus, run_id: &str) {
     bus.publish(DomainEvent::new(
         EventType::ToolCallDispatched,
         run_id,
-        serde_json::json!({"tool_name": "read_file"}),
+        serde_json::json!({"tool_name": "read"}),
     ));
     bus.publish(DomainEvent::new(
         EventType::ToolCallCompleted,
         run_id,
         serde_json::json!({
-            "tool_name": "read_file",
+            "tool_name": "read",
             "state": "Succeeded",
             "args": {"path": "src/main.rs"}
         }),
@@ -89,13 +89,13 @@ fn publish_sequence(bus: &EventBus, run_id: &str) {
     bus.publish(DomainEvent::new(
         EventType::ToolCallDispatched,
         run_id,
-        serde_json::json!({"tool_name": "edit_file"}),
+        serde_json::json!({"tool_name": "edit"}),
     ));
     bus.publish(DomainEvent::new(
         EventType::ToolCallCompleted,
         run_id,
         serde_json::json!({
-            "tool_name": "edit_file",
+            "tool_name": "edit",
             "state": "Succeeded",
             "args": {"path": "src/main.rs"}
         }),
@@ -276,8 +276,8 @@ fn e2e_observability_pipeline_full_flow() {
     assert!(report.token_metrics.tokens_per_successful_edit > 0.0);
     assert_eq!(report.loop_metrics.total_iterations, 2);
     assert_eq!(report.loop_metrics.convergence_rate, 1.0);
-    assert!(report.tool_breakdown.iter().any(|t| t.tool_name == "read_file"));
-    assert!(report.tool_breakdown.iter().any(|t| t.tool_name == "edit_file"));
+    assert!(report.tool_breakdown.iter().any(|t| t.tool_name == "read"));
+    assert!(report.tool_breakdown.iter().any(|t| t.tool_name == "edit"));
     assert!(report.tool_breakdown.iter().any(|t| t.tool_name == "bash"));
 
     // Surrogate metrics are computed.
@@ -352,7 +352,7 @@ fn e2e_detects_weak_verification() {
     bus.publish(DomainEvent::new(
         EventType::ToolCallCompleted,
         run_id,
-        serde_json::json!({"tool_name": "edit_file", "state": "Succeeded"}),
+        serde_json::json!({"tool_name": "edit", "state": "Succeeded"}),
     ));
     bus.publish(DomainEvent::new(EventType::LlmCallStart, run_id, serde_json::json!({})));
     bus.publish(DomainEvent::new(EventType::LlmCallEnd, run_id, serde_json::json!({})));
@@ -408,7 +408,7 @@ fn e2e_detects_conversation_history_loss() {
         EventType::ToolCallCompleted,
         run_id,
         serde_json::json!({
-            "tool_name": "read_file",
+            "tool_name": "read",
             "state": "Succeeded",
             "args": {"path": "src/hot.rs"}
         }),
@@ -463,7 +463,7 @@ fn e2e_pipeline_survives_drop_pressure() {
             bus_clone.publish(DomainEvent::new(
                 EventType::ToolCallCompleted,
                 "e",
-                serde_json::json!({"tool_name": "read_file", "state": "Succeeded", "i": i}),
+                serde_json::json!({"tool_name": "read", "state": "Succeeded", "i": i}),
             ));
         }
     });

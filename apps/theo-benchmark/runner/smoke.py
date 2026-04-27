@@ -114,11 +114,20 @@ def run_scenario(scenario: dict, theo_bin: Path, keep_tmp: bool, temperature: fl
             cmd.extend(["--temperature", str(temperature)])
         cmd.append(prompt)
 
+        # Bug 2026-04-27 (dogfood): without THEO_SKIP_ONBOARDING=1 every
+        # smoke scenario hits the bootstrap onboarding (because the
+        # tmpdir has no `.theo/memory/USER.md`) and the agent answers
+        # "What's your role?" instead of executing the task — pass rate
+        # drops from 18/20 → 2/20. Operators can still override by
+        # setting THEO_SKIP_ONBOARDING=0 explicitly in the parent env.
+        env = os.environ.copy()
+        env.setdefault("THEO_SKIP_ONBOARDING", "1")
         proc = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
             timeout=timeout,
+            env=env,
         )
         exit_code = proc.returncode
         stderr_tail = proc.stderr[-2000:] if proc.stderr else ""

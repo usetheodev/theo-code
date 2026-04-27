@@ -126,6 +126,7 @@ impl EventListener for CliRenderer {
                     .get("error")
                     .or(event.payload.get("reason"))
                     .or(event.payload.get("violation"))
+                    .or(event.payload.get("failure_mode"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("unknown error");
                 eprintln!("{}", tr::render_error(msg, self.caps));

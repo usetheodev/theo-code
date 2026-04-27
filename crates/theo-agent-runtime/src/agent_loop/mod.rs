@@ -719,7 +719,7 @@ mod tests {
             let mut cached = BTreeMap::new();
             cached.insert(
                 "c-known".to_string(),
-                theo_infra_llm::types::Message::tool_result("c-known", "write_file", "ok"),
+                theo_infra_llm::types::Message::tool_result("c-known", "write", "ok"),
             );
             Arc::new(ResumeContext {
                 spec: AgentSpec::on_demand("a", "b"),

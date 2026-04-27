@@ -178,7 +178,27 @@ impl CheckpointManager {
     }
 
     /// List all checkpoints (newest first). Each has commit + label + timestamp.
+    ///
+    /// Bug 2026-04-27 (dogfood F4): when the shadow repo has been
+    /// initialised but no checkpoint commit has been recorded yet,
+    /// `git log` exits 128 with "fatal: your current branch
+    /// 'master' does not have any commits yet" — surfaced to operators
+    /// as a confusing CLI error. The empty-repo case is now detected
+    /// up front via `git rev-parse --verify HEAD` and returns an empty
+    /// list instead, so `theo checkpoints list` prints the canonical
+    /// "No checkpoints for <dir>." message.
     pub fn list(&self) -> Result<Vec<Checkpoint>, CheckpointError> {
+        // `--verify HEAD` exits 0 when HEAD resolves to a commit and
+        // non-zero when the repo has no commits. We only treat
+        // non-zero as "empty repo"; other errors (missing repo,
+        // permission denied) would still surface via the `log` call
+        // because we still hit the same `git()` helper afterwards.
+        if self
+            .git(&["rev-parse", "--verify", "--quiet", "HEAD"], None)
+            .is_err()
+        {
+            return Ok(Vec::new());
+        }
         let out = self.git(
             &["log", "--format=%H%x09%ct%x09%s"],
             None,
@@ -532,5 +552,38 @@ mod tests {
         }
         let count = count_workdir_files(dir.path(), 10).unwrap();
         assert!(count >= 10, "should hit cap");
+    }
+
+    /// Regression test for dogfood F4 (2026-04-27).
+    ///
+    /// Before the fix, `CheckpointManager::list()` called `git log`
+    /// against an empty shadow repo, which exited 128 with
+    /// "fatal: your current branch 'master' does not have any commits
+    /// yet" — surfaced to operators as a confusing CLI error from
+    /// `theo checkpoints list`. After the fix, the empty-repo case
+    /// is detected up front via `git rev-parse --verify HEAD` and
+    /// returns an empty list so the CLI prints the canonical
+    /// "No checkpoints for <dir>." message.
+    #[test]
+    fn list_returns_empty_vec_when_no_snapshots_yet() {
+        if !git_available() {
+            return;
+        }
+        let workdir = workdir_with_files(&[("a.txt", "hello")]);
+        let base = TempDir::new().unwrap();
+        let mgr = CheckpointManager::new(workdir.path(), base.path()).unwrap();
+        // Note: we do NOT call snapshot() here. The shadow repo has been
+        // initialised by `new()` but no checkpoint commit has been
+        // recorded.
+        let result = mgr.list();
+        assert!(
+            result.is_ok(),
+            "list() must not error on empty shadow repo, got: {:?}",
+            result.err()
+        );
+        assert!(
+            result.unwrap().is_empty(),
+            "list() must return empty Vec on empty shadow repo (was: git error)"
+        );
     }
 }
