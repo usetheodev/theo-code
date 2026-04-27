@@ -44,6 +44,57 @@ use theo_engine_retrieval::pipeline::retrieve_with_config;
 #[cfg(feature = "dense-retrieval")]
 use theo_engine_retrieval::reranker::{CrossEncoderConfig, CrossEncoderReranker};
 
+/// T8.1 part 4 — Read `THEO_RERANKER_PRELOAD` from the environment.
+/// Truthy (`1`, `true`, `yes`, `on`, case-insensitive) opts the
+/// background graph build into preloading the cross-encoder model
+/// — first session pays the ~200 MB download once; subsequent
+/// queries get the +15 pt nDCG@10 SOTA gain immediately.
+/// Falsy / unset = preload OFF (default; preserves cold-start speed
+/// for users who don't query enough to amortize the download).
+pub fn env_reranker_preload_enabled() -> bool {
+    match std::env::var("THEO_RERANKER_PRELOAD") {
+        Ok(v) => {
+            let lower = v.to_ascii_lowercase();
+            matches!(lower.as_str(), "1" | "true" | "yes" | "on")
+        }
+        Err(_) => false,
+    }
+}
+
+/// T8.1 part 4 — Best-effort cross-encoder construction.
+/// Returns `Some` when the model loaded; `None` on ANY failure
+/// (network, missing dep, init panic). The graph build path uses
+/// this to populate `GraphState.reranker` without ever propagating
+/// reranker errors to the agent — a missing reranker just means
+/// retrieval falls back to RRF-only, which is still a working
+/// pipeline.
+#[cfg(feature = "dense-retrieval")]
+pub fn try_construct_reranker_if_enabled() -> Option<Arc<CrossEncoderReranker>> {
+    if !env_reranker_preload_enabled() {
+        return None;
+    }
+    // CrossEncoderReranker::new() returns Result<Self, Box<dyn Error>>;
+    // `catch_unwind` guards against any panic inside fastembed/onnx
+    // initialization (the worst-case offline path) so a misconfigured
+    // host can never crash a graph build.
+    let result = std::panic::catch_unwind(|| CrossEncoderReranker::new());
+    match result {
+        Ok(Ok(rr)) => Some(Arc::new(rr)),
+        Ok(Err(e)) => {
+            eprintln!(
+                "[theo:reranker] preload failed (falling back to RRF-only): {e}"
+            );
+            None
+        }
+        Err(_) => {
+            eprintln!(
+                "[theo:reranker] preload panicked (falling back to RRF-only)"
+            );
+            None
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Configuration
 // ---------------------------------------------------------------------------
@@ -206,11 +257,14 @@ impl GraphContextProvider for GraphContextService {
                 embedder,
                 #[cfg(feature = "dense-retrieval")]
                 embedding_cache,
-                // T8.1 — reranker model is heavy to construct
-                // (~200 MB Jina v2 download); start as None and
-                // populate lazily on first query that needs it.
+                // T8.1 — reranker model is heavy (~200 MB Jina v2
+                // download). Start as None unless the operator opted
+                // into preload via THEO_RERANKER_PRELOAD=1; in that
+                // case the helper returns Some on a successful load
+                // and None on any failure (network, missing dep,
+                // panic — all silently downgrade to RRF-only).
                 #[cfg(feature = "dense-retrieval")]
-                reranker: None,
+                reranker: try_construct_reranker_if_enabled(),
                 #[cfg(feature = "dense-retrieval")]
                 cross_encoder_config: CrossEncoderConfig::default(),
             });
@@ -283,7 +337,7 @@ impl GraphContextProvider for GraphContextService {
                         embedding_cache,
                         // T8.1 — see fast-path branch above for rationale.
                         #[cfg(feature = "dense-retrieval")]
-                        reranker: None,
+                        reranker: try_construct_reranker_if_enabled(),
                         #[cfg(feature = "dense-retrieval")]
                         cross_encoder_config: CrossEncoderConfig::default(),
                     });
@@ -1831,6 +1885,70 @@ mod tests {
                     GraphBuildState::Ready(_) => unreachable!(),
                 }
             ),
+        }
+    }
+
+    // ── T8.1 part 4 — lazy reranker preload ────────────────────────
+
+    #[test]
+    fn t81pre_env_disabled_by_default() {
+        // Cold default invariant: an unset env var means NO preload
+        // so cold-start latency stays the same for users who never
+        // query enough to amortize the model download.
+        let prev = std::env::var_os("THEO_RERANKER_PRELOAD");
+        unsafe {
+            std::env::remove_var("THEO_RERANKER_PRELOAD");
+        }
+        assert!(!env_reranker_preload_enabled());
+        if let Some(v) = prev {
+            unsafe {
+                std::env::set_var("THEO_RERANKER_PRELOAD", v);
+            }
+        }
+    }
+
+    #[test]
+    fn t81pre_env_recognises_truthy_values_case_insensitive() {
+        let prev = std::env::var_os("THEO_RERANKER_PRELOAD");
+        unsafe {
+            for v in ["1", "true", "TRUE", "yes", "YES", "on", "ON"] {
+                std::env::set_var("THEO_RERANKER_PRELOAD", v);
+                assert!(
+                    env_reranker_preload_enabled(),
+                    "value `{v}` should opt into preload"
+                );
+            }
+            for v in ["0", "false", "FALSE", "no", "off", "", "garbage"] {
+                std::env::set_var("THEO_RERANKER_PRELOAD", v);
+                assert!(
+                    !env_reranker_preload_enabled(),
+                    "value `{v}` should NOT opt into preload"
+                );
+            }
+            std::env::remove_var("THEO_RERANKER_PRELOAD");
+            if let Some(v) = prev {
+                std::env::set_var("THEO_RERANKER_PRELOAD", v);
+            }
+        }
+    }
+
+    #[cfg(feature = "dense-retrieval")]
+    #[test]
+    fn t81pre_try_construct_returns_none_when_disabled() {
+        // The fast-path no-op: when the env var is off,
+        // try_construct returns None WITHOUT touching the model
+        // loader. Critical invariant — a regression here would
+        // download the model on every cold start.
+        let prev = std::env::var_os("THEO_RERANKER_PRELOAD");
+        unsafe {
+            std::env::remove_var("THEO_RERANKER_PRELOAD");
+        }
+        let result = try_construct_reranker_if_enabled();
+        assert!(result.is_none(), "preload off must short-circuit to None");
+        if let Some(v) = prev {
+            unsafe {
+                std::env::set_var("THEO_RERANKER_PRELOAD", v);
+            }
         }
     }
 }
