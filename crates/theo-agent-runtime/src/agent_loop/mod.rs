@@ -75,6 +75,12 @@ pub struct AgentLoop {
     /// replay their cached `Message::tool_result` instead of
     /// re-executing the tool. `None` means default dispatch.
     resume_context: Option<Arc<crate::subagent::resume::ResumeContext>>,
+    /// T14.1 — Optional partial-progress sender. Forwarded to the
+    /// underlying `AgentRunEngine.rt.partial_progress_tx` so every
+    /// `ToolContext` constructed inside the run loop receives a
+    /// clone, enabling end-to-end progress streaming from tools to
+    /// a consumer (TUI / stderr drainer).
+    partial_progress_tx: Option<tokio::sync::mpsc::Sender<String>>,
 }
 
 impl AgentLoop {
@@ -129,6 +135,7 @@ impl AgentLoop {
             subagent_handoff_guardrails: None,
             subagent_reloadable: None,
             resume_context: None,
+            partial_progress_tx: None,
         }
     }
 
@@ -145,6 +152,19 @@ impl AgentLoop {
         provider: Arc<dyn theo_domain::graph_context::GraphContextProvider>,
     ) -> Self {
         self.graph_context = Some(provider);
+        self
+    }
+
+    /// T14.1 — Set the partial-progress sender. Forwarded to
+    /// `AgentRunEngine.rt.partial_progress_tx` when the engine is
+    /// constructed for `run`. Tools' `crate::partial::emit_progress`
+    /// calls reach the consumer (TUI / stderr drainer) via this
+    /// channel.
+    pub fn with_partial_progress_tx(
+        mut self,
+        tx: tokio::sync::mpsc::Sender<String>,
+    ) -> Self {
+        self.partial_progress_tx = Some(tx);
         self
     }
 
@@ -307,6 +327,9 @@ impl AgentLoop {
         }
         if let Some(rc) = &self.resume_context {
             engine = engine.with_resume_context(rc.clone());
+        }
+        if let Some(tx) = &self.partial_progress_tx {
+            engine = engine.with_partial_progress_tx(tx.clone());
         }
         engine
     }

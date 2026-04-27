@@ -156,9 +156,252 @@ pub async fn run_agent_session_with_injections(
     if let Some(gc) = graph_context {
         agent = agent.with_graph_context(gc);
     }
+
+    // T14.1 — when THEO_PROGRESS_STDERR=1 is set (headless ops,
+    // benchmark visibility, CI smoke tests), wire the partial-
+    // progress drainer to stderr. The TUI integration in
+    // apps/theo-cli/src/tui/* will eventually replace stderr with
+    // an in-place status line update; this stderr fallback lets the
+    // wire be exercised end-to-end RIGHT NOW without touching the
+    // TUI render loop.
+    let progress_drainer = if env_progress_stderr_enabled() {
+        let (tx, rx) = tokio::sync::mpsc::channel::<String>(64);
+        agent = agent.with_partial_progress_tx(tx);
+        let handle = tokio::spawn(stderr_progress_drainer(rx));
+        Some(handle)
+    } else {
+        None
+    };
+
     // Apply sub-agent injections from CLI flags (Phase 1-13 features).
     agent = injections.apply_to(agent);
     let result = agent.run(task, project_dir).await;
 
+    // Wait for the drainer to finish flushing remaining frames.
+    // The agent loop has already exited, so the sender has dropped
+    // (when its last clone goes), and the drainer returns naturally.
+    if let Some(handle) = progress_drainer {
+        let _ = handle.await;
+    }
+
     Ok(result)
+}
+
+/// Returns true when the operator opted into stderr progress dumps.
+/// Truthy values: `1`, `true` (case-insensitive); empty / unset =
+/// false; any other non-empty value also truthy (matches the
+/// permissive convention used by `THEO_NO_GRAPHCTX`).
+fn env_progress_stderr_enabled() -> bool {
+    match std::env::var("THEO_PROGRESS_STDERR") {
+        Ok(v) => !v.is_empty() && v != "0" && !v.eq_ignore_ascii_case("false"),
+        Err(_) => false,
+    }
+}
+
+/// Default drainer used when `THEO_PROGRESS_STDERR=1`. Writes one
+/// `[partial] tool: content [42%]` line to stderr per debounced
+/// frame. Exits when the sender drops (agent loop exit).
+async fn stderr_progress_drainer(rx: tokio::sync::mpsc::Receiver<String>) {
+    use std::time::Duration;
+
+    use tokio::time::Instant;
+
+    // Inline copy of apps/theo-cli's run_drainer logic to avoid the
+    // arch-contract violation (theo-application can't depend on
+    // theo-cli). Same 50ms debounce + latest-wins-per-tool.
+    const DEBOUNCE: Duration = Duration::from_millis(50);
+    let mut rx = rx;
+    loop {
+        let first = match rx.recv().await {
+            Some(line) => line,
+            None => return,
+        };
+        let mut latest: std::collections::HashMap<String, (String, Option<f64>)> =
+            std::collections::HashMap::new();
+        absorb(&first, &mut latest);
+        let deadline = Instant::now() + DEBOUNCE;
+        loop {
+            let timeout = deadline.saturating_duration_since(Instant::now());
+            if timeout.is_zero() {
+                break;
+            }
+            match tokio::time::timeout(timeout, rx.recv()).await {
+                Ok(Some(line)) => absorb(&line, &mut latest),
+                Ok(None) => {
+                    flush(&latest);
+                    return;
+                }
+                Err(_elapsed) => break,
+            }
+        }
+        flush(&latest);
+    }
+}
+
+fn absorb(
+    line: &str,
+    latest: &mut std::collections::HashMap<String, (String, Option<f64>)>,
+) {
+    let v: serde_json::Value = match serde_json::from_str(line) {
+        Ok(v) => v,
+        Err(_) => return, // malformed — silently skip
+    };
+    if v.get("type").and_then(|t| t.as_str()) != Some("partial") {
+        return;
+    }
+    let tool = v
+        .get("tool")
+        .and_then(|t| t.as_str())
+        .unwrap_or("?")
+        .to_string();
+    let content = v
+        .get("content")
+        .and_then(|c| c.as_str())
+        .unwrap_or("")
+        .to_string();
+    let progress = v.get("progress").and_then(|p| p.as_f64());
+    latest.insert(tool, (content, progress));
+}
+
+fn flush(latest: &std::collections::HashMap<String, (String, Option<f64>)>) {
+    let mut keys: Vec<&String> = latest.keys().collect();
+    keys.sort();
+    for k in keys {
+        let (content, progress) = &latest[k];
+        match progress {
+            Some(p) => {
+                let pct = (p * 100.0).round().clamp(0.0, 100.0) as u32;
+                eprintln!("[partial] {k}: {content} [{pct}%]");
+            }
+            None => {
+                eprintln!("[partial] {k}: {content}");
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+    use std::time::Duration;
+
+    #[test]
+    fn t141_env_progress_stderr_disabled_by_default() {
+        // Save / restore so we don't poison sibling tests.
+        let prev = std::env::var_os("THEO_PROGRESS_STDERR");
+        unsafe {
+            std::env::remove_var("THEO_PROGRESS_STDERR");
+        }
+        assert!(!env_progress_stderr_enabled());
+        if let Some(v) = prev {
+            unsafe {
+                std::env::set_var("THEO_PROGRESS_STDERR", v);
+            }
+        }
+    }
+
+    #[test]
+    fn t141_env_progress_stderr_recognises_truthy_values() {
+        let prev = std::env::var_os("THEO_PROGRESS_STDERR");
+        unsafe {
+            for v in ["1", "true", "TRUE", "yes", "on"] {
+                std::env::set_var("THEO_PROGRESS_STDERR", v);
+                assert!(
+                    env_progress_stderr_enabled(),
+                    "{v} should be recognised as truthy"
+                );
+            }
+            for v in ["0", "false", "FALSE", ""] {
+                std::env::set_var("THEO_PROGRESS_STDERR", v);
+                assert!(
+                    !env_progress_stderr_enabled(),
+                    "{v} should be recognised as falsy"
+                );
+            }
+            std::env::remove_var("THEO_PROGRESS_STDERR");
+            if let Some(v) = prev {
+                std::env::set_var("THEO_PROGRESS_STDERR", v);
+            }
+        }
+    }
+
+    // ── absorb / flush — pure logic tests ─────────────────────────
+
+    #[test]
+    fn t141_absorb_parses_full_envelope() {
+        let mut latest: HashMap<String, (String, Option<f64>)> = HashMap::new();
+        let line = r#"{"type":"partial","tool":"a","content":"loading","progress":0.5}"#;
+        absorb(line, &mut latest);
+        assert_eq!(latest.len(), 1);
+        let (content, progress) = &latest["a"];
+        assert_eq!(content, "loading");
+        assert_eq!(*progress, Some(0.5));
+    }
+
+    #[test]
+    fn t141_absorb_silently_skips_malformed_json() {
+        let mut latest: HashMap<String, (String, Option<f64>)> = HashMap::new();
+        absorb("not json", &mut latest);
+        absorb(r#"{"random": "shape"}"#, &mut latest);
+        absorb(r#"{"type":"final","tool":"x","content":"y"}"#, &mut latest);
+        assert!(
+            latest.is_empty(),
+            "absorb must skip malformed lines silently"
+        );
+    }
+
+    #[test]
+    fn t141_absorb_latest_wins_per_tool() {
+        let mut latest: HashMap<String, (String, Option<f64>)> = HashMap::new();
+        absorb(
+            r#"{"type":"partial","tool":"a","content":"first"}"#,
+            &mut latest,
+        );
+        absorb(
+            r#"{"type":"partial","tool":"a","content":"second","progress":0.9}"#,
+            &mut latest,
+        );
+        let (content, progress) = &latest["a"];
+        assert_eq!(content, "second", "latest content wins");
+        assert_eq!(*progress, Some(0.9));
+    }
+
+    // ── stderr_progress_drainer end-to-end ────────────────────────
+
+    #[tokio::test]
+    async fn t141_stderr_drainer_returns_when_sender_drops() {
+        // The drainer must NOT hang the run_agent_session shutdown.
+        // Send 0 events, drop the sender, await the drainer with a
+        // short timeout — it should resolve quickly.
+        let (tx, rx) = tokio::sync::mpsc::channel::<String>(8);
+        drop(tx); // close immediately
+        let result = tokio::time::timeout(
+            Duration::from_millis(200),
+            stderr_progress_drainer(rx),
+        )
+        .await;
+        assert!(result.is_ok(), "drainer must return promptly on close");
+    }
+
+    #[tokio::test]
+    async fn t141_stderr_drainer_processes_events_then_exits_on_close() {
+        // Smoke: feed some envelopes, drop the sender, drainer
+        // processes the in-flight burst and exits within the
+        // debounce window + a small slack.
+        let (tx, rx) = tokio::sync::mpsc::channel::<String>(8);
+        tx.send(r#"{"type":"partial","tool":"a","content":"x"}"#.to_string())
+            .await
+            .unwrap();
+        tx.send(r#"{"type":"partial","tool":"b","content":"y"}"#.to_string())
+            .await
+            .unwrap();
+        drop(tx);
+        let result = tokio::time::timeout(
+            Duration::from_millis(300),
+            stderr_progress_drainer(rx),
+        )
+        .await;
+        assert!(result.is_ok());
+    }
 }
