@@ -151,15 +151,15 @@ pub fn create_default_registry() -> ToolRegistry {
     };
     use crate::dap::{
         DapSessionManager, DebugContinueTool, DebugEvalTool, DebugLaunchTool,
-        DebugScopesTool, DebugSetBreakpointTool, DebugStackTraceTool, DebugStepTool,
-        DebugTerminateTool, DebugThreadsTool, DebugVariablesTool,
+        DebugScopesTool, DebugSetBreakpointTool, DebugStackTraceTool, DebugStatusTool,
+        DebugStepTool, DebugTerminateTool, DebugThreadsTool, DebugVariablesTool,
     };
     use crate::edit::EditTool;
     use crate::glob::GlobTool;
     use crate::grep::GrepTool;
     use crate::lsp::{
         LspDefinitionTool, LspHoverTool, LspReferencesTool, LspRenameTool,
-        LspSessionManager,
+        LspSessionManager, LspStatusTool,
     };
     use crate::memory::MemoryTool;
     use crate::plan::{
@@ -262,6 +262,9 @@ pub fn create_default_registry() -> ToolRegistry {
         // default registry preserves the manifest invariant
         // (every DefaultRegistry entry is reachable from
         // create_default_registry).
+        Box::new(LspStatusTool::new(std::sync::Arc::new(
+            LspSessionManager::from_catalogue(std::collections::HashMap::new()),
+        ))),
         Box::new(LspDefinitionTool::new(std::sync::Arc::new(
             LspSessionManager::from_catalogue(std::collections::HashMap::new()),
         ))),
@@ -278,6 +281,9 @@ pub fn create_default_registry() -> ToolRegistry {
         // lsp_* tools: empty-catalogue stubs in the default registry
         // (actionable error path); real PATH-discovered manager
         // swapped in by `create_default_registry_with_project`.
+        Box::new(DebugStatusTool::new(std::sync::Arc::new(
+            DapSessionManager::from_catalogue(std::collections::HashMap::new()),
+        ))),
         Box::new(DebugLaunchTool::new(std::sync::Arc::new(
             DapSessionManager::from_catalogue(std::collections::HashMap::new()),
         ))),
@@ -380,13 +386,13 @@ pub fn create_default_registry_with_project(
     };
     use crate::dap::{
         DapSessionManager, DebugContinueTool, DebugEvalTool, DebugLaunchTool,
-        DebugScopesTool, DebugSetBreakpointTool, DebugStackTraceTool, DebugStepTool,
-        DebugTerminateTool, DebugThreadsTool, DebugVariablesTool,
+        DebugScopesTool, DebugSetBreakpointTool, DebugStackTraceTool, DebugStatusTool,
+        DebugStepTool, DebugTerminateTool, DebugThreadsTool, DebugVariablesTool,
     };
     use crate::docs_search::{DocsSearchTool, bootstrap_docs_index};
     use crate::lsp::{
         LspDefinitionTool, LspHoverTool, LspReferencesTool, LspRenameTool,
-        LspSessionManager,
+        LspSessionManager, LspStatusTool,
     };
 
     let _ = project_dir; // silenced when no per-project state is wired
@@ -405,9 +411,18 @@ pub fn create_default_registry_with_project(
     // same spawned server processes (one rust-analyzer serves
     // both lsp_definition and lsp_references on `.rs` files).
     let lsp_manager = Arc::new(LspSessionManager::from_path());
-    for tool_id in ["lsp_definition", "lsp_references", "lsp_hover", "lsp_rename"] {
+    for tool_id in [
+        "lsp_status",
+        "lsp_definition",
+        "lsp_references",
+        "lsp_hover",
+        "lsp_rename",
+    ] {
         registry.unregister(tool_id);
     }
+    registry
+        .register(Box::new(LspStatusTool::new(lsp_manager.clone())))
+        .expect("lsp_status tool schema is valid");
     registry
         .register(Box::new(LspDefinitionTool::new(lsp_manager.clone())))
         .expect("lsp_definition tool schema is valid");
@@ -428,6 +443,7 @@ pub fn create_default_registry_with_project(
     // find the session that `debug_launch({session_id: "a"})` opened.
     let dap_manager = Arc::new(DapSessionManager::from_path());
     for tool_id in [
+        "debug_status",
         "debug_launch",
         "debug_set_breakpoint",
         "debug_continue",
@@ -441,6 +457,9 @@ pub fn create_default_registry_with_project(
     ] {
         registry.unregister(tool_id);
     }
+    registry
+        .register(Box::new(DebugStatusTool::new(dap_manager.clone())))
+        .expect("debug_status tool schema is valid");
     registry
         .register(Box::new(DebugLaunchTool::new(dap_manager.clone())))
         .expect("debug_launch tool schema is valid");

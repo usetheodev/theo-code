@@ -157,6 +157,13 @@ pub const TOOL_MANIFEST: &[ToolManifestEntry] = &[
         notes: "Legacy stub. Replaced by `lsp_definition` (and forthcoming lsp_references / lsp_hover / lsp_rename) in the project-aware registry constructor.",
     },
     ToolManifestEntry {
+        id: "lsp_status",
+        exposure: ToolExposure::DefaultRegistry,
+        status: ToolStatus::Implemented,
+        owner: "theo-tooling",
+        notes: "T3.1 — report which LSP servers are discoverable on PATH and which file extensions they support. Lets the agent decide between LSP-based navigation and grep/codesearch BEFORE issuing a doomed `lsp_definition` call. Default registry stub returns 0 extensions; create_default_registry_with_project swaps in the PATH-discovered manager shared with lsp_definition / lsp_references / lsp_hover / lsp_rename.",
+    },
+    ToolManifestEntry {
         id: "lsp_definition",
         exposure: ToolExposure::DefaultRegistry,
         status: ToolStatus::Implemented,
@@ -183,6 +190,13 @@ pub const TOOL_MANIFEST: &[ToolManifestEntry] = &[
         status: ToolStatus::Implemented,
         owner: "theo-tooling",
         notes: "T3.1 — LSP `textDocument/rename` PREVIEW via LspSessionManager. Returns the WorkspaceEdit (file → range → newText) for agent review. Does NOT write files — agent applies via `edit`/`apply_patch` after inspecting. Supports both LSP 3.16+ documentChanges and legacy changes shapes.",
+    },
+    ToolManifestEntry {
+        id: "debug_status",
+        exposure: ToolExposure::DefaultRegistry,
+        status: ToolStatus::Implemented,
+        owner: "theo-tooling",
+        notes: "T13.1 — report which DAP adapters are discoverable on PATH (lldb-vscode for rust/c/cpp, debugpy for python, dlv for go, js-debug-adapter for js/ts) AND list active sessions. Use BEFORE `debug_launch` to decide between debugging and print-debugging. Default registry stub returns 0 languages / 0 sessions; create_default_registry_with_project swaps in the PATH-discovered manager shared across the debug_* family.",
     },
     ToolManifestEntry {
         id: "debug_launch",

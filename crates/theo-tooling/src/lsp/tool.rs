@@ -209,6 +209,89 @@ fn lang_id_for_extension(path: &Path) -> &'static str {
 }
 
 // ---------------------------------------------------------------------------
+// `lsp_status`
+// ---------------------------------------------------------------------------
+
+/// `lsp_status` — report which LSP servers are discoverable on PATH.
+/// Lets the agent decide between LSP-based navigation and a grep
+/// fallback BEFORE issuing a doomed `lsp_definition` call against
+/// a language with no installed server.
+pub struct LspStatusTool {
+    manager: Arc<LspSessionManager>,
+}
+
+impl LspStatusTool {
+    pub fn new(manager: Arc<LspSessionManager>) -> Self {
+        Self { manager }
+    }
+}
+
+#[async_trait]
+impl Tool for LspStatusTool {
+    fn id(&self) -> &str {
+        "lsp_status"
+    }
+
+    fn description(&self) -> &str {
+        "T3.1 — Report which LSP servers are discoverable on PATH and which \
+         file extensions they support. Use this BEFORE `lsp_definition` / \
+         `lsp_references` / `lsp_hover` / `lsp_rename` to know whether the \
+         language even has a server installed; when none is available for \
+         your file's extension, fall back to grep / codesearch. Empty \
+         result list means no LSP server is installed at all (or PATH is \
+         unusual). \
+         Example: lsp_status({})."
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            params: vec![],
+            input_examples: vec![json!({})],
+        }
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Search
+    }
+
+    async fn execute(
+        &self,
+        _args: Value,
+        _ctx: &ToolContext,
+        _permissions: &mut PermissionCollector,
+    ) -> Result<ToolOutput, ToolError> {
+        let mut extensions = self.manager.supported_extensions().await;
+        extensions.sort();
+
+        let count = extensions.len();
+        let metadata = json!({
+            "type": "lsp_status",
+            "supported_extension_count": count,
+            "supported_extensions": extensions,
+        });
+        let output = if extensions.is_empty() {
+            "No LSP servers discovered on PATH. Install one for the languages \
+             you work with (rust-analyzer / pyright / typescript-language-server / \
+             gopls / clangd / etc.) or fall back to grep / codesearch for \
+             navigation."
+                .to_string()
+        } else {
+            let listed = extensions.join(", ");
+            format!(
+                "{count} extension(s) routable to an installed LSP server: {listed}.\n\
+                 Use lsp_definition / lsp_references / lsp_hover / lsp_rename \
+                 against files matching these extensions."
+            )
+        };
+        Ok(ToolOutput::new(
+            format!("lsp_status: {count} extension(s) routable"),
+            output,
+        )
+        .with_metadata(metadata))
+    }
+}
+
+// ---------------------------------------------------------------------------
 // `lsp_definition`
 // ---------------------------------------------------------------------------
 
@@ -887,6 +970,90 @@ mod tests {
 
     fn empty_manager() -> Arc<LspSessionManager> {
         Arc::new(LspSessionManager::from_catalogue(HashMap::new()))
+    }
+
+    // ── lsp_status ────────────────────────────────────────────────
+
+    #[test]
+    fn t31lsptool_status_id_and_category() {
+        let t = LspStatusTool::new(empty_manager());
+        assert_eq!(t.id(), "lsp_status");
+        assert_eq!(t.category(), ToolCategory::Search);
+    }
+
+    #[test]
+    fn t31lsptool_status_schema_validates_with_no_args() {
+        let t = LspStatusTool::new(empty_manager());
+        let schema = t.schema();
+        schema.validate().unwrap();
+        assert!(schema.params.is_empty());
+    }
+
+    #[tokio::test]
+    async fn t31lsptool_status_empty_catalogue_returns_zero_extensions() {
+        // Default registry uses an empty-catalogue manager; status
+        // should list zero extensions and point at grep fallback.
+        let t = LspStatusTool::new(empty_manager());
+        let mut perms = PermissionCollector::new();
+        let ctx = make_ctx(PathBuf::from("/tmp"));
+        let out = t.execute(json!({}), &ctx, &mut perms).await.unwrap();
+        assert_eq!(out.metadata["supported_extension_count"], 0);
+        assert!(
+            out.output.contains("No LSP servers"),
+            "empty catalogue must surface the install/grep-fallback hint"
+        );
+        assert!(out.output.contains("grep") || out.output.contains("codesearch"));
+    }
+
+    #[tokio::test]
+    async fn t31lsptool_status_lists_extensions_alphabetically_with_count() {
+        // Inject a fake catalogue with two distinct extensions and
+        // verify the response sorts them deterministically + counts
+        // them. Extension order matters for status-line UIs that
+        // diff frame-to-frame.
+        use std::collections::HashMap;
+        use std::path::PathBuf;
+
+        let mut catalogue: HashMap<&'static str, crate::lsp::DiscoveredServer> =
+            HashMap::new();
+        catalogue.insert(
+            "rs",
+            crate::lsp::DiscoveredServer {
+                name: "rust-analyzer",
+                command: PathBuf::from("/usr/bin/rust-analyzer"),
+                args: vec![],
+                file_extensions: &["rs"],
+                languages: &["rust"],
+            },
+        );
+        catalogue.insert(
+            "py",
+            crate::lsp::DiscoveredServer {
+                name: "pyright",
+                command: PathBuf::from("/usr/bin/pyright-langserver"),
+                args: vec!["--stdio"],
+                file_extensions: &["py", "pyi"],
+                languages: &["python"],
+            },
+        );
+        let manager = Arc::new(LspSessionManager::from_catalogue(catalogue));
+
+        let t = LspStatusTool::new(manager);
+        let mut perms = PermissionCollector::new();
+        let ctx = make_ctx(PathBuf::from("/tmp"));
+        let out = t.execute(json!({}), &ctx, &mut perms).await.unwrap();
+
+        assert_eq!(out.metadata["supported_extension_count"], 2);
+        let exts = out.metadata["supported_extensions"].as_array().unwrap();
+        assert_eq!(exts.len(), 2);
+        // Alphabetical ordering: py before rs.
+        assert_eq!(exts[0], "py");
+        assert_eq!(exts[1], "rs");
+        // Output text mentions both and points the agent at the
+        // navigation tools.
+        assert!(out.output.contains("py"));
+        assert!(out.output.contains("rs"));
+        assert!(out.output.contains("lsp_definition"));
     }
 
     #[test]
