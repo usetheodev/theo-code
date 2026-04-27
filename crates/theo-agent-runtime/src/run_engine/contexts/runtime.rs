@@ -43,6 +43,16 @@ pub struct RuntimeContext {
     /// replays cached results from `executed_tool_results` to avoid
     /// double side-effects.
     pub resume_context: Option<Arc<crate::subagent::resume::ResumeContext>>,
+    /// T14.1 — Optional sender for partial-progress envelopes. When
+    /// `Some`, every `ToolContext` constructed inside the run loop
+    /// gets `stdout_tx` populated with a clone, so tools (e.g.
+    /// `browser_open`, `browser_screenshot`) can emit progress
+    /// updates the consumer side (TUI's `partial_progress::run_drainer`)
+    /// can render.
+    /// `None` for headless / non-streaming runs — tools see
+    /// `stdout_tx: None` and silently no-op their `emit_progress`
+    /// calls (per the helper's "no consumer = no cost" property).
+    pub partial_progress_tx: Option<tokio::sync::mpsc::Sender<String>>,
 }
 
 impl RuntimeContext {
@@ -62,6 +72,42 @@ impl RuntimeContext {
             skill_created_this_task: AtomicBool::new(false),
             autodream_attempted: AtomicBool::new(false),
             resume_context: None,
+            partial_progress_tx: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::loop_state::ContextLoopState;
+
+    #[test]
+    fn t141_runtime_context_default_partial_tx_is_none() {
+        // Headless / non-streaming default: tools see stdout_tx=None
+        // and emit_progress silently no-ops. Pin this so a future
+        // refactor that flips the default doesn't break headless
+        // performance.
+        let rt = RuntimeContext::new(ContextLoopState::default());
+        assert!(rt.partial_progress_tx.is_none());
+    }
+
+    #[tokio::test]
+    async fn t141_runtime_context_partial_tx_can_be_set_and_cloned() {
+        // Builder side-effect smoke test: setting the tx field makes
+        // it visible to clones the dispatch sites construct.
+        let mut rt = RuntimeContext::new(ContextLoopState::default());
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<String>(8);
+        rt.partial_progress_tx = Some(tx);
+
+        // Mimic what main_loop.rs does: clone into a "ToolContext".
+        let cloned = rt
+            .partial_progress_tx
+            .as_ref()
+            .expect("set above")
+            .clone();
+        cloned.send("test".to_string()).await.unwrap();
+        let recv = rx.recv().await.unwrap();
+        assert_eq!(recv, "test");
     }
 }

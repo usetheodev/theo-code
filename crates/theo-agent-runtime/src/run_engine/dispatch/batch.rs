@@ -83,6 +83,8 @@ impl AgentRunEngine {
                 &tool_name,
                 tool_args.to_string(),
             );
+            // T14.1 — partial_progress_tx propagates so tools in
+            // the parallel batch path emit to the same TUI consumer.
             let batch_ctx = ToolContext {
                 session_id: SessionId::new("batch"),
                 message_id: MessageId::new(format!("batch_{}", i)),
@@ -91,7 +93,7 @@ impl AgentRunEngine {
                 abort: abort_rx.clone(),
                 project_dir: self.project_dir.clone(),
                 graph_context: self.rt.graph_context.clone(),
-                stdout_tx: None,
+                stdout_tx: self.rt.partial_progress_tx.clone(),
             };
 
             futures.push(async move {

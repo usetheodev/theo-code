@@ -109,6 +109,9 @@ impl AgentRunEngine {
                 .enqueue(self.task_id.clone(), name.clone(), tool_args);
 
         // 4. Build the ToolContext for dispatch.
+        // T14.1 — partial_progress_tx propagates from the runtime
+        // context so emit_progress in tools surfaces to the
+        // TUI consumer when streaming is wired.
         let ctx = ToolContext {
             session_id: SessionId::new("agent"),
             message_id: MessageId::new(format!("iter_{iteration}")),
@@ -117,7 +120,7 @@ impl AgentRunEngine {
             abort: abort_rx.clone(),
             project_dir: self.project_dir.clone(),
             graph_context: self.rt.graph_context.clone(),
-            stdout_tx: None,
+            stdout_tx: self.rt.partial_progress_tx.clone(),
         };
 
         // 5. Dispatch + await completion.

@@ -149,4 +149,18 @@ impl AgentRunEngine {
         self.rt.snapshot_store = Some(store);
         self
     }
+
+    /// T14.1 — Wire a partial-progress sender. Every `ToolContext`
+    /// constructed inside the run loop will receive a clone, so
+    /// tools' `emit_progress` calls reach the TUI consumer
+    /// (`apps/theo-cli/src/render/partial_progress.rs::run_drainer`).
+    /// `None` (the default) means tools see `stdout_tx: None` and
+    /// emission silently no-ops.
+    pub fn with_partial_progress_tx(
+        mut self,
+        tx: tokio::sync::mpsc::Sender<String>,
+    ) -> Self {
+        self.rt.partial_progress_tx = Some(tx);
+        self
+    }
 }
