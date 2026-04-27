@@ -232,6 +232,17 @@ enum Commands {
         #[command(subcommand)]
         action: SkillCmd,
     },
+
+    /// T16.1 / D16 — Trajectory export tooling.
+    ///
+    /// Reads `.theo/trajectories/*.jsonl` rating envelopes (T16.1
+    /// wire format) and writes a JSONL file ready for downstream
+    /// RLHF tooling (axolotl / trl / similar). Theo does NOT train
+    /// inside; this is export-only per ADR D16.
+    Trajectory {
+        #[command(subcommand)]
+        action: TrajectoryCmd,
+    },
 }
 
 /// T9.1 — Subcommands for `theo skill`.
@@ -260,6 +271,31 @@ enum SkillCmd {
         /// Skip the confirmation prompt.
         #[arg(long)]
         yes: bool,
+    },
+}
+
+/// T16.1 / D16 — Subcommands for `theo trajectory`.
+#[derive(Subcommand)]
+enum TrajectoryCmd {
+    /// Export rating envelopes to a JSONL file consumable by
+    /// downstream RLHF tooling. Reads
+    /// `<repo>/.theo/trajectories/*.jsonl` and writes filtered
+    /// records to `--out`.
+    ///
+    /// Filters mirror `RatingFilter`:
+    ///   `all` (default) — every rating envelope
+    ///   `positive`      — rating > 0
+    ///   `negative`      — rating < 0
+    ///   `<n>`           — exact rating value (e.g. `1`, `-1`)
+    ExportRlhf {
+        /// Output JSONL path. Created if missing; overwritten if
+        /// present.
+        #[arg(long)]
+        out: PathBuf,
+
+        /// Rating filter. Default: `all`.
+        #[arg(long, default_value = "all")]
+        filter: String,
     },
 }
 
@@ -404,6 +440,14 @@ fn main() {
                 SkillCmd::View { name } => cmd_skill::handle_view(&name),
                 SkillCmd::Delete { name, yes } => {
                     cmd_skill::handle_delete(&name, yes)
+                }
+            };
+            std::process::exit(code);
+        }
+        Some(Commands::Trajectory { action }) => {
+            let code = match action {
+                TrajectoryCmd::ExportRlhf { out, filter } => {
+                    cmd_trajectory_export_rlhf(&cli.repo, &out, &filter)
                 }
             };
             std::process::exit(code);
@@ -634,6 +678,68 @@ fn cmd_dashboard(repo: PathBuf, port: u16, static_dir: Option<PathBuf>) {
     if let Err(e) = rt.block_on(dashboard::serve(project_dir, port, static_dir)) {
         eprintln!("✗ dashboard failed: {e}");
         std::process::exit(1);
+    }
+}
+
+/// T16.1 / D16 — Handler for `theo trajectory export-rlhf`.
+///
+/// Resolves the project dir, parses the rating filter, and dispatches
+/// to `theo_application::use_cases::trajectory_export::export_rlhf`.
+/// Returns a CLI exit code.
+fn cmd_trajectory_export_rlhf(
+    repo: &Path,
+    out: &Path,
+    filter: &str,
+) -> i32 {
+    use theo_application::use_cases::trajectory_export::{
+        export_rlhf, ExportError, RatingFilter,
+    };
+
+    let project_dir = resolve_dir(repo.to_path_buf());
+
+    // Parse the filter string. Mirrors RatingFilter::All|Positive|Negative|Exact(i8).
+    let filter = match filter.to_ascii_lowercase().as_str() {
+        "all" => RatingFilter::All,
+        "positive" | "pos" | "+" => RatingFilter::Positive,
+        "negative" | "neg" | "-" => RatingFilter::Negative,
+        s => match s.parse::<i8>() {
+            Ok(n) => RatingFilter::Exact(n),
+            Err(_) => {
+                eprintln!(
+                    "✗ unknown filter `{filter}`. Valid: all | positive | \
+                     negative | <integer> (e.g. 1, -1)."
+                );
+                return 2;
+            }
+        },
+    };
+
+    match export_rlhf(&project_dir, out, filter) {
+        Ok(n) => {
+            if n == 0 {
+                eprintln!(
+                    "⚠ wrote 0 records to `{}` (no rating envelopes \
+                     matched). Check `.theo/trajectories/` exists and \
+                     contains rated runs.",
+                    out.display()
+                );
+            } else {
+                eprintln!(
+                    "✓ wrote {n} record(s) to `{}` (filter applied at read \
+                     time).",
+                    out.display()
+                );
+            }
+            0
+        }
+        Err(ExportError::Io(e)) => {
+            eprintln!("✗ I/O error: {e}");
+            1
+        }
+        Err(ExportError::InvalidJson(msg)) => {
+            eprintln!("✗ invalid JSONL in trajectory file: {msg}");
+            1
+        }
     }
 }
 

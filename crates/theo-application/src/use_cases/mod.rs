@@ -15,6 +15,7 @@ pub mod pipeline;
 pub mod replan_advisor;
 pub mod run_agent_session;
 pub mod skills;
+pub mod trajectory_export;
 pub mod transcript_indexer_impl;
 pub mod wiki_backend_impl;
 pub mod wiki_enrichment;

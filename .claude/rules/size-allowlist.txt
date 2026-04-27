@@ -46,7 +46,7 @@ crates/theo-infra-llm/src/providers/anthropic.rs|1100|2026-07-23|Phase 4 debt
 crates/theo-domain/src/tool.rs|1100|2026-07-23|Phase 4 debt
 crates/theo-agent-runtime/src/tool_bridge/mod.rs|1100|2026-07-23|Phase 4 debt (refactored to module-dir)
 crates/theo-agent-runtime/src/memory_lifecycle.rs|1050|2026-07-23|Phase 4 debt
-apps/theo-cli/src/main.rs|1400|2026-07-23|Phase 4 debt + T1.2 decouple (ceiling raised from 1050 → 1400 post-SOTA CLI subcommand additions: skill, replan opt-in, partial-progress wiring)
+apps/theo-cli/src/main.rs|1500|2026-07-23|Phase 4 debt + T1.2 decouple (ceiling raised from 1050 → 1500 post-SOTA CLI subcommand additions: skill, replan opt-in, partial-progress wiring, T16.1 trajectory export-rlhf)
 crates/theo-application/src/use_cases/pipeline.rs|1000|2026-07-23|Phase 4 debt
 crates/theo-engine-parser/src/extractors/python.rs|1000|2026-07-23|Phase 4 debt
 crates/theo-infra-llm/src/providers/openai.rs|1000|2026-07-23|Phase 4 debt
