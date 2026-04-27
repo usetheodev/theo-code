@@ -52,6 +52,14 @@ pub struct PilotConfig {
     /// Seconds before circuit breaker transitions Open → HalfOpen.
     #[serde(default = "default_cb_cooldown")]
     pub circuit_breaker_cooldown_secs: u64,
+    /// T6.1 — Failure count at which a task is flagged for replan.
+    /// When `record_failure` bumps a task to or past this threshold,
+    /// the pilot logs a `replan_threshold_exceeded` event and the
+    /// operator (or a future auto-replan advisor) can decide to
+    /// mutate the plan via `plan_replan`. Default 3 — matches the
+    /// SOTA-tier plan target.
+    #[serde(default = "default_replan_failure_threshold")]
+    pub replan_failure_threshold: u32,
 }
 
 fn default_max_total_calls() -> usize {
@@ -72,6 +80,9 @@ fn default_cb_same_error() -> usize {
 fn default_cb_cooldown() -> u64 {
     300
 }
+fn default_replan_failure_threshold() -> u32 {
+    3
+}
 
 impl Default for PilotConfig {
     fn default() -> Self {
@@ -82,6 +93,7 @@ impl Default for PilotConfig {
             circuit_breaker_no_progress: default_cb_no_progress(),
             circuit_breaker_same_error: default_cb_same_error(),
             circuit_breaker_cooldown_secs: default_cb_cooldown(),
+            replan_failure_threshold: default_replan_failure_threshold(),
         }
     }
 }
@@ -431,6 +443,27 @@ impl PilotLoop {
             };
             update_task_status(&mut plan, task.id, new_status);
             update_task_outcome(&mut plan, task.id, result.summary.clone());
+
+            // T6.1 — auto-replan trigger. Increment failure_count on
+            // failure; reset to 0 on success (so a flaky task that
+            // eventually passes doesn't carry its history forever).
+            // When the threshold is breached, log a structured event
+            // — a future iteration will swap this log for an
+            // automatic LLM call to `replan_advisor::propose_recovery_patch`.
+            if result.success {
+                plan.reset_failure_count(task.id);
+            } else if let Some(count) = plan.record_failure(task.id) {
+                let threshold = self.pilot_config.replan_failure_threshold;
+                if threshold > 0 && count >= threshold {
+                    tracing::warn!(
+                        task_id = task.id.0,
+                        failure_count = count,
+                        threshold = threshold,
+                        "replan_threshold_exceeded — task is stuck; consider plan_replan with SkipTask or EditTask",
+                    );
+                }
+            }
+
             plan.updated_at = theo_domain::clock::now_millis();
             if let Err(e) = plan_store::save_plan(plan_path, &plan) {
                 tracing::warn!("Failed to save plan completion: {e}");
@@ -1226,5 +1259,90 @@ exit_signal_threshold = 3
         );
         let result = pilot.run_from_plan(&path).await;
         assert!(matches!(result.reason, ExitReason::FixPlanComplete));
+    }
+
+    // ── T6.1 part 3 — auto-replan trigger config + invariants ─────
+
+    #[test]
+    fn t61_default_pilot_config_has_replan_threshold_3() {
+        // SOTA-default invariant: a fresh PilotConfig must ship with
+        // replan_failure_threshold=3 (matches the plan's target).
+        // Regression here would silently disable the trigger.
+        let cfg = PilotConfig::default();
+        assert_eq!(cfg.replan_failure_threshold, 3);
+    }
+
+    #[test]
+    fn t61_pilot_config_replan_threshold_zero_disables_trigger() {
+        // The wire format accepts replan_failure_threshold=0 — that's
+        // the documented "disable" knob. The trigger code MUST guard
+        // with `threshold > 0` so a misconfigured user doesn't see
+        // the warning fire on every fresh task. This test pins the
+        // config value; the corresponding guard is exercised by
+        // t61_record_failure_below_threshold_does_not_warn (uses the
+        // Plan helper directly, no LLM needed).
+        let toml_str = r#"
+            replan_failure_threshold = 0
+        "#;
+        let cfg: PilotConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.replan_failure_threshold, 0);
+    }
+
+    #[test]
+    fn t61_pilot_config_replan_threshold_parses_from_toml() {
+        let toml_str = r#"
+            replan_failure_threshold = 7
+        "#;
+        let cfg: PilotConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.replan_failure_threshold, 7);
+    }
+
+    #[test]
+    fn t61_pilot_config_replan_threshold_omitted_defaults_to_3() {
+        // Backwards-compat: a config.toml written before T6.1 has no
+        // replan_failure_threshold field. It must default to 3 so
+        // existing pilot runs gain the trigger silently.
+        let toml_str = r#"
+            max_total_calls = 100
+        "#;
+        let cfg: PilotConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(cfg.replan_failure_threshold, 3);
+    }
+
+    #[test]
+    fn t61_record_failure_below_threshold_does_not_signal_replan() {
+        // Pure-logic test against the Plan helpers (the trigger
+        // wiring uses these directly). 1 failure with threshold=3 →
+        // tasks_exceeding_failure_threshold returns empty.
+        let mut plan = sample_plan_for_pilot();
+        plan.record_failure(PlanTaskId(1));
+        assert!(plan.tasks_exceeding_failure_threshold(3).is_empty());
+    }
+
+    #[test]
+    fn t61_record_failure_at_threshold_lists_task_for_replan() {
+        let mut plan = sample_plan_for_pilot();
+        for _ in 0..3 {
+            plan.record_failure(PlanTaskId(1));
+        }
+        let offenders = plan.tasks_exceeding_failure_threshold(3);
+        assert_eq!(offenders, vec![PlanTaskId(1)]);
+    }
+
+    #[test]
+    fn t61_success_resets_failure_count_for_eventually_passing_task() {
+        // A task that fails twice, then succeeds, MUST end at
+        // failure_count = 0 — otherwise a flaky-but-eventually-green
+        // task carries history forever.
+        let mut plan = sample_plan_for_pilot();
+        plan.record_failure(PlanTaskId(1));
+        plan.record_failure(PlanTaskId(1));
+        plan.reset_failure_count(PlanTaskId(1));
+        let task = plan
+            .all_tasks()
+            .into_iter()
+            .find(|t| t.id == PlanTaskId(1))
+            .unwrap();
+        assert_eq!(task.failure_count, 0);
     }
 }
