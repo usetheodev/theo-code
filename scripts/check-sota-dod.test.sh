@@ -92,7 +92,7 @@ assert_json_parseable() {
 # Confirm every script exists and is executable.
 for s in check-adr-coverage.sh check-complexity.sh \
          check-coverage-status.sh check-changelog-phase-coverage.sh \
-         check-sota-dod.sh; do
+         check-phase-artifacts.sh check-sota-dod.sh; do
     if [[ ! -x "scripts/$s" ]]; then
         echo "FATAL: scripts/$s missing or not executable" >&2
         exit 1
@@ -115,6 +115,8 @@ assert_exits "check-coverage-status.sh"            0 \
     bash scripts/check-coverage-status.sh
 assert_exits "check-changelog-phase-coverage.sh"   0 \
     bash scripts/check-changelog-phase-coverage.sh
+assert_exits "check-phase-artifacts.sh"            0 \
+    bash scripts/check-phase-artifacts.sh
 
 # ---------------------------------------------------------------------------
 # 2. --help mode (exit 0, non-empty output)
@@ -125,6 +127,7 @@ assert_help_nonempty "check-adr-coverage.sh"             scripts/check-adr-cover
 assert_help_nonempty "check-complexity.sh"               scripts/check-complexity.sh
 assert_help_nonempty "check-coverage-status.sh"          scripts/check-coverage-status.sh
 assert_help_nonempty "check-changelog-phase-coverage.sh" scripts/check-changelog-phase-coverage.sh
+assert_help_nonempty "check-phase-artifacts.sh"          scripts/check-phase-artifacts.sh
 
 # ---------------------------------------------------------------------------
 # 3. Bogus argument (exit 2 = invocation error)
@@ -139,6 +142,8 @@ assert_exits "check-coverage-status.sh --bogus"          2 \
     bash scripts/check-coverage-status.sh --bogus
 assert_exits "check-changelog-phase-coverage.sh --bogus" 2 \
     bash scripts/check-changelog-phase-coverage.sh --bogus
+assert_exits "check-phase-artifacts.sh --bogus"          2 \
+    bash scripts/check-phase-artifacts.sh --bogus
 
 # ---------------------------------------------------------------------------
 # 4. Per-gate semantic tests
@@ -153,6 +158,10 @@ assert_json_parseable "ADR coverage --json" \
 # CHANGELOG phase coverage --json must be parseable JSON.
 assert_json_parseable "CHANGELOG phase coverage --json" \
     bash scripts/check-changelog-phase-coverage.sh --json
+
+# Phase artifacts --json must be parseable JSON.
+assert_json_parseable "Phase artifacts --json" \
+    bash scripts/check-phase-artifacts.sh --json
 
 # Complexity gate --report mode never fails (always exit 0).
 assert_exits "complexity --report never fails"           0 \

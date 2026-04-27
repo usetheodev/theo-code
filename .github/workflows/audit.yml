@@ -59,6 +59,12 @@ jobs:
       # "Phase N" or by any of its tied task IDs (T0.1, T2.1, ...).
       - name: CHANGELOG phase coverage (SOTA Global DoD #7)
         run: bash scripts/check-changelog-phase-coverage.sh
+      # SOTA Global DoD #1 (CODE half) — every phase 0..16 has its
+      # promised artifact (type, field, module, tool) present at the
+      # canonical site. The BEHAVIOUR half (E2E manuals + bench
+      # runs) is gated by audit.yml::eval (DoD #10/#11).
+      - name: Phase artifact completeness (SOTA Global DoD #1)
+        run: bash scripts/check-phase-artifacts.sh
 
   # ── Rust build + tests ──────────────────────────────────────────────────
   rust:

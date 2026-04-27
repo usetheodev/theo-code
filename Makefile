@@ -140,6 +140,10 @@ check-changelog-phase-coverage: ## SOTA Global DoD #7: CHANGELOG mentions every 
 check-sota-dod-test: ## Regression test for the SOTA-DoD gate scripts themselves
 	@bash $(SCRIPTS)/check-sota-dod.test.sh
 
+.PHONY: check-phase-artifacts
+check-phase-artifacts: ## SOTA Global DoD #1 (code half): every phase has its promised artifacts
+	@bash $(SCRIPTS)/check-phase-artifacts.sh
+
 # ── Composite audit ────────────────────────────────────────────────────────
 .PHONY: audit
 audit: ## Run all 8 audit techniques

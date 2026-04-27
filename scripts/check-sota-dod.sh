@@ -154,6 +154,16 @@ if ! run_step "CHANGELOG phase coverage (#7)" \
     failed=1
 fi
 
+# (2c) Phase artifact completeness (Global DoD #1, CODE half) —
+#      every phase 0..16 has its promised artifact (type, field,
+#      module, tool) present at the canonical site. The BEHAVIOUR
+#      half (E2E manuals + bench runs) is OUT-OF-SCOPE for the
+#      autonomous loop — see #10/#11.
+if ! run_step "Phase artifact completeness (#1, code half)" \
+        bash scripts/check-phase-artifacts.sh; then
+    failed=1
+fi
+
 # (3) Size gate (T4.6) — every oversize file allowlisted with a future
 #     sunset. Catches file-size DoD regressions ("code-audit OK" line in
 #     each per-task DoD) before they leak past the gate.
@@ -207,7 +217,7 @@ fi
 
 # Items in the plan's Global DoD, mapped to the gate (or OUT-OF-SCOPE).
 declare -a DOD_ITEMS=(
-    "All 16 phases feature-complete in code|MANUAL"
+    "All 16 phases feature-complete in code|Phase artifact completeness"
     "All RED tests passing|cargo test"
     "cargo test --workspace green (excl. desktop/marklive)|cargo test"
     "cargo clippy --workspace -- -D warnings green|clippy"
