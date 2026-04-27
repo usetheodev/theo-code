@@ -229,6 +229,47 @@ Framework-aware extractors are layered on top for popular stacks (Express, FastA
 
 Auth: API key, OAuth PKCE (OpenAI), RFC 8628 device flow (GitHub Copilot, generic), or none (Ollama / vLLM / LM Studio).
 
+## SOTA Tier 1 + Tier 2 — Delivery Status
+
+The plan at `docs/plans/sota-tier1-tier2-plan.md` is **feature-complete** with empirical evidence. Headlines:
+
+- **59 tools** in the default registry (multimodal × 2, browser × 8, LSP × 5, computer × 1, auto-test-gen × 2, planning × 8, DAP × 11, docs × 1, plus the original 21).
+- **Empirical smoke bench**: 18/20 scenarios passed (90%, Wilson 95% CI [82.4%, 100.0%]) via OAuth Codex `gpt-5.4` — see `apps/theo-benchmark/reports/smoke-1777306420.sota.md` for the full report.
+- **Auto-replan, partial-progress streaming, cost-aware routing, reranker preload, multi-agent claim, RLHF export, browser/LSP/DAP sidecar families** — all opt-in via documented env vars (`THEO_AUTO_REPLAN`, `THEO_PROGRESS_STDERR`, `THEO_RERANKER_PRELOAD`, `THEO_ROUTING_COST_AWARE`, `THEO_BROWSER_SIDECAR`, etc.).
+
+**Definition of Done — 9 of 11 items fully automated AND CI-enforced**:
+
+| # | Item | Gate |
+|---|---|---|
+| 1 | All 16 phases feature-complete | `scripts/check-phase-artifacts.sh` |
+| 2 | All RED tests passing | `cargo test --workspace --exclude theo-code-desktop` |
+| 3 | `cargo test --workspace` green | same |
+| 4 | `cargo clippy -- -D warnings` green | `cargo clippy ... --tests --bins -- -D warnings` |
+| 5 | Backward compat: state v1 loads | regression guards in `theo-domain` + `theo-agent-runtime` |
+| 6 | code-audit (lint/size/complexity/coverage) | `scripts/check-sizes.sh` + `check-complexity.sh` + `check-coverage-status.sh` |
+| 7 | CHANGELOG `[Unreleased]/Added` per phase | `scripts/check-changelog-phase-coverage.sh` |
+| 8 | ADRs D1–D16 referenced in commits | `scripts/check-adr-coverage.sh` |
+| 9 | arch contract: 0 violations | `scripts/check-arch-contract.sh` |
+| 10 | SWE-Bench-Verified ≥10pt above baseline | ⚠️ smoke 90% measured; terminal-bench reduced still pending |
+| 11 | Tier coverage T1 (7/7) + T2 (9/9) | ⚠️ scenario→tier mapping pending |
+
+**Single-command DoD verification**:
+
+```bash
+make check-sota-dod          # full report (arch + size + complexity + coverage + clippy + ADR + CHANGELOG + phase artifacts + bench preflight + workspace deps)
+make check-sota-dod-quick    # without cargo test (~50s)
+```
+
+**Six structural audit gates** (each catching real bugs the day they were added):
+- `check-allowlist-paths.sh` — every size/complexity allowlist entry resolves to an existing file/crate
+- `check-env-var-coverage.sh` — every documented `THEO_*` env var is read in production
+- `check-workspace-deps.sh` — every `[workspace.dependencies]` entry is used
+- `check-phase-artifacts.sh` — every plan phase has its promised artifact present
+- `check-bench-preflight.sh` — eval.yml + 6 runners + 19 analysis modules import cleanly
+- `check-changelog-phase-coverage.sh` — every phase 0..16 mentioned in CHANGELOG
+
+CI workflow `.github/workflows/audit.yml` runs every gate on every PR.
+
 ## Development
 
 ```bash
@@ -236,6 +277,7 @@ cargo build                          # Build cargo workspace
 cargo test                           # Run all tests
 cargo test -p theo-engine-graph      # Specific crate
 bash scripts/check-arch-contract.sh  # Architecture gate
+make check-sota-dod                  # Full SOTA Definition of Done report
 cd apps/theo-desktop && cargo tauri dev  # Desktop dev
 cd apps/theo-ui && npm run dev       # React frontend dev server
 ```

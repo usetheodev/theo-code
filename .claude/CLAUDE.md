@@ -95,7 +95,7 @@ ADR-023 (sunset) confirms apps no longer depend on `theo-agent-runtime` directly
 - Circular dependencies are forbidden.
 - Sandbox is mandatory for `bash`: `bwrap > landlock > noop` cascade.
 - Every tool declares `schema()` + `category()` and is registered in `crates/theo-tooling/src/tool_manifest.rs` (source of truth for exposure: `DefaultRegistry`, `MetaTool`, `ExperimentalModule`, `InternalModule`).
-- Tool counts at `tool_manifest.rs`: 21 default registry, 5 meta-tools, 8 experimental, 2 internal.
+- Tool counts at `tool_manifest.rs`: **59 default registry** (post-SOTA Tier 1 + Tier 2), 5 meta-tools, 8 experimental, 2 internal. The exact 59-tool list is pinned by `default_registry_tool_id_snapshot_is_pinned` — silent renames/removals fail the test.
 - `AgentConfig` is organized as 7 owned nested sub-configs (`llm`, `loop_cfg`, `context`, `memory`, `routing`, `evolution`, `plugin`) plus 1 leaf field (`checkpoint_ttl_seconds`). Each sub-config ≤10 fields (T3.2 / T4.1).
 - `AgentRunEngine` is decomposed into 5 owned contexts (`subagent`, `observability`, `tracking`, `runtime`, `llm`) — no god-object (T3.1).
 - Secrets passing through `state_manager::append_message` are scrubbed of: `sk-ant-…`, `ghp_…`, `AKIA…`, and PEM blocks (T4.5 — see `secret_scrubber.rs`).
@@ -103,6 +103,15 @@ ADR-023 (sunset) confirms apps no longer depend on `theo-agent-runtime` directly
 - Untrusted strings (tool results, MCP results, hook injections, `.theo/PROMPT.md`) flow through `theo_domain::prompt_sanitizer::fence_untrusted` / `strip_injection_tokens` (T2.1/2.2/2.4/2.5).
 - `CapabilityGate` is always installed; default capability set is `unrestricted` (T2.3).
 - Benchmark/research code (`apps/theo-benchmark`, `research/`) stays isolated from production runtime.
+- **SOTA Tier 1 + Tier 2 plan delivered** — `docs/plans/sota-tier1-tier2-plan.md` is feature-complete with empirical evidence. 9 of 11 Global DoD items are fully automated AND CI-enforced via `make check-sota-dod`; the 2 remaining (#10 SWE-Bench-Verified, #11 tier T1+T2 coverage) need terminal-bench infrastructure beyond the autonomous loop. **Smoke baseline locked at 18/20 (90%)** via OAuth Codex `gpt-5.4` — report under `apps/theo-benchmark/reports/smoke-1777306420.sota.md`.
+- **CONTENT/STRUCTURAL audit pattern installed across 6 surfaces** — every claimed artifact must have BOTH a CONTENT audit (artifact exists?) AND a STRUCTURAL audit (artifact actually invokable / resolvable?). Surfaces gated:
+  1. CLI subcommands — `apps/theo-cli/tests/e2e_smoke.rs::every_subcommand_responds_to_help_with_exit_zero`
+  2. Tool JSON Schemas — `every_tool_input_example_satisfies_declared_required_params` (theo-tooling)
+  3. Allowlist files — `scripts/check-allowlist-paths.sh`
+  4. Env vars — `scripts/check-env-var-coverage.sh`
+  5. Workspace deps — `scripts/check-workspace-deps.sh`
+  6. Library functions — `cargo test --workspace`
+- Six SOTA-DoD gate scripts ship under `scripts/check-*.sh` — each has a self-test in `scripts/check-sota-dod.test.sh` (39 assertions) and is wired into both `make check-sota-dod` and `.github/workflows/audit.yml`.
 
 ## Runtime Layout
 
