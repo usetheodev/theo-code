@@ -22,7 +22,9 @@
 //! the protocol types are testable without a real Node runtime.
 
 pub mod protocol;
+pub mod sidecar;
 
 pub use protocol::{
     BrowserAction, BrowserError, BrowserRequest, BrowserResponse, BrowserResult, ScreenshotFormat,
 };
+pub use sidecar::{SidecarError, SidecarSession};
