@@ -312,10 +312,24 @@ fn formality_from_slug(s: &str) -> Formality {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, MutexGuard};
+
+    /// Serializes the three tests that mutate `THEO_SKIP_ONBOARDING`
+    /// (a production env var read by `needs_bootstrap`). Without this
+    /// lock, cargo's parallel test runner makes them race with each
+    /// other AND with any other test in the module that calls
+    /// `needs_bootstrap` — same flake class as the wiki/compiler one
+    /// fixed in commit 8025a70.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn env_lock() -> MutexGuard<'static, ()> {
+        ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner())
+    }
 
     // ── AC-5.1 ─────────────────────────────────────────────────
     #[test]
     fn test_needs_bootstrap_true_when_dir_missing() {
+        let _guard = env_lock();
         let tmp = tempfile::tempdir().expect("tmp");
         let missing = tmp.path().join("not-created");
         assert!(needs_bootstrap(&missing));
@@ -323,12 +337,14 @@ mod tests {
 
     #[test]
     fn test_needs_bootstrap_true_when_user_md_absent() {
+        let _guard = env_lock();
         let tmp = tempfile::tempdir().expect("tmp");
         assert!(needs_bootstrap(tmp.path()));
     }
 
     #[test]
     fn test_needs_bootstrap_true_when_user_md_only_has_frontmatter() {
+        let _guard = env_lock();
         let tmp = tempfile::tempdir().expect("tmp");
         std::fs::write(tmp.path().join(USER_MD_FILENAME), "---\n---\n").unwrap();
         assert!(needs_bootstrap(tmp.path()));
@@ -337,6 +353,7 @@ mod tests {
     // ── AC-5.5 ─────────────────────────────────────────────────
     #[test]
     fn test_needs_bootstrap_false_when_user_md_populated() {
+        let _guard = env_lock();
         let tmp = tempfile::tempdir().expect("tmp");
         let body = "---\nrole: data-scientist\n---\n# User\nA very useful description here.";
         std::fs::write(tmp.path().join(USER_MD_FILENAME), body).unwrap();
@@ -346,6 +363,11 @@ mod tests {
     // ── THEO_SKIP_ONBOARDING bypass ──
     #[test]
     fn needs_bootstrap_returns_false_when_skip_env_set() {
+        // SAFETY: holding `ENV_LOCK` serialises every test in this
+        // module that reads `THEO_SKIP_ONBOARDING` via
+        // `needs_bootstrap`, so for the duration of this test no
+        // other thread reads the variable.
+        let _guard = env_lock();
         let tmp = tempfile::tempdir().expect("tmp");
         // No USER.md → would normally return true.
         unsafe { std::env::set_var("THEO_SKIP_ONBOARDING", "1"); }
@@ -356,6 +378,8 @@ mod tests {
 
     #[test]
     fn needs_bootstrap_returns_true_when_skip_env_set_to_zero() {
+        // SAFETY: see `needs_bootstrap_returns_false_when_skip_env_set`.
+        let _guard = env_lock();
         let tmp = tempfile::tempdir().expect("tmp");
         unsafe { std::env::set_var("THEO_SKIP_ONBOARDING", "0"); }
         let result = needs_bootstrap(tmp.path());
@@ -365,6 +389,8 @@ mod tests {
 
     #[test]
     fn needs_bootstrap_returns_false_when_skip_env_set_to_true_lowercase() {
+        // SAFETY: see `needs_bootstrap_returns_false_when_skip_env_set`.
+        let _guard = env_lock();
         let tmp = tempfile::tempdir().expect("tmp");
         unsafe { std::env::set_var("THEO_SKIP_ONBOARDING", "true"); }
         let result = needs_bootstrap(tmp.path());
