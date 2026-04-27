@@ -21,9 +21,11 @@
 //! Subprocess wiring (spawn + stdio routing) is the next iteration —
 //! the protocol types are testable without a real Node runtime.
 
+pub mod client;
 pub mod protocol;
 pub mod sidecar;
 
+pub use client::{BrowserClient, BrowserClientError, NoopWriter, SidecarWriter};
 pub use protocol::{
     BrowserAction, BrowserError, BrowserRequest, BrowserResponse, BrowserResult, ScreenshotFormat,
 };
