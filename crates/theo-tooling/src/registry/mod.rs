@@ -144,6 +144,10 @@ impl Default for ToolRegistry {
 pub fn create_default_registry() -> ToolRegistry {
     use crate::apply_patch::ApplyPatchTool;
     use crate::bash::BashTool;
+    use crate::browser::{
+        BrowserClickTool, BrowserCloseTool, BrowserOpenTool, BrowserScreenshotTool,
+        BrowserSessionManager,
+    };
     use crate::dap::{
         DapSessionManager, DebugContinueTool, DebugEvalTool, DebugLaunchTool,
         DebugSetBreakpointTool, DebugStackTraceTool, DebugStepTool, DebugTerminateTool,
@@ -285,6 +289,22 @@ pub fn create_default_registry() -> ToolRegistry {
         Box::new(DebugTerminateTool::new(std::sync::Arc::new(
             DapSessionManager::from_catalogue(std::collections::HashMap::new()),
         ))),
+        // T2.1 — browser tool family. Default registry uses managers
+        // pointing at a non-existent script path so every call
+        // surfaces the same actionable "missing script" error until
+        // the project-aware constructor swaps in real managers.
+        Box::new(BrowserOpenTool::new(std::sync::Arc::new(
+            BrowserSessionManager::new("node", "/__theo_no_browser__/playwright_sidecar.js"),
+        ))),
+        Box::new(BrowserClickTool::new(std::sync::Arc::new(
+            BrowserSessionManager::new("node", "/__theo_no_browser__/playwright_sidecar.js"),
+        ))),
+        Box::new(BrowserScreenshotTool::new(std::sync::Arc::new(
+            BrowserSessionManager::new("node", "/__theo_no_browser__/playwright_sidecar.js"),
+        ))),
+        Box::new(BrowserCloseTool::new(std::sync::Arc::new(
+            BrowserSessionManager::new("node", "/__theo_no_browser__/playwright_sidecar.js"),
+        ))),
         // Builtin plugins — typed operations
         Box::new(crate::git::GitStatusTool),
         Box::new(crate::git::GitDiffTool),
@@ -325,6 +345,10 @@ pub fn create_default_registry_with_project(
 ) -> ToolRegistry {
     use std::sync::Arc;
 
+    use crate::browser::{
+        BrowserClickTool, BrowserCloseTool, BrowserOpenTool, BrowserScreenshotTool,
+        BrowserSessionManager,
+    };
     use crate::dap::{
         DapSessionManager, DebugContinueTool, DebugEvalTool, DebugLaunchTool,
         DebugSetBreakpointTool, DebugStackTraceTool, DebugStepTool, DebugTerminateTool,
@@ -411,7 +435,58 @@ pub fn create_default_registry_with_project(
         .register(Box::new(DebugTerminateTool::new(dap_manager.clone())))
         .expect("debug_terminate tool schema is valid");
 
+    // T2.1 — swap browser tool stubs for managers backed by the
+    // shipped Playwright sidecar script. Resolution order:
+    //   1. $THEO_BROWSER_SIDECAR — explicit override (CI, custom installs)
+    //   2. <project>/crates/theo-tooling/scripts/playwright_sidecar.js
+    //      (works inside this repo's checkout)
+    //   3. <project>/.theo/playwright_sidecar.js (per-project bundle)
+    // Tools share ONE BrowserSessionManager so navigation state
+    // persists across browser_open / browser_click / browser_screenshot
+    // within the same agent run.
+    let browser_script = resolve_browser_sidecar_script(project_dir);
+    let browser_node =
+        std::env::var("THEO_BROWSER_NODE").unwrap_or_else(|_| "node".to_string());
+    let browser_manager = Arc::new(BrowserSessionManager::new(
+        browser_node,
+        browser_script,
+    ));
+    for tool_id in [
+        "browser_open",
+        "browser_click",
+        "browser_screenshot",
+        "browser_close",
+    ] {
+        registry.unregister(tool_id);
+    }
     registry
+        .register(Box::new(BrowserOpenTool::new(browser_manager.clone())))
+        .expect("browser_open tool schema is valid");
+    registry
+        .register(Box::new(BrowserClickTool::new(browser_manager.clone())))
+        .expect("browser_click tool schema is valid");
+    registry
+        .register(Box::new(BrowserScreenshotTool::new(browser_manager.clone())))
+        .expect("browser_screenshot tool schema is valid");
+    registry
+        .register(Box::new(BrowserCloseTool::new(browser_manager.clone())))
+        .expect("browser_close tool schema is valid");
+
+    registry
+}
+
+/// Resolve the Playwright sidecar script path for a project.
+/// Order: env override → in-repo source path → per-project bundle.
+fn resolve_browser_sidecar_script(project_dir: &std::path::Path) -> std::path::PathBuf {
+    if let Ok(p) = std::env::var("THEO_BROWSER_SIDECAR") {
+        return std::path::PathBuf::from(p);
+    }
+    let in_repo = project_dir
+        .join("crates/theo-tooling/scripts/playwright_sidecar.js");
+    if in_repo.exists() {
+        return in_repo;
+    }
+    project_dir.join(".theo/playwright_sidecar.js")
 }
 
 /// Load plugin tools into an existing registry.

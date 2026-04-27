@@ -23,10 +23,14 @@
 
 pub mod client;
 pub mod protocol;
+pub mod session_manager;
 pub mod sidecar;
+pub mod tool;
 
 pub use client::{BrowserClient, BrowserClientError, NoopWriter, SidecarWriter};
 pub use protocol::{
     BrowserAction, BrowserError, BrowserRequest, BrowserResponse, BrowserResult, ScreenshotFormat,
 };
+pub use session_manager::{BrowserSessionError, BrowserSessionManager};
 pub use sidecar::{SidecarError, SidecarSession};
+pub use tool::{BrowserClickTool, BrowserCloseTool, BrowserOpenTool, BrowserScreenshotTool};
