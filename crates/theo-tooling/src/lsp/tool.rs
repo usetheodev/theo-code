@@ -132,12 +132,24 @@ fn map_session_error(err: LspSessionError) -> ToolError {
 }
 
 /// Send the open notification + the request, return the typed response.
+/// T14.1 — emits a partial-progress envelope tagged with `method` so
+/// each LSP call (definition / references / hover / rename) shows
+/// up as a distinct progress line in the streaming UI. Cold first
+/// calls hit the rust-analyzer initialize handshake and can take
+/// several seconds; without progress the agent appears frozen.
 async fn open_and_request(
+    ctx: &ToolContext,
     client: &LspClient,
     file_path: &Path,
     method: &'static str,
     params: Value,
 ) -> Result<JsonRpcResponse, ToolError> {
+    crate::partial::emit_progress(
+        ctx,
+        method,
+        format!("Querying LSP server for {}", file_path.display()),
+    );
+
     // Read the file so we can send `textDocument/didOpen` with the
     // current contents. LSP servers refuse to answer position queries
     // on documents they haven't seen.
@@ -255,6 +267,7 @@ impl Tool for LspDefinitionTool {
             "position": {"line": pos.line, "character": pos.character},
         });
         let resp = open_and_request(
+            ctx,
             client.as_ref(),
             &pos.file_path,
             "textDocument/definition",
@@ -347,6 +360,7 @@ impl Tool for LspRenameTool {
             "newName": new_name,
         });
         let resp = open_and_request(
+            ctx,
             client.as_ref(),
             &pos.file_path,
             "textDocument/rename",
@@ -577,6 +591,7 @@ impl Tool for LspReferencesTool {
             "context": {"includeDeclaration": include_declaration},
         });
         let resp = open_and_request(
+            ctx,
             client.as_ref(),
             &pos.file_path,
             "textDocument/references",
@@ -707,6 +722,7 @@ impl Tool for LspHoverTool {
             "position": {"line": pos.line, "character": pos.character},
         });
         let resp = open_and_request(
+            ctx,
             client.as_ref(),
             &pos.file_path,
             "textDocument/hover",

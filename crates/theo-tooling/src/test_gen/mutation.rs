@@ -168,12 +168,42 @@ impl Tool for GenMutationTestTool {
             .and_then(Value::as_str)
             .map(str::to_owned);
 
+        // T14.1 — surface progress around cargo-mutants. The
+        // subprocess can run for many minutes on a large crate; a
+        // single static "tool started" indicator is misleading.
+        // Two checkpoints: spawning, then "still running" once the
+        // outcomes parser has the raw output (the real wall-clock
+        // gap; the parser itself is fast).
         let report = if let Some(rel) = existing {
+            crate::partial::emit_progress(
+                ctx,
+                "gen_mutation_test",
+                format!("Reading outcomes from `{rel}`…"),
+            );
             let abs = ctx.project_dir.join(&rel);
             let raw = std::fs::read_to_string(&abs).map_err(ToolError::Io)?;
             parse_outcomes(&raw).map_err(ToolError::from)?
         } else {
-            run_cargo_mutants(&ctx.project_dir, &path).map_err(ToolError::from)?
+            crate::partial::emit_progress(
+                ctx,
+                "gen_mutation_test",
+                format!(
+                    "Running cargo-mutants in `{path}` (this can take \
+                     many minutes — set `existing_outcomes` to a cached \
+                     outcomes.json to skip)"
+                ),
+            );
+            let r = run_cargo_mutants(&ctx.project_dir, &path)
+                .map_err(ToolError::from)?;
+            crate::partial::emit_progress(
+                ctx,
+                "gen_mutation_test",
+                format!(
+                    "cargo-mutants finished: {} total, {} caught, {} survivors",
+                    r.total, r.caught, r.survivors.len()
+                ),
+            );
+            r
         };
 
         let summary = format!(
