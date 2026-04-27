@@ -52,6 +52,11 @@ jobs:
       # task IDs.
       - name: ADR coverage (SOTA Global DoD #8)
         run: bash scripts/check-adr-coverage.sh
+      # SOTA Global DoD #7 — every phase 0..16 has at least one
+      # mention in CHANGELOG.md [Unreleased], either by literal
+      # "Phase N" or by any of its tied task IDs (T0.1, T2.1, ...).
+      - name: CHANGELOG phase coverage (SOTA Global DoD #7)
+        run: bash scripts/check-changelog-phase-coverage.sh
 
   # ── Rust build + tests ──────────────────────────────────────────────────
   rust:

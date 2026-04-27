@@ -132,6 +132,10 @@ check-complexity: ## SOTA Global DoD #6 (partial): clippy::too_many_lines per-cr
 check-coverage-status: ## SOTA Global DoD #6 (partial): validate local .coverage/cobertura.xml
 	@bash $(SCRIPTS)/check-coverage-status.sh
 
+.PHONY: check-changelog-phase-coverage
+check-changelog-phase-coverage: ## SOTA Global DoD #7: CHANGELOG mentions every phase 0..16
+	@bash $(SCRIPTS)/check-changelog-phase-coverage.sh
+
 # ── Composite audit ────────────────────────────────────────────────────────
 .PHONY: audit
 audit: ## Run all 8 audit techniques

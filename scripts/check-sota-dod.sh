@@ -146,6 +146,14 @@ if ! run_step "ADR coverage (D1-D16 → tasks → commits)" \
     failed=1
 fi
 
+# (2b) CHANGELOG phase coverage (Global DoD #7) — every phase 0..16
+#      has at least one mention in CHANGELOG.md [Unreleased],
+#      either by literal "Phase N" or by any of its tied task IDs.
+if ! run_step "CHANGELOG phase coverage (#7)" \
+        bash scripts/check-changelog-phase-coverage.sh; then
+    failed=1
+fi
+
 # (3) Size gate (T4.6) — every oversize file allowlisted with a future
 #     sunset. Catches file-size DoD regressions ("code-audit OK" line in
 #     each per-task DoD) before they leak past the gate.
@@ -207,7 +215,7 @@ declare -a DOD_ITEMS=(
     "Per-task code-audit: file size invariant (T4.6)|size gate"
     "Per-task code-audit: function complexity (DoD #6 partial)|complexity gate"
     "Per-task code-audit: line coverage (DoD #6 partial)|coverage gate"
-    "CHANGELOG.md updated for each phase|MANUAL"
+    "CHANGELOG.md updated for each phase|CHANGELOG phase coverage"
     "ADRs D1-D16 referenced in commits|ADR coverage"
     "Architecture contract: 0 violations|arch-contract"
     "SWE-Bench-Verified or terminal-bench >= 10pt above baseline|OUT-OF-SCOPE (paid LLM API)"
