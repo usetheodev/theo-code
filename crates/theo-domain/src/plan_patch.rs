@@ -157,15 +157,20 @@ mod tests {
 
     #[test]
     fn task_edits_not_empty_when_any_field_set() {
-        let mut e = TaskEdits::default();
-        e.title = Some("x".into());
+        let e = TaskEdits {
+            title: Some("x".into()),
+            ..Default::default()
+        };
         assert!(!e.is_empty());
     }
 
     #[test]
     fn task_edits_outcome_clearing_marked_non_empty() {
-        let mut e = TaskEdits::default();
-        e.outcome = Some(None); // Some(None) means "clear the outcome"
+        // Some(None) means "clear the outcome"
+        let e = TaskEdits {
+            outcome: Some(None),
+            ..Default::default()
+        };
         assert!(!e.is_empty());
     }
 

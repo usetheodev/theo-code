@@ -334,11 +334,10 @@ mod tests {
         assert!(result.metadata["bytes"].as_u64().unwrap() > 0);
         assert_eq!(result.metadata["image_block"]["type"], "image_base64");
         assert!(
-            result.metadata["image_block"]["source"]["data"]
+            !result.metadata["image_block"]["source"]["data"]
                 .as_str()
                 .unwrap()
-                .len()
-                > 0
+                .is_empty()
         );
     }
 

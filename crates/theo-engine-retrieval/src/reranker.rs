@@ -111,19 +111,19 @@ mod inner {
             if symbol_count >= 5 {
                 break;
             }
-            if let Some(child) = graph.get_node(child_id) {
-                if child.node_type == NodeType::Symbol {
-                    parts.push(child.name.clone());
-                    if let Some(sig) = &child.signature {
-                        parts.push(sig.clone());
-                    }
-                    if let Some(doc) = &child.doc {
-                        if let Some(first_line) = doc.lines().next() {
-                            parts.push(first_line.to_string());
-                        }
-                    }
-                    symbol_count += 1;
+            if let Some(child) = graph.get_node(child_id)
+                && child.node_type == NodeType::Symbol
+            {
+                parts.push(child.name.clone());
+                if let Some(sig) = &child.signature {
+                    parts.push(sig.clone());
                 }
+                if let Some(doc) = &child.doc
+                    && let Some(first_line) = doc.lines().next()
+                {
+                    parts.push(first_line.to_string());
+                }
+                symbol_count += 1;
             }
         }
 

@@ -7,8 +7,8 @@
 //!   `{seq, type: "request", command, arguments?}`
 //! - **Response** (server → client, paired by `request_seq`):
 //!   `{seq, type: "response", request_seq, command, success, body?,
-//!    message?}` — `message` is a human-readable error string when
-//!    `success == false`.
+//!   message?}` — `message` is a human-readable error string when
+//!   `success == false`.
 //! - **Event** (server → client, unsolicited):
 //!   `{seq, type: "event", event, body?}`
 //!

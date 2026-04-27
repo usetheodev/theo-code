@@ -54,12 +54,13 @@ struct Wrapper {
 /// - The slot map is empty (nothing to route to)
 ///
 /// T10.1 — The returned router honours `routing.cost_aware`:
-///   - `cost_aware = true`  → classifier picks Cheap/Default/Strong
-///                            (SOTA-default; ≥20% cost reduction A/B)
-///   - `cost_aware = false` → always picks the default slot
-///   The flag also reads `THEO_ROUTING_COST_AWARE` (0/false/off/no →
-///   classifier off) so operators can disable per-shell without
-///   editing config.
+/// - `cost_aware = true`  → classifier picks Cheap/Default/Strong
+///   (SOTA-default; ≥20% cost reduction A/B)
+/// - `cost_aware = false` → always picks the default slot
+///
+/// The flag also reads `THEO_ROUTING_COST_AWARE` (0/false/off/no →
+/// classifier off) so operators can disable per-shell without
+/// editing config.
 pub fn load_router(
     project_dir: &Path,
     metrics_recorder: Option<RoutingMetricsRecorder>,

@@ -7,7 +7,7 @@
 //!
 //! Generated file shape (single test, single function):
 //!
-//! ```rust
+//! ```ignore
 //! use proptest::prelude::*;
 //! use crate::path::to::module::function_name;
 //!

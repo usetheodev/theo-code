@@ -12,18 +12,13 @@
 use serde::{Deserialize, Serialize};
 
 /// Image format for `Screenshot` actions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ScreenshotFormat {
+    #[default]
     Png,
     Jpeg,
-}
-
-impl Default for ScreenshotFormat {
-    fn default() -> Self {
-        Self::Png
-    }
 }
 
 /// One action the Rust client asks the sidecar to perform.

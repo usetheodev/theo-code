@@ -405,6 +405,10 @@ fn t21_tool_constant_fits_provider_window_budget() {
     // tool-result limits when mixed with other context. 256 KiB is
     // generous — but flagged here so a future bump above 1 MiB is a
     // visible decision.
-    assert!(theo_agent_runtime::constants::MAX_TOOL_OUTPUT_BYTES <= 1024 * 1024,
-        "MAX_TOOL_OUTPUT_BYTES grew above 1 MiB — re-evaluate prompt budget");
+    const {
+        assert!(
+            theo_agent_runtime::constants::MAX_TOOL_OUTPUT_BYTES <= 1024 * 1024,
+            "MAX_TOOL_OUTPUT_BYTES grew above 1 MiB — re-evaluate prompt budget"
+        );
+    }
 }

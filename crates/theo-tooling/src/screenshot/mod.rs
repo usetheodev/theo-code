@@ -172,11 +172,11 @@ fn pick_temp_path() -> PathBuf {
 pub fn capture_to_path(path: &std::path::Path) -> Result<(), CaptureError> {
     #[cfg(target_os = "macos")]
     {
-        return capture_macos(path);
+        capture_macos(path)
     }
     #[cfg(target_os = "linux")]
     {
-        return capture_linux(path);
+        capture_linux(path)
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
@@ -294,7 +294,7 @@ fn try_imagemagick_import(path: &std::path::Path) -> Result<(), CaptureError> {
 fn base64_encode(bytes: &[u8]) -> String {
     const ALPHABET: &[u8; 64] =
         b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(((bytes.len() + 2) / 3) * 4);
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     let mut i = 0;
     while i + 3 <= bytes.len() {
         let n = ((bytes[i] as u32) << 16)

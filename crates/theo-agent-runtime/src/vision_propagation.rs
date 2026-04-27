@@ -130,7 +130,7 @@ fn parse_block(v: &Value) -> Option<ContentBlock> {
             // text+image. Skip otherwise.
             v.get("text")
                 .and_then(Value::as_str)
-                .map(|s| ContentBlock::text(s))
+                .map(ContentBlock::text)
         }
         _ => None,
     }

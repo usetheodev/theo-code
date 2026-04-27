@@ -190,7 +190,7 @@ pub fn detect_driver(force: Option<DriverFamily>) -> DriverFamily {
         if std::env::var_os("DISPLAY").is_some() {
             return DriverFamily::Xdotool;
         }
-        return DriverFamily::Unknown;
+        DriverFamily::Unknown
     }
     #[cfg(target_os = "macos")]
     {

@@ -153,8 +153,10 @@ mod tests {
     fn findings_load_rejects_future_version() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("findings.json");
-        let mut f = PlanFindings::default();
-        f.version = 999;
+        let f = PlanFindings {
+            version: 999,
+            ..Default::default()
+        };
         std::fs::write(&path, serde_json::to_string(&f).unwrap()).unwrap();
         let err = load_findings(&path).unwrap_err();
         assert!(matches!(err, PlanFindingsError::UnsupportedVersion { .. }));

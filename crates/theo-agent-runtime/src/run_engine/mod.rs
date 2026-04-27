@@ -526,8 +526,7 @@ mod tests {
         let baseline = setup.listener.captured().len();
 
         // Act — synthesise a SessionTreeError and publish it.
-        let err = crate::session_tree::SessionTreeError::Io(std::io::Error::new(
-            std::io::ErrorKind::Other,
+        let err = crate::session_tree::SessionTreeError::Io(std::io::Error::other(
             "disk full (synthesised)",
         ));
         engine.publish_state_append_failure("assistant", &err);

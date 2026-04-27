@@ -413,15 +413,13 @@ mod tests {
             .launch("ses-3", "Python", serde_json::json!({"program":"x.py"}))
             .await
             .map(|_| "unexpected_ok");
-        match res {
-            Err(DapSessionError::NoAdapterForLanguage { language }) => {
-                panic!(
-                    "language `{language}` should have been found via case-insensitive lookup"
-                )
-            }
-            // Anything else is fine — the test is only about the
-            // language lookup, not about whether the binary exists.
-            _ => {}
+        // Anything other than NoAdapterForLanguage is fine — the test is
+        // only about the language lookup, not about whether the binary
+        // exists.
+        if let Err(DapSessionError::NoAdapterForLanguage { language }) = res {
+            panic!(
+                "language `{language}` should have been found via case-insensitive lookup"
+            );
         }
     }
 }

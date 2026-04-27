@@ -382,7 +382,7 @@ mod tests {
         assert_eq!(by_ext.get("rs").unwrap().name, "rust-analyzer");
         assert_eq!(by_ext.get("go").unwrap().name, "gopls");
         // Unknown extension → None.
-        assert!(by_ext.get("xyz").is_none());
+        assert!(!by_ext.contains_key("xyz"));
     }
 
     #[test]

@@ -228,8 +228,10 @@ mod tests {
     fn progress_load_rejects_future_version() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("progress.json");
-        let mut p = PlanProgress::default();
-        p.version = 999;
+        let p = PlanProgress {
+            version: 999,
+            ..Default::default()
+        };
         std::fs::write(&path, serde_json::to_string(&p).unwrap()).unwrap();
         let err = load_progress(&path).unwrap_err();
         assert!(matches!(err, PlanProgressError::UnsupportedVersion { .. }));

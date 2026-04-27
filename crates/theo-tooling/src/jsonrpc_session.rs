@@ -406,11 +406,8 @@ mod tests {
         drop(harness_writer);
         let err = sut.read_frame().await.unwrap_err();
         // Whatever the EOF state, buffered_len reflects internal state.
-        match err {
-            SessionError::UnexpectedEof { leftover_bytes } => {
-                assert!(leftover_bytes > 0);
-            }
-            _ => {}
+        if let SessionError::UnexpectedEof { leftover_bytes } = err {
+            assert!(leftover_bytes > 0);
         }
     }
 
