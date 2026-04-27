@@ -94,7 +94,7 @@ for s in check-adr-coverage.sh check-complexity.sh \
          check-coverage-status.sh check-changelog-phase-coverage.sh \
          check-phase-artifacts.sh check-bench-preflight.sh \
          check-allowlist-paths.sh check-env-var-coverage.sh \
-         check-sota-dod.sh; do
+         check-workspace-deps.sh check-sota-dod.sh; do
     if [[ ! -x "scripts/$s" ]]; then
         echo "FATAL: scripts/$s missing or not executable" >&2
         exit 1
@@ -125,6 +125,8 @@ assert_exits "check-allowlist-paths.sh"            0 \
     bash scripts/check-allowlist-paths.sh
 assert_exits "check-env-var-coverage.sh"           0 \
     bash scripts/check-env-var-coverage.sh
+assert_exits "check-workspace-deps.sh"             0 \
+    bash scripts/check-workspace-deps.sh
 
 # ---------------------------------------------------------------------------
 # 2. --help mode (exit 0, non-empty output)
@@ -139,6 +141,7 @@ assert_help_nonempty "check-phase-artifacts.sh"          scripts/check-phase-art
 assert_help_nonempty "check-bench-preflight.sh"          scripts/check-bench-preflight.sh
 assert_help_nonempty "check-allowlist-paths.sh"          scripts/check-allowlist-paths.sh
 assert_help_nonempty "check-env-var-coverage.sh"         scripts/check-env-var-coverage.sh
+assert_help_nonempty "check-workspace-deps.sh"           scripts/check-workspace-deps.sh
 
 # ---------------------------------------------------------------------------
 # 3. Bogus argument (exit 2 = invocation error)
@@ -161,6 +164,8 @@ assert_exits "check-allowlist-paths.sh --bogus"          2 \
     bash scripts/check-allowlist-paths.sh --bogus
 assert_exits "check-env-var-coverage.sh --bogus"         2 \
     bash scripts/check-env-var-coverage.sh --bogus
+assert_exits "check-workspace-deps.sh --bogus"           2 \
+    bash scripts/check-workspace-deps.sh --bogus
 
 # ---------------------------------------------------------------------------
 # 4. Per-gate semantic tests
@@ -191,6 +196,10 @@ assert_json_parseable "Allowlist paths --json" \
 # Env-var coverage --json must be parseable JSON.
 assert_json_parseable "Env-var coverage --json" \
     bash scripts/check-env-var-coverage.sh --json
+
+# Workspace deps --json must be parseable JSON.
+assert_json_parseable "Workspace deps --json" \
+    bash scripts/check-workspace-deps.sh --json
 
 # Complexity gate --report mode never fails (always exit 0).
 assert_exits "complexity --report never fails"           0 \

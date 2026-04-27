@@ -156,6 +156,10 @@ check-allowlist-paths: ## Structural audit — every allowlist path/crate resolv
 check-env-var-coverage: ## Structural audit — every documented THEO_* env var is read in source
 	@bash $(SCRIPTS)/check-env-var-coverage.sh
 
+.PHONY: check-workspace-deps
+check-workspace-deps: ## Structural audit — every [workspace.dependencies] entry is used by >=1 crate
+	@bash $(SCRIPTS)/check-workspace-deps.sh
+
 # ── Composite audit ────────────────────────────────────────────────────────
 .PHONY: audit
 audit: ## Run all 8 audit techniques

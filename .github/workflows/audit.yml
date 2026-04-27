@@ -50,6 +50,11 @@ jobs:
       # setting flags that do nothing.
       - name: SOTA env-var coverage (CHANGELOG → source)
         run: bash scripts/check-env-var-coverage.sh
+      # Structural complement to root [workspace.dependencies]:
+      # every declared dep must be used by >=1 crate. Stale entries
+      # silently pin a version in Cargo.lock without justification.
+      - name: workspace deps coverage (declared → used)
+        run: bash scripts/check-workspace-deps.sh
       - name: unwrap/expect (T2.5)
         run: bash scripts/check-unwrap.sh
       - name: panic/todo/unimplemented (T2.6)

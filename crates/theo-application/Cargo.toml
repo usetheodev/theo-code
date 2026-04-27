@@ -22,7 +22,7 @@ thiserror.workspace = true
 async-trait.workspace = true
 ignore.workspace = true
 theo-governance.workspace = true
-theo-infra-auth = { path = "../theo-infra-auth" }
+theo-infra-auth.workspace = true
 theo-infra-llm.workspace = true
 theo-infra-memory.workspace = true
 rayon.workspace = true

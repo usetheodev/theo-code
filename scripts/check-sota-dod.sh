@@ -192,6 +192,17 @@ if ! run_step "SOTA env-var coverage (CHANGELOG → source)" \
     failed=1
 fi
 
+# (3d) Workspace deps coverage — every dep declared in
+#      `[workspace.dependencies]` MUST be referenced by ≥1 crate
+#      via `<dep>.workspace = true`. Stale workspace deps end up
+#      in Cargo.lock as dead weight (slowing fresh checkouts,
+#      pulling in CVEs nobody owns). Same iter-25-onward lesson,
+#      sixth surface.
+if ! run_step "workspace deps coverage (declared → used)" \
+        bash scripts/check-workspace-deps.sh; then
+    failed=1
+fi
+
 # (4) Complexity gate — clippy::too_many_lines per-crate ceiling.
 #     Same baseline-allowlist pattern as size gate: existing 75-function
 #     debt is locked at the current per-crate count; future regressions
