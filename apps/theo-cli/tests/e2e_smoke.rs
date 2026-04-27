@@ -89,14 +89,80 @@ fn help_exposes_every_advertised_subcommand() {
     let output = theo().arg("--help").output().expect("execute");
     let stdout = String::from_utf8_lossy(&output.stdout);
     for cmd in [
-        "init", "agent", "pilot", "context", "impact", "stats", "memory", "login", "logout",
-        "dashboard",
+        // Core agent surface
+        "init", "agent", "pilot", "context", "impact", "stats", "memory",
+        // Identity + service
+        "login", "logout", "dashboard",
+        // Sub-agent + state management
+        "subagent", "checkpoints", "agents",
+        // External integrations
+        "mcp",
+        // SOTA Tier 1 + Tier 2 additions
+        "skill",       // T9.1
+        "trajectory",  // T16.1 / D16
     ] {
         assert!(
             stdout.contains(cmd),
             "subcommand `{cmd}` missing from `theo --help` output"
         );
     }
+}
+
+/// Locks the INVOKABILITY half of every CLI subcommand: each one
+/// must respond to `--help` with exit 0 and non-empty output.
+///
+/// Why a dedicated test: the existing
+/// `help_exposes_every_advertised_subcommand` test only checks that
+/// the subcommand NAME appears in the parent `--help` output, not
+/// that the subcommand itself responds to `--help`. A typo in the
+/// dispatch table would let the parent help mention `trajectory`
+/// while `theo trajectory --help` panics or returns exit 2 — the
+/// kind of CLI-surface gap I closed in commit 86165f8 for
+/// `theo trajectory export-rlhf` (where the library code existed
+/// but the CLI subcommand had never been wired).
+///
+/// Subcommands that REQUIRE an argument (e.g. `pilot` takes a
+/// project path, `mcp` takes a sub-action) are tested via
+/// `<cmd> --help` which clap renders without invoking the handler.
+#[test]
+fn every_subcommand_responds_to_help_with_exit_zero() {
+    for cmd in [
+        "init", "agent", "pilot", "context", "impact", "stats", "memory",
+        "login", "logout", "dashboard",
+        "subagent", "checkpoints", "agents",
+        "mcp",
+        "skill", "trajectory",
+    ] {
+        let assert = theo().args([cmd, "--help"]).assert().success();
+        let output = assert.get_output();
+        assert!(
+            !output.stdout.is_empty(),
+            "subcommand `theo {cmd} --help` produced empty stdout — \
+             the dispatch-or-handler is silently broken"
+        );
+    }
+}
+
+/// T16.1 / D16 — `theo trajectory export-rlhf` is the closing CLI
+/// surface for the SOTA Tier 1 + Tier 2 plan. Locks both the
+/// subcommand wiring (parent --help mentions trajectory) and the
+/// nested action (`export-rlhf --help` works + names the contract
+/// vocabulary: the `--out` arg + the `--filter` arg).
+#[test]
+fn trajectory_export_rlhf_surface_is_invokable() {
+    theo()
+        .args(["trajectory", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("export-rlhf"));
+    theo()
+        .args(["trajectory", "export-rlhf", "--help"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("--out")
+                .and(predicate::str::contains("--filter")),
+        );
 }
 
 #[test]
