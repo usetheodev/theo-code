@@ -1593,6 +1593,56 @@ mod tests {
         assert!(plan.phases[0].tasks[0].assignee.is_none());
     }
 
+    /// Backward-compat regression guard for the `sota-tier1-tier2-plan`
+    /// global DoD: a plan.json written before T6.1 (no `failure_count` on
+    /// PlanTask) and before T7.1 (no `assignee` on PlanTask, no
+    /// `version_counter` on Plan) MUST load under the current schema and
+    /// every new field MUST default deterministically. Locks the
+    /// `#[serde(default)]` contract on the bumped types.
+    #[test]
+    fn pre_t6_t7_legacy_plan_json_loads_with_all_new_fields_at_default() {
+        // Wire shape from a hypothetical theo build at HEAD~ before T6.1
+        // and T7.1. Only canonical pre-bump fields included.
+        let json = r#"{
+            "version": 1,
+            "title": "pre-bump",
+            "goal": "regression guard",
+            "current_phase": 1,
+            "phases": [
+                {
+                    "id": 1,
+                    "title": "Phase 1",
+                    "status": "in_progress",
+                    "tasks": [
+                        {"id": 1, "title": "Task 1", "status": "pending"},
+                        {"id": 2, "title": "Task 2", "status": "completed",
+                         "depends_on": [1]}
+                    ]
+                }
+            ],
+            "created_at": 1700000000,
+            "updated_at": 1700000000
+        }"#;
+        let plan: Plan = serde_json::from_str(json).expect(
+            "pre-T6/T7 plan JSON must remain loadable under the current schema",
+        );
+        // T7.1 — version_counter defaults to 0 on legacy plans.
+        assert_eq!(plan.version_counter, 0);
+        // T6.1 + T7.1 — every task gets defaulted new fields.
+        for task in plan.phases.iter().flat_map(|p| p.tasks.iter()) {
+            assert!(
+                task.assignee.is_none(),
+                "T7.1 assignee must default to None on legacy plans"
+            );
+            assert_eq!(
+                task.failure_count, 0,
+                "T6.1 failure_count must default to 0 on legacy plans"
+            );
+        }
+        // Plan must still validate end-to-end.
+        plan.validate().expect("legacy plan must still pass validate()");
+    }
+
     #[test]
     fn t71_claim_result_is_owned_predicate() {
         assert!(ClaimResult::Claimed.is_owned());

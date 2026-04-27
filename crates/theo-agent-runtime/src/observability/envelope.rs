@@ -277,4 +277,63 @@ mod tests {
         assert_eq!(back.rating_value(), Some(1));
         assert_eq!(back.payload["comment"], "good");
     }
+
+    /// Backward-compat regression guard for the `sota-tier1-tier2-plan`
+    /// global DoD: a `.theo/trajectories/*.jsonl` line written by a
+    /// theo build BEFORE T16.1 (so `EnvelopeKind` only had the original
+    /// 4 variants — `event`/`drop_sentinel`/`writer_recovered`/`summary`)
+    /// MUST still parse under the current `#[non_exhaustive]` enum that
+    /// also contains `Rating`. Locks the wire-format contract.
+    #[test]
+    fn pre_t161_legacy_trajectory_envelope_loads_each_original_kind() {
+        // Canonical pre-T16.1 lines for each of the 4 original kinds.
+        let cases = [
+            (
+                "event",
+                r#"{"v":1,"seq":0,"ts":1700000000,"run_id":"run-a",
+                    "kind":"event","event_type":"ToolCallCompleted",
+                    "event_kind":"Tooling","entity_id":"call-1",
+                    "payload":{"status":"ok"}}"#,
+                EnvelopeKind::Event,
+            ),
+            (
+                "drop_sentinel",
+                r#"{"v":1,"seq":5,"ts":1700000010,"run_id":"run-a",
+                    "kind":"drop_sentinel",
+                    "payload":{"dropped_count":3}}"#,
+                EnvelopeKind::DropSentinel,
+            ),
+            (
+                "writer_recovered",
+                r#"{"v":1,"seq":7,"ts":1700000020,"run_id":"run-a",
+                    "kind":"writer_recovered",
+                    "payload":{"buffered_events":12,"error":"disk_full"}}"#,
+                EnvelopeKind::WriterRecovered,
+            ),
+            (
+                "summary",
+                r#"{"v":1,"seq":10,"ts":1700000030,"run_id":"run-a",
+                    "kind":"summary",
+                    "payload":{"final_status":"ok","metric":0.42}}"#,
+                EnvelopeKind::Summary,
+            ),
+        ];
+        for (name, json, expected_kind) in cases {
+            let env: TrajectoryEnvelope = serde_json::from_str(json)
+                .unwrap_or_else(|e| panic!("legacy `{name}` envelope failed to parse: {e}"));
+            assert_eq!(env.kind, expected_kind, "kind mismatch for `{name}`");
+            assert_eq!(env.v, 1, "schema version preserved for `{name}`");
+            assert_eq!(
+                env.dropped_since_last, 0,
+                "`dropped_since_last` defaults to 0 on legacy envelopes (`{name}`)"
+            );
+            // Roundtrip: serialise and deserialise once more — the modern
+            // type must produce wire-format equivalent under all original
+            // kinds (no rename / no field renumber).
+            let s = serde_json::to_string(&env).expect("modern envelope serialises");
+            let back: TrajectoryEnvelope =
+                serde_json::from_str(&s).expect("modern envelope round-trips");
+            assert_eq!(back.kind, expected_kind);
+        }
+    }
 }

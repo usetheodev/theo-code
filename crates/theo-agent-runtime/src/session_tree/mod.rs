@@ -684,4 +684,70 @@ mod tests {
         assert!(has_model);
         assert!(has_branch);
     }
+
+    /// Backward-compat regression guard for the `sota-tier1-tier2-plan`
+    /// global DoD: a `.theo/state/<run_id>/session.jsonl` written by an
+    /// earlier theo build MUST still parse under the current
+    /// `#[non_exhaustive]` `SessionEntry` enum. The 5 original variants
+    /// (`header`/`message`/`compaction`/`model_change`/`branch_summary`)
+    /// were not modified by the SOTA Tier 1 + Tier 2 work; this test
+    /// locks the wire-format contract so a future bump that breaks
+    /// state v1 transcripts surfaces immediately.
+    #[test]
+    fn pre_sota_legacy_session_entry_jsonl_loads_each_original_variant() {
+        // Canonical pre-SOTA wire shapes for each variant. Note the
+        // `type` discriminator + snake_case rename is part of the
+        // contract — these strings are what older theo runs wrote to
+        // disk.
+        let cases: &[(&str, fn(&SessionEntry) -> bool)] = &[
+            (
+                r#"{"type":"header","id":"deadbeefcafebabe",
+                    "version":1,
+                    "timestamp":"2025-01-15T12:00:00Z",
+                    "cwd":"/home/user/project"}"#,
+                |e| e.is_header(),
+            ),
+            (
+                r#"{"type":"message","id":"00000000aaaaaaaa",
+                    "parent_id":"deadbeefcafebabe",
+                    "role":"user","content":"hello"}"#,
+                |e| e.is_message(),
+            ),
+            (
+                r#"{"type":"compaction","id":"00000000bbbbbbbb",
+                    "parent_id":"00000000aaaaaaaa",
+                    "summary":"older turns folded","first_kept_entry_id":
+                    "00000000cccccccc","tokens_before":1024}"#,
+                |e| e.is_compaction(),
+            ),
+            (
+                r#"{"type":"model_change","id":"00000000dddddddd",
+                    "parent_id":"00000000aaaaaaaa",
+                    "provider":"anthropic","model_id":"claude-sonnet-4-6"}"#,
+                |e| matches!(e, SessionEntry::ModelChange { .. }),
+            ),
+            (
+                r#"{"type":"branch_summary","id":"00000000eeeeeeee",
+                    "parent_id":"00000000aaaaaaaa",
+                    "summary":"abandoned exploration",
+                    "from_branch_id":"00000000ffffffff"}"#,
+                |e| matches!(e, SessionEntry::BranchSummary { .. }),
+            ),
+        ];
+        for (json, predicate) in cases {
+            let entry: SessionEntry = serde_json::from_str(json).unwrap_or_else(|err| {
+                panic!("legacy SessionEntry line failed to parse:\n{json}\n→ {err}")
+            });
+            assert!(
+                predicate(&entry),
+                "deserialised SessionEntry did not match expected variant for line:\n{json}"
+            );
+            // Roundtrip: writing and re-reading the modern form must
+            // still classify correctly under the same predicate.
+            let s = serde_json::to_string(&entry).expect("entry serialises");
+            let back: SessionEntry =
+                serde_json::from_str(&s).expect("entry round-trips");
+            assert!(predicate(&back));
+        }
+    }
 }
