@@ -891,6 +891,428 @@ fn format_eval_output(
 }
 
 // ---------------------------------------------------------------------------
+// `debug_stack_trace`
+// ---------------------------------------------------------------------------
+
+/// `debug_stack_trace` — fetch the call stack for a thread.
+pub struct DebugStackTraceTool {
+    manager: Arc<DapSessionManager>,
+}
+
+impl DebugStackTraceTool {
+    pub fn new(manager: Arc<DapSessionManager>) -> Self {
+        Self { manager }
+    }
+}
+
+#[async_trait]
+impl Tool for DebugStackTraceTool {
+    fn id(&self) -> &str {
+        "debug_stack_trace"
+    }
+
+    fn description(&self) -> &str {
+        "T13.1 — Fetch the call stack for `thread_id` (DAP `stackTrace`). \
+         Use after a `stopped` event to see where execution paused. \
+         `start_frame` (default 0) skips that many top frames; `levels` \
+         (default 20) caps the slice. Each frame carries an `id` you can pass \
+         to `debug_eval(frame_id)` or future `debug_scopes` to inspect locals \
+         at that level. \
+         Example: debug_stack_trace({session_id: \"a\", thread_id: 1})."
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            params: vec![
+                ToolParam {
+                    name: "session_id".into(),
+                    param_type: "string".into(),
+                    description: "ID of the active debug session.".into(),
+                    required: true,
+                },
+                ToolParam {
+                    name: "thread_id".into(),
+                    param_type: "integer".into(),
+                    description:
+                        "Thread to fetch the stack for. Get it from a \
+                         `stopped` event or future debug_threads tool."
+                            .into(),
+                    required: true,
+                },
+                ToolParam {
+                    name: "start_frame".into(),
+                    param_type: "integer".into(),
+                    description: "Skip this many top frames. Default 0.".into(),
+                    required: false,
+                },
+                ToolParam {
+                    name: "levels".into(),
+                    param_type: "integer".into(),
+                    description:
+                        "Cap on frames returned. Default 20 — increase to see \
+                         deeper stacks. 0 = adapter default (often unlimited)."
+                            .into(),
+                    required: false,
+                },
+            ],
+            input_examples: vec![
+                json!({"session_id": "a", "thread_id": 1}),
+                json!({"session_id": "a", "thread_id": 1, "start_frame": 5, "levels": 10}),
+            ],
+        }
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Search
+    }
+
+    async fn execute(
+        &self,
+        args: Value,
+        _ctx: &ToolContext,
+        _permissions: &mut PermissionCollector,
+    ) -> Result<ToolOutput, ToolError> {
+        let session_id = parse_session_id(&args)?;
+        let thread_id = args
+            .get("thread_id")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| {
+                ToolError::InvalidArgs("missing integer `thread_id`".into())
+            })?;
+        let start_frame = args
+            .get("start_frame")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let levels = args.get("levels").and_then(Value::as_u64).unwrap_or(20);
+
+        let client = require_session(&self.manager, &session_id).await?;
+        let mut params = json!({
+            "threadId": thread_id,
+            "startFrame": start_frame,
+        });
+        if levels > 0 {
+            params["levels"] = json!(levels);
+        }
+        let resp = client
+            .request("stackTrace", Some(params))
+            .await
+            .map_err(|e| ToolError::Execution(format!("stackTrace failed: {e}")))?;
+        check_response(&resp, "stackTrace")?;
+        Ok(format_stack_trace_output(
+            &resp,
+            &session_id,
+            thread_id,
+            start_frame,
+            levels,
+        ))
+    }
+}
+
+fn format_stack_trace_output(
+    resp: &DapResponse,
+    session_id: &str,
+    thread_id: u64,
+    start_frame: u64,
+    levels: u64,
+) -> ToolOutput {
+    let body = resp.body.as_ref();
+    let frames = body
+        .and_then(|b| b.get("stackFrames"))
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let total_frames = body
+        .and_then(|b| b.get("totalFrames"))
+        .and_then(Value::as_u64);
+
+    let summary: Vec<Value> = frames
+        .iter()
+        .map(|f| {
+            json!({
+                "id": f.get("id").and_then(Value::as_u64),
+                "name": f.get("name").and_then(Value::as_str),
+                "source_path": f
+                    .get("source")
+                    .and_then(|s| s.get("path"))
+                    .and_then(Value::as_str),
+                "line": f.get("line").and_then(Value::as_u64),
+                "column": f.get("column").and_then(Value::as_u64),
+            })
+        })
+        .collect();
+
+    let mut out = format!(
+        "debug_stack_trace: {} frame(s){} (session=`{session_id}`, thread={thread_id})\n\n",
+        frames.len(),
+        match total_frames {
+            Some(n) => format!(" of {n} total"),
+            None => String::new(),
+        }
+    );
+    for (i, f) in summary.iter().enumerate() {
+        let frame_num = start_frame + i as u64;
+        out.push_str(&format!(
+            "  #{frame_num}  id={id}  {name}  {path}:{line}:{col}\n",
+            id = f["id"],
+            name = f["name"].as_str().unwrap_or("(no name)"),
+            path = f["source_path"].as_str().unwrap_or("(no source)"),
+            line = f["line"],
+            col = f["column"],
+        ));
+    }
+    if frames.is_empty() {
+        out.push_str("(no frames returned — thread may not be in a stopped state)\n");
+    }
+
+    ToolOutput::new(
+        format!(
+            "debug_stack_trace: {} frame(s) (thread {thread_id})",
+            frames.len()
+        ),
+        out,
+    )
+    .with_metadata(json!({
+        "type": "debug_stack_trace",
+        "session_id": session_id,
+        "thread_id": thread_id,
+        "start_frame": start_frame,
+        "levels": levels,
+        "total_frames": total_frames,
+        "frame_count": frames.len(),
+        "frames": summary,
+    }))
+}
+
+// ---------------------------------------------------------------------------
+// `debug_variables`
+// ---------------------------------------------------------------------------
+
+/// `debug_variables` — drill into a variables container.
+pub struct DebugVariablesTool {
+    manager: Arc<DapSessionManager>,
+}
+
+impl DebugVariablesTool {
+    pub fn new(manager: Arc<DapSessionManager>) -> Self {
+        Self { manager }
+    }
+}
+
+#[async_trait]
+impl Tool for DebugVariablesTool {
+    fn id(&self) -> &str {
+        "debug_variables"
+    }
+
+    fn description(&self) -> &str {
+        "T13.1 — List children of a `variables_reference` (DAP `variables`). \
+         The reference comes from `debug_eval` (when the result is structured: \
+         struct, vec, hashmap), or from a future `debug_scopes` tool. \
+         Returns each child's name, value preview, type, and its OWN \
+         variables_reference (so the agent can recursively descend). Optional \
+         `start` + `count` paginate large containers (e.g. a Vec<T> with \
+         100k items). \
+         Example: debug_variables({session_id: \"a\", variables_reference: 7})."
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            params: vec![
+                ToolParam {
+                    name: "session_id".into(),
+                    param_type: "string".into(),
+                    description: "ID of the active debug session.".into(),
+                    required: true,
+                },
+                ToolParam {
+                    name: "variables_reference".into(),
+                    param_type: "integer".into(),
+                    description:
+                        "Container reference from a previous `debug_eval` or \
+                         `debug_scopes` response. MUST be > 0; references \
+                         marked as 0 in the parent are non-drillable scalars."
+                            .into(),
+                    required: true,
+                },
+                ToolParam {
+                    name: "start".into(),
+                    param_type: "integer".into(),
+                    description:
+                        "Index to start at when paginating. Default 0."
+                            .into(),
+                    required: false,
+                },
+                ToolParam {
+                    name: "count".into(),
+                    param_type: "integer".into(),
+                    description:
+                        "Max children to return. Default 100. 0 = adapter \
+                         default (often unlimited — risky for huge containers)."
+                            .into(),
+                    required: false,
+                },
+                ToolParam {
+                    name: "filter".into(),
+                    param_type: "string".into(),
+                    description:
+                        "DAP child filter: `indexed` (array entries) or \
+                         `named` (struct fields). Omit to get both."
+                            .into(),
+                    required: false,
+                },
+            ],
+            input_examples: vec![
+                json!({"session_id": "a", "variables_reference": 7}),
+                json!({"session_id": "a", "variables_reference": 7, "start": 0, "count": 50}),
+            ],
+        }
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Search
+    }
+
+    async fn execute(
+        &self,
+        args: Value,
+        _ctx: &ToolContext,
+        _permissions: &mut PermissionCollector,
+    ) -> Result<ToolOutput, ToolError> {
+        let session_id = parse_session_id(&args)?;
+        let var_ref = args
+            .get("variables_reference")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| {
+                ToolError::InvalidArgs(
+                    "missing integer `variables_reference`".into(),
+                )
+            })?;
+        if var_ref == 0 {
+            return Err(ToolError::InvalidArgs(
+                "`variables_reference` must be > 0; reference == 0 marks \
+                 a scalar value with no children to drill into"
+                    .into(),
+            ));
+        }
+        let start = args.get("start").and_then(Value::as_u64).unwrap_or(0);
+        let count = args.get("count").and_then(Value::as_u64).unwrap_or(100);
+        let filter = args.get("filter").and_then(Value::as_str).map(str::to_string);
+        if let Some(ref f) = filter
+            && !["indexed", "named"].contains(&f.as_str())
+        {
+            return Err(ToolError::InvalidArgs(format!(
+                "`filter` must be `indexed` or `named` (got `{f}`)"
+            )));
+        }
+
+        let client = require_session(&self.manager, &session_id).await?;
+        let mut params = json!({
+            "variablesReference": var_ref,
+            "start": start,
+        });
+        if count > 0 {
+            params["count"] = json!(count);
+        }
+        if let Some(ref f) = filter {
+            params["filter"] = json!(f);
+        }
+        let resp = client
+            .request("variables", Some(params))
+            .await
+            .map_err(|e| ToolError::Execution(format!("variables failed: {e}")))?;
+        check_response(&resp, "variables")?;
+        Ok(format_variables_output(
+            &resp,
+            &session_id,
+            var_ref,
+            start,
+            count,
+            filter.as_deref(),
+        ))
+    }
+}
+
+fn format_variables_output(
+    resp: &DapResponse,
+    session_id: &str,
+    variables_reference: u64,
+    start: u64,
+    count: u64,
+    filter: Option<&str>,
+) -> ToolOutput {
+    let vars = resp
+        .body
+        .as_ref()
+        .and_then(|b| b.get("variables"))
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let summary: Vec<Value> = vars
+        .iter()
+        .map(|v| {
+            json!({
+                "name": v.get("name").and_then(Value::as_str),
+                "value": v.get("value").and_then(Value::as_str),
+                "type": v.get("type").and_then(Value::as_str),
+                "variables_reference": v
+                    .get("variablesReference")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0),
+                "evaluate_name": v.get("evaluateName").and_then(Value::as_str),
+            })
+        })
+        .collect();
+
+    let drillable_count = summary
+        .iter()
+        .filter(|s| s["variables_reference"].as_u64().unwrap_or(0) > 0)
+        .count();
+
+    let mut out = format!(
+        "debug_variables: {} child(ren), {} drillable (session=`{session_id}`, ref={variables_reference})\n\n",
+        summary.len(),
+        drillable_count,
+    );
+    for s in &summary {
+        let drill_hint = if s["variables_reference"].as_u64().unwrap_or(0) > 0 {
+            format!("  [drill: {}]", s["variables_reference"])
+        } else {
+            String::new()
+        };
+        out.push_str(&format!(
+            "  {name} = {value}{ty}{drill}\n",
+            name = s["name"].as_str().unwrap_or("(unnamed)"),
+            value = s["value"].as_str().unwrap_or("?"),
+            ty = match s["type"].as_str() {
+                Some(t) => format!("  : {t}"),
+                None => String::new(),
+            },
+            drill = drill_hint,
+        ));
+    }
+
+    ToolOutput::new(
+        format!(
+            "debug_variables: {} child(ren), {} drillable",
+            summary.len(),
+            drillable_count
+        ),
+        out,
+    )
+    .with_metadata(json!({
+        "type": "debug_variables",
+        "session_id": session_id,
+        "variables_reference": variables_reference,
+        "start": start,
+        "count": count,
+        "filter": filter,
+        "child_count": summary.len(),
+        "drillable_count": drillable_count,
+        "variables": summary,
+    }))
+}
+
+// ---------------------------------------------------------------------------
 // `debug_terminate`
 // ---------------------------------------------------------------------------
 
@@ -1674,6 +2096,309 @@ mod tests {
         assert_eq!(out.metadata["result"], "(no result)");
         assert!(out.metadata["value_type"].is_null());
         assert_eq!(out.metadata["variables_reference"], 0);
+    }
+
+    // ── debug_stack_trace ─────────────────────────────────────────
+
+    #[test]
+    fn t131tool_stack_trace_id_and_category() {
+        let t = DebugStackTraceTool::new(empty_manager());
+        assert_eq!(t.id(), "debug_stack_trace");
+        assert_eq!(t.category(), ToolCategory::Search);
+    }
+
+    #[test]
+    fn t131tool_stack_trace_schema_validates_with_required_thread_id() {
+        let t = DebugStackTraceTool::new(empty_manager());
+        let schema = t.schema();
+        schema.validate().unwrap();
+        let required: Vec<&str> = schema
+            .params
+            .iter()
+            .filter(|p| p.required)
+            .map(|p| p.name.as_str())
+            .collect();
+        assert!(required.contains(&"thread_id"));
+        assert!(required.contains(&"session_id"));
+    }
+
+    #[tokio::test]
+    async fn t131tool_stack_trace_missing_thread_id_returns_invalid_args() {
+        let t = DebugStackTraceTool::new(empty_manager());
+        let ctx = make_ctx(PathBuf::from("/tmp"));
+        let mut perms = PermissionCollector::new();
+        let err = t
+            .execute(json!({"session_id": "a"}), &ctx, &mut perms)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::InvalidArgs(_)));
+    }
+
+    #[tokio::test]
+    async fn t131tool_stack_trace_unknown_session_returns_actionable_error() {
+        let t = DebugStackTraceTool::new(empty_manager());
+        let ctx = make_ctx(PathBuf::from("/tmp"));
+        let mut perms = PermissionCollector::new();
+        let err = t
+            .execute(
+                json!({"session_id": "ghost", "thread_id": 1}),
+                &ctx,
+                &mut perms,
+            )
+            .await
+            .unwrap_err();
+        match err {
+            ToolError::Execution(msg) => assert!(msg.contains("no active debug session")),
+            other => panic!("expected Execution error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn t131tool_format_stack_trace_includes_frame_ids_and_source_locations() {
+        let resp = DapResponse {
+            seq: 1,
+            message_type: "response".into(),
+            request_seq: 1,
+            command: "stackTrace".into(),
+            success: true,
+            message: None,
+            body: Some(json!({
+                "stackFrames": [
+                    {
+                        "id": 1000,
+                        "name": "main",
+                        "source": {"path": "/abs/main.rs"},
+                        "line": 42,
+                        "column": 12,
+                    },
+                    {
+                        "id": 1001,
+                        "name": "<rust_main>",
+                        "source": {"path": "/abs/lib.rs"},
+                        "line": 5,
+                        "column": 1,
+                    },
+                ],
+                "totalFrames": 2,
+            })),
+        };
+        let out = format_stack_trace_output(&resp, "a", 1, 0, 20);
+        assert_eq!(out.metadata["frame_count"], 2);
+        assert_eq!(out.metadata["total_frames"], 2);
+        assert_eq!(out.metadata["thread_id"], 1);
+        // Frame id MUST be preserved — it's the input to debug_eval(frame_id).
+        let frames = out.metadata["frames"].as_array().unwrap();
+        assert_eq!(frames[0]["id"], 1000);
+        assert_eq!(frames[0]["source_path"], "/abs/main.rs");
+        assert_eq!(frames[0]["line"], 42);
+        assert!(out.output.contains("main"));
+        assert!(out.output.contains("/abs/main.rs:42:12"));
+    }
+
+    #[test]
+    fn t131tool_format_stack_trace_handles_empty_frames_with_explanation() {
+        let resp = DapResponse {
+            seq: 1,
+            message_type: "response".into(),
+            request_seq: 1,
+            command: "stackTrace".into(),
+            success: true,
+            message: None,
+            body: Some(json!({"stackFrames": [], "totalFrames": 0})),
+        };
+        let out = format_stack_trace_output(&resp, "a", 1, 0, 20);
+        assert_eq!(out.metadata["frame_count"], 0);
+        // Helps the agent diagnose: a stopped thread should HAVE frames.
+        assert!(out.output.contains("no frames returned"));
+        assert!(out.output.contains("stopped state"));
+    }
+
+    #[test]
+    fn t131tool_format_stack_trace_offsets_frame_numbers_by_start_frame() {
+        let resp = DapResponse {
+            seq: 1,
+            message_type: "response".into(),
+            request_seq: 1,
+            command: "stackTrace".into(),
+            success: true,
+            message: None,
+            body: Some(json!({
+                "stackFrames": [
+                    {"id": 5000, "name": "fn_a", "source": {"path": "/x"}, "line": 1, "column": 1},
+                    {"id": 5001, "name": "fn_b", "source": {"path": "/x"}, "line": 2, "column": 1},
+                ],
+                "totalFrames": 100,
+            })),
+        };
+        let out = format_stack_trace_output(&resp, "a", 1, 50, 2);
+        // start_frame=50 means the rendered frames are #50, #51 — not #0, #1.
+        assert!(out.output.contains("#50"));
+        assert!(out.output.contains("#51"));
+        assert!(!out.output.contains("#0  id=5000"));
+    }
+
+    // ── debug_variables ───────────────────────────────────────────
+
+    #[test]
+    fn t131tool_variables_id_and_category() {
+        let t = DebugVariablesTool::new(empty_manager());
+        assert_eq!(t.id(), "debug_variables");
+        assert_eq!(t.category(), ToolCategory::Search);
+    }
+
+    #[test]
+    fn t131tool_variables_schema_validates() {
+        let t = DebugVariablesTool::new(empty_manager());
+        t.schema().validate().unwrap();
+    }
+
+    #[tokio::test]
+    async fn t131tool_variables_missing_reference_returns_invalid_args() {
+        let t = DebugVariablesTool::new(empty_manager());
+        let ctx = make_ctx(PathBuf::from("/tmp"));
+        let mut perms = PermissionCollector::new();
+        let err = t
+            .execute(json!({"session_id": "a"}), &ctx, &mut perms)
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ToolError::InvalidArgs(_)));
+    }
+
+    #[tokio::test]
+    async fn t131tool_variables_zero_reference_returns_invalid_args_with_explanation() {
+        // variablesReference == 0 means "not drillable". Calling
+        // debug_variables on it is a logic error — explain WHY.
+        let t = DebugVariablesTool::new(empty_manager());
+        let ctx = make_ctx(PathBuf::from("/tmp"));
+        let mut perms = PermissionCollector::new();
+        let err = t
+            .execute(
+                json!({"session_id": "a", "variables_reference": 0}),
+                &ctx,
+                &mut perms,
+            )
+            .await
+            .unwrap_err();
+        match err {
+            ToolError::InvalidArgs(msg) => {
+                assert!(msg.contains("must be > 0"));
+                assert!(msg.contains("scalar value"));
+            }
+            other => panic!("expected InvalidArgs, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn t131tool_variables_invalid_filter_returns_invalid_args() {
+        let t = DebugVariablesTool::new(empty_manager());
+        let ctx = make_ctx(PathBuf::from("/tmp"));
+        let mut perms = PermissionCollector::new();
+        let err = t
+            .execute(
+                json!({
+                    "session_id": "a",
+                    "variables_reference": 7,
+                    "filter": "weird"
+                }),
+                &ctx,
+                &mut perms,
+            )
+            .await
+            .unwrap_err();
+        match err {
+            ToolError::InvalidArgs(msg) => {
+                assert!(msg.contains("`filter`"));
+                assert!(msg.contains("indexed"));
+                assert!(msg.contains("named"));
+            }
+            other => panic!("expected InvalidArgs, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn t131tool_variables_unknown_session_returns_actionable_error() {
+        let t = DebugVariablesTool::new(empty_manager());
+        let ctx = make_ctx(PathBuf::from("/tmp"));
+        let mut perms = PermissionCollector::new();
+        let err = t
+            .execute(
+                json!({"session_id": "ghost", "variables_reference": 7}),
+                &ctx,
+                &mut perms,
+            )
+            .await
+            .unwrap_err();
+        match err {
+            ToolError::Execution(msg) => assert!(msg.contains("no active debug session")),
+            other => panic!("expected Execution error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn t131tool_format_variables_counts_drillable_children() {
+        let resp = DapResponse {
+            seq: 1,
+            message_type: "response".into(),
+            request_seq: 1,
+            command: "variables".into(),
+            success: true,
+            message: None,
+            body: Some(json!({
+                "variables": [
+                    {"name": "x", "value": "42", "type": "i32", "variablesReference": 0},
+                    {"name": "v", "value": "[1, 2, 3]", "type": "Vec<i32>", "variablesReference": 11},
+                    {"name": "name", "value": "\"hi\"", "type": "&str", "variablesReference": 0},
+                    {"name": "map", "value": "HashMap{2}", "type": "HashMap<i32, String>", "variablesReference": 12},
+                ]
+            })),
+        };
+        let out = format_variables_output(&resp, "a", 7, 0, 100, None);
+        assert_eq!(out.metadata["child_count"], 4);
+        assert_eq!(out.metadata["drillable_count"], 2);
+        assert_eq!(out.metadata["session_id"], "a");
+        // Output text shows drill hints for the two structured ones.
+        assert!(out.output.contains("[drill: 11]"));
+        assert!(out.output.contains("[drill: 12]"));
+        assert!(out.output.contains("x = 42"));
+        // Scalar children must NOT have a drill hint.
+        let x_line = out
+            .output
+            .lines()
+            .find(|l| l.contains("x = 42"))
+            .unwrap();
+        assert!(!x_line.contains("[drill:"));
+    }
+
+    #[test]
+    fn t131tool_format_variables_handles_empty_response_gracefully() {
+        let resp = DapResponse {
+            seq: 1,
+            message_type: "response".into(),
+            request_seq: 1,
+            command: "variables".into(),
+            success: true,
+            message: None,
+            body: Some(json!({"variables": []})),
+        };
+        let out = format_variables_output(&resp, "a", 7, 0, 100, None);
+        assert_eq!(out.metadata["child_count"], 0);
+        assert_eq!(out.metadata["drillable_count"], 0);
+    }
+
+    #[test]
+    fn t131tool_format_variables_passes_filter_through_to_metadata() {
+        let resp = DapResponse {
+            seq: 1,
+            message_type: "response".into(),
+            request_seq: 1,
+            command: "variables".into(),
+            success: true,
+            message: None,
+            body: Some(json!({"variables": []})),
+        };
+        let out = format_variables_output(&resp, "a", 7, 0, 50, Some("indexed"));
+        assert_eq!(out.metadata["filter"], "indexed");
+        assert_eq!(out.metadata["count"], 50);
     }
 
     // Suppress unused-helper warning when no test needs make_ctx +

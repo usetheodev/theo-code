@@ -146,7 +146,8 @@ pub fn create_default_registry() -> ToolRegistry {
     use crate::bash::BashTool;
     use crate::dap::{
         DapSessionManager, DebugContinueTool, DebugEvalTool, DebugLaunchTool,
-        DebugSetBreakpointTool, DebugStepTool, DebugTerminateTool,
+        DebugSetBreakpointTool, DebugStackTraceTool, DebugStepTool, DebugTerminateTool,
+        DebugVariablesTool,
     };
     use crate::edit::EditTool;
     use crate::glob::GlobTool;
@@ -275,6 +276,12 @@ pub fn create_default_registry() -> ToolRegistry {
         Box::new(DebugEvalTool::new(std::sync::Arc::new(
             DapSessionManager::from_catalogue(std::collections::HashMap::new()),
         ))),
+        Box::new(DebugStackTraceTool::new(std::sync::Arc::new(
+            DapSessionManager::from_catalogue(std::collections::HashMap::new()),
+        ))),
+        Box::new(DebugVariablesTool::new(std::sync::Arc::new(
+            DapSessionManager::from_catalogue(std::collections::HashMap::new()),
+        ))),
         Box::new(DebugTerminateTool::new(std::sync::Arc::new(
             DapSessionManager::from_catalogue(std::collections::HashMap::new()),
         ))),
@@ -320,7 +327,8 @@ pub fn create_default_registry_with_project(
 
     use crate::dap::{
         DapSessionManager, DebugContinueTool, DebugEvalTool, DebugLaunchTool,
-        DebugSetBreakpointTool, DebugStepTool, DebugTerminateTool,
+        DebugSetBreakpointTool, DebugStackTraceTool, DebugStepTool, DebugTerminateTool,
+        DebugVariablesTool,
     };
     use crate::docs_search::{DocsSearchTool, bootstrap_docs_index};
     use crate::lsp::{
@@ -372,6 +380,8 @@ pub fn create_default_registry_with_project(
         "debug_continue",
         "debug_step",
         "debug_eval",
+        "debug_stack_trace",
+        "debug_variables",
         "debug_terminate",
     ] {
         registry.unregister(tool_id);
@@ -391,6 +401,12 @@ pub fn create_default_registry_with_project(
     registry
         .register(Box::new(DebugEvalTool::new(dap_manager.clone())))
         .expect("debug_eval tool schema is valid");
+    registry
+        .register(Box::new(DebugStackTraceTool::new(dap_manager.clone())))
+        .expect("debug_stack_trace tool schema is valid");
+    registry
+        .register(Box::new(DebugVariablesTool::new(dap_manager.clone())))
+        .expect("debug_variables tool schema is valid");
     registry
         .register(Box::new(DebugTerminateTool::new(dap_manager.clone())))
         .expect("debug_terminate tool schema is valid");

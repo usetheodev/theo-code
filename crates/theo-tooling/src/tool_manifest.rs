@@ -220,6 +220,20 @@ pub const TOOL_MANIFEST: &[ToolManifestEntry] = &[
         notes: "T13.1 — DAP `evaluate` for inspecting expressions in the debuggee context. Optional `frame_id` (from debug_stack_trace) and `context` (`watch`/`repl`/`hover`). Returns result + type + variablesReference for drill-down.",
     },
     ToolManifestEntry {
+        id: "debug_stack_trace",
+        exposure: ToolExposure::DefaultRegistry,
+        status: ToolStatus::Implemented,
+        owner: "theo-tooling",
+        notes: "T13.1 — DAP `stackTrace`. Returns frames {id, name, source.path, line, column}. Use frame.id as `frame_id` in debug_eval / future debug_scopes. Optional `start_frame` + `levels` for paginating deep stacks.",
+    },
+    ToolManifestEntry {
+        id: "debug_variables",
+        exposure: ToolExposure::DefaultRegistry,
+        status: ToolStatus::Implemented,
+        owner: "theo-tooling",
+        notes: "T13.1 — DAP `variables`. Drills into a variablesReference (from debug_eval / future debug_scopes). Each child carries its OWN variables_reference for recursive descent. Rejects reference == 0 with explanation (scalar values are non-drillable). Optional `start`/`count`/`filter` for paginating large containers.",
+    },
+    ToolManifestEntry {
         id: "debug_terminate",
         exposure: ToolExposure::DefaultRegistry,
         status: ToolStatus::Implemented,
