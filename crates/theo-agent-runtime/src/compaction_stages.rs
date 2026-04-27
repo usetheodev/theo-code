@@ -43,12 +43,22 @@ pub const MASK_SENTINEL_PREFIX: &str = "[ref: tool result ";
 /// to recompute.
 pub const PROTECTED_TOOL_NAMES: &[&str] = &[
     "read",
-    "graph_context",
+    // 2026-04-27: was `graph_context` — name not registered. The
+    // production tool exposing the structural code map is registered
+    // as `codebase_context` (theo-tooling tool_manifest.rs:48).
+    "codebase_context",
+    // `skill` is a MetaTool injected by tool_bridge (not in
+    // create_default_registry); `invoke_skill` / `present_plan` from
+    // the original list never existed in production and were dropped.
     "skill",
-    "invoke_skill",
-    "present_plan",
     "lsp_definition",
     "lsp_references",
+    // 2026-04-27: also protect plan-state tools — losing their results
+    // forces the agent to rebuild plan reasoning from scratch which
+    // wastes far more tokens than keeping the message intact.
+    "plan_create",
+    "plan_summary",
+    "plan_next_task",
 ];
 
 /// Build the canonical Mask sentinel for a tool result.

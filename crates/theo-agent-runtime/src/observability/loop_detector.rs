@@ -22,7 +22,12 @@ const WINDOW_SIZE: usize = 10;
 /// suspicious repetition rather than benign workflow, inflating the
 /// loop detector's noise floor. The pairs now mirror the production
 /// IDs (`edit`, `write`, `read`).
-const EXPECTED_SEQUENCES: &[(&str, &str)] = &[
+///
+/// `pub` (was private) so the contract test
+/// `production_registry_recognises_all_observability_tool_names` in
+/// `tests/observability_tool_name_contract.rs` can cross-check every
+/// referenced name against the snapshot-pinned production registry.
+pub const EXPECTED_SEQUENCES: &[(&str, &str)] = &[
     ("write", "read"),
     ("edit", "bash"),
     ("edit", "read"),

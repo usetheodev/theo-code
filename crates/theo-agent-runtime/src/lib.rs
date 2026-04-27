@@ -54,7 +54,10 @@ pub mod vision_propagation;
 // unit that sees the same surface as external crates.
 pub mod autodream;          // tests/observability_e2e.rs
 pub mod budget_enforcer;    // observability tests
-pub(crate) mod compaction_stages;
+// pub (was pub(crate)) so `tests/observability_tool_name_contract.rs`
+// can cross-check `PROTECTED_TOOL_NAMES` against the production registry
+// (dogfood-2026-04-27 follow-up).
+pub mod compaction_stages;
 pub(crate) mod compaction_summary;
 pub(crate) mod extension;
 pub(crate) mod failure_tracker;
