@@ -153,6 +153,7 @@ mod tests {
                     rationale: String::new(),
                     outcome: None,
                     assignee: None,
+                    failure_count: 0,
                 }],
             }],
             decisions: vec![],

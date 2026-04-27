@@ -1147,6 +1147,7 @@ exit_signal_threshold = 3
                         rationale: String::new(),
                         outcome: None,
                         assignee: None,
+                        failure_count: 0,
                     },
                     PlanTask {
                         id: PlanTaskId(2),
@@ -1159,6 +1160,7 @@ exit_signal_threshold = 3
                         rationale: String::new(),
                         outcome: None,
                         assignee: None,
+                        failure_count: 0,
                     },
                 ],
             }],

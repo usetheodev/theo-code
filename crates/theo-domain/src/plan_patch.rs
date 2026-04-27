@@ -175,6 +175,7 @@ mod tests {
                 rationale: String::new(),
                 outcome: None,
                 assignee: None,
+                failure_count: 0,
             },
             position: InsertPosition::Begin,
         };

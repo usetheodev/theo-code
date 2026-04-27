@@ -187,6 +187,7 @@ fn build_plan_from_args(
                     rationale: t.rationale,
                     outcome: None,
                     assignee: None,
+                    failure_count: 0,
                 })
                 .collect(),
         })
