@@ -128,6 +128,10 @@ check-adr-coverage: ## SOTA Global DoD #8: ADRs D1-D16 referenced in commits
 check-complexity: ## SOTA Global DoD #6 (partial): clippy::too_many_lines per-crate ceiling
 	@bash $(SCRIPTS)/check-complexity.sh
 
+.PHONY: check-coverage-status
+check-coverage-status: ## SOTA Global DoD #6 (partial): validate local .coverage/cobertura.xml
+	@bash $(SCRIPTS)/check-coverage-status.sh
+
 # ── Composite audit ────────────────────────────────────────────────────────
 .PHONY: audit
 audit: ## Run all 8 audit techniques

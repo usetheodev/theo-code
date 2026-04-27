@@ -163,6 +163,18 @@ if ! run_step "complexity gate (clippy::too_many_lines, baseline allowlist)" \
     failed=1
 fi
 
+# (5) Coverage gate (local artifact validation).
+#     Tarpaulin is too slow to run every iteration (minutes per pass).
+#     This gate validates the LAST locally-produced cobertura.xml
+#     against a line-rate floor; the FULL gate runs in CI via
+#     audit.yml::coverage. Refresh locally with:
+#       cargo tarpaulin -p theo-agent-runtime --out Xml \
+#         --output-dir .coverage
+if ! run_step "coverage gate (local cobertura.xml line-rate floor)" \
+        bash scripts/check-coverage-status.sh; then
+    failed=1
+fi
+
 # (3) cargo clippy --workspace (excl. desktop/marklive) -- -D warnings
 #     Clippy on every crate the contract touches; -D warnings turns each
 #     lint into an error so the gate is honest about the lint surface.
@@ -194,6 +206,7 @@ declare -a DOD_ITEMS=(
     "Backward compatibility: state v1 plans/transcripts load|cargo test"
     "Per-task code-audit: file size invariant (T4.6)|size gate"
     "Per-task code-audit: function complexity (DoD #6 partial)|complexity gate"
+    "Per-task code-audit: line coverage (DoD #6 partial)|coverage gate"
     "CHANGELOG.md updated for each phase|MANUAL"
     "ADRs D1-D16 referenced in commits|ADR coverage"
     "Architecture contract: 0 violations|arch-contract"
