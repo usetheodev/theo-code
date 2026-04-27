@@ -154,6 +154,15 @@ if ! run_step "size gate (T4.6 allowlist + sunsets)" \
     failed=1
 fi
 
+# (4) Complexity gate — clippy::too_many_lines per-crate ceiling.
+#     Same baseline-allowlist pattern as size gate: existing 75-function
+#     debt is locked at the current per-crate count; future regressions
+#     fail the gate.
+if ! run_step "complexity gate (clippy::too_many_lines, baseline allowlist)" \
+        bash scripts/check-complexity.sh; then
+    failed=1
+fi
+
 # (3) cargo clippy --workspace (excl. desktop/marklive) -- -D warnings
 #     Clippy on every crate the contract touches; -D warnings turns each
 #     lint into an error so the gate is honest about the lint surface.
@@ -184,6 +193,7 @@ declare -a DOD_ITEMS=(
     "cargo clippy --workspace -- -D warnings green|clippy"
     "Backward compatibility: state v1 plans/transcripts load|cargo test"
     "Per-task code-audit: file size invariant (T4.6)|size gate"
+    "Per-task code-audit: function complexity (DoD #6 partial)|complexity gate"
     "CHANGELOG.md updated for each phase|MANUAL"
     "ADRs D1-D16 referenced in commits|ADR coverage"
     "Architecture contract: 0 violations|arch-contract"

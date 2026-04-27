@@ -1,0 +1,28 @@
+# Complexity allowlist for `scripts/check-complexity.sh`.
+#
+# Format:  <crate>|<max-allowed-violations>|<reason>
+#
+# `max-allowed-violations` is the per-crate ceiling for
+# `clippy::too_many_lines` warnings (default threshold 100 LOC per
+# function). When a crate's count exceeds its ceiling, the gate
+# fails — the diff that introduced the regression is required to
+# either refactor the new oversized function OR raise this ceiling
+# with a justification in the reason field.
+#
+# Refactoring a function below 100 LOC drops the count → please
+# also drop the ceiling here so the new floor is locked in.
+#
+# The initial baseline was captured 2026-04-27 (post-SOTA
+# Tier 1 + Tier 2 delivery). Every entry pairs to a per-crate
+# follow-up to refactor the offending functions during the next
+# decomposition sprint (sunset alongside the size-allowlist
+# entries at 2026-07-23).
+
+theo-engine-retrieval|24|Phase 4 retrieval god-files (assembly.rs, search.rs, file_retriever.rs) host the longest functions; refactor at 2026-07-23 sunset.
+theo|11|apps/theo-cli/src/main.rs subcommand bodies + tui/widgets/diff_viewer; per-subcommand decomposition pending.
+theo-infra-llm|10|provider catalogs + format converters host the longest functions (anthropic.rs, openai.rs, openai_compatible.rs).
+theo-agent-runtime|10|run_engine, subagent, compaction_stages, pilot — all on the size-allowlist with sunset 2026-07-23.
+theo-application|9|graph_context_service.rs + use_cases/pipeline.rs; sunset 2026-07-23.
+theo-tooling|8|dap/lsp/browser/plan tool families — same sunset as the size-allowlist entries.
+theo-domain|2|plan.rs apply_patch + a serde helper; harmless but worth refactoring.
+theo-engine-graph|1|cluster.rs label-propagation loop.

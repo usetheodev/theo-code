@@ -124,6 +124,10 @@ check-sota-dod-quick: ## SOTA DoD report (arch + clippy only, no tests)
 check-adr-coverage: ## SOTA Global DoD #8: ADRs D1-D16 referenced in commits
 	@bash $(SCRIPTS)/check-adr-coverage.sh
 
+.PHONY: check-complexity
+check-complexity: ## SOTA Global DoD #6 (partial): clippy::too_many_lines per-crate ceiling
+	@bash $(SCRIPTS)/check-complexity.sh
+
 # ── Composite audit ────────────────────────────────────────────────────────
 .PHONY: audit
 audit: ## Run all 8 audit techniques
