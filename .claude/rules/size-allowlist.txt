@@ -71,7 +71,8 @@ crates/theo-infra-memory/src/security.rs|850|2026-07-23|Phase 4 debt
 # 2026-07-23 alongside the broader Phase 4 god-file allowlist — by
 # that date the SOTA tools must be split per-tool (one tool per file)
 # or the gate fails.
-crates/theo-tooling/src/dap/tool.rs|3050|2026-07-23|T13.1 — DAP tool family (debug_status/launch/breakpoint/continue/step/eval/stack_trace/variables/scopes/threads/terminate). Decompose into per-tool files at sunset.
+crates/theo-tooling/src/dap/tool.rs|2500|2026-07-23|T13.1 — DAP tool family (debug_status/launch/breakpoint/continue/step/eval/stack_trace/variables/scopes/threads/terminate). Test body extracted to `tool_tests.rs` via `#[cfg(test)] #[path = "tool_tests.rs"] mod tests;` so the production half stays under the 2500-line `theo-governance::structural_hygiene::no_oversized_source_files` hard limit. Decompose into per-tool files at sunset.
+crates/theo-tooling/src/dap/tool_tests.rs|1300|2026-07-23|T13.1 — sibling test body of `dap/tool.rs` (1250 lines of test-only code, 73 tests). Extracted 2026-04-27 to keep tool.rs under the 2500-line structural-hygiene hard limit. Will be split per-tool alongside tool.rs at sunset.
 crates/theo-tooling/src/plan/mod.rs|2400|2026-07-23|T6.1 — plan_create + plan_update_task + plan_advance_phase + plan_log + plan_summary + plan_next_task + plan_replan + plan_failure_status. Decompose into per-tool files at sunset.
 crates/theo-domain/src/plan.rs|1900|2026-07-23|T6.1 + T7.1 — Plan/Phase/PlanTask schema + PlanPatch + ClaimResult + 60+ tests. Split tests into separate file at sunset.
 crates/theo-tooling/src/lsp/tool.rs|1800|2026-07-23|T3.1 — LSP tool family (lsp_status/definition/references/hover/rename). Decompose into per-tool files at sunset.
