@@ -492,7 +492,33 @@ pub async fn run(
 
                     // T15.1 — populate docs_search index from project's well-known locations.
                     let registry = create_default_registry_with_project(&task_dir);
-                    let agent = injections_for_task.apply_to(AgentLoop::new(cfg.clone(), registry));
+
+                    // T14.1 — wire partial-progress streaming. The
+                    // agent loop emits envelopes through `tx`; a
+                    // spawned drainer pulls them with 50 ms debounce
+                    // and forwards rendered lines as
+                    // `Msg::PartialProgressUpdate` to the TUI update
+                    // path, which mutates `state.partial_progress`.
+                    let (partial_tx, partial_rx) =
+                        tokio::sync::mpsc::channel::<String>(64);
+                    let drainer_msg_tx = task_msg_tx.clone();
+                    let drainer_handle = tokio::spawn(async move {
+                        crate::render::partial_progress::run_drainer(
+                            partial_rx,
+                            move |lines| {
+                                let _ = drainer_msg_tx.try_send(
+                                    crate::tui::app::Msg::PartialProgressUpdate(
+                                        lines,
+                                    ),
+                                );
+                            },
+                        )
+                        .await;
+                    });
+
+                    let agent = injections_for_task
+                        .apply_to(AgentLoop::new(cfg.clone(), registry))
+                        .with_partial_progress_tx(partial_tx);
 
                     tui_log("AgentLoop created, calling run_with_history...");
                     tui_log(&format!("  api_key len: {}", cfg.llm.api_key.as_ref().map(|k| k.len()).unwrap_or(0)));
@@ -510,6 +536,19 @@ pub async fn run(
                         .await;
 
                     tui_log(&format!("Agent finished: success={} summary={}", result.success, &result.summary[..result.summary.len().min(100)]));
+
+                    // T14.1 — agent's `partial_tx` clones drop with
+                    // the AgentRunEngine; the drainer sees the
+                    // channel close and exits naturally. Await its
+                    // join handle so any in-flight final frame
+                    // reaches the TUI before we send AgentComplete.
+                    let _ = drainer_handle.await;
+                    // Clear the status line on agent exit — no tool
+                    // is in flight anymore, so a stale partial would
+                    // mislead the user.
+                    let _ = task_msg_tx
+                        .send(Msg::PartialProgressUpdate(Vec::new()))
+                        .await;
                     let _ = task_msg_tx.send(Msg::AgentComplete(result.summary, result.success)).await;
                 });
             }

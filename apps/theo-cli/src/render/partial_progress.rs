@@ -1,9 +1,3 @@
-// T14.1 — Helpers consumed by the TUI streaming integration in a
-// follow-up commit. The pure parser/formatter + drainer ship now
-// so the wire format is locked-in and TUI work can iterate in
-// parallel; the unused warnings clear once the TUI lands.
-#![allow(dead_code)]
-
 //! T14.1 — Consumer side of partial-progress streaming.
 //!
 //! Drains the `mpsc::Receiver<String>` that `ToolContext.stdout_tx`

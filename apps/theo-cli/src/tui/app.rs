@@ -105,6 +105,11 @@ pub struct TuiState {
     pub show_timeline: bool,
     // Approval modal (F4-T02)
     pub pending_approval: Option<PendingApproval>,
+    /// T14.1 — Latest debounced partial-progress lines (one per
+    /// active tool, sorted alphabetically). Populated by the
+    /// drainer task; rendered above / inside the status line.
+    /// Empty Vec when no tool is emitting progress.
+    pub partial_progress: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -215,6 +220,7 @@ impl TuiState {
             tool_chain: Vec::new(),
             show_timeline: false,
             pending_approval: None,
+            partial_progress: Vec::new(),
         }
     }
 }
@@ -303,6 +309,11 @@ pub enum Msg {
     ToggleCopyMode,
     CopyLastResponse,
     CopyLastCodeBlock,
+    /// T14.1 — Partial-progress status line update. Carries the
+    /// rendered lines (one per active tool, alphabetically sorted)
+    /// produced by `partial_progress::run_drainer` after each 50 ms
+    /// debounce window. Empty Vec → clear the status line.
+    PartialProgressUpdate(Vec<String>),
 }
 
 // ---------------------------------------------------------------------------
@@ -492,6 +503,13 @@ pub fn update(state: &mut TuiState, msg: Msg) {
         }
         Msg::Notify(message) => {
             state.transcript.push(TranscriptEntry::SystemMessage(message));
+        }
+        Msg::PartialProgressUpdate(lines) => {
+            // T14.1 — replace (latest-wins) the partial-progress
+            // status. Empty Vec from the drainer = nothing in flight,
+            // so clear the status. Pure assignment; the renderer
+            // reads `state.partial_progress` each frame.
+            state.partial_progress = lines;
         }
         Msg::CopyToClipboard(text) => {
             // OSC52 clipboard escape sequence (works in most modern terminals + tmux + SSH)
