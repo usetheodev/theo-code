@@ -31,8 +31,8 @@ crates/theo-agent-runtime/src/run_engine/mod_tests.rs|1260|2026-10-31|Sibling te
 # crates/theo-engine-parser/src/extractors/language_behavior.rs — REMOVED 2026-04-28 (file moved to module-dir form during god-files refactor)
 # crates/theo-engine-parser/src/extractors/language_behavior_tests.rs — REMOVED 2026-04-28 (file moved to module-dir form during god-files refactor)
 # crates/theo-application/src/use_cases/graph_context_service.rs — REMOVED 2026-04-28 (file moved to module-dir form during god-files refactor)
-crates/theo-engine-parser/src/types.rs|960|2026-10-31|T4.5 god file (T2.4 split: tests extracted to types_tests.rs; production half 1665 → 948 LOC)
-crates/theo-engine-parser/src/types_tests.rs|800|2026-10-31|Sibling test body of types.rs (T2.4)
+# crates/theo-engine-parser/src/types.rs — REMOVED 2026-04-28 (file moved to module-dir form during god-files refactor)
+# crates/theo-engine-parser/src/types_tests.rs — REMOVED 2026-04-28 (file moved to module-dir form during god-files refactor)
 # crates/theo-engine-retrieval/src/assembly.rs — REMOVED 2026-04-28 (file moved to module-dir form during god-files refactor)
 # crates/theo-engine-graph/src/cluster.rs — REMOVED 2026-04-28 (file moved to module-dir form during god-files refactor)
 # crates/theo-engine-retrieval/src/file_retriever.rs — T4.3 split 2026-04-28: production half now 720 LOC.
@@ -47,8 +47,8 @@ crates/theo-engine-parser/src/symbol_table_tests.rs|850|2026-10-31|Sibling test 
 # crates/theo-engine-retrieval/src/search.rs — REMOVED 2026-04-28 (file moved to module-dir form during god-files refactor)
 # crates/theo-engine-parser/src/import_resolver.rs — T2.4 split 2026-04-28: production half now 603 LOC.
 # crates/theo-agent-runtime/src/pilot/mod.rs — T3.2 split 2026-04-28: production half now 780 LOC.
-crates/theo-agent-runtime/src/pilot/mod_tests.rs|650|2026-10-31|Sibling test body of pilot/mod.rs (T3.2)
-crates/theo-engine-parser/src/extractors/data_models.rs|970|2026-10-31|Phase 4 debt (T2.4 split: tests extracted; production half 1185 → 960 LOC)
+# crates/theo-agent-runtime/src/pilot/mod_tests.rs — RESOLVED 2026-04-28 (now under 800 LOC default ceiling)
+# crates/theo-engine-parser/src/extractors/data_models.rs — REMOVED 2026-04-28 (file moved to module-dir form during god-files refactor)
 # crates/theo-engine-parser/src/extractors/csharp.rs — T2.4 split 2026-04-28: production half now 783 LOC (under 800), tests extracted.
 # crates/theo-engine-retrieval/src/wiki/runtime.rs — T4.4 split 2026-04-28: production half now 694 LOC.
 # crates/theo-infra-llm/src/providers/anthropic.rs — T5.2 split 2026-04-28: decomposed to anthropic/{request,response,streaming,image}.rs.
@@ -66,15 +66,15 @@ crates/theo-engine-parser/src/extractors/data_models.rs|970|2026-10-31|Phase 4 d
 # crates/theo-infra-llm/src/providers/openai.rs — T5.2 split 2026-04-28: decomposed to openai/{request,response,streaming}.rs.
 # crates/theo-engine-parser/src/extractors/php.rs — T2.4 split 2026-04-28: production half now 616 LOC.
 # crates/theo-application/src/use_cases/context_assembler.rs — T5.5 split 2026-04-28: production half now 453 LOC.
-crates/theo-engine-retrieval/src/tantivy_search.rs|950|2026-10-31|Phase 4 debt
-crates/theo-tooling/src/read/mod.rs|970|2026-10-31|Phase 4 debt (T2.3 adoption raised ceiling by 20 LOC for canonicalize hardening)
+# crates/theo-engine-retrieval/src/tantivy_search.rs — REMOVED 2026-04-28 (file moved to module-dir form during god-files refactor)
+# crates/theo-tooling/src/read/mod.rs — RESOLVED 2026-04-28 (now under 800 LOC default ceiling)
 # crates/theo-engine-parser/src/extractors/typescript.rs — T2.4 split 2026-04-28: production half now 519 LOC.
 # crates/theo-agent-runtime/src/session_tree/mod.rs — T3.5 split 2026-04-28: production half now 324 LOC.
 # crates/theo-engine-graph/src/bridge.rs — T5.6 split 2026-04-28: production half now 642 LOC.
 # crates/theo-engine-parser/src/tree_sitter.rs — T2.4 split 2026-04-28: production half now 334 LOC.
 # crates/theo-engine-graph/src/git.rs — T5.6 split 2026-04-28: production half now 448 LOC.
 # crates/theo-engine-retrieval/src/wiki/model.rs — T4.4 split 2026-04-28: production half now 701 LOC.
-crates/theo-tooling/src/apply_patch/mod.rs|920|2026-10-31|Phase 4 debt (T2.3 adoption raised ceiling by ~20 LOC for canonicalize + permission hardening)
+# crates/theo-tooling/src/apply_patch/mod.rs — RESOLVED 2026-04-28 (now under 800 LOC default ceiling)
 # crates/theo-agent-runtime/src/observability/report.rs — refactored
 # into module-dir form `observability/report/mod.rs` (412 LOC) +
 # `observability/report/metrics.rs`; post-refactor mod.rs is well
@@ -125,14 +125,14 @@ crates/theo-agent-runtime/src/subagent/mod_tests.rs|1050|2026-10-31|Sibling test
 # crates/theo-agent-runtime/src/subagent/resume.rs — T3.3 split 2026-04-28: production half now 319 LOC.
 crates/theo-agent-runtime/src/subagent/resume_tests.rs|850|2026-10-31|Sibling test body of subagent/resume.rs (T3.3)
 # crates/theo-agent-runtime/src/compaction_stages.rs — T3.4 split 2026-04-28: production half now 418 LOC.
-crates/theo-agent-runtime/src/compaction_stages_tests.rs|550|2026-10-31|Sibling test body of compaction_stages.rs (T3.4)
+# crates/theo-agent-runtime/src/compaction_stages_tests.rs — RESOLVED 2026-04-28 (now under 800 LOC default ceiling)
 # crates/theo-agent-runtime/src/lifecycle_hooks.rs — T3.5 split 2026-04-28: production half now 362 LOC.
 # crates/theo-agent-runtime/src/config/mod.rs — T3.5 split 2026-04-28: production half now 576 LOC.
 # crates/theo-domain/src/event.rs — T5.1 split 2026-04-28: production half now 415 LOC.
 # crates/theo-infra-mcp/src/discovery.rs — T5.7 split 2026-04-28: production half now 286 LOC.
 
 # ── UI (>400 LOC) ──────────────────────────────────────────────────────
-apps/theo-ui/src/components/ui/sidebar.tsx|800|2026-10-31|T4.4 follow-up (third-party UI derived)
+apps/theo-ui/src/components/ui/sidebar.tsx|800|2026-10-31|T4.4 follow-up (third-party shadcn/ui Sidebar primitive; sub-component split deferred per ADR-020)
 # apps/theo-ui/src/features/settings/pages/SettingsPage.tsx — decomposed
 # in T4.4 into useSettings hook + 7 section sub-components; page is now
 # 83 LOC, well under the 400-LOC UI limit. Entry removed 2026-04-23.
