@@ -3,6 +3,18 @@
 ## [Unreleased]
 
 ### Fixed
+- **god-files T2.4 — parser/extractor tests extracted to siblings (Phase 2, ADR D4)** (`docs/plans/god-files-2026-07-23-plan.md`).
+  Strategic pivot: ADR D3 (queries to `.scm` files) didn't apply — extractors use imperative AST traversal via `tree_sitter::Node`/`Tree`, not `tree_sitter::Query`. The few inline query strings in `symbols.rs` total ~100 LOC, not the bulk of the files. Instead applied **ADR D4** (extract tests to sibling) which produced the dramatic LOC drops we needed.
+  `scripts/extract-tests-to-sibling.py` (T0.2 helper) ran on 7 parser files:
+  - `extractors/python.rs` 970 → 560 LOC, sibling `python_tests.rs` 416 LOC
+  - `extractors/csharp.rs` 1158 → 783 LOC, sibling `csharp_tests.rs` 381 LOC
+  - `extractors/php.rs` 944 → 616 LOC, sibling `php_tests.rs` 334 LOC
+  - `extractors/typescript.rs` 921 → 519 LOC, sibling `typescript_tests.rs` 408 LOC
+  - `extractors/data_models.rs` 1185 → 960 LOC, sibling `data_models_tests.rs` 231 LOC
+  - `symbol_table.rs` 1349 → 525 LOC, sibling `symbol_table_tests.rs` 830 LOC
+  - `types.rs` 1665 → 948 LOC, sibling `types_tests.rs` 722 LOC (script needed manual fix-up — the brace counter cut off 16 lines early; reconstructed from git HEAD)
+  Allowlist net change: `python.rs`, `csharp.rs`, `php.rs`, `typescript.rs`, `symbol_table.rs` (5 entries) removed completely (production halves now under 800 LOC). `data_models.rs` and `types.rs` ceilings updated to current sizes (970 and 960). 2 sibling test entries added (`types_tests.rs`, `symbol_table_tests.rs`). Net: 49 → 45 entries (-4).
+  Validation: `cargo test --workspace --exclude theo-code-desktop --lib --tests --no-fail-fast` → 5247 PASS / 0 FAIL / 24 IGNORED. `bash scripts/check-sizes.sh` → 45 oversize, 0 NEW, 0 EXPIRED.
 - **god-files T1.5 — registry split (Phase 1, ADR D5)** (`docs/plans/god-files-2026-07-23-plan.md`).
   `crates/theo-tooling/src/registry/mod.rs` (1550 → 173 LOC). 1377-line drop. Decomposition:
   - `registry/mod.rs` (173 LOC) — `ToolRegistry` struct + impls + `register_plugin_tools`

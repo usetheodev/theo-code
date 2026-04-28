@@ -26,12 +26,14 @@ crates/theo-agent-runtime/src/run_engine/mod.rs|2600|2026-07-23|T4.1 (execute_wi
 crates/theo-engine-retrieval/src/wiki/generator.rs|2100|2026-07-23|T4.5 god file
 crates/theo-engine-parser/src/extractors/language_behavior.rs|1800|2026-07-23|T4.5 god file
 crates/theo-application/src/use_cases/graph_context_service.rs|1980|2026-07-23|T4.5 god file (ceiling raised from 1800 → 1980 post-T8.1 reranker wiring)
-crates/theo-engine-parser/src/types.rs|1700|2026-07-23|T4.5 god file
+crates/theo-engine-parser/src/types.rs|960|2026-07-23|T4.5 god file (T2.4 split: tests extracted to types_tests.rs; production half 1665 → 948 LOC)
+crates/theo-engine-parser/src/types_tests.rs|800|2026-07-23|Sibling test body of types.rs (T2.4)
 crates/theo-engine-retrieval/src/assembly.rs|1700|2026-07-23|T4.5 god file
 crates/theo-engine-graph/src/cluster.rs|1650|2026-07-23|T4.5 god file
 crates/theo-engine-retrieval/src/file_retriever.rs|1500|2026-07-23|T4.5 god file
 crates/theo-engine-parser/src/extractors/symbols.rs|1450|2026-07-23|T4.5 god file
-crates/theo-engine-parser/src/symbol_table.rs|1400|2026-07-23|T4.5 god file
+# crates/theo-engine-parser/src/symbol_table.rs — T2.4 split 2026-04-28: production half now 525 LOC (under 800), tests extracted.
+crates/theo-engine-parser/src/symbol_table_tests.rs|850|2026-07-23|Sibling test body of symbol_table.rs (T2.4); 826-line test body of high-fidelity name resolution
 crates/theo-domain/src/episode.rs|1400|2026-07-23|T4.5 god file
 apps/theo-cli/src/tui/app.rs|1300|2026-07-23|T4.3 (TUI update refactor)
 
@@ -39,8 +41,8 @@ apps/theo-cli/src/tui/app.rs|1300|2026-07-23|T4.3 (TUI update refactor)
 crates/theo-engine-retrieval/src/search.rs|1300|2026-07-23|Phase 4 debt
 crates/theo-engine-parser/src/import_resolver.rs|1300|2026-07-23|Phase 4 debt
 crates/theo-agent-runtime/src/pilot/mod.rs|1450|2026-07-23|Phase 4 debt (refactored to module-dir; ceiling raised from 1250 → 1450 post-T6.1 auto-replan trigger wiring)
-crates/theo-engine-parser/src/extractors/data_models.rs|1200|2026-07-23|Phase 4 debt
-crates/theo-engine-parser/src/extractors/csharp.rs|1200|2026-07-23|Phase 4 debt
+crates/theo-engine-parser/src/extractors/data_models.rs|970|2026-07-23|Phase 4 debt (T2.4 split: tests extracted; production half 1185 → 960 LOC)
+# crates/theo-engine-parser/src/extractors/csharp.rs — T2.4 split 2026-04-28: production half now 783 LOC (under 800), tests extracted.
 crates/theo-engine-retrieval/src/wiki/runtime.rs|1100|2026-07-23|Phase 4 debt
 crates/theo-infra-llm/src/providers/anthropic.rs|1100|2026-07-23|Phase 4 debt
 crates/theo-domain/src/tool.rs|1100|2026-07-23|Phase 4 debt
@@ -52,13 +54,13 @@ crates/theo-agent-runtime/src/tool_bridge/mod.rs|1100|2026-07-23|Phase 4 debt (r
 # audit (`scripts/check-allowlist-paths.sh`).
 apps/theo-cli/src/main.rs|1500|2026-07-23|Phase 4 debt + T1.2 decouple (ceiling raised from 1050 → 1500 post-SOTA CLI subcommand additions: skill, replan opt-in, partial-progress wiring, T16.1 trajectory export-rlhf)
 crates/theo-application/src/use_cases/pipeline.rs|1000|2026-07-23|Phase 4 debt
-crates/theo-engine-parser/src/extractors/python.rs|1000|2026-07-23|Phase 4 debt
+# crates/theo-engine-parser/src/extractors/python.rs — T2.4 split 2026-04-28: production half now 560 LOC.
 crates/theo-infra-llm/src/providers/openai.rs|1000|2026-07-23|Phase 4 debt
-crates/theo-engine-parser/src/extractors/php.rs|1000|2026-07-23|Phase 4 debt
+# crates/theo-engine-parser/src/extractors/php.rs — T2.4 split 2026-04-28: production half now 616 LOC.
 crates/theo-application/src/use_cases/context_assembler.rs|950|2026-07-23|Phase 4 debt
 crates/theo-engine-retrieval/src/tantivy_search.rs|950|2026-07-23|Phase 4 debt
 crates/theo-tooling/src/read/mod.rs|970|2026-07-23|Phase 4 debt (T2.3 adoption raised ceiling by 20 LOC for canonicalize hardening)
-crates/theo-engine-parser/src/extractors/typescript.rs|950|2026-07-23|Phase 4 debt
+# crates/theo-engine-parser/src/extractors/typescript.rs — T2.4 split 2026-04-28: production half now 519 LOC.
 crates/theo-agent-runtime/src/session_tree/mod.rs|950|2026-07-23|Phase 4 debt (refactored to module-dir)
 crates/theo-engine-graph/src/bridge.rs|900|2026-07-23|Phase 4 debt
 crates/theo-engine-parser/src/tree_sitter.rs|900|2026-07-23|Phase 4 debt
