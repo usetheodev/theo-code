@@ -40,7 +40,9 @@
 # crates/theo-engine-graph/src/cluster.rs — REMOVED 2026-04-28 (file moved to module-dir form during god-files refactor)
 # crates/theo-engine-retrieval/src/file_retriever.rs — T4.3 split 2026-04-28: production half now 720 LOC.
 # crates/theo-engine-parser/src/extractors/symbols.rs — T2.4 split 2026-04-28: production half now 261 LOC.
-crates/theo-engine-parser/src/extractors/symbols_tests.rs|1150|2026-10-31|Sibling test body of symbols.rs (T2.4); 1132 LOC of multi-language symbol extraction tests
+# crates/theo-engine-parser/src/extractors/symbols_tests.rs — RESOLVED 2026-04-28 (T3.3 of code-hygiene-5x5).
+# Split per-language: symbols_{ts,python,java,go,csharp,rust,php,ruby,common}_lang_tests.rs
+# (36-241 LOC each) + symbols_test_helpers.rs (13 LOC). All ≤ 800 LOC.
 # crates/theo-engine-parser/src/symbol_table.rs — T2.4 split 2026-04-28: production half now 525 LOC (under 800), tests extracted.
 crates/theo-engine-parser/src/symbol_table_tests.rs|850|2026-10-31|Sibling test body of symbol_table.rs (T2.4); 826-line test body of high-fidelity name resolution
 # crates/theo-domain/src/episode.rs — T5.1 split 2026-04-28: production half now 726 LOC.

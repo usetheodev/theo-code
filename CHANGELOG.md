@@ -3,6 +3,13 @@
 ## [Unreleased]
 
 ### Changed
+- **code-hygiene-5x5 T3.3 — `extractors/symbols_tests.rs` (1142 LOC, 60 fn) split per-language** (`docs/plans/code-hygiene-5x5-plan.md`).
+  `crates/theo-engine-parser/src/extractors/symbols_tests.rs` decomposed into 9 per-language sibling files (`symbols_{ts,python,java,go,csharp,rust,php,ruby,common}_lang_tests.rs`)
+  plus `symbols_test_helpers.rs` (13 LOC) holding the `symbols_for` fixture. All ≤ 241 LOC.
+  Splitter handles raw-string literals (`r#"..."#`) using a Rust-aware lexer state machine,
+  preserving Python/Ruby/Go indentation inside test fixtures.
+  Test count preserved: 57 PASS in `cargo test -p theo-engine-parser --lib symbols_*_lang`.
+  size-allowlist entry resolved.
 - **code-hygiene-5x5 T3.2 — `run_engine/mod_tests.rs` (1255 LOC) split per-area** (`docs/plans/code-hygiene-5x5-plan.md`).
   `crates/theo-agent-runtime/src/run_engine/mod_tests.rs` decomposed into:
   - `run_engine/test_helpers.rs` (45 LOC) — shared `TestSetup` (pub(super))

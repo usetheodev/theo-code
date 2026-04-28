@@ -256,6 +256,34 @@ fn parse_kind_from_capture(capture_name: &str) -> Option<SymbolKind> {
 }
 
 
+// Sibling tests split per-language (T3.3 of code-hygiene-5x5).
 #[cfg(test)]
-#[path = "symbols_tests.rs"]
-mod tests;
+#[path = "symbols_test_helpers.rs"]
+mod symbols_test_helpers;
+#[cfg(test)]
+#[path = "symbols_ts_lang_tests.rs"]
+mod symbols_ts_lang_tests;
+#[cfg(test)]
+#[path = "symbols_python_lang_tests.rs"]
+mod symbols_python_lang_tests;
+#[cfg(test)]
+#[path = "symbols_java_lang_tests.rs"]
+mod symbols_java_lang_tests;
+#[cfg(test)]
+#[path = "symbols_go_lang_tests.rs"]
+mod symbols_go_lang_tests;
+#[cfg(test)]
+#[path = "symbols_csharp_lang_tests.rs"]
+mod symbols_csharp_lang_tests;
+#[cfg(test)]
+#[path = "symbols_rust_lang_tests.rs"]
+mod symbols_rust_lang_tests;
+#[cfg(test)]
+#[path = "symbols_php_lang_tests.rs"]
+mod symbols_php_lang_tests;
+#[cfg(test)]
+#[path = "symbols_ruby_lang_tests.rs"]
+mod symbols_ruby_lang_tests;
+#[cfg(test)]
+#[path = "symbols_common_lang_tests.rs"]
+mod symbols_common_lang_tests;
