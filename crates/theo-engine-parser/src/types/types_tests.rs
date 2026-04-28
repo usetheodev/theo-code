@@ -2,7 +2,12 @@
 //! Extracted by `scripts/extract-tests-to-sibling.py` (T0.2 of god-files-2026-07-23-plan.md).
 //! Included from `types.rs` via `#[path = "types_tests.rs"] mod tests;`.
 
+    #![allow(unused_imports)]
     use super::*;
+    use crate::types::*;
+    use std::collections::HashMap;
+    use std::path::{Path, PathBuf};
+    use crate::tree_sitter::SupportedLanguage;
 
     #[test]
     fn code_model_round_trip_serialization() {
