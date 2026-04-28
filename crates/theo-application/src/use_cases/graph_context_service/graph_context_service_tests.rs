@@ -4,7 +4,13 @@
 //!
 //! Do not edit the path attribute — it is what keeps this file linked.
 
+    #![allow(unused_imports)]
     use super::*;
+    use crate::use_cases::graph_context_service::*;
+    use std::time::Duration;
+    use theo_domain::graph_context::{ContextBlock, GraphContextError, GraphContextProvider, GraphContextResult};
+    use std::path::{Path, PathBuf};
+    use crate::use_cases::conversion::{convert_symbol_kind, convert_reference_kind};
     use theo_engine_graph::bridge::{ReferenceKindDto, SymbolKindDto};
     use theo_engine_parser::types::{ReferenceKind, SymbolKind};
 
