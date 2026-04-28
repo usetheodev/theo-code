@@ -53,6 +53,40 @@ pub use protocol::{
 };
 pub use session_manager::{DapSessionError, DapSessionManager};
 
+// Sibling tests split per tool (T3.1 of code-hygiene-5x5).
 #[cfg(test)]
-#[path = "tool_tests.rs"]
-mod tests;
+#[path = "test_helpers.rs"]
+mod test_helpers;
+#[cfg(test)]
+#[path = "status_tests.rs"]
+mod status_tests;
+#[cfg(test)]
+#[path = "launch_tests.rs"]
+mod launch_tests;
+#[cfg(test)]
+#[path = "breakpoint_tests.rs"]
+mod breakpoint_tests;
+#[cfg(test)]
+#[path = "continue_tests.rs"]
+mod continue_tests;
+#[cfg(test)]
+#[path = "step_tests.rs"]
+mod step_tests;
+#[cfg(test)]
+#[path = "eval_tests.rs"]
+mod eval_tests;
+#[cfg(test)]
+#[path = "stack_trace_tests.rs"]
+mod stack_trace_tests;
+#[cfg(test)]
+#[path = "variables_tests.rs"]
+mod variables_tests;
+#[cfg(test)]
+#[path = "scopes_tests.rs"]
+mod scopes_tests;
+#[cfg(test)]
+#[path = "threads_tests.rs"]
+mod threads_tests;
+#[cfg(test)]
+#[path = "terminate_tests.rs"]
+mod terminate_tests;

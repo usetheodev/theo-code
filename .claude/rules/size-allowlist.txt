@@ -94,7 +94,11 @@ crates/theo-engine-parser/src/symbol_table_tests.rs|850|2026-10-31|Sibling test 
 # breakpoint/continue_/step/eval/stack_trace/variables/scopes/threads/
 # terminate.rs), each ≤ 254 LOC. Shared helpers moved to dap/tool_common.rs.
 # tool.rs was deleted; the allowlist entry is no longer needed.
-crates/theo-tooling/src/dap/tool_tests.rs|1300|2026-10-31|T13.1 — sibling test body covering 213 tests across the 11 debug_* tools. Per-tool split deferred to a follow-up; ceiling kept at 1300.
+# crates/theo-tooling/src/dap/tool_tests.rs — RESOLVED 2026-04-28 (T3.1 of code-hygiene-5x5).
+# The 1281 LOC sibling test body was split into 11 per-tool _tests.rs files
+# (status/launch/breakpoint/continue/step/eval/stack_trace/variables/scopes/
+# threads/terminate) plus a shared dap/test_helpers.rs (28 LOC).
+# Each per-tool file ≤ 220 LOC; tool_tests.rs deleted.
 # crates/theo-tooling/src/plan/mod.rs — REMOVED 2026-04-28 (T1.2 of god-files-2026-07-23-plan.md).
 # The 8 plan_* tools were decomposed into per-tool files (create/update_task/
 # advance_phase/log_entry/summary/next_task/replan/failure_status.rs); shared

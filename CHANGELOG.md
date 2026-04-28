@@ -3,6 +3,14 @@
 ## [Unreleased]
 
 ### Changed
+- **code-hygiene-5x5 T3.1 — DAP `tool_tests.rs` (1281 LOC, 73 tests) split into 11 per-tool sibling files** (`docs/plans/code-hygiene-5x5-plan.md`).
+  `crates/theo-tooling/src/dap/tool_tests.rs` decomposed into:
+  - `dap/test_helpers.rs` (28 LOC) — shared `make_ctx` + `empty_manager` (pub(crate))
+  - `dap/{status,launch,breakpoint,continue,step,eval,stack_trace,variables,scopes,threads,terminate}_tests.rs`
+    (4-10 tests each, 86-220 LOC, all ≤ 220 LOC)
+  Test count preserved: 73 tests in `cargo test -p theo-tooling --lib dap`.
+  Allowlist net: size-allowlist entry for `dap/tool_tests.rs` resolved.
+  Validation: cargo test 5247 PASS / 0 FAIL / 24 IGNORED, clippy 0 warnings, sizes gate exit 0.
 - **code-hygiene-5x5 T2.3 — drained idiomatic `unwrap`/`unsafe`/`panic` allowlists via ADR-021** (`docs/plans/code-hygiene-5x5-plan.md`).
   21 idiomatic `unwrap`/`expect` regex+path entries migrated from `.claude/rules/unwrap-allowlist.txt`
   to ADR-021 + `.claude/rules/recognized-patterns.toml`. ADR-021 grew from 9 → 13 codified patterns:
