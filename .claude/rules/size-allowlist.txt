@@ -28,23 +28,23 @@
 # crates/theo-agent-runtime/src/run_engine/mod.rs — T3.1 split 2026-04-28: production half now 423 LOC.
 crates/theo-agent-runtime/src/run_engine/mod_tests.rs|1260|2026-10-31|Sibling test body of run_engine/mod.rs (T3.1)
 # crates/theo-engine-retrieval/src/wiki/generator.rs — T4.1 split 2026-04-28: decomposed to generator/{doc,metadata,summary,hashing,incremental,concepts}.rs.
-crates/theo-engine-parser/src/extractors/language_behavior.rs|1340|2026-10-31|T4.5 god file (T2.2 partial: tests extracted to language_behavior_tests.rs; production half 1757 → 1331 LOC. Per-language module decomposition still needed)
-crates/theo-engine-parser/src/extractors/language_behavior_tests.rs|450|2026-10-31|Sibling test body of language_behavior.rs (T2.2 partial)
-crates/theo-application/src/use_cases/graph_context_service.rs|1430|2026-10-31|T4.5 god file (T4.5 partial: tests extracted; production half 1959 → 1423 LOC)
+# crates/theo-engine-parser/src/extractors/language_behavior.rs — REMOVED 2026-04-28 (file moved to module-dir form during god-files refactor)
+# crates/theo-engine-parser/src/extractors/language_behavior_tests.rs — REMOVED 2026-04-28 (file moved to module-dir form during god-files refactor)
+# crates/theo-application/src/use_cases/graph_context_service.rs — REMOVED 2026-04-28 (file moved to module-dir form during god-files refactor)
 crates/theo-engine-parser/src/types.rs|960|2026-10-31|T4.5 god file (T2.4 split: tests extracted to types_tests.rs; production half 1665 → 948 LOC)
 crates/theo-engine-parser/src/types_tests.rs|800|2026-10-31|Sibling test body of types.rs (T2.4)
-crates/theo-engine-retrieval/src/assembly.rs|1250|2026-10-31|T4.5 god file (T4.3 partial: tests extracted; production half 1612 → 1247 LOC)
-crates/theo-engine-graph/src/cluster.rs|1650|2026-10-31|T4.5 god file
+# crates/theo-engine-retrieval/src/assembly.rs — REMOVED 2026-04-28 (file moved to module-dir form during god-files refactor)
+# crates/theo-engine-graph/src/cluster.rs — REMOVED 2026-04-28 (file moved to module-dir form during god-files refactor)
 # crates/theo-engine-retrieval/src/file_retriever.rs — T4.3 split 2026-04-28: production half now 720 LOC.
 # crates/theo-engine-parser/src/extractors/symbols.rs — T2.4 split 2026-04-28: production half now 261 LOC.
 crates/theo-engine-parser/src/extractors/symbols_tests.rs|1150|2026-10-31|Sibling test body of symbols.rs (T2.4); 1132 LOC of multi-language symbol extraction tests
 # crates/theo-engine-parser/src/symbol_table.rs — T2.4 split 2026-04-28: production half now 525 LOC (under 800), tests extracted.
 crates/theo-engine-parser/src/symbol_table_tests.rs|850|2026-10-31|Sibling test body of symbol_table.rs (T2.4); 826-line test body of high-fidelity name resolution
 # crates/theo-domain/src/episode.rs — T5.1 split 2026-04-28: production half now 726 LOC.
-apps/theo-cli/src/tui/app.rs|1120|2026-10-31|T4.3 + T5.4 split 2026-04-28: tests extracted; production half 1270 → 1110 LOC. Structural decomposition deferred.
+# apps/theo-cli/src/tui/app.rs — REMOVED 2026-04-28 (file moved to module-dir form during god-files refactor)
 
 # ── Files 800–1500 LOC (broader Phase 4 scope) ─────────────────────────
-crates/theo-engine-retrieval/src/search.rs|1050|2026-10-31|Phase 4 debt (T4.3 partial: tests extracted; production half 1257 → 1044 LOC)
+# crates/theo-engine-retrieval/src/search.rs — REMOVED 2026-04-28 (file moved to module-dir form during god-files refactor)
 # crates/theo-engine-parser/src/import_resolver.rs — T2.4 split 2026-04-28: production half now 603 LOC.
 # crates/theo-agent-runtime/src/pilot/mod.rs — T3.2 split 2026-04-28: production half now 780 LOC.
 crates/theo-agent-runtime/src/pilot/mod_tests.rs|650|2026-10-31|Sibling test body of pilot/mod.rs (T3.2)
