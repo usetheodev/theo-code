@@ -3,6 +3,13 @@
 ## [Unreleased]
 
 ### Fixed
+- **god-files T2.2 + T2.4 follow-up — language_behavior, symbols, import_resolver, tree_sitter tests extracted** (`docs/plans/god-files-2026-07-23-plan.md`).
+  Continuation of the previous T2.4 commit. Applied D4 to 4 more parser files where the helper script's first run reported "no extraction needed" (script bug — fell back to manual line-slice from git HEAD):
+  - `extractors/language_behavior.rs` 1757 → 1331 LOC, sibling 431 LOC. Production half still over 800; allowlist ceiling lowered 1800 → 1340 (per-language module decomposition still pending in a follow-up).
+  - `extractors/symbols.rs` 1393 → 261 LOC (huge drop — most of the file was test fixture code), sibling 1139 LOC. Production half under 800, removed from allowlist; sibling added with ceiling 1150.
+  - `import_resolver.rs` 1300 → 603 LOC, sibling 646 LOC. Production half under 800, removed from allowlist.
+  - `tree_sitter.rs` 900 → 334 LOC, sibling 548 LOC. Production half under 800, removed from allowlist.
+  Allowlist net: 45 → 43 entries (-2). Validation: cargo test 5247 PASS / 0 FAIL / 24 IGNORED, clippy 0 warnings, sizes gate exit 0.
 - **god-files T2.4 — parser/extractor tests extracted to siblings (Phase 2, ADR D4)** (`docs/plans/god-files-2026-07-23-plan.md`).
   Strategic pivot: ADR D3 (queries to `.scm` files) didn't apply — extractors use imperative AST traversal via `tree_sitter::Node`/`Tree`, not `tree_sitter::Query`. The few inline query strings in `symbols.rs` total ~100 LOC, not the bulk of the files. Instead applied **ADR D4** (extract tests to sibling) which produced the dramatic LOC drops we needed.
   `scripts/extract-tests-to-sibling.py` (T0.2 helper) ran on 7 parser files:
