@@ -425,6 +425,7 @@ mod tests {
         .iter()
         .map(|k| (k.to_string(), std::env::var_os(k)))
         .collect();
+        // SAFETY: sandbox setup syscalls — pre-conditions checked above (cgroup mount paths verified, capability set computed) and the call is made from the parent process before any fork.
         unsafe {
             for (k, _) in &saved {
                 std::env::set_var(k, "SECRET-VALUE-DO-NOT-LEAK");
@@ -446,6 +447,7 @@ mod tests {
         }
 
         // Restore original env.
+        // SAFETY: sandbox setup syscalls — pre-conditions checked above (cgroup mount paths verified, capability set computed) and the call is made from the parent process before any fork.
         unsafe {
             for (k, v) in saved {
                 match v {

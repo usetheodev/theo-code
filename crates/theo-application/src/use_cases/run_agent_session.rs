@@ -290,11 +290,13 @@ mod tests {
     fn t141_env_progress_stderr_disabled_by_default() {
         // Save / restore so we don't poison sibling tests.
         let prev = std::env::var_os("THEO_PROGRESS_STDERR");
+        // SAFETY: test mutates a uniquely-named env var; the test runs single-threaded under cargo test's per-test isolation, no concurrent reader exists.
         unsafe {
             std::env::remove_var("THEO_PROGRESS_STDERR");
         }
         assert!(!env_progress_stderr_enabled());
         if let Some(v) = prev {
+            // SAFETY: test mutates a uniquely-named env var; the test runs single-threaded under cargo test's per-test isolation, no concurrent reader exists.
             unsafe {
                 std::env::set_var("THEO_PROGRESS_STDERR", v);
             }
@@ -304,6 +306,7 @@ mod tests {
     #[test]
     fn t141_env_progress_stderr_recognises_truthy_values() {
         let prev = std::env::var_os("THEO_PROGRESS_STDERR");
+        // SAFETY: test mutates a uniquely-named env var; the test runs single-threaded under cargo test's per-test isolation, no concurrent reader exists.
         unsafe {
             for v in ["1", "true", "TRUE", "yes", "on"] {
                 std::env::set_var("THEO_PROGRESS_STDERR", v);

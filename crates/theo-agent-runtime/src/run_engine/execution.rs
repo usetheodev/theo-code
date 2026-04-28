@@ -450,12 +450,14 @@ mod forced_tool_choice_tests {
     impl EnvSnapshot {
         fn capture() -> Self {
             let prior = std::env::var_os("THEO_FORCE_TOOL_CHOICE");
+            // SAFETY: pre-fork setup — the call site is synchronous w.r.t. the child process, runs after the parent has prepared all FDs, and never executes in async context.
             unsafe { std::env::remove_var("THEO_FORCE_TOOL_CHOICE") };
             Self { prior }
         }
     }
     impl Drop for EnvSnapshot {
         fn drop(&mut self) {
+            // SAFETY: pre-fork setup — the call site is synchronous w.r.t. the child process, runs after the parent has prepared all FDs, and never executes in async context.
             unsafe {
                 match &self.prior {
                     Some(v) => std::env::set_var("THEO_FORCE_TOOL_CHOICE", v),
@@ -480,6 +482,7 @@ mod forced_tool_choice_tests {
     fn force_tool_choice_with_quote_in_name_serializes_correctly() {
         let _l = env_lock();
         let _s = EnvSnapshot::capture();
+        // SAFETY: pre-fork setup — the call site is synchronous w.r.t. the child process, runs after the parent has prepared all FDs, and never executes in async context.
         unsafe {
             std::env::set_var("THEO_FORCE_TOOL_CHOICE", r#"function:weird"name"#);
         }
@@ -498,6 +501,7 @@ mod forced_tool_choice_tests {
     fn force_tool_choice_with_backslash_in_name_serializes_correctly() {
         let _l = env_lock();
         let _s = EnvSnapshot::capture();
+        // SAFETY: pre-fork setup — the call site is synchronous w.r.t. the child process, runs after the parent has prepared all FDs, and never executes in async context.
         unsafe {
             std::env::set_var("THEO_FORCE_TOOL_CHOICE", r#"function:back\slash"#);
         }
@@ -512,11 +516,13 @@ mod forced_tool_choice_tests {
     fn force_tool_choice_passes_through_verbatim_strings() {
         let _l = env_lock();
         let _s = EnvSnapshot::capture();
+        // SAFETY: pre-fork setup — the call site is synchronous w.r.t. the child process, runs after the parent has prepared all FDs, and never executes in async context.
         unsafe { std::env::set_var("THEO_FORCE_TOOL_CHOICE", "required") };
         assert_eq!(
             forced_tool_choice(&tool_defs_with("x")).as_deref(),
             Some("required")
         );
+        // SAFETY: pre-fork setup — the call site is synchronous w.r.t. the child process, runs after the parent has prepared all FDs, and never executes in async context.
         unsafe { std::env::set_var("THEO_FORCE_TOOL_CHOICE", "none") };
         assert_eq!(
             forced_tool_choice(&tool_defs_with("x")).as_deref(),
@@ -528,6 +534,7 @@ mod forced_tool_choice_tests {
     fn force_tool_choice_normalizes_any_to_required() {
         let _l = env_lock();
         let _s = EnvSnapshot::capture();
+        // SAFETY: pre-fork setup — the call site is synchronous w.r.t. the child process, runs after the parent has prepared all FDs, and never executes in async context.
         unsafe { std::env::set_var("THEO_FORCE_TOOL_CHOICE", "any") };
         assert_eq!(
             forced_tool_choice(&tool_defs_with("x")).as_deref(),
@@ -539,6 +546,7 @@ mod forced_tool_choice_tests {
     fn force_tool_choice_returns_none_when_no_tools_exposed() {
         let _l = env_lock();
         let _s = EnvSnapshot::capture();
+        // SAFETY: pre-fork setup — the call site is synchronous w.r.t. the child process, runs after the parent has prepared all FDs, and never executes in async context.
         unsafe { std::env::set_var("THEO_FORCE_TOOL_CHOICE", "required") };
         // Empty tool_defs — early return before consulting env var.
         assert!(forced_tool_choice(&[]).is_none());

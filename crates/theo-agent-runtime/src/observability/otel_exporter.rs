@@ -209,6 +209,7 @@ mod tests {
             "OTLP_SERVICE_NAME",
             "OTLP_BATCH_SIZE",
         ] {
+            // SAFETY: serialized by `let _g = lock();` at the top of every test in this module — env mutations are single-threaded for the duration of the guard.
             unsafe { std::env::remove_var(k); }
         }
     }
@@ -224,6 +225,7 @@ mod tests {
     fn config_from_env_returns_none_when_endpoint_blank() {
         let _g = lock();
         clear_env();
+        // SAFETY: serialized by `let _g = lock();` at the top of every test in this module — env mutations are single-threaded for the duration of the guard.
         unsafe { std::env::set_var("OTLP_ENDPOINT", "   "); }
         let got = OtlpExporterConfig::from_env();
         clear_env();
@@ -234,6 +236,7 @@ mod tests {
     fn config_from_env_returns_some_when_endpoint_set() {
         let _g = lock();
         clear_env();
+        // SAFETY: serialized by `let _g = lock();` at the top of every test in this module — env mutations are single-threaded for the duration of the guard.
         unsafe { std::env::set_var("OTLP_ENDPOINT", "http://localhost:4317"); }
         let got = OtlpExporterConfig::from_env().expect("endpoint set");
         clear_env();
@@ -244,6 +247,7 @@ mod tests {
     fn config_from_env_defaults_protocol_to_grpc() {
         let _g = lock();
         clear_env();
+        // SAFETY: serialized by `let _g = lock();` at the top of every test in this module — env mutations are single-threaded for the duration of the guard.
         unsafe { std::env::set_var("OTLP_ENDPOINT", "http://x"); }
         let got = OtlpExporterConfig::from_env().unwrap();
         clear_env();
@@ -254,7 +258,9 @@ mod tests {
     fn config_from_env_parses_protocol_http_protobuf() {
         let _g = lock();
         clear_env();
+        // SAFETY: serialized by `let _g = lock();` at the top of every test in this module — env mutations are single-threaded for the duration of the guard.
         unsafe { std::env::set_var("OTLP_ENDPOINT", "http://x"); }
+        // SAFETY: serialized by `let _g = lock();` at the top of every test in this module — env mutations are single-threaded for the duration of the guard.
         unsafe { std::env::set_var("OTLP_PROTOCOL", "http_protobuf"); }
         let got = OtlpExporterConfig::from_env().unwrap();
         clear_env();
@@ -265,7 +271,9 @@ mod tests {
     fn config_from_env_parses_protocol_http_alias() {
         let _g = lock();
         clear_env();
+        // SAFETY: serialized by `let _g = lock();` at the top of every test in this module — env mutations are single-threaded for the duration of the guard.
         unsafe { std::env::set_var("OTLP_ENDPOINT", "http://x"); }
+        // SAFETY: serialized by `let _g = lock();` at the top of every test in this module — env mutations are single-threaded for the duration of the guard.
         unsafe { std::env::set_var("OTLP_PROTOCOL", "http"); }
         let got = OtlpExporterConfig::from_env().unwrap();
         clear_env();
@@ -276,6 +284,7 @@ mod tests {
     fn config_from_env_defaults_timeout_to_10s() {
         let _g = lock();
         clear_env();
+        // SAFETY: serialized by `let _g = lock();` at the top of every test in this module — env mutations are single-threaded for the duration of the guard.
         unsafe { std::env::set_var("OTLP_ENDPOINT", "http://x"); }
         let got = OtlpExporterConfig::from_env().unwrap();
         clear_env();
@@ -286,7 +295,9 @@ mod tests {
     fn config_from_env_parses_timeout_seconds() {
         let _g = lock();
         clear_env();
+        // SAFETY: serialized by `let _g = lock();` at the top of every test in this module — env mutations are single-threaded for the duration of the guard.
         unsafe { std::env::set_var("OTLP_ENDPOINT", "http://x"); }
+        // SAFETY: serialized by `let _g = lock();` at the top of every test in this module — env mutations are single-threaded for the duration of the guard.
         unsafe { std::env::set_var("OTLP_TIMEOUT_SECS", "42"); }
         let got = OtlpExporterConfig::from_env().unwrap();
         clear_env();
@@ -297,7 +308,9 @@ mod tests {
     fn config_from_env_falls_back_to_default_when_timeout_zero() {
         let _g = lock();
         clear_env();
+        // SAFETY: serialized by `let _g = lock();` at the top of every test in this module — env mutations are single-threaded for the duration of the guard.
         unsafe { std::env::set_var("OTLP_ENDPOINT", "http://x"); }
+        // SAFETY: serialized by `let _g = lock();` at the top of every test in this module — env mutations are single-threaded for the duration of the guard.
         unsafe { std::env::set_var("OTLP_TIMEOUT_SECS", "0"); }
         let got = OtlpExporterConfig::from_env().unwrap();
         clear_env();
@@ -308,7 +321,9 @@ mod tests {
     fn config_from_env_falls_back_when_timeout_unparseable() {
         let _g = lock();
         clear_env();
+        // SAFETY: serialized by `let _g = lock();` at the top of every test in this module — env mutations are single-threaded for the duration of the guard.
         unsafe { std::env::set_var("OTLP_ENDPOINT", "http://x"); }
+        // SAFETY: serialized by `let _g = lock();` at the top of every test in this module — env mutations are single-threaded for the duration of the guard.
         unsafe { std::env::set_var("OTLP_TIMEOUT_SECS", "not-a-number"); }
         let got = OtlpExporterConfig::from_env().unwrap();
         clear_env();
@@ -319,7 +334,9 @@ mod tests {
     fn config_from_env_parses_multiple_headers() {
         let _g = lock();
         clear_env();
+        // SAFETY: serialized by `let _g = lock();` at the top of every test in this module — env mutations are single-threaded for the duration of the guard.
         unsafe { std::env::set_var("OTLP_ENDPOINT", "http://x"); }
+        // SAFETY: serialized by `let _g = lock();` at the top of every test in this module — env mutations are single-threaded for the duration of the guard.
         unsafe { std::env::set_var("OTLP_HEADERS", "Authorization=Bearer abc,X-Tenant=t1"); }
         let got = OtlpExporterConfig::from_env().unwrap();
         clear_env();
@@ -332,6 +349,7 @@ mod tests {
     fn config_from_env_defaults_service_name_to_theo() {
         let _g = lock();
         clear_env();
+        // SAFETY: serialized by `let _g = lock();` at the top of every test in this module — env mutations are single-threaded for the duration of the guard.
         unsafe { std::env::set_var("OTLP_ENDPOINT", "http://x"); }
         let got = OtlpExporterConfig::from_env().unwrap();
         clear_env();
@@ -342,7 +360,9 @@ mod tests {
     fn config_from_env_uses_custom_service_name_when_set() {
         let _g = lock();
         clear_env();
+        // SAFETY: serialized by `let _g = lock();` at the top of every test in this module — env mutations are single-threaded for the duration of the guard.
         unsafe { std::env::set_var("OTLP_ENDPOINT", "http://x"); }
+        // SAFETY: serialized by `let _g = lock();` at the top of every test in this module — env mutations are single-threaded for the duration of the guard.
         unsafe { std::env::set_var("OTLP_SERVICE_NAME", "theo-cli-prod"); }
         let got = OtlpExporterConfig::from_env().unwrap();
         clear_env();
@@ -353,6 +373,7 @@ mod tests {
     fn config_from_env_defaults_batch_size_to_512() {
         let _g = lock();
         clear_env();
+        // SAFETY: serialized by `let _g = lock();` at the top of every test in this module — env mutations are single-threaded for the duration of the guard.
         unsafe { std::env::set_var("OTLP_ENDPOINT", "http://x"); }
         let got = OtlpExporterConfig::from_env().unwrap();
         clear_env();
@@ -363,7 +384,9 @@ mod tests {
     fn config_from_env_parses_custom_batch_size() {
         let _g = lock();
         clear_env();
+        // SAFETY: serialized by `let _g = lock();` at the top of every test in this module — env mutations are single-threaded for the duration of the guard.
         unsafe { std::env::set_var("OTLP_ENDPOINT", "http://x"); }
+        // SAFETY: serialized by `let _g = lock();` at the top of every test in this module — env mutations are single-threaded for the duration of the guard.
         unsafe { std::env::set_var("OTLP_BATCH_SIZE", "100"); }
         let got = OtlpExporterConfig::from_env().unwrap();
         clear_env();

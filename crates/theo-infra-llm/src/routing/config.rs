@@ -293,6 +293,7 @@ mod tests {
         // We can't pollute the process env from a unit test (other
         // tests may race), so exercise the parsing logic by mutating
         // and then restoring.
+        // SAFETY: test mutates a uniquely-named env var while holding the test lock; concurrent readers of the same key are not present in this test module.
         unsafe {
             // Ensure we start clean.
             std::env::remove_var("THEO_ROUTING_COST_AWARE");

@@ -372,6 +372,7 @@ mod tests {
         // No USER.md → would normally return true.
         unsafe { std::env::set_var("THEO_SKIP_ONBOARDING", "1"); }
         let result = needs_bootstrap(tmp.path());
+        // SAFETY: serialized by `let _guard = env_lock();` at the top of this test; the env mutex makes mutations single-threaded for the lifetime of the guard.
         unsafe { std::env::remove_var("THEO_SKIP_ONBOARDING"); }
         assert!(!result, "THEO_SKIP_ONBOARDING=1 must skip bootstrap");
     }

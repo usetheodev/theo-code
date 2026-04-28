@@ -718,6 +718,7 @@ mod tests {
         #[test]
         fn returns_default_5s_when_env_unset() {
             let _g = lock();
+            // SAFETY: serialized by `let _g = lock();` at the top of this test; the env mutex makes the env mutation single-threaded for the lifetime of the guard.
             unsafe { std::env::remove_var(ENV); }
             assert_eq!(
                 super::super::effective_default_timeout(),
@@ -728,8 +729,10 @@ mod tests {
         #[test]
         fn returns_env_value_when_set_to_valid_number() {
             let _g = lock();
+            // SAFETY: serialized by `let _g = lock();` at the top of this test; the env mutex makes the env mutation single-threaded for the lifetime of the guard.
             unsafe { std::env::set_var(ENV, "42"); }
             let got = super::super::effective_default_timeout();
+            // SAFETY: serialized by `let _g = lock();` at the top of this test; the env mutex makes the env mutation single-threaded for the lifetime of the guard.
             unsafe { std::env::remove_var(ENV); }
             assert_eq!(got, Duration::from_secs(42));
         }
@@ -737,8 +740,10 @@ mod tests {
         #[test]
         fn falls_back_to_default_when_env_unparseable() {
             let _g = lock();
+            // SAFETY: serialized by `let _g = lock();` at the top of this test; the env mutex makes the env mutation single-threaded for the lifetime of the guard.
             unsafe { std::env::set_var(ENV, "not-a-number"); }
             let got = super::super::effective_default_timeout();
+            // SAFETY: serialized by `let _g = lock();` at the top of this test; the env mutex makes the env mutation single-threaded for the lifetime of the guard.
             unsafe { std::env::remove_var(ENV); }
             assert_eq!(got, DEFAULT_PER_SERVER_TIMEOUT);
         }
@@ -748,8 +753,10 @@ mod tests {
             // 0s would cause instant timeout — protect operators from
             // self-foot-shooting; treat as "use default".
             let _g = lock();
+            // SAFETY: serialized by `let _g = lock();` at the top of this test; the env mutex makes the env mutation single-threaded for the lifetime of the guard.
             unsafe { std::env::set_var(ENV, "0"); }
             let got = super::super::effective_default_timeout();
+            // SAFETY: serialized by `let _g = lock();` at the top of this test; the env mutex makes the env mutation single-threaded for the lifetime of the guard.
             unsafe { std::env::remove_var(ENV); }
             assert_eq!(got, DEFAULT_PER_SERVER_TIMEOUT);
         }

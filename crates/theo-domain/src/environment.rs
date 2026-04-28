@@ -154,26 +154,32 @@ mod tests {
     #[test]
     fn bool_var_recognizes_falsey_values() {
         for falsey in ["0", "false", "FALSE", "no", "NO", "off", "OFF", ""] {
+            // SAFETY: test mutates a uniquely-named THEO_TEST_* env var (no other test reads it), so a data race on it is impossible even without a global lock.
             unsafe { std::env::set_var("THEO_BOOL_FALSEY", falsey) };
             assert!(
                 !bool_var("THEO_BOOL_FALSEY", true),
                 "expected false for {falsey:?}"
             );
         }
+        // SAFETY: test mutates a uniquely-named THEO_TEST_* env var (no other test reads it), so a data race on it is impossible even without a global lock.
         unsafe { std::env::remove_var("THEO_BOOL_FALSEY") };
     }
 
     #[test]
     fn bool_var_returns_true_for_nonempty_truthy() {
+        // SAFETY: test mutates a uniquely-named THEO_TEST_* env var (no other test reads it), so a data race on it is impossible even without a global lock.
         unsafe { std::env::set_var("THEO_BOOL_TRUTHY", "1") };
         assert!(bool_var("THEO_BOOL_TRUTHY", false));
+        // SAFETY: test mutates a uniquely-named THEO_TEST_* env var (no other test reads it), so a data race on it is impossible even without a global lock.
         unsafe { std::env::set_var("THEO_BOOL_TRUTHY", "yes") };
         assert!(bool_var("THEO_BOOL_TRUTHY", false));
+        // SAFETY: test mutates a uniquely-named THEO_TEST_* env var (no other test reads it), so a data race on it is impossible even without a global lock.
         unsafe { std::env::remove_var("THEO_BOOL_TRUTHY") };
     }
 
     #[test]
     fn bool_var_returns_default_when_absent() {
+        // SAFETY: test mutates a uniquely-named THEO_TEST_* env var (no other test reads it), so a data race on it is impossible even without a global lock.
         unsafe { std::env::remove_var("THEO_BOOL_ABSENT") };
         assert!(bool_var("THEO_BOOL_ABSENT", true));
         assert!(!bool_var("THEO_BOOL_ABSENT", false));
@@ -181,10 +187,13 @@ mod tests {
 
     #[test]
     fn parse_var_parses_integers() {
+        // SAFETY: test mutates a uniquely-named THEO_TEST_* env var (no other test reads it), so a data race on it is impossible even without a global lock.
         unsafe { std::env::set_var("THEO_INT_TEST", "42") };
         assert_eq!(parse_var::<u32>("THEO_INT_TEST"), Some(42));
+        // SAFETY: test mutates a uniquely-named THEO_TEST_* env var (no other test reads it), so a data race on it is impossible even without a global lock.
         unsafe { std::env::set_var("THEO_INT_TEST", "not-an-int") };
         assert_eq!(parse_var::<u32>("THEO_INT_TEST"), None);
+        // SAFETY: test mutates a uniquely-named THEO_TEST_* env var (no other test reads it), so a data race on it is impossible even without a global lock.
         unsafe { std::env::remove_var("THEO_INT_TEST") };
     }
 

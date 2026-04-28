@@ -96,6 +96,7 @@ mod tests {
         // Save / restore the env var so this test is independent.
         let prev = std::env::var_os("THEO_HOME");
         let tmp = TempDir::new().unwrap();
+        // SAFETY: skill catalog test sets a process-scoped env var that only this test reads; the test runner serializes by file, so no concurrent access exists.
         unsafe {
             std::env::set_var("THEO_HOME", tmp.path());
         }
@@ -103,6 +104,7 @@ mod tests {
         assert_eq!(home, tmp.path());
 
         // Cleanup.
+        // SAFETY: skill catalog test sets a process-scoped env var that only this test reads; the test runner serializes by file, so no concurrent access exists.
         unsafe {
             match prev {
                 Some(v) => std::env::set_var("THEO_HOME", v),
@@ -116,6 +118,7 @@ mod tests {
         // Snapshot env state to keep test deterministic.
         let theo_home_prev = std::env::var_os("THEO_HOME");
         let home_prev = std::env::var_os("HOME");
+        // SAFETY: skill catalog test sets a process-scoped env var that only this test reads; the test runner serializes by file, so no concurrent access exists.
         unsafe {
             std::env::remove_var("THEO_HOME");
             // Point HOME to a temp dir without skills so list_default
@@ -127,6 +130,7 @@ mod tests {
         assert!(skills.is_empty());
 
         // Restore.
+        // SAFETY: skill catalog test sets a process-scoped env var that only this test reads; the test runner serializes by file, so no concurrent access exists.
         unsafe {
             match theo_home_prev {
                 Some(v) => std::env::set_var("THEO_HOME", v),

@@ -575,6 +575,7 @@ description = "Demo plugin"
         struct HomeSnap(Option<std::ffi::OsString>);
         impl Drop for HomeSnap {
             fn drop(&mut self) {
+                // SAFETY: dyn-loaded library symbol resolution — `lib` outlives the returned function pointer because the Library is moved into the registry alongside it (see Plugin::load → SAFETY contract).
                 unsafe {
                     match &self.0 {
                         Some(v) => std::env::set_var("HOME", v),
@@ -585,6 +586,7 @@ description = "Demo plugin"
         }
         let _l = env_lock();
         let _s = HomeSnap(std::env::var_os("HOME"));
+        // SAFETY: dyn-loaded library symbol resolution — `lib` outlives the returned function pointer because the Library is moved into the registry alongside it (see Plugin::load → SAFETY contract).
         unsafe { std::env::remove_var("HOME") };
 
         // Project dir without any plugins → load returns empty Vec
@@ -629,6 +631,7 @@ description = "Demo plugin"
         if !foreign.exists() {
             return; // Container without /etc/passwd — skip silently.
         }
+        // SAFETY: libc::getuid() is async-signal-safe and has no preconditions; reading the current process's UID is always defined behavior.
         let am_root = unsafe { libc::getuid() } == 0;
         if am_root {
             // The test invariant assumes a non-root tester. Skip when

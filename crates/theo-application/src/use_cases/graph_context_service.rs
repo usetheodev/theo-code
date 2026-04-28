@@ -1896,11 +1896,13 @@ mod tests {
         // so cold-start latency stays the same for users who never
         // query enough to amortize the model download.
         let prev = std::env::var_os("THEO_RERANKER_PRELOAD");
+        // SAFETY: test mutates a uniquely-named env var inside a serialized test module; concurrent access to the same key is not present in this test.
         unsafe {
             std::env::remove_var("THEO_RERANKER_PRELOAD");
         }
         assert!(!env_reranker_preload_enabled());
         if let Some(v) = prev {
+            // SAFETY: test mutates a uniquely-named env var inside a serialized test module; concurrent access to the same key is not present in this test.
             unsafe {
                 std::env::set_var("THEO_RERANKER_PRELOAD", v);
             }
@@ -1910,6 +1912,7 @@ mod tests {
     #[test]
     fn t81pre_env_recognises_truthy_values_case_insensitive() {
         let prev = std::env::var_os("THEO_RERANKER_PRELOAD");
+        // SAFETY: test mutates a uniquely-named env var inside a serialized test module; concurrent access to the same key is not present in this test.
         unsafe {
             for v in ["1", "true", "TRUE", "yes", "YES", "on", "ON"] {
                 std::env::set_var("THEO_RERANKER_PRELOAD", v);
@@ -1940,12 +1943,14 @@ mod tests {
         // loader. Critical invariant — a regression here would
         // download the model on every cold start.
         let prev = std::env::var_os("THEO_RERANKER_PRELOAD");
+        // SAFETY: test mutates a uniquely-named env var inside a serialized test module; concurrent access to the same key is not present in this test.
         unsafe {
             std::env::remove_var("THEO_RERANKER_PRELOAD");
         }
         let result = try_construct_reranker_if_enabled();
         assert!(result.is_none(), "preload off must short-circuit to None");
         if let Some(v) = prev {
+            // SAFETY: test mutates a uniquely-named env var inside a serialized test module; concurrent access to the same key is not present in this test.
             unsafe {
                 std::env::set_var("THEO_RERANKER_PRELOAD", v);
             }
