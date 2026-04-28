@@ -4,9 +4,12 @@
 //!
 //! Do not edit the path attribute — it is what keeps this file linked.
 
+    #![allow(unused_imports)]
     use std::path::PathBuf;
-
     use super::*;
+    use crate::extractors::data_models::*;
+    use crate::tree_sitter::SupportedLanguage;
+    use crate::types::{DataModel, DataModelKind, FieldInfo, Visibility};
     
 
     fn parse_and_extract(source: &str, language: SupportedLanguage) -> Vec<DataModel> {
