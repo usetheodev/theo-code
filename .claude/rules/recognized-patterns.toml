@@ -113,8 +113,8 @@ alternative_rejected = "see crates entry"
 
 [[panic_pattern]]
 name = "builtin_tool_schema_panic"
-regex = 'panic!\("invalid built-in tool schema:.*"\)'
-scope = "crates/theo-tooling/src/registry/**/*.rs"
+regex = 'panic!\(".*invalid schema.*"\)'
+scope = "crates/theo-tooling/**/*.rs"
 invariant = "Startup panic if a built-in tool ships an invalid schema; no recoverable path"
 adr = "021-recognized-rust-idioms.md#7-builtin_tool_schema_panic"
 alternative_rejected = "compile-time validation via proc-macro — scope creep"

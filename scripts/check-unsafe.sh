@@ -44,6 +44,11 @@ TODAY="$(date -u +%Y-%m-%d)"
 declare -A ALLOW
 declare -A ALLOW_SUNSET
 declare -A ALLOW_REASON
+ALLOW_PATTERN_GLOBS=()
+ALLOW_PATTERN_REGEXES=()
+ALLOW_PATTERN_SUNSETS=()
+ALLOW_PATTERN_REASONS=()
+
 if [[ -f "$ALLOWLIST_FILE" ]]; then
     while IFS='|' read -r loc sunset reason; do
         [[ -z "${loc// }" || "${loc:0:1}" == "#" ]] && continue
@@ -51,6 +56,26 @@ if [[ -f "$ALLOWLIST_FILE" ]]; then
         ALLOW_SUNSET["$loc"]="$sunset"
         ALLOW_REASON["$loc"]="$reason"
     done < "$ALLOWLIST_FILE"
+fi
+
+# ── ADR-021 recognized patterns (T2.2 of code-hygiene-5x5-plan) ────────
+PATTERN_LOADER="${REPO_ROOT}/scripts/check-recognized-patterns.sh"
+if [[ -f "$PATTERN_LOADER" ]]; then
+    # shellcheck source=check-recognized-patterns.sh
+    REPO_ROOT="$REPO_ROOT" source "$PATTERN_LOADER"
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        part1="${line%%@@*}"
+        rest1="${line#*@@}"
+        part2="${rest1%%@@*}"
+        rest2="${rest1#*@@}"
+        part3="${rest2%%@@*}"
+        part4="${rest2#*@@}"
+        ALLOW_PATTERN_GLOBS+=("$part1")
+        ALLOW_PATTERN_REGEXES+=("$part2")
+        ALLOW_PATTERN_SUNSETS+=("$part3")
+        ALLOW_PATTERN_REASONS+=("$part4")
+    done < <(emit_recognized_patterns unsafe)
 fi
 
 # Locate every `unsafe` site in production code.
@@ -101,6 +126,29 @@ while IFS= read -r line; do
         fi
         continue
     fi
+
+    # ADR-021 recognized-pattern check: if this unsafe line matches one
+    # of the codified `unsafe_pattern` regexes for this file's path, it is
+    # accepted without a SAFETY comment (the pattern + ADR-021 entry IS
+    # the documented invariant).
+    line_content="$(sed -n "${line_no}p" "$path" 2>/dev/null)"
+    matched_pattern=0
+    p_idx=0
+    while (( p_idx < ${#ALLOW_PATTERN_GLOBS[@]} )); do
+        glob="${ALLOW_PATTERN_GLOBS[$p_idx]}"
+        regex="${ALLOW_PATTERN_REGEXES[$p_idx]}"
+        p_idx=$((p_idx + 1))
+        case "$path" in
+            $glob)
+                if [[ "$line_content" =~ $regex ]]; then
+                    matched_pattern=1
+                    allow_hits=$((allow_hits + 1))
+                    break
+                fi
+                ;;
+        esac
+    done
+    (( matched_pattern )) && continue
 
     # Look back up to 8 lines for a SAFETY comment.
     start=$((line_no > 8 ? line_no - 8 : 1))

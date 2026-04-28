@@ -87,6 +87,29 @@ if [[ -f "$ALLOWLIST_FILE" ]]; then
     done < "$ALLOWLIST_FILE"
 fi
 
+# ── ADR-021 recognized patterns (T2.2 of code-hygiene-5x5-plan) ────────
+# Load codified Rust idioms from .claude/rules/recognized-patterns.toml
+# and append to the content-regex allowlist arrays. These are NOT
+# exceptions — they are the canonical idioms the project uses.
+PATTERN_LOADER="${REPO_ROOT}/scripts/check-recognized-patterns.sh"
+if [[ -f "$PATTERN_LOADER" ]]; then
+    # shellcheck source=check-recognized-patterns.sh
+    REPO_ROOT="$REPO_ROOT" source "$PATTERN_LOADER"
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        part1="${line%%@@*}"
+        rest1="${line#*@@}"
+        part2="${rest1%%@@*}"
+        rest2="${rest1#*@@}"
+        part3="${rest2%%@@*}"
+        part4="${rest2#*@@}"
+        ALLOW_GLOBS_CR+=("$part1")
+        ALLOW_REGEXES_CR+=("$part2")
+        ALLOW_SUNSETS_CR+=("$part3")
+        ALLOW_REASONS_CR+=("$part4")
+    done < <(emit_recognized_patterns unwrap)
+fi
+
 collect_hits() {
     local pattern="$1"
     # Search in crates/ and apps/, excluding tests/, benches/, target/.

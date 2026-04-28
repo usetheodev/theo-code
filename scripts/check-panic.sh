@@ -52,6 +52,9 @@ TODAY="$(date -u +%Y-%m-%d)"
 declare -A ALLOW
 declare -A ALLOW_SUNSET
 declare -A ALLOW_REASON
+ALLOW_PATTERN_GLOBS=()
+ALLOW_PATTERN_REGEXES=()
+
 if [[ -f "$ALLOWLIST_FILE" ]]; then
     while IFS='|' read -r loc sunset reason; do
         [[ -z "${loc// }" || "${loc:0:1}" == "#" ]] && continue
@@ -59,6 +62,21 @@ if [[ -f "$ALLOWLIST_FILE" ]]; then
         ALLOW_SUNSET["$loc"]="$sunset"
         ALLOW_REASON["$loc"]="$reason"
     done < "$ALLOWLIST_FILE"
+fi
+
+# ── ADR-021 recognized patterns (T2.2 of code-hygiene-5x5-plan) ────────
+PATTERN_LOADER="${REPO_ROOT}/scripts/check-recognized-patterns.sh"
+if [[ -f "$PATTERN_LOADER" ]]; then
+    # shellcheck source=check-recognized-patterns.sh
+    REPO_ROOT="$REPO_ROOT" source "$PATTERN_LOADER"
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        part1="${line%%@@*}"
+        rest1="${line#*@@}"
+        part2="${rest1%%@@*}"
+        ALLOW_PATTERN_GLOBS+=("$part1")
+        ALLOW_PATTERN_REGEXES+=("$part2")
+    done < <(emit_recognized_patterns panic)
 fi
 
 collect() {
@@ -129,6 +147,28 @@ run() {
             fi
             continue
         fi
+
+        # ADR-021 recognized-pattern check: line content match.
+        local content="${line#*:}"
+        content="${content#*:}"
+        local p_idx=0
+        local pattern_match=0
+        while (( p_idx < ${#ALLOW_PATTERN_GLOBS[@]} )); do
+            local glob="${ALLOW_PATTERN_GLOBS[$p_idx]}"
+            local regex="${ALLOW_PATTERN_REGEXES[$p_idx]}"
+            p_idx=$((p_idx + 1))
+            case "$path_line" in
+                $glob)
+                    if [[ "$content" =~ $regex ]]; then
+                        pattern_match=1
+                        allow_hits=$((allow_hits + 1))
+                        break
+                    fi
+                    ;;
+            esac
+        done
+        (( pattern_match )) && continue
+
         violations+=("$kind $line")
     done <<< "$filtered"
 }
