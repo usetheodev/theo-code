@@ -4,7 +4,11 @@
 //!
 //! Do not edit the path attribute — it is what keeps this file linked.
 
+    #![allow(unused_imports)]
     use super::*;
+    use crate::assembly::*;
+    use crate::search::ScoredCommunity;
+    use theo_engine_graph::model::{CodeGraph, NodeType};
     use crate::summary::{CommunityStructuredData, CommunitySummary};
     use std::collections::HashMap;
     use std::io::Write;
