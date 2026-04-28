@@ -3,6 +3,17 @@
 ## [Unreleased]
 
 ### Fixed
+- **god-files T1.3 — LSP tool family split (Phase 1, ADR D2)** (`docs/plans/god-files-2026-07-23-plan.md`).
+  `crates/theo-tooling/src/lsp/tool.rs` (974 LOC) decomposed into 5 per-tool files following ADR D2:
+  - `lsp/status.rs` (105 LOC) LspStatusTool
+  - `lsp/definition.rs` (138 LOC) LspDefinitionTool + format_definition_output
+  - `lsp/rename.rs` (274 LOC) LspRenameTool + RenameEditPreview + format_rename_output + collect_rename_edits + parse_text_edit
+  - `lsp/references.rs` (167 LOC) LspReferencesTool + format_references_output
+  - `lsp/hover.rs` (139 LOC) LspHoverTool + format_hover_output + extract_hover_text + flatten_contents
+  - `lsp/tool_common.rs` (239 LOC) shared helpers: PositionArgs, position_schema, extension_or_error, map_session_error, open_and_request, lang_id_for_extension, LocationEntry, collect_locations, extract_location
+  - `lsp/mod.rs` (~120 LOC) re-exports each tool struct + protocol surface; keeps the legacy `LspTool` umbrella stub for the `all_tools_have_valid_schemas` contract test
+  Allowlist net change: `lsp/tool.rs` (ceiling 1000) removed; `lsp/tool_tests.rs` (ceiling 850) kept for the consolidated sibling test body. 52 → 51 entries.
+  Validation: `cargo test --workspace --exclude theo-code-desktop --lib --tests --no-fail-fast` → 5247 PASS / 0 FAIL / 24 IGNORED. `cargo clippy -p theo-tooling --all-targets -- -D warnings` → 0 warnings. `bash scripts/check-sizes.sh` → 50 oversize, 0 NEW, 0 EXPIRED.
 - **god-files T1.2 — plan tool family split (Phase 1, ADR D2)** (`docs/plans/god-files-2026-07-23-plan.md`).
   `crates/theo-tooling/src/plan/mod.rs` (2356 LOC) decomposed into per-tool files following ADR D2:
   - `plan/create.rs` (153 LOC) CreatePlanTool
