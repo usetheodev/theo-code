@@ -160,6 +160,12 @@ check-env-var-coverage: ## Structural audit — every documented THEO_* env var 
 check-workspace-deps: ## Structural audit — every [workspace.dependencies] entry is used by >=1 crate
 	@bash $(SCRIPTS)/check-workspace-deps.sh
 
+.PHONY: check-allowlist-progress
+check-allowlist-progress: ## god-files-2026-07-23 plan progress (informational, not a gate)
+	@bash $(SCRIPTS)/check-allowlist-progress.sh
+	@echo ""
+	@bash $(SCRIPTS)/check-allowlist-progress.sh --baseline
+
 # ── Composite audit ────────────────────────────────────────────────────────
 .PHONY: audit
 audit: ## Run all 8 audit techniques

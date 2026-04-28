@@ -3,6 +3,9 @@
 ## [Unreleased]
 
 ### Fixed
+- **god-files Phase 0 (T0.1+T0.2) — baseline + tooling for the 2026-07-23 sunset campaign** (`docs/plans/god-files-2026-07-23-plan.md`).
+  - **T0.1** `docs/audit/god-files-baseline-2026-04-28.md` — frozen 53-entry snapshot with per-entry current LOC, ceiling, headroom, plus rollups by ceiling tier and by crate. `scripts/check-allowlist-progress.sh` reports current vs baseline (entries remaining: 53 → 53, total LOC above default ceiling: 21298, largest remaining: `theo-tooling/src/plan/mod.rs` 2356 LOC). `make check-allowlist-progress` target wired.
+  - **T0.2** `scripts/extract-tests-to-sibling.py` — mechanical extractor that moves `#[cfg(test)] mod tests { ... }` to a sibling `<file>_tests.rs` and rewrites the original to `#[cfg(test)] #[path = "<file>_tests.rs"] mod tests;`. Idempotent; handles raw-string false-positives; preserves headers/imports. 14/14 fixture tests in `scripts/extract-tests-to-sibling.test.sh`.
 - **CLEAN-F1 — theo-compat-harness explicitly excluded from workspace + README** (`docs/plans/cleanup-2026-04-28.md`).
   `crates/theo-compat-harness/` declared dependencies on `../commands`, `../tools`, `../runtime` — three sibling crates that do not exist anywhere in this repository. Origin: commits `914534d` / `3140ce8` ("CLI professionalization review"). The crate cannot compile and was sitting silently in `crates/` despite being absent from `[workspace.members]`, confusing readers. Now: (a) `Cargo.toml [workspace.exclude]` lists it explicitly so cargo never tries to resolve it, (b) `crates/theo-compat-harness/README.md` documents the situation and exposes the deletion path. Source preserved for git-history reference until someone with context decides revive vs delete.
 - **CLEAN-F2 — apps/theo-ui now has a README** (`docs/plans/cleanup-2026-04-28.md`).
