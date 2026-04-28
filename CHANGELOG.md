@@ -3,6 +3,16 @@
 ## [Unreleased]
 
 ### Fixed
+- **god-files T5.3 — apps/theo-cli/src/main.rs split (Phase 5, ADR D6)** (`docs/plans/god-files-2026-07-23-plan.md`).
+  `apps/theo-cli/src/main.rs` (1480 LOC) → 569 LOC. Extracted all 13 `cmd_*` handler functions (cmd_init, cmd_agent, cmd_headless, cmd_pilot, cmd_context, cmd_impact, cmd_stats, cmd_login, cmd_logout, cmd_dashboard, cmd_trajectory_export_rlhf, run_oauth_device_flow, plus the resolve_agent_config helper) to a new `apps/theo-cli/src/cmd.rs` (932 LOC).
+  main.rs now keeps only:
+  - `mod` declarations + `use crate::cmd::*;`
+  - `Cli` clap struct + `Commands` enum
+  - `fn main()` and the `Commands::*` match dispatch
+  - `build_injections` helper
+  All cmd_* functions made `pub` so main.rs can reach them through the wildcard import.
+  Allowlist net change: `apps/theo-cli/src/main.rs` (ceiling 1500) removed; `apps/theo-cli/src/cmd.rs` (ceiling 940) added. Same number of entries — but main.rs went from #1 oversize app file to under-ceiling. Per-subcommand file split into `cmd/<name>.rs` deferred to a follow-up (current monolithic cmd.rs satisfies T5.3's "extract from main.rs" objective).
+  Validation: `cargo test --workspace --exclude theo-code-desktop --lib --tests --no-fail-fast` → 5247 PASS / 0 FAIL / 24 IGNORED. `cargo clippy --workspace --all-targets -- -D warnings` → 0 warnings. `bash scripts/check-sizes.sh` → 26 oversize, 0 NEW, 0 EXPIRED.
 - **god-files Phase 5 batch — domain/providers/applications/graph/memory/mcp/tui tests extracted (T5.1..T5.7, ADR D4)** (`docs/plans/god-files-2026-07-23-plan.md`).
   Applied D4 to 13 files in a single batch:
   - `theo-domain/src/plan.rs` 1867 → 784 LOC, sibling 1090 LOC (T5.1; needed manual reconstruction — script extracted only 234 lines, brace counter cut off early)

@@ -56,7 +56,8 @@ crates/theo-infra-llm/src/providers/anthropic.rs|970|2026-07-23|Phase 4 debt (T5
 # files; post-refactor mod.rs is below the 800-LOC default ceiling
 # so no allowlist entry needed. Removed 2026-04-27 after stale-path
 # audit (`scripts/check-allowlist-paths.sh`).
-apps/theo-cli/src/main.rs|1500|2026-07-23|Phase 4 debt + T1.2 decouple (ceiling raised from 1050 → 1500 post-SOTA CLI subcommand additions: skill, replan opt-in, partial-progress wiring, T16.1 trajectory export-rlhf)
+# apps/theo-cli/src/main.rs — T5.3 split 2026-04-28: production half now 569 LOC (clap definition + main() + dispatch).
+apps/theo-cli/src/cmd.rs|940|2026-07-23|T5.3 — extracted cmd_* handlers from main.rs (ADR D6). Per-cmd file split deferred.
 # crates/theo-application/src/use_cases/pipeline.rs — T5.5 split 2026-04-28: production half now 601 LOC.
 # crates/theo-engine-parser/src/extractors/python.rs — T2.4 split 2026-04-28: production half now 560 LOC.
 crates/theo-infra-llm/src/providers/openai.rs|900|2026-07-23|Phase 4 debt (T5.2 partial: tests extracted; production half 964 → 895 LOC)
