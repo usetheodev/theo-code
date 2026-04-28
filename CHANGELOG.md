@@ -3,6 +3,23 @@
 ## [Unreleased]
 
 ### Fixed
+- **god-files T1.2 — plan tool family split (Phase 1, ADR D2)** (`docs/plans/god-files-2026-07-23-plan.md`).
+  `crates/theo-tooling/src/plan/mod.rs` (2356 LOC) decomposed into per-tool files following ADR D2:
+  - `plan/create.rs` (153 LOC) CreatePlanTool
+  - `plan/update_task.rs` (134 LOC) UpdateTaskTool
+  - `plan/advance_phase.rs` (116 LOC) AdvancePhaseTool
+  - `plan/log_entry.rs` (177 LOC) LogEntryTool
+  - `plan/summary.rs` (99 LOC) GetPlanSummaryTool
+  - `plan/next_task.rs` (113 LOC) GetNextTaskTool
+  - `plan/failure_status.rs` (204 LOC) PlanFailureStatusTool
+  - `plan/replan.rs` (162 LOC) ReplanTool
+  - `plan/shared.rs` (207 LOC) — disk helpers (atomic plan.json read/write) + JSON DTOs (PhaseArg, TaskArg, build_plan_from_args, parse_status, etc.)
+  - `plan/side_files.rs` (204 LOC) — FindingsFile + ProgressFile + helpers used by `plan_log` (append_finding, append_resource, append_requirement, append_error_entry, append_decision)
+  - `plan/mod.rs` (112 LOC) — declares each submodule + pub-use the 8 tool structs + keeps `PlanExitTool` (trivial, backward-compat) inline
+  Tests: extracted via `scripts/extract-tests-to-sibling.py` (T0.2 helper) into `plan/mod_tests.rs` (958 LOC, 37 tests). Per-tool test split deferred — the helper produces a single sibling file by design.
+  Allowlist net change: `plan/mod.rs` (ceiling 2400) removed, `plan/mod_tests.rs` (ceiling 970) added — same number of entries (52). `plan/mod.rs` was the largest file in the workspace; the remaining `plan/mod_tests.rs` is test-only.
+  `theo_domain::plan::{Plan, PlanDecision}` and `theo_domain::clock::now_millis` are imported into `side_files.rs` (used by `append_decision`). Struct fields in `FindingsFile`/`ProgressFile`/`FindingEntry`/`ResourceEntry`/`ErrorEntry` made `pub` to allow tests to inspect them after the split.
+  Validation: `cargo test --workspace --exclude theo-code-desktop --lib --tests --no-fail-fast` → 5247 PASS / 0 FAIL / 24 IGNORED (no count drop). `cargo clippy -p theo-tooling --all-targets -- -D warnings` → 0 warnings. `bash scripts/check-sizes.sh` → 0 NEW, 0 EXPIRED.
 - **god-files T1.1 — DAP tool family split (Phase 1, ADR D2)** (`docs/plans/god-files-2026-07-23-plan.md`).
   `crates/theo-tooling/src/dap/tool.rs` (1783 LOC) decomposed into 11 per-tool files following ADR D2 ("split per-tool with shared schema module"):
   - `dap/status.rs` (133 LOC) DebugStatusTool
