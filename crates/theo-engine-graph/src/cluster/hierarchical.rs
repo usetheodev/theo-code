@@ -90,7 +90,20 @@ pub fn subdivide_with_lpa_seeded(graph: &CodeGraph, parent: &Community) -> Vec<C
     let labels = if local_weights.is_empty() {
         seeds.clone()
     } else {
-        lpa_seeded(members, &local_weights, &seeds)
+        // ADR-019: lpa_seeded returns Result; on the rare case the
+        // partition state is internally inconsistent (programming bug),
+        // log + degrade gracefully by falling back to directory seeds —
+        // the user-facing API still produces *some* partition rather
+        // than panicking through the public boundary.
+        match lpa_seeded(members, &local_weights, &seeds) {
+            Ok(labels) => labels,
+            Err(err) => {
+                eprintln!(
+                    "lpa_seeded failed (ADR-019); falling back to directory seeds: {err}"
+                );
+                seeds.clone()
+            }
+        }
     };
 
     // Group by label.

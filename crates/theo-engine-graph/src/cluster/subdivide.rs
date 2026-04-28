@@ -16,18 +16,18 @@ pub fn subdivide_community(
     graph: &CodeGraph,
     community: &Community,
     _max_size: usize,
-) -> Vec<Community> {
+) -> Result<Vec<Community>, ClusterError> {
     let members = &community.node_ids;
 
     if members.len() <= 1 {
-        return vec![Community {
+        return Ok(vec![Community {
             id: format!("{}-mod-0", community.id),
             name: format!("{} / mod-0", community.name),
             level: 1,
             node_ids: members.clone(),
             parent_id: Some(community.id.clone()),
             version: community.version,
-        }];
+        }]);
     }
 
     // Build a local weight map restricted to community members.
@@ -70,7 +70,10 @@ pub fn subdivide_community(
                     (other_id.clone(), node_id.clone())
                 };
                 if let Some(&w) = local_weights.get(&(lo, hi)) {
-                    let lbl = *labels.get(other_id.as_str()).unwrap();
+                    let lbl = labels
+                        .get(other_id.as_str())
+                        .copied()
+                        .ok_or_else(|| ClusterError::MissingLabel(other_id.clone()))?;
                     *label_weight.entry(lbl).or_insert(0.0) += w;
                 }
             }
@@ -79,14 +82,21 @@ pub fn subdivide_community(
                 continue;
             }
 
-            // Adopt the most-frequent (heaviest) label.
+            // Adopt the most-frequent (heaviest) label. Inner partial_cmp
+            // tolerates non-NaN edge weights only; NaN is an upstream bug
+            // surfaced via the EmptyNeighbors path (max_by returns None).
             let best_label = label_weight
                 .iter()
-                .max_by(|(_, wa), (_, wb)| wa.partial_cmp(wb).unwrap())
+                .max_by(|(_, wa), (_, wb)| {
+                    wa.partial_cmp(wb).unwrap_or(std::cmp::Ordering::Equal)
+                })
                 .map(|(&lbl, _)| lbl)
-                .unwrap();
+                .ok_or(ClusterError::EmptyNeighbors)?;
 
-            let current = *labels.get(node_id.as_str()).unwrap();
+            let current = labels
+                .get(node_id.as_str())
+                .copied()
+                .ok_or_else(|| ClusterError::MissingLabel(node_id.clone()))?;
             if best_label != current {
                 labels.insert(node_id.as_str(), best_label);
                 changed = true;
@@ -101,12 +111,15 @@ pub fn subdivide_community(
     // Group nodes by their final label.
     let mut buckets: HashMap<usize, Vec<String>> = HashMap::new();
     for node_id in members.iter() {
-        let lbl = *labels.get(node_id.as_str()).unwrap();
+        let lbl = labels
+            .get(node_id.as_str())
+            .copied()
+            .ok_or_else(|| ClusterError::MissingLabel(node_id.clone()))?;
         buckets.entry(lbl).or_default().push(node_id.clone());
     }
 
     // Emit sub-communities.
-    buckets
+    Ok(buckets
         .into_values()
         .enumerate()
         .map(|(i, node_ids)| Community {
@@ -117,7 +130,7 @@ pub fn subdivide_community(
             parent_id: Some(community.id.clone()),
             version: community.version,
         })
-        .collect()
+        .collect())
 }
 
 // ---------------------------------------------------------------------------

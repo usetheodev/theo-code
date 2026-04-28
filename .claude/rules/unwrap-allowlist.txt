@@ -28,7 +28,7 @@ crates/theo-infra-llm/src/mock.rs|2026-10-23|Mock LLM provider used only from te
 
 # regex: entries use @@ as field separator so `|` is free inside regexes.
 regex:crates/**/*.rs@@\.(lock|read|write)\(\)\.expect\(.*(poisoned|lock)@@2026-10-23@@Mutex/RwLock poison is unrecoverable; .expect() documents the invariant.
-regex:crates/theo-engine-graph/**/*.rs@@\.unwrap\(\)@@2026-10-31@@Louvain heuristic invariants in cluster/subdivide.rs + cluster/lpa.rs — partial_cmp on non-NaN floats and HashMap::get on label-set built from same iterated ids. Inherited from cluster.rs Cat-B in B1 (T4.2 split).
+# REMOVED 2026-04-28 (T1.1 of code-hygiene-5x5: cluster Cat-B converted to ClusterError typed errors via ADR-019)
 regex:crates/theo-tooling/src/lsp/tool_common.rs@@\.unwrap\(\)@@2026-10-31@@Inherited from lsp/tool.rs Cat-B in B1.
 regex:apps/**/*.rs@@\.(lock|read|write)\(\)\.expect\(.*(poisoned|lock)@@2026-10-23@@Same poison idiom in apps.
 regex:apps/theo-cli/**/*.rs@@tokio::runtime::Runtime::new\(\)\.expect\(@@2026-10-31@@Runtime spawn failure at process entrypoint is fatal by design (T5.3 cmd/*.rs split).
@@ -61,7 +61,7 @@ regex:crates/theo-agent-runtime/src/bin/theo-agent\.rs@@\.unwrap\(\)@@2026-10-31
 # refactor to typed errors is non-trivial. ADR-019 (to be written) will
 # document the louvain clustering invariants. Sunset earlier than the
 # others to force a revisit.
-crates/theo-engine-graph/src/cluster.rs|2026-08-31|Louvain clustering: HashMap::get and partial_cmp on float weights — `labels` is built from the same node-id set being iterated, so `.get()` returns Some by construction; `partial_cmp` cannot return None because edge weights are normalised non-NaN floats. Refactor to typed errors tracked as ADR-019.
+# crates/theo-engine-graph/src/cluster.rs — REMOVED 2026-04-28 (file moved to module-dir; T1.1 of code-hygiene-5x5 also resolved Cat-B unwraps via ADR-019)
 regex:crates/theo-engine-retrieval/src/summary\.rs@@\.last\(\)\.unwrap\(\)@@2026-08-31@@`chain` is non-empty by construction at the call site; refactor to typed errors tracked.
 regex:crates/theo-tooling/src/apply_patch/mod\.rs@@\*candidates\.last\(\)\.unwrap\(\)@@2026-08-31@@`candidates` is non-empty by construction (early-return on len==0 above); refactor tracked.
 

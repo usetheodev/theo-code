@@ -182,7 +182,8 @@ fn label_propagation_subdivides_large_community() {
         version: 1,
     };
 
-    let sub = subdivide_community(&g, &big_community, 25);
+    let sub = subdivide_community(&g, &big_community, 25)
+        .expect("subdivide_community failed: invariant violated in test fixture");
 
     // Should split into at least 2 sub-communities
     assert!(
@@ -416,7 +417,8 @@ fn leiden_has_reasonable_modularity_on_clustered_graph() {
 
 #[test]
 fn lpa_seeded_empty_returns_empty() {
-    let result = lpa_seeded(&[], &HashMap::new(), &HashMap::new());
+    let result = lpa_seeded(&[], &HashMap::new(), &HashMap::new())
+        .expect("lpa_seeded on empty input should not error");
     assert!(result.is_empty());
 }
 
@@ -446,7 +448,8 @@ fn lpa_seeded_clusters_by_directory() {
     weights.insert((nodes[2].clone(), nodes[3].clone()), 0.5);
 
     let seeds = dir_seed_labels(&nodes);
-    let labels = lpa_seeded(&nodes, &weights, &seeds);
+    let labels = lpa_seeded(&nodes, &weights, &seeds)
+        .expect("lpa_seeded should succeed on test fixture");
 
     // All auth nodes should have the same label
     let auth_label = labels[&nodes[0]];
@@ -474,7 +477,8 @@ fn lpa_seeded_converges_on_fully_connected() {
     }
 
     let seeds = HashMap::new(); // no seeds = unique per node
-    let labels = lpa_seeded(&nodes, &weights, &seeds);
+    let labels = lpa_seeded(&nodes, &weights, &seeds)
+        .expect("lpa_seeded should succeed on test fixture");
 
     // All nodes should converge to the same label
     let unique: std::collections::HashSet<usize> = labels.values().copied().collect();

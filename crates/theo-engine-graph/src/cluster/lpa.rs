@@ -111,10 +111,10 @@ pub fn lpa_seeded(
     node_ids: &[String],
     weight_map: &HashMap<(String, String), f64>,
     initial_labels: &HashMap<String, usize>,
-) -> HashMap<String, usize> {
+) -> Result<HashMap<String, usize>, ClusterError> {
     let n = node_ids.len();
     if n == 0 {
-        return HashMap::new();
+        return Ok(HashMap::new());
     }
 
     // Index: node_id → idx
@@ -162,12 +162,18 @@ pub fn lpa_seeded(
                 *label_weight.entry(labels[nb_idx]).or_insert(0.0) += w;
             }
 
-            // Adopt heaviest label
+            // Adopt heaviest label. partial_cmp tolerates non-NaN
+            // weights only; NaN → Equal, biased to first encountered.
+            // The .ok_or path can't be triggered here because
+            // adj[idx].is_empty() is checked above, but the typed
+            // error documents the algorithmic contract.
             let best = label_weight
                 .iter()
-                .max_by(|(_, wa), (_, wb)| wa.partial_cmp(wb).unwrap())
+                .max_by(|(_, wa), (_, wb)| {
+                    wa.partial_cmp(wb).unwrap_or(std::cmp::Ordering::Equal)
+                })
                 .map(|(&lbl, _)| lbl)
-                .unwrap();
+                .ok_or(ClusterError::EmptyNeighbors)?;
 
             if best != labels[idx] {
                 labels[idx] = best;
@@ -180,11 +186,11 @@ pub fn lpa_seeded(
     }
 
     // Convert to HashMap output
-    node_ids
+    Ok(node_ids
         .iter()
         .enumerate()
         .map(|(i, id)| (id.clone(), labels[i]))
-        .collect()
+        .collect())
 }
 
 /// Generate directory-based seed labels from node IDs.
