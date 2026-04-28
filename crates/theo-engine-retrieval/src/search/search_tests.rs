@@ -4,7 +4,11 @@
 //!
 //! Do not edit the path attribute — it is what keeps this file linked.
 
+    #![allow(unused_imports)]
     use super::*;
+    use crate::search::*;
+    use theo_engine_graph::cluster::Community;
+    use theo_engine_graph::model::CodeGraph;
 
     #[test]
     fn test_split_snake_case() {
