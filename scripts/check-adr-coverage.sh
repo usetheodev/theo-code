@@ -15,6 +15,14 @@
 # branch mentions one of its tied task IDs. The mapping below comes
 # from the "ADRs" section of the plan (lines 58-138).
 #
+# IMPORTANT — naming systems do NOT collide here:
+#   * `Dx` (D1..D16)        — conceptual SOTA-plan ADRs, validated via
+#                              git log --grep on tied task IDs (this script).
+#   * `ADR-NNN` (e.g. 008)  — physical files at docs/adr/<NNN>-*.md, validated
+#                              by per-test acceptance checks (e.g. RM-pre-4).
+# This script does NOT touch docs/adr/ — it cannot detect a missing
+# ADR-NNN file. See CLEAN-A5 in docs/plans/cleanup-2026-04-28.md.
+#
 # Usage:
 #   scripts/check-adr-coverage.sh                  # full report
 #   scripts/check-adr-coverage.sh --since=v1.0.0   # restrict log range

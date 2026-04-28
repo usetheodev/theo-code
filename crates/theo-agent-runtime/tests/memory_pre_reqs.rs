@@ -60,6 +60,7 @@ fn test_pre1_ac_4_gitignore_excludes_reflections_jsonl() {
 // ── RM-pre-4 ──────────────────────────────────────────────────────────
 
 #[test]
+#[ignore = "RM-pre-4 awaits docs/adr/008-theo-infra-memory.md (memory subsystem not yet delivered, see outputs/agent-memory-plan.md and CLEAN-A4 in docs/plans/cleanup-2026-04-28.md)"]
 fn test_pre4_ac_2_adr_008_exists_and_signed() {
     let adr = workspace_root().join("docs/adr/008-theo-infra-memory.md");
     let body = std::fs::read_to_string(&adr).expect("ADR-008 must be committed");

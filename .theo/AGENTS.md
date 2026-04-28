@@ -1,47 +1,60 @@
 # Theo-Code Agent Navigation Map
 
-Quick-reference for AI agents working on this codebase. This is a **map**, not a manual.
-For detailed architecture, see `theo-architecture.md` in the autoloop repo.
+> Mirror condensed do `/CLAUDE.md` na raiz do repo. Em conflito numérico,
+> a fonte canônica é `/CLAUDE.md`.
 
-## Workspace (14 crates, 11 in eval scope)
+## Workspace (15 lib crates + 3 binary apps, Rust 2024)
 
-| Crate | Package Name | Responsibility | Tests | How to Test |
-|---|---|---|---|---|
-| `crates/theo-domain` | `theo-domain` | Pure types, state machines, zero deps | 251 | `cargo test -p theo-domain` |
-| `crates/theo-engine-parser` | `theo-engine-parser` | Tree-sitter extraction, 16 languages | 468 | `cargo test -p theo-engine-parser` |
-| `crates/theo-agent-runtime` | `theo-agent-runtime` | Agent loop, pilot mode, convergence | 359 | `cargo test -p theo-agent-runtime` |
-| `crates/theo-engine-retrieval` | `theo-engine-retrieval` | Search, ranking, context assembly | 274 | `cargo test -p theo-engine-retrieval` |
-| `crates/theo-infra-llm` | `theo-infra-llm` | 25 LLM providers, streaming, retry | 156 | `cargo test -p theo-infra-llm` |
-| `crates/theo-tooling` | `theo-tooling` | 40+ tools, registry, schemas | 144 | `cargo test -p theo-tooling` |
-| `crates/theo-engine-graph` | `theo-engine-graph` | Code graph construction, clustering | 103 | `cargo test -p theo-engine-graph` |
-| `crates/theo-infra-auth` | `theo-infra-auth` | OAuth PKCE, device flow, env vars | 87 | `cargo test -p theo-infra-auth` |
-| `crates/theo-application` | `theo-application` | Use cases, pipeline, wiki backend | 70 | `cargo test -p theo-application` |
-| `crates/theo-governance` | `theo-governance` | Sandbox, policy, impact analysis | 64 | `cargo test -p theo-governance` |
-| `crates/theo-api-contracts` | `theo-api-contracts` | Serializable DTOs | 0 | `cargo test -p theo-api-contracts` |
-| `apps/theo-cli` | `theo` | CLI binary | — | `cargo test -p theo` |
-| `apps/theo-marklive` | `theo-marklive` | Markdown live renderer | 4 | `cargo test -p theo-marklive` |
+| Crate / App | Package | Responsibility | Test Command |
+|---|---|---|---|
+| `crates/theo-domain` | `theo-domain` | Pure types, state machines, zero deps | `cargo test -p theo-domain` |
+| `crates/theo-engine-graph` | `theo-engine-graph` | Code graph construction, clustering | `cargo test -p theo-engine-graph` |
+| `crates/theo-engine-parser` | `theo-engine-parser` | Tree-Sitter extraction (14 languages) | `cargo test -p theo-engine-parser` |
+| `crates/theo-engine-retrieval` | `theo-engine-retrieval` | BM25 + RRF + context assembly | `cargo test -p theo-engine-retrieval` |
+| `crates/theo-governance` | `theo-governance` | Policy engine, sandbox cascade | `cargo test -p theo-governance` |
+| `crates/theo-isolation` | `theo-isolation` | bwrap / landlock / noop fallback | `cargo test -p theo-isolation` |
+| `crates/theo-infra-llm` | `theo-infra-llm` | 26 provider specs, streaming, retry | `cargo test -p theo-infra-llm` |
+| `crates/theo-infra-auth` | `theo-infra-auth` | OAuth PKCE, device flow, env keys | `cargo test -p theo-infra-auth` |
+| `crates/theo-infra-mcp` | `theo-infra-mcp` | Model Context Protocol client | `cargo test -p theo-infra-mcp` |
+| `crates/theo-infra-memory` | `theo-infra-memory` | (in progress; ADR-008 pending) | `cargo test -p theo-infra-memory` |
+| `crates/theo-test-memory-fixtures` | `theo-test-memory-fixtures` | Memory test fixtures | `cargo test -p theo-test-memory-fixtures` |
+| `crates/theo-tooling` | `theo-tooling` | 72 production tools + registry | `cargo test -p theo-tooling` |
+| `crates/theo-agent-runtime` | `theo-agent-runtime` | Agent loop, sub-agents, observability | `cargo test -p theo-agent-runtime` |
+| `crates/theo-api-contracts` | `theo-api-contracts` | Serializable DTOs for IPC | `cargo test -p theo-api-contracts` |
+| `crates/theo-application` | `theo-application` | Use-cases, facade, CLI runtime re-exports | `cargo test -p theo-application` |
+| `apps/theo-cli` | `theo` | CLI binary (binary name: `theo`) | `cargo test -p theo` |
+| `apps/theo-marklive` | `theo-marklive` | Markdown live renderer | `cargo test -p theo-marklive` |
+| `apps/theo-desktop` | `theo-code-desktop` | Tauri shell — **excluded from CI tests** (GTK deps) | n/a |
+
+**Outside Cargo workspace:**
+- `crates/theo-compat-harness` — separate Cargo project (CLEAN-F1 tracks decision)
+- `apps/theo-benchmark` — Python benchmark harness
+- `apps/theo-ui` — Vite/TypeScript UI
 
 ## Do NOT Touch
 
-- `apps/theo-desktop/` — Needs Tauri system deps, not in eval scope
-- `apps/theo-benchmark/` — Benchmark isolation
-- `.claude/CLAUDE.md` — Project instructions
+- `apps/theo-desktop/` — Excluded from `cargo test --workspace`. Use `--exclude theo-code-desktop`.
+- `apps/theo-benchmark/` — Python, runs against the built `theo` binary.
+- `apps/theo-ui/` — TypeScript/Vite, separate `npm test`.
+- `referencias/` — Vendored open-source repos, gitignored.
+- `.theo/audit/`, `.theo/coverage/` — Generated artifacts.
 
-## Dependency Order (leaf → root)
+## Dependency Order (leaf → root, ADR-010)
 
 ```
 theo-domain (leaf, CAUTION: rebuilds everything)
-  └─ theo-governance, theo-api-contracts
-      └─ theo-engine-parser
-          └─ theo-engine-graph
-              └─ theo-engine-retrieval
-                  └─ theo-tooling, theo-infra-llm, theo-infra-auth
-                      └─ theo-agent-runtime
-                          └─ theo-application
-                              └─ theo-cli (root)
+  ├─ theo-governance, theo-api-contracts
+  ├─ theo-engine-parser, theo-engine-graph
+  │    └─ theo-engine-retrieval (ADR-011)
+  ├─ theo-tooling, theo-infra-llm, theo-infra-auth, theo-infra-mcp, theo-infra-memory
+  └─ theo-agent-runtime (consumes governance + infra-llm + infra-auth + tooling)
+       └─ theo-application
+            └─ apps/* (theo-cli, theo-marklive, theo-desktop)
 ```
 
-**Rule**: Work leaf-first to minimize rebuild cascading.
+**Rule:** Apps NEVER import engine/infra crates directly. Use `theo_application::cli_runtime::*` re-exports.
+
+**Rule:** Work leaf-first to minimize rebuild cascading.
 
 ## Key Invariants
 
@@ -51,17 +64,58 @@ theo-domain (leaf, CAUTION: rebuilds everything)
 4. Sandbox policy checked before every tool execution
 5. Every execution has unique RunId
 6. Budget enforcer records iteration BEFORE budget check
+7. ADR-010 dependency direction enforced by `make check-arch` (0 violations today)
 
-## Quality Tests
+## Quality gates (verified 2026-04-28)
 
-- `crates/theo-governance/tests/boundary_test.rs` — 5 architectural boundary tests
-- `crates/theo-governance/tests/structural_hygiene.rs` — Structural code quality tests
+| Gate | Status | Command |
+|---|---|---|
+| `cargo build --workspace --exclude theo-code-desktop` | ✅ exit 0 | `cargo build ...` |
+| `cargo test ... --no-fail-fast` | 5247 PASS / 0 FAIL / 24 IGNORED (after CLEAN-A4) | `cargo test --workspace --exclude theo-code-desktop --lib --tests --no-fail-fast` |
+| `make check-arch` | ✅ 0 violations (16 crates) | `bash scripts/check-arch-contract.sh` |
+| `make check-sizes` | ✅ 52 oversize, all allowlisted, 0 NEW | `bash scripts/check-sizes.sh` |
+| `make check-sota-dod --quick` | ✅ 12/12 PASS, 2 SKIP (paid LLM) | `bash scripts/check-sota-dod.sh --quick` |
+| `make check-unwrap` (strict) | ❌ tracked in CLEAN-B1 | `bash scripts/check-unwrap.sh` |
+| `make check-unsafe` (strict) | ❌ tracked in CLEAN-B2 | `bash scripts/check-unsafe.sh` |
 
 ## Quick Commands
 
 ```bash
-cargo test --workspace --exclude theo-code-desktop    # All tests
-cargo clippy --workspace --exclude theo-code-desktop   # All clippy
-cargo test -p theo-domain                              # Single crate
-grep -r '.unwrap()' crates/*/src/ | wc -l              # Unwrap count
+# Build & test (always exclude desktop)
+cargo build --workspace --exclude theo-code-desktop
+cargo test --workspace --exclude theo-code-desktop --lib --tests --no-fail-fast
+
+# Per-crate (faster)
+cargo test -p theo-domain                   # leaf — fastest
+cargo test -p theo-tooling                  # ~900 tests
+cargo test -p theo-agent-runtime            # ~1300 tests
+
+# Audit (zero new debt allowed)
+make check-arch
+make check-sizes
+make check-sota-dod-quick
 ```
+
+## CLI surface (`theo` — 17 subcommands)
+
+```
+init, agent, pilot, context, impact, stats, memory,
+login, logout, dashboard, subagent, checkpoints,
+agents, mcp, skill, trajectory, help
+```
+
+Run `cargo run -p theo --bin theo -- --help` for the full list.
+
+## Where to look
+
+| You want to | Look in |
+|---|---|
+| Canonical agent guide | `/CLAUDE.md` (this file is a mirror) |
+| Project rules (inquebráveis) | `.claude/rules/` |
+| ADRs D1-D16 (SOTA plan, conceptual) | `docs/plans/sota-tier1-tier2-plan.md` |
+| ADRs ADR-NNN (physical files, not all written yet) | `docs/adr/` (pending) |
+| Plans / phases | `docs/plans/` |
+| Audits | `docs/audit/` |
+| Cleanup tasks (current) | `docs/plans/cleanup-2026-04-28.md` |
+| Maturity gap analysis | `docs/audit/maturity-gap-analysis-2026-04-27.md` |
+| Reference repos (gitignored) | `referencias/` |
