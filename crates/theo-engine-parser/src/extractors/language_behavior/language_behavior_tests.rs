@@ -3,6 +3,19 @@
 #![allow(unused_imports)]
 
 use super::*;
+use super::trait_def::*;
+use super::dispatch::*;
+use super::typescript::*;
+use super::python::*;
+use super::java::*;
+use super::csharp::*;
+use super::go::*;
+use super::php::*;
+use super::ruby::*;
+use super::rust::*;
+use super::generic::*;
+use crate::tree_sitter::SupportedLanguage;
+use crate::types::Visibility;
 
     // =======================================================================
     // module_separator
