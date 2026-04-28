@@ -3,6 +3,16 @@
 ## [Unreleased]
 
 ### Fixed
+- **god-files Phase 4 partial — retrieval/wiki/cluster/graph_context tests extracted (T4.1..T4.5, ADR D4)** (`docs/plans/god-files-2026-07-23-plan.md`).
+  Applied D4 to 7 retrieval/wiki/application files in a single batch:
+  - `assembly.rs` 1612 → 1247 LOC, sibling 368 LOC (T4.3; still over 800, ceiling lowered 1700 → 1250)
+  - `file_retriever.rs` 1418 → 720 LOC, sibling 701 LOC (T4.3; under 800, removed)
+  - `search.rs` 1257 → 1044 LOC, sibling 216 LOC (T4.3; ceiling 1300 → 1050)
+  - `wiki/generator.rs` 2018 → 1418 LOC, sibling 603 LOC (T4.1; ceiling 2100 → 1430)
+  - `wiki/runtime.rs` 1087 → 694 LOC, sibling 396 LOC (T4.4; under 800, removed)
+  - `wiki/model.rs` 856 → 701 LOC, sibling 158 LOC (T4.4; under 800, removed)
+  - `graph_context_service.rs` 1959 → 1423 LOC, sibling 539 LOC (T4.5; ceiling 1980 → 1430)
+  Allowlist net: 38 → 35 entries (-3). 4 files remain over 800 (assembly, search, wiki/generator, graph_context_service); structural decomposition deferred. Validation: cargo test 5247 PASS / 0 FAIL / 24 IGNORED, clippy `--all-targets` 0 warnings, sizes gate exit 0.
 - **god-files Phase 3 — agent-runtime tests extracted (T3.1..T3.5, ADR D4)** (`docs/plans/god-files-2026-07-23-plan.md`).
   Applied D4 to 9 agent-runtime files in a single batch:
   - `run_engine/mod.rs` 1668 → 423 LOC, sibling 1252 LOC (T3.1)
