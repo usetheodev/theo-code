@@ -102,7 +102,13 @@ crates/theo-tooling/src/lsp/tool_tests.rs|850|2026-07-23|T3.1 — sibling test b
 # The 8 browser_* tools were decomposed into per-tool files (status/open/click/
 # screenshot/type_text/eval/wait_for_selector/close.rs); shared helpers moved
 # to browser/tool_common.rs. mod.rs is now ~45 LOC.
-crates/theo-tooling/src/registry/mod.rs|1550|2026-07-23|T2.1 + T3.1 + T13.1 — default registry now wires 9 sidecar-backed tool stubs + their project-aware swap, plus 4 contract tests (`discovery_tool_family_lsp_dap_browser_share_zero_arg_search_contract`, `sota_tools_have_steering_descriptions_with_concrete_examples`, `default_registry_tool_id_snapshot_is_pinned`, `every_tool_input_example_satisfies_declared_required_params`). 2026-04-27 (dogfood F3): ceiling 1500 → 1550 to accommodate the embedded Playwright sidecar (`include_str!`) + materialise-on-first-use logic. Move builder helpers to `registry/builders/` at sunset.
+# crates/theo-tooling/src/registry/mod.rs — REMOVED 2026-04-28 (T1.5 of god-files-2026-07-23-plan.md).
+# Decomposed into 3 files:
+#   - registry/mod.rs (173 LOC) — ToolRegistry struct + impls + register_plugin_tools
+#   - registry/builders.rs (398 LOC) — create_default_registry +
+#     create_default_registry_with_project + browser sidecar helpers
+#   - registry/mod_tests.rs (832 LOC) — 25 contract tests, sibling test body
+crates/theo-tooling/src/registry/mod_tests.rs|850|2026-07-23|T1.5 — sibling test body covering 25 contract tests on the registry public surface. Per-test split deferred.
 crates/theo-agent-runtime/src/subagent/mod.rs|1500|2026-07-23|Phase 30 (resume-runtime-wiring) added WorktreeOverride + spawn_with_spec_with_override + 3 worktree-restore tests
 crates/theo-agent-runtime/src/subagent/resume.rs|1200|2026-07-23|Phase 30 (resume-runtime-wiring) — Resumer translates worktree strategy + 9 resume-translation tests
 crates/theo-agent-runtime/src/compaction_stages.rs|960|2026-07-23|T11.1 — Mask/Prune/Aggressive/Compact stages with deterministic offline summary fallback. 2026-04-27 (dogfood): ceiling 920 → 960 to absorb the doc-comment block + 2 new entries (`read`, `lsp_definition`, `lsp_references`) added to `PROTECTED_TOOL_NAMES` after the stale-tool-id audit.

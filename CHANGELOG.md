@@ -3,6 +3,14 @@
 ## [Unreleased]
 
 ### Fixed
+- **god-files T1.5 — registry split (Phase 1, ADR D5)** (`docs/plans/god-files-2026-07-23-plan.md`).
+  `crates/theo-tooling/src/registry/mod.rs` (1550 → 173 LOC). 1377-line drop. Decomposition:
+  - `registry/mod.rs` (173 LOC) — `ToolRegistry` struct + impls + `register_plugin_tools`
+  - `registry/builders.rs` (398 LOC) — extracted `create_default_registry` + `create_default_registry_with_project` (the 200-line `vec![Box::new(...)]` registration list + the project-aware LSP/Browser/DocsSearch swap) + browser sidecar helpers (`resolve_browser_sidecar_script`, `materialize_embedded_browser_sidecar`, `browser_sidecar_cache_dir`)
+  - `registry/mod_tests.rs` (832 LOC) — 25 contract tests extracted via `scripts/extract-tests-to-sibling.py` (T0.2 helper)
+  Public API: `create_default_registry` and `create_default_registry_with_project` are re-exported from `registry/mod.rs` via `pub use builders::*;` so consumers (`theo-application::cli_runtime`, `theo-agent-runtime::agent_loop`) need no change.
+  Allowlist net change: `registry/mod.rs` (ceiling 1550, the largest after `dap/tool.rs`/`plan/mod.rs`) removed; `registry/mod_tests.rs` (ceiling 850) added. 50 → 49 entries (-1).
+  Validation: `cargo test --workspace --exclude theo-code-desktop --lib --tests --no-fail-fast` → 5247 PASS / 0 FAIL / 24 IGNORED. `cargo clippy -p theo-tooling --all-targets -- -D warnings` → 0 warnings. `bash scripts/check-sizes.sh` → 49 oversize, 0 NEW, 0 EXPIRED. Phase 1 of the god-files plan is now COMPLETE — all 7 SOTA tool-family entries (DAP, plan, LSP, browser, registry mod) decomposed.
 - **god-files T1.4 — browser tool family split (Phase 1, ADR D2)** (`docs/plans/god-files-2026-07-23-plan.md`).
   `crates/theo-tooling/src/browser/tool.rs` (868 LOC) decomposed into 8 per-tool files following ADR D2:
   - `browser/status.rs` (118 LOC) BrowserStatusTool
