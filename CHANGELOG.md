@@ -3,6 +3,23 @@
 ## [Unreleased]
 
 ### Fixed
+- **god-files Phase 5 batch — domain/providers/applications/graph/memory/mcp/tui tests extracted (T5.1..T5.7, ADR D4)** (`docs/plans/god-files-2026-07-23-plan.md`).
+  Applied D4 to 13 files in a single batch:
+  - `theo-domain/src/plan.rs` 1867 → 784 LOC, sibling 1090 LOC (T5.1; needed manual reconstruction — script extracted only 234 lines, brace counter cut off early)
+  - `theo-domain/src/episode.rs` 1324 → 726 LOC, sibling 601 LOC (T5.1; under 800, removed)
+  - `theo-domain/src/event.rs` 803 → 415 LOC, sibling 391 LOC (T5.1; under 800, removed)
+  - `theo-domain/src/tool.rs` 1090 → 556 LOC, sibling 537 LOC (T5.1; under 800, removed)
+  - `theo-infra-llm/src/providers/anthropic.rs` 1074 → 958 LOC, sibling 119 LOC (T5.2; ceiling 1100 → 970)
+  - `theo-infra-llm/src/providers/openai.rs` 964 → 895 LOC, sibling 72 LOC (T5.2; ceiling 1000 → 900)
+  - `theo-application/src/use_cases/pipeline.rs` 989 → 601 LOC (T5.5; under 800, removed)
+  - `theo-application/src/use_cases/context_assembler.rs` 949 → 453 LOC (T5.5; under 800, removed)
+  - `theo-engine-graph/src/bridge.rs` 884 → 642 LOC (T5.6; under 800, removed)
+  - `theo-engine-graph/src/git.rs` 861 → 448 LOC (T5.6; under 800, removed)
+  - `theo-infra-memory/src/security.rs` 816 → 551 LOC (T5.7; under 800, removed)
+  - `theo-infra-mcp/src/discovery.rs` 933 → 286 LOC (T5.7; under 800, removed)
+  - `apps/theo-cli/src/tui/app.rs` 1270 → 1110 LOC (T5.4; ceiling 1300 → 1120, structural decomposition deferred)
+  Allowlist net: 35 → 26 entries (-9). Promise progression total: 53 → 26 entries (-27, ~51% of original allowlist resolved).
+  Validation: cargo test 5247 PASS / 0 FAIL / 24 IGNORED, clippy `--all-targets` 0 warnings, sizes gate exit 0.
 - **god-files Phase 4 partial — retrieval/wiki/cluster/graph_context tests extracted (T4.1..T4.5, ADR D4)** (`docs/plans/god-files-2026-07-23-plan.md`).
   Applied D4 to 7 retrieval/wiki/application files in a single batch:
   - `assembly.rs` 1612 → 1247 LOC, sibling 368 LOC (T4.3; still over 800, ceiling lowered 1700 → 1250)
