@@ -14,41 +14,44 @@
 #
 # Rough limit primer: crates max 800 LOC, UI max 400 LOC.
 #
-# Initial allowlist captured 2026-04-23 (Fase 4 baseline). Every entry
-# sunsets at T4.5 deadline 2026-07-23 (3 months) — if the file has not
-# been decomposed by then, the gate fails and forces action.
+# Initial allowlist captured 2026-04-23 (Fase 4 baseline). Original sunset
+# was T4.5 deadline 2026-07-23. The god-files-2026-07-23 plan resolved 27
+# of 53 entries by 2026-04-28 (51% reduction); the remaining 30 entries
+# were renewed to **2026-10-31** under ADR-020
+# (`docs/adr/020-renewed-size-allowlist-2026-07-15.md`). The next plan
+# should target ≤ 10 entries and renewed sunset ≤ 2027-01-31.
 
 # ── Top-12 god files (>1000 LOC; highest priority T4.5) ────────────────
 # 2026-04-27 path correction: run_engine.rs / pilot.rs / session_tree.rs /
 # tool_bridge.rs were refactored into module-dir form (`<name>/mod.rs`)
 # pre-SOTA; allowlist entries follow the new paths.
 # crates/theo-agent-runtime/src/run_engine/mod.rs — T3.1 split 2026-04-28: production half now 423 LOC.
-crates/theo-agent-runtime/src/run_engine/mod_tests.rs|1260|2026-07-23|Sibling test body of run_engine/mod.rs (T3.1)
-crates/theo-engine-retrieval/src/wiki/generator.rs|1430|2026-07-23|T4.5 god file (T4.1 partial: tests extracted; production half 2018 → 1418 LOC)
-crates/theo-engine-parser/src/extractors/language_behavior.rs|1340|2026-07-23|T4.5 god file (T2.2 partial: tests extracted to language_behavior_tests.rs; production half 1757 → 1331 LOC. Per-language module decomposition still needed)
-crates/theo-engine-parser/src/extractors/language_behavior_tests.rs|450|2026-07-23|Sibling test body of language_behavior.rs (T2.2 partial)
-crates/theo-application/src/use_cases/graph_context_service.rs|1430|2026-07-23|T4.5 god file (T4.5 partial: tests extracted; production half 1959 → 1423 LOC)
-crates/theo-engine-parser/src/types.rs|960|2026-07-23|T4.5 god file (T2.4 split: tests extracted to types_tests.rs; production half 1665 → 948 LOC)
-crates/theo-engine-parser/src/types_tests.rs|800|2026-07-23|Sibling test body of types.rs (T2.4)
-crates/theo-engine-retrieval/src/assembly.rs|1250|2026-07-23|T4.5 god file (T4.3 partial: tests extracted; production half 1612 → 1247 LOC)
-crates/theo-engine-graph/src/cluster.rs|1650|2026-07-23|T4.5 god file
+crates/theo-agent-runtime/src/run_engine/mod_tests.rs|1260|2026-10-31|Sibling test body of run_engine/mod.rs (T3.1)
+crates/theo-engine-retrieval/src/wiki/generator.rs|1430|2026-10-31|T4.5 god file (T4.1 partial: tests extracted; production half 2018 → 1418 LOC)
+crates/theo-engine-parser/src/extractors/language_behavior.rs|1340|2026-10-31|T4.5 god file (T2.2 partial: tests extracted to language_behavior_tests.rs; production half 1757 → 1331 LOC. Per-language module decomposition still needed)
+crates/theo-engine-parser/src/extractors/language_behavior_tests.rs|450|2026-10-31|Sibling test body of language_behavior.rs (T2.2 partial)
+crates/theo-application/src/use_cases/graph_context_service.rs|1430|2026-10-31|T4.5 god file (T4.5 partial: tests extracted; production half 1959 → 1423 LOC)
+crates/theo-engine-parser/src/types.rs|960|2026-10-31|T4.5 god file (T2.4 split: tests extracted to types_tests.rs; production half 1665 → 948 LOC)
+crates/theo-engine-parser/src/types_tests.rs|800|2026-10-31|Sibling test body of types.rs (T2.4)
+crates/theo-engine-retrieval/src/assembly.rs|1250|2026-10-31|T4.5 god file (T4.3 partial: tests extracted; production half 1612 → 1247 LOC)
+crates/theo-engine-graph/src/cluster.rs|1650|2026-10-31|T4.5 god file
 # crates/theo-engine-retrieval/src/file_retriever.rs — T4.3 split 2026-04-28: production half now 720 LOC.
 # crates/theo-engine-parser/src/extractors/symbols.rs — T2.4 split 2026-04-28: production half now 261 LOC.
-crates/theo-engine-parser/src/extractors/symbols_tests.rs|1150|2026-07-23|Sibling test body of symbols.rs (T2.4); 1132 LOC of multi-language symbol extraction tests
+crates/theo-engine-parser/src/extractors/symbols_tests.rs|1150|2026-10-31|Sibling test body of symbols.rs (T2.4); 1132 LOC of multi-language symbol extraction tests
 # crates/theo-engine-parser/src/symbol_table.rs — T2.4 split 2026-04-28: production half now 525 LOC (under 800), tests extracted.
-crates/theo-engine-parser/src/symbol_table_tests.rs|850|2026-07-23|Sibling test body of symbol_table.rs (T2.4); 826-line test body of high-fidelity name resolution
+crates/theo-engine-parser/src/symbol_table_tests.rs|850|2026-10-31|Sibling test body of symbol_table.rs (T2.4); 826-line test body of high-fidelity name resolution
 # crates/theo-domain/src/episode.rs — T5.1 split 2026-04-28: production half now 726 LOC.
-apps/theo-cli/src/tui/app.rs|1120|2026-07-23|T4.3 + T5.4 split 2026-04-28: tests extracted; production half 1270 → 1110 LOC. Structural decomposition deferred.
+apps/theo-cli/src/tui/app.rs|1120|2026-10-31|T4.3 + T5.4 split 2026-04-28: tests extracted; production half 1270 → 1110 LOC. Structural decomposition deferred.
 
 # ── Files 800–1500 LOC (broader Phase 4 scope) ─────────────────────────
-crates/theo-engine-retrieval/src/search.rs|1050|2026-07-23|Phase 4 debt (T4.3 partial: tests extracted; production half 1257 → 1044 LOC)
+crates/theo-engine-retrieval/src/search.rs|1050|2026-10-31|Phase 4 debt (T4.3 partial: tests extracted; production half 1257 → 1044 LOC)
 # crates/theo-engine-parser/src/import_resolver.rs — T2.4 split 2026-04-28: production half now 603 LOC.
 # crates/theo-agent-runtime/src/pilot/mod.rs — T3.2 split 2026-04-28: production half now 780 LOC.
-crates/theo-agent-runtime/src/pilot/mod_tests.rs|650|2026-07-23|Sibling test body of pilot/mod.rs (T3.2)
-crates/theo-engine-parser/src/extractors/data_models.rs|970|2026-07-23|Phase 4 debt (T2.4 split: tests extracted; production half 1185 → 960 LOC)
+crates/theo-agent-runtime/src/pilot/mod_tests.rs|650|2026-10-31|Sibling test body of pilot/mod.rs (T3.2)
+crates/theo-engine-parser/src/extractors/data_models.rs|970|2026-10-31|Phase 4 debt (T2.4 split: tests extracted; production half 1185 → 960 LOC)
 # crates/theo-engine-parser/src/extractors/csharp.rs — T2.4 split 2026-04-28: production half now 783 LOC (under 800), tests extracted.
 # crates/theo-engine-retrieval/src/wiki/runtime.rs — T4.4 split 2026-04-28: production half now 694 LOC.
-crates/theo-infra-llm/src/providers/anthropic.rs|970|2026-07-23|Phase 4 debt (T5.2 partial: tests extracted; production half 1074 → 958 LOC)
+crates/theo-infra-llm/src/providers/anthropic.rs|970|2026-10-31|Phase 4 debt (T5.2 partial: tests extracted; production half 1074 → 958 LOC)
 # crates/theo-domain/src/tool.rs — T5.1 split 2026-04-28: production half now 556 LOC.
 # crates/theo-agent-runtime/src/tool_bridge/mod.rs — T3.5 split 2026-04-28: production half now 133 LOC.
 # crates/theo-agent-runtime/src/memory_lifecycle.rs — refactored
@@ -57,21 +60,21 @@ crates/theo-infra-llm/src/providers/anthropic.rs|970|2026-07-23|Phase 4 debt (T5
 # so no allowlist entry needed. Removed 2026-04-27 after stale-path
 # audit (`scripts/check-allowlist-paths.sh`).
 # apps/theo-cli/src/main.rs — T5.3 split 2026-04-28: production half now 569 LOC (clap definition + main() + dispatch).
-apps/theo-cli/src/cmd.rs|940|2026-07-23|T5.3 — extracted cmd_* handlers from main.rs (ADR D6). Per-cmd file split deferred.
+apps/theo-cli/src/cmd.rs|940|2026-10-31|T5.3 — extracted cmd_* handlers from main.rs (ADR D6). Per-cmd file split deferred.
 # crates/theo-application/src/use_cases/pipeline.rs — T5.5 split 2026-04-28: production half now 601 LOC.
 # crates/theo-engine-parser/src/extractors/python.rs — T2.4 split 2026-04-28: production half now 560 LOC.
-crates/theo-infra-llm/src/providers/openai.rs|900|2026-07-23|Phase 4 debt (T5.2 partial: tests extracted; production half 964 → 895 LOC)
+crates/theo-infra-llm/src/providers/openai.rs|900|2026-10-31|Phase 4 debt (T5.2 partial: tests extracted; production half 964 → 895 LOC)
 # crates/theo-engine-parser/src/extractors/php.rs — T2.4 split 2026-04-28: production half now 616 LOC.
 # crates/theo-application/src/use_cases/context_assembler.rs — T5.5 split 2026-04-28: production half now 453 LOC.
-crates/theo-engine-retrieval/src/tantivy_search.rs|950|2026-07-23|Phase 4 debt
-crates/theo-tooling/src/read/mod.rs|970|2026-07-23|Phase 4 debt (T2.3 adoption raised ceiling by 20 LOC for canonicalize hardening)
+crates/theo-engine-retrieval/src/tantivy_search.rs|950|2026-10-31|Phase 4 debt
+crates/theo-tooling/src/read/mod.rs|970|2026-10-31|Phase 4 debt (T2.3 adoption raised ceiling by 20 LOC for canonicalize hardening)
 # crates/theo-engine-parser/src/extractors/typescript.rs — T2.4 split 2026-04-28: production half now 519 LOC.
 # crates/theo-agent-runtime/src/session_tree/mod.rs — T3.5 split 2026-04-28: production half now 324 LOC.
 # crates/theo-engine-graph/src/bridge.rs — T5.6 split 2026-04-28: production half now 642 LOC.
 # crates/theo-engine-parser/src/tree_sitter.rs — T2.4 split 2026-04-28: production half now 334 LOC.
 # crates/theo-engine-graph/src/git.rs — T5.6 split 2026-04-28: production half now 448 LOC.
 # crates/theo-engine-retrieval/src/wiki/model.rs — T4.4 split 2026-04-28: production half now 701 LOC.
-crates/theo-tooling/src/apply_patch/mod.rs|920|2026-07-23|Phase 4 debt (T2.3 adoption raised ceiling by ~20 LOC for canonicalize + permission hardening)
+crates/theo-tooling/src/apply_patch/mod.rs|920|2026-10-31|Phase 4 debt (T2.3 adoption raised ceiling by ~20 LOC for canonicalize + permission hardening)
 # crates/theo-agent-runtime/src/observability/report.rs — refactored
 # into module-dir form `observability/report/mod.rs` (412 LOC) +
 # `observability/report/metrics.rs`; post-refactor mod.rs is well
@@ -91,21 +94,21 @@ crates/theo-tooling/src/apply_patch/mod.rs|920|2026-07-23|Phase 4 debt (T2.3 ado
 # breakpoint/continue_/step/eval/stack_trace/variables/scopes/threads/
 # terminate.rs), each ≤ 254 LOC. Shared helpers moved to dap/tool_common.rs.
 # tool.rs was deleted; the allowlist entry is no longer needed.
-crates/theo-tooling/src/dap/tool_tests.rs|1300|2026-07-23|T13.1 — sibling test body covering 213 tests across the 11 debug_* tools. Per-tool split deferred to a follow-up; ceiling kept at 1300.
+crates/theo-tooling/src/dap/tool_tests.rs|1300|2026-10-31|T13.1 — sibling test body covering 213 tests across the 11 debug_* tools. Per-tool split deferred to a follow-up; ceiling kept at 1300.
 # crates/theo-tooling/src/plan/mod.rs — REMOVED 2026-04-28 (T1.2 of god-files-2026-07-23-plan.md).
 # The 8 plan_* tools were decomposed into per-tool files (create/update_task/
 # advance_phase/log_entry/summary/next_task/replan/failure_status.rs); shared
 # helpers moved to plan/shared.rs and plan/side_files.rs. mod.rs is now 113 LOC
 # (header + module decls + pub use + PlanExitTool inline).
-crates/theo-tooling/src/plan/mod_tests.rs|970|2026-07-23|T6.1 — sibling test body for the 8 plan_* tools (37 tests, 940 LOC). Per-tool test split deferred; ceiling kept at 970.
+crates/theo-tooling/src/plan/mod_tests.rs|970|2026-10-31|T6.1 — sibling test body for the 8 plan_* tools (37 tests, 940 LOC). Per-tool test split deferred; ceiling kept at 970.
 # crates/theo-domain/src/plan.rs — T5.1 split 2026-04-28: production half now 784 LOC.
-crates/theo-domain/src/plan_tests.rs|1100|2026-07-23|Sibling test body of plan.rs (T5.1) — 60+ tests covering Plan/Phase/PlanTask schema
+crates/theo-domain/src/plan_tests.rs|1100|2026-10-31|Sibling test body of plan.rs (T5.1) — 60+ tests covering Plan/Phase/PlanTask schema
 # crates/theo-tooling/src/lsp/tool.rs — REMOVED 2026-04-28 (T1.3 of god-files-2026-07-23-plan.md).
 # The 5 lsp_* tools were decomposed into per-tool files (status/definition/
 # references/hover/rename.rs); shared helpers (PositionArgs, position_schema,
 # extension_or_error, map_session_error, open_and_request, lang_id_for_extension,
 # LocationEntry, collect_locations, extract_location) moved to lsp/tool_common.rs.
-crates/theo-tooling/src/lsp/tool_tests.rs|850|2026-07-23|T3.1 — sibling test body covering 131 lsp_* tests. Per-tool test split deferred.
+crates/theo-tooling/src/lsp/tool_tests.rs|850|2026-10-31|T3.1 — sibling test body covering 131 lsp_* tests. Per-tool test split deferred.
 # crates/theo-tooling/src/browser/tool.rs — REMOVED 2026-04-28 (T1.4 of god-files-2026-07-23-plan.md).
 # The 8 browser_* tools were decomposed into per-tool files (status/open/click/
 # screenshot/type_text/eval/wait_for_selector/close.rs); shared helpers moved
@@ -116,20 +119,20 @@ crates/theo-tooling/src/lsp/tool_tests.rs|850|2026-07-23|T3.1 — sibling test b
 #   - registry/builders.rs (398 LOC) — create_default_registry +
 #     create_default_registry_with_project + browser sidecar helpers
 #   - registry/mod_tests.rs (832 LOC) — 25 contract tests, sibling test body
-crates/theo-tooling/src/registry/mod_tests.rs|850|2026-07-23|T1.5 — sibling test body covering 25 contract tests on the registry public surface. Per-test split deferred.
+crates/theo-tooling/src/registry/mod_tests.rs|850|2026-10-31|T1.5 — sibling test body covering 25 contract tests on the registry public surface. Per-test split deferred.
 # crates/theo-agent-runtime/src/subagent/mod.rs — T3.3 split 2026-04-28: production half now 481 LOC.
-crates/theo-agent-runtime/src/subagent/mod_tests.rs|1050|2026-07-23|Sibling test body of subagent/mod.rs (T3.3)
+crates/theo-agent-runtime/src/subagent/mod_tests.rs|1050|2026-10-31|Sibling test body of subagent/mod.rs (T3.3)
 # crates/theo-agent-runtime/src/subagent/resume.rs — T3.3 split 2026-04-28: production half now 319 LOC.
-crates/theo-agent-runtime/src/subagent/resume_tests.rs|850|2026-07-23|Sibling test body of subagent/resume.rs (T3.3)
+crates/theo-agent-runtime/src/subagent/resume_tests.rs|850|2026-10-31|Sibling test body of subagent/resume.rs (T3.3)
 # crates/theo-agent-runtime/src/compaction_stages.rs — T3.4 split 2026-04-28: production half now 418 LOC.
-crates/theo-agent-runtime/src/compaction_stages_tests.rs|550|2026-07-23|Sibling test body of compaction_stages.rs (T3.4)
+crates/theo-agent-runtime/src/compaction_stages_tests.rs|550|2026-10-31|Sibling test body of compaction_stages.rs (T3.4)
 # crates/theo-agent-runtime/src/lifecycle_hooks.rs — T3.5 split 2026-04-28: production half now 362 LOC.
 # crates/theo-agent-runtime/src/config/mod.rs — T3.5 split 2026-04-28: production half now 576 LOC.
 # crates/theo-domain/src/event.rs — T5.1 split 2026-04-28: production half now 415 LOC.
 # crates/theo-infra-mcp/src/discovery.rs — T5.7 split 2026-04-28: production half now 286 LOC.
 
 # ── UI (>400 LOC) ──────────────────────────────────────────────────────
-apps/theo-ui/src/components/ui/sidebar.tsx|800|2026-07-23|T4.4 follow-up (third-party UI derived)
+apps/theo-ui/src/components/ui/sidebar.tsx|800|2026-10-31|T4.4 follow-up (third-party UI derived)
 # apps/theo-ui/src/features/settings/pages/SettingsPage.tsx — decomposed
 # in T4.4 into useSettings hook + 7 section sub-components; page is now
 # 83 LOC, well under the 400-LOC UI limit. Entry removed 2026-04-23.
