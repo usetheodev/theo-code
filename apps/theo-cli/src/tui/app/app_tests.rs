@@ -5,7 +5,7 @@
 //! Do not edit the path attribute — it is what keeps this file linked.
 
     use super::*;
-    use theo_domain::event::DomainEvent;
+    use theo_domain::event::{DomainEvent, EventType};
 
     fn make_event(event_type: EventType, entity: &str, payload: serde_json::Value) -> DomainEvent {
         DomainEvent::new(event_type, entity, payload)
