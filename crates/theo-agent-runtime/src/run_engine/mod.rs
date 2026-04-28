@@ -418,6 +418,19 @@ use theo_domain::clock::now_millis;
 // `run_engine_sandbox.rs` / `execution.rs` in Fase 4 (REMEDIATION_PLAN T4.2).
 
 
+// Sibling tests split per area (T3.2 of code-hygiene-5x5).
 #[cfg(test)]
-#[path = "mod_tests.rs"]
-mod tests;
+#[path = "test_helpers.rs"]
+mod test_helpers;
+#[cfg(test)]
+#[path = "lifecycle_tests.rs"]
+mod lifecycle_tests;
+#[cfg(test)]
+#[path = "delegate_tests.rs"]
+mod delegate_tests;
+#[cfg(test)]
+#[path = "dispatch_tests.rs"]
+mod dispatch_tests;
+#[cfg(test)]
+#[path = "variants_tests.rs"]
+mod variants_tests;

@@ -26,7 +26,10 @@
 # tool_bridge.rs were refactored into module-dir form (`<name>/mod.rs`)
 # pre-SOTA; allowlist entries follow the new paths.
 # crates/theo-agent-runtime/src/run_engine/mod.rs — T3.1 split 2026-04-28: production half now 423 LOC.
-crates/theo-agent-runtime/src/run_engine/mod_tests.rs|1260|2026-10-31|Sibling test body of run_engine/mod.rs (T3.1)
+# crates/theo-agent-runtime/src/run_engine/mod_tests.rs — RESOLVED 2026-04-28 (T3.2 of code-hygiene-5x5).
+# Split per-area into lifecycle_tests.rs (445), delegate_tests.rs (376),
+# dispatch_tests.rs (158), variants_tests.rs (279) + test_helpers.rs (45).
+# All ≤ 800 LOC.
 # crates/theo-engine-retrieval/src/wiki/generator.rs — T4.1 split 2026-04-28: decomposed to generator/{doc,metadata,summary,hashing,incremental,concepts}.rs.
 # crates/theo-engine-parser/src/extractors/language_behavior.rs — REMOVED 2026-04-28 (file moved to module-dir form during god-files refactor)
 # crates/theo-engine-parser/src/extractors/language_behavior_tests.rs — REMOVED 2026-04-28 (file moved to module-dir form during god-files refactor)

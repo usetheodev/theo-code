@@ -3,6 +3,15 @@
 ## [Unreleased]
 
 ### Changed
+- **code-hygiene-5x5 T3.2 — `run_engine/mod_tests.rs` (1255 LOC) split per-area** (`docs/plans/code-hygiene-5x5-plan.md`).
+  `crates/theo-agent-runtime/src/run_engine/mod_tests.rs` decomposed into:
+  - `run_engine/test_helpers.rs` (45 LOC) — shared `TestSetup` (pub(super))
+  - `run_engine/lifecycle_tests.rs` (445 LOC) — transition / state / publish_state / agent_result + llm_error_class_mapping inner mod
+  - `run_engine/delegate_tests.rs` (376 LOC) — delegate_task_* + Capture/ScopeRewriter helper structs
+  - `run_engine/dispatch_tests.rs` (158 LOC) — try_dispatch_mcp_tool / is_mutating_tool / maybe_checkpoint / engine_with_subagent_*
+  - `run_engine/variants_tests.rs` (279 LOC) — dispatch_replays / provider_hint / success_semantics inner mods
+  All files ≤ 800 LOC. size-allowlist entry resolved.
+  Validation: cargo test 5247 PASS / 0 FAIL / 24 IGNORED, clippy 0 warnings, sizes gate exit 0.
 - **code-hygiene-5x5 T3.1 — DAP `tool_tests.rs` (1281 LOC, 73 tests) split into 11 per-tool sibling files** (`docs/plans/code-hygiene-5x5-plan.md`).
   `crates/theo-tooling/src/dap/tool_tests.rs` decomposed into:
   - `dap/test_helpers.rs` (28 LOC) — shared `make_ctx` + `empty_manager` (pub(crate))
