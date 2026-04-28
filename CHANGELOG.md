@@ -3,6 +3,19 @@
 ## [Unreleased]
 
 ### Fixed
+- **god-files Phase 3 — agent-runtime tests extracted (T3.1..T3.5, ADR D4)** (`docs/plans/god-files-2026-07-23-plan.md`).
+  Applied D4 to 9 agent-runtime files in a single batch:
+  - `run_engine/mod.rs` 1668 → 423 LOC, sibling 1252 LOC (T3.1)
+  - `pilot/mod.rs` 1414 → 780 LOC, sibling 640 LOC (T3.2)
+  - `subagent/mod.rs` 1492 → 481 LOC, sibling 1017 LOC (T3.3)
+  - `subagent/resume.rs` 1144 → 319 LOC, sibling 832 LOC (T3.3)
+  - `compaction_stages.rs` 934 → 418 LOC, sibling 522 LOC (T3.4)
+  - `lifecycle_hooks.rs` 837 → 362 LOC, sibling 481 LOC (T3.5)
+  - `config/mod.rs` 905 → 576 LOC, sibling 336 LOC (T3.5)
+  - `tool_bridge/mod.rs` 923 → 133 LOC, sibling 796 LOC (T3.5)
+  - `session_tree/mod.rs` 753 → 324 LOC, sibling 436 LOC (T3.5; needed manual reconstruction — extract-tests script broke on raw-string brace counting)
+  Allowlist net: 43 → 38 entries (-5). All 9 production halves now under 800 LOC; 4 sibling files remained over 800 (ceiling adjusted in allowlist with new entries). Phase 3 of the god-files plan is now COMPLETE.
+  Validation: cargo test 5247 PASS / 0 FAIL / 24 IGNORED, clippy 0 warnings, sizes gate exit 0.
 - **god-files T2.2 + T2.4 follow-up — language_behavior, symbols, import_resolver, tree_sitter tests extracted** (`docs/plans/god-files-2026-07-23-plan.md`).
   Continuation of the previous T2.4 commit. Applied D4 to 4 more parser files where the helper script's first run reported "no extraction needed" (script bug — fell back to manual line-slice from git HEAD):
   - `extractors/language_behavior.rs` 1757 → 1331 LOC, sibling 431 LOC. Production half still over 800; allowlist ceiling lowered 1800 → 1340 (per-language module decomposition still pending in a follow-up).
