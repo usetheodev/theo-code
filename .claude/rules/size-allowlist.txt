@@ -111,7 +111,10 @@ crates/theo-engine-parser/src/symbol_table_tests.rs|850|2026-10-31|Sibling test 
 # (header + module decls + pub use + PlanExitTool inline).
 crates/theo-tooling/src/plan/mod_tests.rs|970|2026-10-31|T6.1 — sibling test body for the 8 plan_* tools (37 tests, 940 LOC). Per-tool test split deferred; ceiling kept at 970.
 # crates/theo-domain/src/plan.rs — T5.1 split 2026-04-28: production half now 784 LOC.
-crates/theo-domain/src/plan_tests.rs|1100|2026-10-31|Sibling test body of plan.rs (T5.1) — 60+ tests covering Plan/Phase/PlanTask schema
+# crates/theo-domain/src/plan_tests.rs — RESOLVED 2026-04-28 (T3.4 of code-hygiene-5x5).
+# Split per-feature: plan_schema_tests.rs (410), plan_patch_tests.rs (242),
+# plan_failure_tests.rs (195), plan_claim_tests.rs (201), plan_legacy_tests.rs (56)
+# + plan_test_helpers.rs (59). All ≤ 800 LOC.
 # crates/theo-tooling/src/lsp/tool.rs — REMOVED 2026-04-28 (T1.3 of god-files-2026-07-23-plan.md).
 # The 5 lsp_* tools were decomposed into per-tool files (status/definition/
 # references/hover/rename.rs); shared helpers (PositionArgs, position_schema,

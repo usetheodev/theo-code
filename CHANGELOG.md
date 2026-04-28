@@ -3,6 +3,15 @@
 ## [Unreleased]
 
 ### Changed
+- **code-hygiene-5x5 T3.4 — `domain/plan_tests.rs` (1093 LOC, 62 tests) split per-feature** (`docs/plans/code-hygiene-5x5-plan.md`).
+  `crates/theo-domain/src/plan_tests.rs` decomposed into 5 per-feature sibling files:
+  - `plan_test_helpers.rs` (59 LOC) — shared `make_plan/task/phase/plan_with_two_tasks` builders
+  - `plan_schema_tests.rs` (410 LOC) — Plan/Phase/PlanTask schema, validate, topology, markdown
+  - `plan_patch_tests.rs` (242 LOC) — apply_patch (T6.1) — add/remove/skip/edit/reorder
+  - `plan_failure_tests.rs` (195 LOC) — record/reset failure_count, threshold queries
+  - `plan_claim_tests.rs` (201 LOC) — T7.1 claim/release semantics
+  - `plan_legacy_tests.rs` (56 LOC) — pre-T6/T7 legacy JSON loading
+  All ≤ 800 LOC. size-allowlist entry resolved.
 - **code-hygiene-5x5 T3.3 — `extractors/symbols_tests.rs` (1142 LOC, 60 fn) split per-language** (`docs/plans/code-hygiene-5x5-plan.md`).
   `crates/theo-engine-parser/src/extractors/symbols_tests.rs` decomposed into 9 per-language sibling files (`symbols_{ts,python,java,go,csharp,rust,php,ruby,common}_lang_tests.rs`)
   plus `symbols_test_helpers.rs` (13 LOC) holding the `symbols_for` fixture. All ≤ 241 LOC.

@@ -779,6 +779,22 @@ impl Plan {
 // ---------------------------------------------------------------------------
 
 
+// Sibling tests split per-feature (T3.4 of code-hygiene-5x5).
 #[cfg(test)]
-#[path = "plan_tests.rs"]
-mod tests;
+#[path = "plan_test_helpers.rs"]
+mod plan_test_helpers;
+#[cfg(test)]
+#[path = "plan_schema_tests.rs"]
+mod plan_schema_tests;
+#[cfg(test)]
+#[path = "plan_patch_tests.rs"]
+mod plan_patch_tests;
+#[cfg(test)]
+#[path = "plan_failure_tests.rs"]
+mod plan_failure_tests;
+#[cfg(test)]
+#[path = "plan_claim_tests.rs"]
+mod plan_claim_tests;
+#[cfg(test)]
+#[path = "plan_legacy_tests.rs"]
+mod plan_legacy_tests;
