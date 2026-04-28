@@ -1,31 +1,36 @@
-//! T2.1 — Browser automation via a Node-hosted Playwright sidecar.
+//! T2.1 — Browser automation via a Node-hosted Playwright sidecar +
+//! agent-callable tool family.
 //!
 //! The Rust side (`Capability::Browser`-gated) speaks JSON-RPC to a
-//! Node subprocess running `scripts/playwright_sidecar.js`. The
-//! sidecar exposes Playwright's chromium control as a stable
-//! request/response API — Theo never embeds the browser bytes.
-//!
-//! Why a sidecar (per ADR D2): the Rust browser ecosystem
-//! (chromiumoxide, headless_chrome) is not at parity with Playwright
-//! for CDP completeness. A 150-line Node sidecar is the cheap path
-//! to feature-parity with Cursor / Lovable / Bolt's browser
-//! integration.
-//!
-//! This module ships:
-//! - `protocol.rs` — `BrowserAction` + `BrowserResult` types and the
-//!   JSON-RPC envelope used between the Rust client and the JS
-//!   sidecar.
-//! - `scripts/playwright_sidecar.js` (next to `crates/theo-tooling/`)
-//!   — the Node implementation. Loads playwright on first action.
-//!
-//! Subprocess wiring (spawn + stdio routing) is the next iteration —
-//! the protocol types are testable without a real Node runtime.
+//! Node subprocess running `scripts/playwright_sidecar.js`. 8 agent
+//! tools live one-per-file. Pre-2026-04-28 the family lived in a
+//! single 868-LOC `tool.rs`; the per-file split was T1.4 of
+//! `docs/plans/god-files-2026-07-23-plan.md` (ADR D2).
 
 pub mod client;
 pub mod protocol;
 pub mod session_manager;
 pub mod sidecar;
-pub mod tool;
+
+pub(crate) mod tool_common;
+
+mod click;
+mod close;
+mod eval;
+mod open;
+mod screenshot;
+mod status;
+mod type_text;
+mod wait_for_selector;
+
+pub use click::BrowserClickTool;
+pub use close::BrowserCloseTool;
+pub use eval::BrowserEvalTool;
+pub use open::BrowserOpenTool;
+pub use screenshot::BrowserScreenshotTool;
+pub use status::BrowserStatusTool;
+pub use type_text::BrowserTypeTool;
+pub use wait_for_selector::BrowserWaitForSelectorTool;
 
 pub use client::{BrowserClient, BrowserClientError, NoopWriter, SidecarWriter};
 pub use protocol::{
@@ -33,7 +38,7 @@ pub use protocol::{
 };
 pub use session_manager::{BrowserSessionError, BrowserSessionManager, BrowserStatus};
 pub use sidecar::{SidecarError, SidecarSession};
-pub use tool::{
-    BrowserClickTool, BrowserCloseTool, BrowserEvalTool, BrowserOpenTool,
-    BrowserScreenshotTool, BrowserStatusTool, BrowserTypeTool, BrowserWaitForSelectorTool,
-};
+
+#[cfg(test)]
+#[path = "tool_tests.rs"]
+mod tests;

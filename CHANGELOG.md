@@ -3,6 +3,21 @@
 ## [Unreleased]
 
 ### Fixed
+- **god-files T1.4 — browser tool family split (Phase 1, ADR D2)** (`docs/plans/god-files-2026-07-23-plan.md`).
+  `crates/theo-tooling/src/browser/tool.rs` (868 LOC) decomposed into 8 per-tool files following ADR D2:
+  - `browser/status.rs` (118 LOC) BrowserStatusTool
+  - `browser/open.rs` (122 LOC) BrowserOpenTool
+  - `browser/click.rs` (113 LOC) BrowserClickTool
+  - `browser/screenshot.rs` (153 LOC) BrowserScreenshotTool
+  - `browser/type_text.rs` (125 LOC) BrowserTypeTool (`type_text` filename — `type` is a Rust keyword)
+  - `browser/eval.rs` (122 LOC) BrowserEvalTool
+  - `browser/wait_for_selector.rs` (129 LOC) BrowserWaitForSelectorTool
+  - `browser/close.rs` (~95 LOC) BrowserCloseTool
+  - `browser/tool_common.rs` (45 LOC) shared imports + helpers
+  - `browser/mod.rs` (44 LOC) module decls + per-tool re-exports + protocol/sidecar surface
+  Tests: `browser/tool_tests.rs` (474 LOC, 114 tests) reattached via `#[cfg(test)] #[path = "tool_tests.rs"] mod tests;` in `browser/mod.rs`. Imports updated to bring in serde_json, theo_domain types, and per-tool wildcard imports.
+  Allowlist net change: `browser/tool.rs` (ceiling 900) removed. 51 → 50 entries (`browser/tool_tests.rs` was never in the allowlist — it's the only family without a sibling test entry).
+  Validation: `cargo test --workspace --exclude theo-code-desktop --lib --tests --no-fail-fast` → 5247 PASS / 0 FAIL / 24 IGNORED. `cargo clippy -p theo-tooling --all-targets -- -D warnings` → 0 warnings. `bash scripts/check-sizes.sh` → 49 oversize, 0 NEW, 0 EXPIRED.
 - **god-files T1.3 — LSP tool family split (Phase 1, ADR D2)** (`docs/plans/god-files-2026-07-23-plan.md`).
   `crates/theo-tooling/src/lsp/tool.rs` (974 LOC) decomposed into 5 per-tool files following ADR D2:
   - `lsp/status.rs` (105 LOC) LspStatusTool

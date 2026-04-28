@@ -7,9 +7,30 @@
 // counts. Only test code lives here.
 #![cfg(test)]
 
+#![allow(unused_imports)]
+
 use super::*;
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
+
+use serde_json::{Value, json};
+
+use theo_domain::error::ToolError;
 use theo_domain::session::{MessageId, SessionId};
+use theo_domain::tool::{
+    PermissionCollector, Tool, ToolCategory, ToolContext, ToolOutput,
+};
+
+use crate::browser::tool_common::*;
+use crate::browser::click::*;
+use crate::browser::close::*;
+use crate::browser::eval::*;
+use crate::browser::open::*;
+use crate::browser::screenshot::*;
+use crate::browser::status::*;
+use crate::browser::type_text::*;
+use crate::browser::wait_for_selector::*;
 
 fn make_ctx() -> ToolContext {
     let (_tx, rx) = tokio::sync::watch::channel(false);
