@@ -683,7 +683,7 @@ mod tests {
         // accidentally reverts this to `create_default_registry()`,
         // these tools will still register but their internal manager
         // will hold an empty catalogue (the production bug).
-        for tool_id in ["lsp_status", "browser_status", "debug_status"] {
+        for tool_id in ["lsp_status", "browser_status"] {
             assert!(
                 registry.get(tool_id).is_some(),
                 "build_registry must register `{tool_id}` (regression of dogfood F2)"

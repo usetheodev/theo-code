@@ -149,11 +149,6 @@ pub fn create_default_registry() -> ToolRegistry {
         BrowserScreenshotTool, BrowserSessionManager, BrowserStatusTool, BrowserTypeTool,
         BrowserWaitForSelectorTool,
     };
-    use crate::dap::{
-        DapSessionManager, DebugContinueTool, DebugEvalTool, DebugLaunchTool,
-        DebugScopesTool, DebugSetBreakpointTool, DebugStackTraceTool, DebugStatusTool,
-        DebugStepTool, DebugTerminateTool, DebugThreadsTool, DebugVariablesTool,
-    };
     use crate::edit::EditTool;
     use crate::glob::GlobTool;
     use crate::grep::GrepTool;
@@ -170,7 +165,6 @@ pub fn create_default_registry() -> ToolRegistry {
     use crate::read::ReadTool;
     use crate::read_image::ReadImageTool;
     use crate::reflect::ReflectTool;
-    use crate::computer::ComputerActionTool;
     use crate::screenshot::ScreenshotTool;
     use crate::test_gen::{GenMutationTestTool, GenPropertyTestTool};
     use crate::think::ThinkTool;
@@ -247,10 +241,6 @@ pub fn create_default_registry() -> ToolRegistry {
         // (screencapture / gnome-screenshot / import). Gracefully
         // degrades to typed `no display` error in headless contexts.
         Box::new(ScreenshotTool::new()),
-        // T4.1 — Anthropic Computer Use (UI automation via xdotool /
-        // cliclick). Single dispatch tool over the full ComputerAction
-        // enum. CAPABILITY-GATED — see ADR D6.
-        Box::new(ComputerActionTool::new()),
         // T15.1 — external docs RAG (empty index by default; populated
         // by future commits that wire crates.io/MDN/npm sources)
         Box::new(DocsSearchTool::new()),
@@ -276,43 +266,6 @@ pub fn create_default_registry() -> ToolRegistry {
         ))),
         Box::new(LspRenameTool::new(std::sync::Arc::new(
             LspSessionManager::from_catalogue(std::collections::HashMap::new()),
-        ))),
-        // T13.1 — DAP tool family. Same dual-registry pattern as the
-        // lsp_* tools: empty-catalogue stubs in the default registry
-        // (actionable error path); real PATH-discovered manager
-        // swapped in by `create_default_registry_with_project`.
-        Box::new(DebugStatusTool::new(std::sync::Arc::new(
-            DapSessionManager::from_catalogue(std::collections::HashMap::new()),
-        ))),
-        Box::new(DebugLaunchTool::new(std::sync::Arc::new(
-            DapSessionManager::from_catalogue(std::collections::HashMap::new()),
-        ))),
-        Box::new(DebugSetBreakpointTool::new(std::sync::Arc::new(
-            DapSessionManager::from_catalogue(std::collections::HashMap::new()),
-        ))),
-        Box::new(DebugContinueTool::new(std::sync::Arc::new(
-            DapSessionManager::from_catalogue(std::collections::HashMap::new()),
-        ))),
-        Box::new(DebugStepTool::new(std::sync::Arc::new(
-            DapSessionManager::from_catalogue(std::collections::HashMap::new()),
-        ))),
-        Box::new(DebugEvalTool::new(std::sync::Arc::new(
-            DapSessionManager::from_catalogue(std::collections::HashMap::new()),
-        ))),
-        Box::new(DebugStackTraceTool::new(std::sync::Arc::new(
-            DapSessionManager::from_catalogue(std::collections::HashMap::new()),
-        ))),
-        Box::new(DebugVariablesTool::new(std::sync::Arc::new(
-            DapSessionManager::from_catalogue(std::collections::HashMap::new()),
-        ))),
-        Box::new(DebugScopesTool::new(std::sync::Arc::new(
-            DapSessionManager::from_catalogue(std::collections::HashMap::new()),
-        ))),
-        Box::new(DebugThreadsTool::new(std::sync::Arc::new(
-            DapSessionManager::from_catalogue(std::collections::HashMap::new()),
-        ))),
-        Box::new(DebugTerminateTool::new(std::sync::Arc::new(
-            DapSessionManager::from_catalogue(std::collections::HashMap::new()),
         ))),
         // T2.1 — browser tool family. Default registry uses managers
         // pointing at a non-existent script path so every call
@@ -387,11 +340,6 @@ pub fn create_default_registry_with_project(
         BrowserScreenshotTool, BrowserSessionManager, BrowserStatusTool, BrowserTypeTool,
         BrowserWaitForSelectorTool,
     };
-    use crate::dap::{
-        DapSessionManager, DebugContinueTool, DebugEvalTool, DebugLaunchTool,
-        DebugScopesTool, DebugSetBreakpointTool, DebugStackTraceTool, DebugStatusTool,
-        DebugStepTool, DebugTerminateTool, DebugThreadsTool, DebugVariablesTool,
-    };
     use crate::docs_search::{DocsSearchTool, bootstrap_docs_index};
     use crate::lsp::{
         LspDefinitionTool, LspHoverTool, LspReferencesTool, LspRenameTool,
@@ -438,61 +386,6 @@ pub fn create_default_registry_with_project(
     registry
         .register(Box::new(LspRenameTool::new(lsp_manager.clone())))
         .expect("lsp_rename tool schema is valid");
-
-    // T13.1 — same pattern for the debug_* family. Critical:
-    // every debug_* tool MUST share the SAME Arc<DapSessionManager>
-    // so they all see the same session table. Splitting the manager
-    // would make `debug_set_breakpoint({session_id: "a"})` fail to
-    // find the session that `debug_launch({session_id: "a"})` opened.
-    let dap_manager = Arc::new(DapSessionManager::from_path());
-    for tool_id in [
-        "debug_status",
-        "debug_launch",
-        "debug_set_breakpoint",
-        "debug_continue",
-        "debug_step",
-        "debug_eval",
-        "debug_stack_trace",
-        "debug_variables",
-        "debug_scopes",
-        "debug_threads",
-        "debug_terminate",
-    ] {
-        registry.unregister(tool_id);
-    }
-    registry
-        .register(Box::new(DebugStatusTool::new(dap_manager.clone())))
-        .expect("debug_status tool schema is valid");
-    registry
-        .register(Box::new(DebugLaunchTool::new(dap_manager.clone())))
-        .expect("debug_launch tool schema is valid");
-    registry
-        .register(Box::new(DebugSetBreakpointTool::new(dap_manager.clone())))
-        .expect("debug_set_breakpoint tool schema is valid");
-    registry
-        .register(Box::new(DebugContinueTool::new(dap_manager.clone())))
-        .expect("debug_continue tool schema is valid");
-    registry
-        .register(Box::new(DebugStepTool::new(dap_manager.clone())))
-        .expect("debug_step tool schema is valid");
-    registry
-        .register(Box::new(DebugEvalTool::new(dap_manager.clone())))
-        .expect("debug_eval tool schema is valid");
-    registry
-        .register(Box::new(DebugStackTraceTool::new(dap_manager.clone())))
-        .expect("debug_stack_trace tool schema is valid");
-    registry
-        .register(Box::new(DebugVariablesTool::new(dap_manager.clone())))
-        .expect("debug_variables tool schema is valid");
-    registry
-        .register(Box::new(DebugScopesTool::new(dap_manager.clone())))
-        .expect("debug_scopes tool schema is valid");
-    registry
-        .register(Box::new(DebugThreadsTool::new(dap_manager.clone())))
-        .expect("debug_threads tool schema is valid");
-    registry
-        .register(Box::new(DebugTerminateTool::new(dap_manager.clone())))
-        .expect("debug_terminate tool schema is valid");
 
     // T2.1 — swap browser tool stubs for managers backed by the
     // shipped Playwright sidecar script. Resolution order:
@@ -664,21 +557,21 @@ mod tests {
     use crate::read::ReadTool;
     use theo_domain::tool::{PermissionCollector, ToolCategory, ToolContext};
 
-    /// Locks the discovery-tool family contract: `lsp_status`,
-    /// `debug_status`, and `browser_status` must each ship as
-    /// zero-arg, `Search`-category, schema-validated read-only tools
+    /// Locks the discovery-tool family contract: `lsp_status`
+    /// and `browser_status` must each ship as zero-arg,
+    /// `Search`-category, schema-validated read-only tools
     /// in the default registry, and each `execute({})` must return a
     /// JSON metadata object whose `type` matches the tool id. Pairs
-    /// the LSP / DAP / Browser sidecar-backed families so a future
+    /// the LSP / Browser sidecar-backed families so a future
     /// change that breaks the symmetry (eg. silently adds a required
     /// arg, drops one of the tools, or renames the metadata `type`
     /// discriminator) surfaces immediately instead of leaking out as
     /// an agent-side regression.
     #[tokio::test]
-    async fn discovery_tool_family_lsp_dap_browser_share_zero_arg_search_contract() {
+    async fn discovery_tool_family_lsp_browser_share_zero_arg_search_contract() {
         let registry = create_default_registry();
         let ctx = ToolContext::test_context(std::path::PathBuf::from("/tmp"));
-        for id in ["lsp_status", "debug_status", "browser_status"] {
+        for id in ["lsp_status", "browser_status"] {
             let tool = registry
                 .get(id)
                 .unwrap_or_else(|| panic!("`{id}` missing from default registry"));
@@ -1035,18 +928,6 @@ mod tests {
             "browser_type",
             "browser_wait_for_selector",
             "codebase_context",
-            "computer_action",
-            "debug_continue",
-            "debug_eval",
-            "debug_launch",
-            "debug_scopes",
-            "debug_set_breakpoint",
-            "debug_stack_trace",
-            "debug_status",
-            "debug_step",
-            "debug_terminate",
-            "debug_threads",
-            "debug_variables",
             "docs_search",
             "edit",
             "env_info",
@@ -1142,11 +1023,11 @@ mod tests {
         //   - A discovery tool (`*_status`) — it's the documented
         //     entry point for "should I even try this family?"
         //   - A standalone sidecar wrapper without a discovery tool
-        //     (`screenshot`, `computer_action`, `gen_mutation_test`)
+        //     (`screenshot`, `gen_mutation_test`)
         //     — the agent has nowhere else to learn the fallback.
         //
         // Operation tools inside a discovery-backed family
-        // (`browser_open` / `lsp_definition` / `debug_launch` etc.)
+        // (`browser_open` / `lsp_definition` etc.)
         // delegate fallback-naming to their family's `*_status` tool
         // and to the actionable error returned by `map_session_error`
         // when the sidecar is missing — repeating the fallback in
@@ -1173,26 +1054,12 @@ mod tests {
             ("lsp_references", false),
             ("lsp_hover", false),
             ("lsp_rename", false),
-            // Phase 4 — Computer Use (xdotool / cliclick)
-            ("computer_action", true), // standalone — no separate `computer_status`
             // Phase 5 — auto-test-gen
             ("gen_property_test", false), // pure templating, no exec
             ("gen_mutation_test", true),  // standalone wrapper around cargo-mutants binary
             // Phase 6 — adaptive replanning (pure JSON manipulation)
             ("plan_failure_status", false),
             ("plan_replan", false),
-            // Phase 13 — DAP (lldb-vscode / debugpy / dlv / js-debug-adapter)
-            ("debug_status", true), // discovery entry point
-            ("debug_launch", false), // operation; delegates to debug_status
-            ("debug_set_breakpoint", false),
-            ("debug_continue", false),
-            ("debug_step", false),
-            ("debug_eval", false),
-            ("debug_stack_trace", false),
-            ("debug_variables", false),
-            ("debug_scopes", false),
-            ("debug_threads", false),
-            ("debug_terminate", false),
             // Phase 15 — external docs RAG (in-memory index)
             ("docs_search", false),
         ];
@@ -1220,8 +1087,7 @@ mod tests {
             // Concrete invocation. The convention across all SOTA tools
             // is `Example: <tool_id>(...)` or `Examples: <tool_id>(...)`
             // when several variants are demonstrated. Lowercased lookup
-            // accepts both `example:` and `examples:` (plural form is
-            // used by `computer_action` to show multiple action shapes).
+            // accepts both `example:` and `examples:`.
             assert!(
                 lower.contains("example:") || lower.contains("examples:"),
                 "description for `{tool_id}` must include a concrete \
@@ -1234,8 +1100,8 @@ mod tests {
                  tool id itself so the LLM sees a callable invocation"
             );
             // Discovery-entry-point tools (`*_status`) and standalone
-            // sidecar wrappers (`screenshot`, `computer_action`,
-            // `gen_mutation_test`) MUST name a fallback in the
+            // sidecar wrappers (`screenshot`, `gen_mutation_test`)
+            // MUST name a fallback in the
             // description — those are decision points the agent reads
             // before committing to a tool family. Operation tools
             // inside a discovery-backed family delegate fallback
