@@ -15,5 +15,5 @@
 # that, if ever false, would indicate a code bug that typed errors cannot
 # recover from.
 
-crates/theo-tooling/src/registry/mod.rs:217|2026-10-23|Startup panic if a built-in tool ships an invalid schema. Caught at `ToolRegistry::register_builtins()` during app boot; there is no recoverable path because the tool would then be unusable. Acceptable until schemas are validated at compile time.
-crates/theo-agent-runtime/src/observability/normalizer.rs:26|2026-10-23|Panic guard inside `cached(&OnceLock, &'static pattern)`. Patterns are compile-time literals validated by tests — this branch is unreachable in practice and exists to surface a code bug loudly if someone passes a malformed literal.
+# crates/theo-tooling/src/registry/mod.rs:217 — COVERED BY ADR-021#builtin_tool_schema_panic (T2.3 of code-hygiene-5x5; file moved to registry/builders.rs:189)
+# crates/theo-agent-runtime/src/observability/normalizer.rs:26 — COVERED BY ADR-021#observability_normalizer_compile_panic (T2.3 of code-hygiene-5x5)

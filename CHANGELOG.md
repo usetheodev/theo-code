@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### Changed
+- **code-hygiene-5x5 T2.3 — drained idiomatic `unwrap`/`unsafe`/`panic` allowlists via ADR-021** (`docs/plans/code-hygiene-5x5-plan.md`).
+  21 idiomatic `unwrap`/`expect` regex+path entries migrated from `.claude/rules/unwrap-allowlist.txt`
+  to ADR-021 + `.claude/rules/recognized-patterns.toml`. ADR-021 grew from 9 → 13 codified patterns:
+  added `mutex_poison_expect_split` (multi-line `.lock()` / `.expect()` chain),
+  `local_proven_invariant` (#10, covering 13 narrow call sites),
+  `process_entrypoint_desktop` (#11), `process_entrypoint_agent_bin` (#12),
+  `lsp_tool_common_unwrap` (#13). `unwrap-allowlist.txt` net: 26 → 5 active entries
+  (only true test-fixture whole-file allowlists remain — `mock_llm.rs`, `mock_retrieval.rs`,
+  `mock.rs`, `test_helpers.rs`, `read/mod.rs` test-only base64 helper).
+  `unsafe-allowlist.txt` and `panic-allowlist.txt` already drained to 0 active entries in T2.2
+  via `rust_2024_test_env_var`, `builtin_tool_schema_panic`, `observability_normalizer_compile_panic`.
+  Validation: cargo test 5247 PASS / 0 FAIL / 24 IGNORED, clippy `--all-targets` 0 warnings,
+  `check-{unwrap,unsafe,panic,arch}` all exit 0.
+
 ### Fixed
 - **god-files T5.3.b + T4.1 structural — cmd.rs and wiki/generator.rs decomposed** (`docs/plans/god-files-2026-07-23-plan.md`).
   Two structural splits:

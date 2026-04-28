@@ -40,6 +40,14 @@ adr = "021-recognized-rust-idioms.md#1-mutex_poison_lock"
 alternative_rejected = "see crates entry"
 
 [[unwrap_pattern]]
+name = "mutex_poison_expect_split"
+regex = '^[[:space:]]*\.expect\("[^"]*(poisoned|snapshot lock|mutex lock)[^"]*"\)'
+scope = "crates/**/*.rs"
+invariant = "Multi-line .lock()/.expect() chain — same Mutex/RwLock poison contract as mutex_poison_lock"
+adr = "021-recognized-rust-idioms.md#1-mutex_poison_lock"
+alternative_rejected = "rewrite as single-line — fights rustfmt's chained-method style"
+
+[[unwrap_pattern]]
 name = "system_clock_unix_epoch_domain"
 regex = '\.expect\("system clock before UNIX epoch"\)'
 scope = "crates/theo-domain/**/*.rs"
@@ -74,7 +82,7 @@ alternative_rejected = "process::exit(1) with manual print — expect() IS that 
 [[unwrap_pattern]]
 name = "observability_writer_spawn"
 regex = '\.expect\(.*(metrics|spawn).*\)'
-scope = "crates/theo-agent-runtime/src/observability/**/*.rs"
+scope = "crates/theo-agent-runtime/**/*.rs"
 invariant = "Failure to spawn observability writer / metrics mutex is fatal — blind agent is worse than fast crash"
 adr = "021-recognized-rust-idioms.md#5-observability_writer_spawn"
 alternative_rejected = "silently degrade to no-op — masks observability failures in CI"
@@ -82,10 +90,148 @@ alternative_rejected = "silently degrade to no-op — masks observability failur
 [[unwrap_pattern]]
 name = "syntect_default_theme"
 regex = 'themes\.values\(\)\.next\(\)\.expect\("at least one theme"\)'
-scope = "apps/theo-cli/src/render/**/*.rs"
+scope = "apps/theo-cli/**/*.rs"
 invariant = "Syntect bundles at least one theme at compile time — invariant proven by sibling test"
 adr = "021-recognized-rust-idioms.md#3-embedded_tool_schema_valid"
 alternative_rejected = "fallback theme constant — duplicates Syntect data"
+
+# ── Pattern 10: local_proven_invariant ──────────────────────────────────
+# Each entry is a narrow `expect("<proof message>")` whose call site is
+# proven unreachable by a guard immediately above. See ADR-021#10.
+
+[[unwrap_pattern]]
+name = "local_invariant_bash_is_some"
+regex = '\.expect\("checked is_some above"\)'
+scope = "crates/theo-tooling/**/*.rs"
+invariant = "Local `is_some()` guard checked one line above"
+adr = "021-recognized-rust-idioms.md#10-local_proven_invariant"
+alternative_rejected = "if let Some(x) = … reshape — adds nesting without earning safety"
+
+[[unwrap_pattern]]
+name = "local_invariant_skill_name_nonempty"
+regex = '\.expect\("invariant: name is non-empty \(checked above\)"\)'
+scope = "crates/theo-agent-runtime/**/*.rs"
+invariant = "Local non-empty check on skill name immediately above"
+adr = "021-recognized-rust-idioms.md#10-local_proven_invariant"
+alternative_rejected = "see ADR-021#10"
+
+[[unwrap_pattern]]
+name = "local_invariant_just_pushed"
+regex = '\.expect\("just pushed"\)'
+scope = "crates/theo-agent-runtime/**/*.rs"
+invariant = "Vec was pushed-to one line above; .expect() documents post-push"
+adr = "021-recognized-rust-idioms.md#10-local_proven_invariant"
+alternative_rejected = "see ADR-021#10"
+
+[[unwrap_pattern]]
+name = "local_invariant_snapshot_serialize"
+regex = '\.expect\("snapshot serialization failed"\)'
+scope = "crates/theo-agent-runtime/**/*.rs"
+invariant = "serde_json on derived Serialize struct cannot fail unless OOM"
+adr = "021-recognized-rust-idioms.md#10-local_proven_invariant"
+alternative_rejected = "see ADR-021#10"
+
+[[unwrap_pattern]]
+name = "local_invariant_spawn_semaphore"
+regex = '\.expect\("spawn_semaphore is never closed during runtime"\)'
+scope = "crates/theo-agent-runtime/**/*.rs"
+invariant = "Semaphore lifetime tied to AgentRuntime; closing implies use-after-drop"
+adr = "021-recognized-rust-idioms.md#10-local_proven_invariant"
+alternative_rejected = "see ADR-021#10"
+
+[[unwrap_pattern]]
+name = "local_invariant_scrubber_regex"
+regex = '\.expect\("scrubber regex constants are valid"\)'
+scope = "crates/theo-agent-runtime/**/*.rs"
+invariant = "Regex patterns are compile-time const strings; sibling tests exercise them"
+adr = "021-recognized-rust-idioms.md#10-local_proven_invariant"
+alternative_rejected = "see ADR-021#10"
+
+[[unwrap_pattern]]
+name = "local_invariant_sandbox_decision"
+regex = '_candidate\.expect\('
+scope = "crates/theo-tooling/**/*.rs"
+invariant = "Sandbox backend already proven Some by BackendDecision::* match arm above"
+adr = "021-recognized-rust-idioms.md#10-local_proven_invariant"
+alternative_rejected = "see ADR-021#10"
+
+[[unwrap_pattern]]
+name = "local_invariant_summary_last"
+regex = '\.last\(\)\.unwrap\(\)'
+scope = "crates/theo-engine-retrieval/**/*.rs"
+invariant = "chain non-empty by construction at the call site"
+adr = "021-recognized-rust-idioms.md#10-local_proven_invariant"
+alternative_rejected = "see ADR-021#10"
+
+[[unwrap_pattern]]
+name = "local_invariant_apply_patch_candidates"
+regex = '\*candidates\.last\(\)\.unwrap\(\)'
+scope = "crates/theo-tooling/**/*.rs"
+invariant = "candidates non-empty: early-return on len==0 above"
+adr = "021-recognized-rust-idioms.md#10-local_proven_invariant"
+alternative_rejected = "see ADR-021#10"
+
+[[unwrap_pattern]]
+name = "local_invariant_test_gen_property_name"
+regex = 'name\.chars\(\)\.next\(\)\.unwrap\(\)'
+scope = "crates/theo-tooling/**/*.rs"
+invariant = "name validated non-empty by calling tool registry"
+adr = "021-recognized-rust-idioms.md#10-local_proven_invariant"
+alternative_rejected = "see ADR-021#10"
+
+[[unwrap_pattern]]
+name = "local_invariant_lsp_tool_unwrap_in_match"
+regex = '\.unwrap\(\)'
+scope = "crates/theo-tooling/src/lsp/tool.rs"
+invariant = "Inside Option chain already pattern-matched Some — local invariant"
+adr = "021-recognized-rust-idioms.md#10-local_proven_invariant"
+alternative_rejected = "see ADR-021#10"
+
+[[unwrap_pattern]]
+name = "local_invariant_webfetch_quote_strip"
+regex = 'quote\.unwrap\(\)'
+scope = "crates/theo-tooling/**/*.rs"
+invariant = "Quote-stripping inside a match arm where quote is Some"
+adr = "021-recognized-rust-idioms.md#10-local_proven_invariant"
+alternative_rejected = "see ADR-021#10"
+
+[[unwrap_pattern]]
+name = "local_invariant_php_extractor_test_fixture"
+regex = 'parse_http_method.*\.unwrap\(\)'
+scope = "crates/theo-engine-parser/**/*.rs"
+invariant = "test fixture using hardcoded literal as input"
+adr = "021-recognized-rust-idioms.md#10-local_proven_invariant"
+alternative_rejected = "see ADR-021#10"
+
+# ── Pattern 11: process_entrypoint_desktop ──────────────────────────────
+
+[[unwrap_pattern]]
+name = "process_entrypoint_desktop"
+regex = '\.expect\("error while running Theo Code"\)'
+scope = "apps/theo-desktop/**/*.rs"
+invariant = "Tauri desktop entrypoint — fatal by design"
+adr = "021-recognized-rust-idioms.md#11-process_entrypoint_desktop"
+alternative_rejected = "DesktopRunError typed-error — no caller to receive it"
+
+# ── Pattern 12: process_entrypoint_agent_bin ────────────────────────────
+
+[[unwrap_pattern]]
+name = "process_entrypoint_agent_bin"
+regex = '\.unwrap\(\)'
+scope = "crates/theo-agent-runtime/src/bin/theo-agent.rs"
+invariant = "Developer-only binary entrypoint; main()-level unwrap is fatal by design"
+adr = "021-recognized-rust-idioms.md#12-process_entrypoint_agent_bin"
+alternative_rejected = "thread Result<()> through main — wrapper not worth the ceremony"
+
+# ── Pattern 13: lsp_tool_common_unwrap ──────────────────────────────────
+
+[[unwrap_pattern]]
+name = "lsp_tool_common_unwrap"
+regex = '\.unwrap\(\)'
+scope = "crates/theo-tooling/src/lsp/tool_common.rs"
+invariant = "Internal LSP helpers — JSON-RPC contract guarantees field presence"
+adr = "021-recognized-rust-idioms.md#13-lsp_tool_common_unwrap"
+alternative_rejected = "duplicate LspError typing in helpers — ceremony without info"
 
 # ---------------------------------------------------------------------------
 # unsafe_pattern entries (consumed by scripts/check-unsafe.sh)

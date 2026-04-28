@@ -12,8 +12,8 @@
 # test module; no concurrent read races occur. Whole-file allowlist so
 # each new env-manipulating test does not need its own SAFETY comment.
 # Sunset aligned with the Phase-5 test-migration window.
-crates/theo-agent-runtime/src/project_config.rs|2026-10-23|Rust 2024 test-only env::set_var/remove_var; tests run serially.
-crates/theo-tooling/src/sandbox/env_sanitizer.rs|2026-10-23|Rust 2024 test-only env::set_var/remove_var; tests run serially.
-crates/theo-application/src/use_cases/memory_ui.rs|2026-10-23|Rust 2024 test-only env manipulation; tests run serially.
-crates/theo-infra-memory/src/wiki/compiler.rs|2026-10-23|Rust 2024 test-only env manipulation; tests run serially.
-apps/theo-cli/src/permission/prompt.rs|2026-10-23|Rust 2024 test-only env manipulation inside cfg(test) tests.
+# crates/theo-agent-runtime/src/project_config.rs — COVERED BY ADR-021#rust_2024_test_env_var (T2.3 of code-hygiene-5x5)
+# crates/theo-tooling/src/sandbox/env_sanitizer.rs — COVERED BY ADR-021#rust_2024_test_env_var (T2.3 of code-hygiene-5x5)
+# crates/theo-application/src/use_cases/memory_ui.rs — COVERED BY ADR-021#rust_2024_test_env_var (T2.3 of code-hygiene-5x5)
+# crates/theo-infra-memory/src/wiki/compiler.rs — COVERED BY ADR-021#rust_2024_test_env_var (T2.3 of code-hygiene-5x5)
+# apps/theo-cli/src/permission/prompt.rs — COVERED BY ADR-021#rust_2024_test_env_var (T2.3 of code-hygiene-5x5)

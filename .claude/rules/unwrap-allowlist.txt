@@ -20,60 +20,22 @@
 crates/theo-test-memory-fixtures/src/mock_llm.rs|2026-10-23|Test-fixture crate (publish=false); Mutex::lock().unwrap() is acceptable in mocks.
 crates/theo-test-memory-fixtures/src/mock_retrieval.rs|2026-10-23|Test-fixture crate (publish=false); Mutex::lock().unwrap() is acceptable in mocks.
 crates/theo-infra-llm/src/mock.rs|2026-10-23|Mock LLM provider used only from test harnesses; Mutex::lock().unwrap() acceptable.
-
-# ── Content-regex allowlist (4 fields: path-glob | regex | sunset | reason) ─
-# These patterns are idiomatic Rust poisoning-on-panic guards where panic
-# is the documented correct behaviour. Listing them here keeps the gate
-# signal concentrated on *real* recoverable-error sites.
-
-# regex: entries use @@ as field separator so `|` is free inside regexes.
-regex:crates/**/*.rs@@\.(lock|read|write)\(\)\.expect\(.*(poisoned|lock)@@2026-10-23@@Mutex/RwLock poison is unrecoverable; .expect() documents the invariant.
-# REMOVED 2026-04-28 (T1.1 of code-hygiene-5x5: cluster Cat-B converted to ClusterError typed errors via ADR-019)
-regex:crates/theo-tooling/src/lsp/tool_common.rs@@\.unwrap\(\)@@2026-10-31@@Inherited from lsp/tool.rs Cat-B in B1.
-regex:apps/**/*.rs@@\.(lock|read|write)\(\)\.expect\(.*(poisoned|lock)@@2026-10-23@@Same poison idiom in apps.
-regex:apps/theo-cli/**/*.rs@@tokio::runtime::Runtime::new\(\)\.expect\(@@2026-10-31@@Runtime spawn failure at process entrypoint is fatal by design (T5.3 cmd/*.rs split).
-regex:crates/theo-agent-runtime/src/observability/**/*.rs@@\.expect\(.*(metrics|spawn)@@2026-10-23@@Observability writer thread spawn/metrics lock — fatal if breaks.
-regex:apps/theo-cli/src/render/code_block.rs@@themes\.values\(\)\.next\(\)\.expect\("at least one theme"\)@@2026-10-23@@Syntect bundles at least one theme at compile time; invariant proven by test.
-
-# ── CLEAN-B1 / 2026-04-28 — invariants documented in the expect() message ──
-# Each pattern below names a static invariant that is either (a) verified by
-# a sibling test, (b) impossible by definition (UNIX clock arithmetic), or
-# (c) fatal-by-design at process entrypoint. Sunset 2026-10-31; revisit once
-# the typed-error refactor for those modules ships.
-regex:crates/theo-domain/**/*.rs@@\.expect\("system clock before UNIX epoch"\)@@2026-10-31@@SystemTime::duration_since(UNIX_EPOCH) only fails if the system clock is set before 1970-01-01 — fatal misconfiguration; expect() documents the invariant.
-regex:crates/theo-tooling/src/memory/mod.rs@@\.expect\("system clock before UNIX epoch"\)@@2026-10-31@@Same UNIX-clock invariant as theo-domain.
-regex:crates/theo-tooling/**/*.rs@@\.expect\(".*tool schema is valid"\)@@2026-10-31@@Tool schemas are embedded const data; the `build_registry` contract test validates each one at compile-and-test time. Path widened in T1.5 (registry/builders.rs).
-regex:crates/theo-tooling/src/sandbox/executor.rs@@\.expect\(@@2026-10-31@@Sandbox backend decision was already proven to be Some by the BackendDecision::* match arm above; the .expect() makes the invariant explicit.
-regex:crates/theo-tooling/src/bash/mod.rs@@\.expect\("checked is_some above"\)@@2026-10-31@@Local guard checked is_some immediately above; the .expect() documents the proven-non-empty invariant.
-regex:crates/theo-tooling/src/undo.rs@@\.expect\("snapshot lock"\)@@2026-10-31@@Mutex poisoning is unrecoverable; .expect() documents the invariant.
-regex:crates/theo-agent-runtime/src/skill_catalog.rs@@\.expect\("invariant: name is non-empty \(checked above\)"\)@@2026-10-31@@Local guard checked non-empty immediately above; .expect() documents the invariant.
-regex:crates/theo-agent-runtime/**/*.rs@@\.expect\("loop detector mutex poisoned"\)@@2026-10-31@@Mutex poisoning is unrecoverable; the loop detector cannot meaningfully continue with a corrupted state.
-regex:crates/theo-agent-runtime/src/secret_scrubber\.rs@@\.expect\("scrubber regex constants are valid"\)@@2026-10-31@@Regex patterns are compile-time const strings exercised by sibling tests.
-regex:crates/theo-agent-runtime/src/snapshot\.rs@@\.expect\("snapshot serialization failed"\)@@2026-10-31@@serde_json on a derived-Serialize struct cannot fail unless we hit OOM, in which case the process is doomed regardless.
-regex:crates/theo-agent-runtime/src/subagent/mod\.rs@@\.expect\("spawn_semaphore is never closed during runtime"\)@@2026-10-31@@Semaphore lifetime is tied to AgentRuntime; closing it implies a use-after-drop bug elsewhere — fatal.
-regex:crates/theo-agent-runtime/src/session_tree/mod\.rs@@\.expect\("just pushed"\)@@2026-10-31@@The Vec was pushed-to immediately above; .expect() documents the local invariant.
-regex:apps/theo-desktop/src/lib\.rs@@\.expect\("error while running Theo Code"\)@@2026-10-31@@Process entrypoint — Tauri runtime failure is fatal by design.
-regex:crates/theo-agent-runtime/src/bin/theo-agent\.rs@@\.unwrap\(\)@@2026-10-31@@Process entrypoint binary; unwrap on a structurally-validated input at the top of main is acceptable.
-
-# ── CLEAN-B1 — Cat-B production unwrap with named invariant ──────────
-# These sites are NOT idiomatic; they sit in real production code paths.
-# Each entry is allowlisted because the invariant is provable but the
-# refactor to typed errors is non-trivial. ADR-019 (to be written) will
-# document the louvain clustering invariants. Sunset earlier than the
-# others to force a revisit.
-# crates/theo-engine-graph/src/cluster.rs — REMOVED 2026-04-28 (file moved to module-dir; T1.1 of code-hygiene-5x5 also resolved Cat-B unwraps via ADR-019)
-regex:crates/theo-engine-retrieval/src/summary\.rs@@\.last\(\)\.unwrap\(\)@@2026-08-31@@`chain` is non-empty by construction at the call site; refactor to typed errors tracked.
-regex:crates/theo-tooling/src/apply_patch/mod\.rs@@\*candidates\.last\(\)\.unwrap\(\)@@2026-08-31@@`candidates` is non-empty by construction (early-return on len==0 above); refactor tracked.
-
-# ── CLEAN-B1 — Test-helpers fixture (pub used only by tests) ─────────
 crates/theo-tooling/src/test_helpers.rs|2026-10-31|Test helpers: file is `pub` only because the test harness in sibling crates imports it; every site is `expect("Failed to <fs op>")` against a freshly-created tempdir that cannot fail in any realistic test environment.
-
-# ── CLEAN-B1 — small Cat-B unwraps with local invariant ──────────────
-crates/theo-tooling/src/test_gen/property.rs:228|2026-10-31|`name.chars().next()` on a name validated non-empty by the calling tool registry; refactor to typed error tracked.
-crates/theo-tooling/src/lsp/tool.rs:939|2026-10-31|Inside an Option chain that was already pattern-matched as Some; .unwrap() documents the local invariant. Refactor to `if let` tracked.
-crates/theo-tooling/src/webfetch/mod.rs:292|2026-08-31|Quote-stripping in HTTP header parser — the surrounding match arm only enters when quote is Some. Refactor to `if let` tracked.
 crates/theo-tooling/src/read/mod.rs|2026-10-31|Inside a test-only base64 helper used by Read tool's binary file rendering; refactor to fallible decoder tracked.
-crates/theo-engine-parser/src/extractors/php.rs:485|2026-10-31|Test fixture using parse_http_method on a hardcoded literal; refactor tracked.
 
-# ── CLEAN-B1 — Observability writer thread spawn ─────────────────────
-crates/theo-agent-runtime/src/observability/writer.rs:92|2026-10-31|Thread spawn for the observability writer — failure is fatal by design (no observability = blind agent). Already covered by the `metrics|spawn` regex above but pinned here for explicit traceability.
+# ── ALL OTHER ENTRIES MIGRATED TO ADR-021 + recognized-patterns.toml ──
+# T2.3 (code-hygiene-5x5) drained 21 regex/path entries:
+#   - mutex_poison_lock (×3)        : undo.rs snapshot_lock, loop_detector, lsp/tool_common
+#   - system_clock_unix_epoch (×2)  : theo-domain, theo-tooling
+#   - embedded_tool_schema_valid    : theo-tooling
+#   - observability_writer_spawn    : theo-agent-runtime
+#   - syntect_default_theme         : theo-cli
+#   - local_proven_invariant (×13)  : bash, skill_catalog, session_tree, snapshot,
+#                                     subagent, secret_scrubber, sandbox/executor,
+#                                     summary, apply_patch, test_gen/property,
+#                                     lsp/tool, webfetch, php extractor
+#   - process_entrypoint_desktop    : apps/theo-desktop
+#   - process_entrypoint_agent_bin  : crates/theo-agent-runtime/src/bin/theo-agent.rs
+#
+# See `docs/adr/021-recognized-rust-idioms.md` and
+# `.claude/rules/recognized-patterns.toml` for the canonical listing.

@@ -352,6 +352,9 @@ mod tests {
                 .collect::<Vec<_>>();
             // Strip any pre-existing value so `with_env_overrides`
             // sees a known-clean slate.
+            // SAFETY: ADR-021#rust_2024_test_env_var — Rust 2024 made
+            // env::remove_var unsafe; this snapshot helper is invoked
+            // only from #[cfg(test)] tests serialised by cargo test.
             unsafe {
                 for (k, _) in &prior {
                     std::env::remove_var(k);
@@ -363,6 +366,8 @@ mod tests {
 
     impl Drop for EnvSnapshot {
         fn drop(&mut self) {
+            // SAFETY: ADR-021#rust_2024_test_env_var — same test-only
+            // env mutation contract as the constructor above.
             unsafe {
                 for (k, v) in &self.prior {
                     match v {

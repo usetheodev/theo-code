@@ -344,6 +344,150 @@ a path under `tests/`, `mock_*.rs`, or `test_helpers.rs` is accepted.
 
 ---
 
+### 10. `local_proven_invariant`
+
+**Pattern:** `\.expect\("<narrow message documenting the local proof>"\)`
+**Scope:** specific files where a local invariant (just-pushed, just-validated,
+            already-Some, already-non-empty) makes the panic branch unreachable.
+
+**Idiom:**
+
+```rust
+// example: bash arg parser already checked is_some immediately above.
+debug_assert!(maybe_arg.is_some());
+let arg = maybe_arg.expect("checked is_some above");
+
+// example: name was validated non-empty in the calling tool registry.
+let first_char = name.chars().next().expect("name non-empty (validated above)");
+
+// example: Vec was just pushed-to one line above.
+let last = stack.last().expect("just pushed");
+```
+
+**Invariant:** the panic branch is unreachable because a *guard* — local
+match arm, debug_assert, prior `if let Some`, or one-line-above
+`push()` — proves the post-condition. Refactoring to `if let` /
+typed errors is *tracked* (see plan T2.4 follow-up) but the immediate
+substitution would be either (a) ceremonial mapping to `unreachable!()`
+or (b) typed-error wrapping that every caller maps back to a panic.
+
+**Alternative considered:** `unreachable!()` with the same message.
+Rejected: `unreachable!()` and `expect()` on a proven-Some Option are
+semantically identical; `expect()` keeps the Option's `unwrap`-like
+ergonomics.
+
+**Acceptance:** narrow scope (single file or single line) plus a
+specific message that names the local invariant. Generic `unwrap()`
+calls are NOT covered — each entry must spell out the proof.
+
+Currently codified call sites:
+- `crates/theo-tooling/src/bash/mod.rs` — `expect("checked is_some above")`
+- `crates/theo-agent-runtime/src/skill_catalog.rs` —
+  `expect("invariant: name is non-empty (checked above)")`
+- `crates/theo-agent-runtime/src/session_tree/mod.rs` — `expect("just pushed")`
+- `crates/theo-agent-runtime/src/snapshot.rs` —
+  `expect("snapshot serialization failed")` (serde on derived `Serialize`
+  cannot fail unless OOM)
+- `crates/theo-agent-runtime/src/subagent/mod.rs` —
+  `expect("spawn_semaphore is never closed during runtime")`
+- `crates/theo-agent-runtime/src/secret_scrubber.rs` —
+  `expect("scrubber regex constants are valid")`
+- `crates/theo-tooling/src/sandbox/executor.rs` —
+  bare `expect()` after a `BackendDecision::*` match arm proves Some
+- `crates/theo-engine-retrieval/src/summary.rs` —
+  `chain.last().unwrap()` (chain non-empty by construction)
+- `crates/theo-tooling/src/apply_patch/mod.rs` —
+  `*candidates.last().unwrap()` (early-return on len==0)
+- `crates/theo-tooling/src/test_gen/property.rs:228` —
+  `name.chars().next()` on validated-non-empty name
+- `crates/theo-tooling/src/lsp/tool.rs:939` — `.unwrap()` inside a
+  pattern-matched-Some Option chain
+- `crates/theo-tooling/src/webfetch/mod.rs:292` — quote stripping
+  inside a `quote.is_some()` match arm
+- `crates/theo-engine-parser/src/extractors/php.rs:485` — test fixture
+  using `parse_http_method` on a hardcoded literal
+
+---
+
+### 11. `process_entrypoint_desktop`
+
+**Pattern:** `\.expect\("error while running Theo Code"\)`
+**Scope:** `apps/theo-desktop/**/*.rs`.
+
+**Idiom:**
+
+```rust
+fn run() {
+    tauri::Builder::default()
+        .run(tauri::generate_context!())
+        .expect("error while running Theo Code");
+}
+```
+
+**Invariant:** Tauri runtime failure at the desktop entrypoint is fatal
+by design. Same logic as `process_entrypoint_runtime_init` (CLI Tokio
+runtime) but for the GUI shell.
+
+**Alternative considered:** propagate to a typed `DesktopRunError`.
+Rejected: there is no caller above `run()` to handle it.
+
+**Acceptance:** the literal message `"error while running Theo Code"`
+in `apps/theo-desktop/`.
+
+---
+
+### 12. `process_entrypoint_agent_bin`
+
+**Pattern:** `\.unwrap\(\)`
+**Scope:** `crates/theo-agent-runtime/src/bin/theo-agent.rs` only.
+
+**Idiom:**
+
+```rust
+fn main() {
+    let cfg = parse_args().unwrap();
+    AgentRuntime::start(cfg).unwrap();
+}
+```
+
+**Invariant:** binary entrypoint at the top of `main()`. Failure is
+fatal by design and there is no caller. The binary file is small
+(≤ 200 LOC) and serves as a thin wrapper around the library.
+
+**Alternative considered:** typed errors threaded through `main`
+returning `Result<()>`. Rejected: `theo-agent` is a developer-only
+spawn shim — the wrapping does not earn its keep.
+
+**Acceptance:** any `.unwrap()` inside that one file is accepted.
+
+---
+
+### 13. `lsp_tool_common_unwrap`
+
+**Pattern:** `\.unwrap\(\)`
+**Scope:** `crates/theo-tooling/src/lsp/tool_common.rs` only.
+
+**Idiom:** internal LSP helper functions where the JSON-RPC contract
+guarantees every accessed field is present. The original `lsp/tool.rs`
+file (Cat-B in B1) was split via the god-files plan; the helpers
+inherit the same invariant.
+
+**Invariant:** `tool_common.rs` is a private module exposing pure
+helpers that consume already-validated JSON values from the LSP
+response decoder. The `unwrap()` sites are inside a chain of
+`if let Some(_) = …` arms or after `serde_json::from_value` that has
+typed the value; the runtime cannot reach the panic branch unless the
+LSP server violates the spec, which is a developer bug.
+
+**Alternative considered:** wrap the helpers in `Result<_, LspError>`
+and propagate. Rejected: the LSP error path is already typed at the
+*tool boundary* (`LspError` enum); duplicating it in helpers below
+adds ceremony without information.
+
+**Acceptance:** any `.unwrap()` inside `tool_common.rs` is accepted.
+
+---
+
 ### Pattern bookkeeping
 
 The list above is **not closed**. New patterns are added by:
