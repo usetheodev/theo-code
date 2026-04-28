@@ -3,6 +3,14 @@
 ## [Unreleased]
 
 ### Fixed
+- **god-files T5.2 structural — provider catalog split (Phase 5, ADR D5)** (`docs/plans/god-files-2026-07-23-plan.md` follow-up).
+  Both `theo-infra-llm/src/providers/anthropic.rs` (1074) and `openai.rs` (964) decomposed into module-dirs:
+  - `providers/anthropic/{request,response,streaming,image}.rs` + `mod.rs` (each ≤ 469 LOC)
+  - `providers/openai/{request,response,streaming}.rs` + `mod.rs` (each ≤ 414 LOC)
+  Tests preserved as sibling `<provider>_tests.rs` inside the module-dir. Allowlist net: 25 → 24 (anthropic.rs entry removed; openai.rs entry already removed in Phase 6 renewal but ceiling 900 was retained for the new dir's largest file at 414 LOC — well under 800, no entry needed).
+  Validation: cargo test 5247 PASS / 0 FAIL / 24 IGNORED, clippy 0 warnings, sizes gate exit 0.
+- **god-files Phase 6 — sunset renewal commit + ADR-020** (`docs/plans/god-files-2026-07-23-plan.md`).
+  Plan formally CLOSED with 27/53 entries fully resolved (51%). The 30 remaining entries renewed to 2026-10-31 under `docs/adr/020-renewed-size-allowlist-2026-07-15.md` with three-category breakdown (sibling-tests over 800, production-halves needing structural decomp, legitimately near-ceiling). Ralph Loop iter 9 closure.
 - **god-files T5.3 — apps/theo-cli/src/main.rs split (Phase 5, ADR D6)** (`docs/plans/god-files-2026-07-23-plan.md`).
   `apps/theo-cli/src/main.rs` (1480 LOC) → 569 LOC. Extracted all 13 `cmd_*` handler functions (cmd_init, cmd_agent, cmd_headless, cmd_pilot, cmd_context, cmd_impact, cmd_stats, cmd_login, cmd_logout, cmd_dashboard, cmd_trajectory_export_rlhf, run_oauth_device_flow, plus the resolve_agent_config helper) to a new `apps/theo-cli/src/cmd.rs` (932 LOC).
   main.rs now keeps only:

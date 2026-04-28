@@ -4,7 +4,11 @@
 //!
 //! Do not edit the path attribute — it is what keeps this file linked.
 
+    #![allow(unused_imports)]
     use super::*;
+    use crate::providers::openai::*;
+    use crate::providers::common::*;
+    use serde_json::{Value, json};
 
     #[test]
     fn test_from_openai_responses_request() {
