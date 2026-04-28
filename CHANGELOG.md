@@ -3,6 +3,25 @@
 ## [Unreleased]
 
 ### Fixed
+- **god-files T1.1 — DAP tool family split (Phase 1, ADR D2)** (`docs/plans/god-files-2026-07-23-plan.md`).
+  `crates/theo-tooling/src/dap/tool.rs` (1783 LOC) decomposed into 11 per-tool files following ADR D2 ("split per-tool with shared schema module"):
+  - `dap/status.rs` (133 LOC) DebugStatusTool
+  - `dap/launch.rs` (200 LOC) DebugLaunchTool
+  - `dap/breakpoint.rs` (219 LOC) DebugSetBreakpointTool
+  - `dap/continue_.rs` (133 LOC) DebugContinueTool (`_` suffix because `continue` is a Rust keyword)
+  - `dap/step.rs` (156 LOC) DebugStepTool
+  - `dap/eval.rs` (205 LOC) DebugEvalTool
+  - `dap/stack_trace.rs` (218 LOC) DebugStackTraceTool
+  - `dap/variables.rs` (254 LOC) DebugVariablesTool
+  - `dap/scopes.rs` (177 LOC) DebugScopesTool
+  - `dap/threads.rs` (135 LOC) DebugThreadsTool
+  - `dap/terminate.rs` (114 LOC) DebugTerminateTool
+  - `dap/tool_common.rs` (80 LOC) shared helpers (`parse_session_id`, `map_session_error`, `require_session`, `check_response`)
+  - `dap/mod.rs` (58 LOC) re-exports each tool struct + remains the canonical `pub use` surface
+  All 11 files are ≤ 254 LOC, well under the 800-LOC default ceiling; the file-level violation for `dap/tool.rs` is gone, allowlist entry removed.
+  `dap/tool_tests.rs` (1281 LOC, 213 tests) is reattached to `dap/mod.rs` via `#[cfg(test)] #[path = "tool_tests.rs"] mod tests;`. Per-tool test split deferred — file stays in the allowlist with ceiling 1300 (revisit when phase 1.1.b lands).
+  `crates/theo-tooling/src/registry/mod.rs` — no import-path change required (already `use crate::dap::{Debug*Tool}` via the mod-level re-exports).
+  Validation: `cargo test --workspace --exclude theo-code-desktop --lib --tests --no-fail-fast` → 5247 PASS / 0 FAIL / 24 IGNORED (no count drop). `cargo clippy -p theo-tooling --all-targets -- -D warnings` → 0 warnings. `bash scripts/check-sizes.sh` → 51 files over (was 52), 0 NEW, 0 EXPIRED. `bash scripts/check-allowlist-paths.sh` → 0 stale paths.
 - **god-files Phase 0 (T0.1+T0.2) — baseline + tooling for the 2026-07-23 sunset campaign** (`docs/plans/god-files-2026-07-23-plan.md`).
   - **T0.1** `docs/audit/god-files-baseline-2026-04-28.md` — frozen 53-entry snapshot with per-entry current LOC, ceiling, headroom, plus rollups by ceiling tier and by crate. `scripts/check-allowlist-progress.sh` reports current vs baseline (entries remaining: 53 → 53, total LOC above default ceiling: 21298, largest remaining: `theo-tooling/src/plan/mod.rs` 2356 LOC). `make check-allowlist-progress` target wired.
   - **T0.2** `scripts/extract-tests-to-sibling.py` — mechanical extractor that moves `#[cfg(test)] mod tests { ... }` to a sibling `<file>_tests.rs` and rewrites the original to `#[cfg(test)] #[path = "<file>_tests.rs"] mod tests;`. Idempotent; handles raw-string false-positives; preserves headers/imports. 14/14 fixture tests in `scripts/extract-tests-to-sibling.test.sh`.

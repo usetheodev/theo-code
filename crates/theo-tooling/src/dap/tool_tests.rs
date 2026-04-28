@@ -7,10 +7,32 @@
 // counts. Only test code lives here.
 #![cfg(test)]
 
-use super::*;
+#[allow(unused_imports)]
+use crate::dap::{
+    DapResponse, DapSessionManager, DebugContinueTool, DebugEvalTool, DebugLaunchTool,
+    DebugScopesTool, DebugSetBreakpointTool, DebugStackTraceTool, DebugStatusTool, DebugStepTool,
+    DebugTerminateTool, DebugThreadsTool, DebugVariablesTool,
+};
+use crate::dap::breakpoint::format_set_breakpoint_output;
+use crate::dap::eval::format_eval_output;
+use crate::dap::scopes::format_scopes_output;
+use crate::dap::stack_trace::format_stack_trace_output;
+use crate::dap::threads::format_threads_output;
+use crate::dap::variables::format_variables_output;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use serde_json::json;
+
+use theo_domain::error::ToolError;
 use theo_domain::session::{MessageId, SessionId};
+use theo_domain::tool::{PermissionCollector, Tool, ToolCategory, ToolContext};
+
+#[allow(unused_imports)]
+use crate::dap::tool_common::{
+    check_response, map_session_error, parse_session_id, require_session,
+};
 
 fn make_ctx(project_dir: PathBuf) -> ToolContext {
     let (_tx, rx) = tokio::sync::watch::channel(false);
