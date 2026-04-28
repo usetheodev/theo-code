@@ -109,7 +109,10 @@ crates/theo-engine-parser/src/symbol_table_tests.rs|850|2026-10-31|Sibling test 
 # advance_phase/log_entry/summary/next_task/replan/failure_status.rs); shared
 # helpers moved to plan/shared.rs and plan/side_files.rs. mod.rs is now 113 LOC
 # (header + module decls + pub use + PlanExitTool inline).
-crates/theo-tooling/src/plan/mod_tests.rs|970|2026-10-31|T6.1 — sibling test body for the 8 plan_* tools (37 tests, 940 LOC). Per-tool test split deferred; ceiling kept at 970.
+# crates/theo-tooling/src/plan/mod_tests.rs — RESOLVED 2026-04-28 (T3.6 of code-hygiene-5x5).
+# Split per-tool: plan_{registry,advance_phase,log_entry,create,next_task,summary,
+# update_task,replan,failure_status}_tests.rs + plan_test_helpers.rs.
+# All ≤ 220 LOC.
 # crates/theo-domain/src/plan.rs — T5.1 split 2026-04-28: production half now 784 LOC.
 # crates/theo-domain/src/plan_tests.rs — RESOLVED 2026-04-28 (T3.4 of code-hygiene-5x5).
 # Split per-feature: plan_schema_tests.rs (410), plan_patch_tests.rs (242),

@@ -3,6 +3,11 @@
 ## [Unreleased]
 
 ### Changed
+- **code-hygiene-5x5 T3.6 — `theo-tooling plan/mod_tests.rs` (961 LOC, 37 tests) split per-tool** (`docs/plans/code-hygiene-5x5-plan.md`).
+  `crates/theo-tooling/src/plan/mod_tests.rs` decomposed into 9 per-tool sibling files
+  (`plan_{registry,advance_phase,log_entry,create,next_task,summary,update_task,replan,failure_status}_tests.rs`)
+  plus `plan_test_helpers.rs` (92 LOC) holding `make_ctx`, `sample_phase_args`, `create_plan_with_failures`.
+  All sibling files ≤ 220 LOC. size-allowlist entry resolved.
 - **code-hygiene-5x5 T3.5 — `subagent/mod_tests.rs` (1020 LOC, 34 tests) split per-feature** (`docs/plans/code-hygiene-5x5-plan.md`).
   `crates/theo-agent-runtime/src/subagent/mod_tests.rs` decomposed into 6 per-feature sibling files plus shared helpers:
   - `subagent_test_helpers.rs` (44 LOC) — `mcp_env_lock` + `CaptureListener` (pub(super))

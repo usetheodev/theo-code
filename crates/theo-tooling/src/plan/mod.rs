@@ -107,6 +107,34 @@ impl Tool for PlanExitTool {
 // CreatePlanTool — `plan_create`
 // ---------------------------------------------------------------------------
 
+// Sibling tests split per-tool (T3.6 of code-hygiene-5x5).
 #[cfg(test)]
-#[path = "mod_tests.rs"]
-mod tests;
+#[path = "plan_test_helpers.rs"]
+mod plan_test_helpers;
+#[cfg(test)]
+#[path = "plan_registry_tests.rs"]
+mod plan_registry_tests;
+#[cfg(test)]
+#[path = "plan_advance_phase_tests.rs"]
+mod plan_advance_phase_tests;
+#[cfg(test)]
+#[path = "plan_log_entry_tests.rs"]
+mod plan_log_entry_tests;
+#[cfg(test)]
+#[path = "plan_create_tests.rs"]
+mod plan_create_tests;
+#[cfg(test)]
+#[path = "plan_next_task_tests.rs"]
+mod plan_next_task_tests;
+#[cfg(test)]
+#[path = "plan_summary_tests.rs"]
+mod plan_summary_tests;
+#[cfg(test)]
+#[path = "plan_update_task_tests.rs"]
+mod plan_update_task_tests;
+#[cfg(test)]
+#[path = "plan_replan_tests.rs"]
+mod plan_replan_tests;
+#[cfg(test)]
+#[path = "plan_failure_status_tests.rs"]
+mod plan_failure_status_tests;
