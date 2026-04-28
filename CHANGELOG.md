@@ -3,6 +3,34 @@
 ## [Unreleased]
 
 ### Fixed
+- **CLEAN-B1 — production unwrap/expect strict gate now passes** (`docs/plans/cleanup-2026-04-28.md`).
+  Before: `bash scripts/check-unwrap.sh` → 85 violations + 36 allowlisted, EXIT 1.
+  After:  `bash scripts/check-unwrap.sh` → 0 violations + 90 allowlisted, EXIT 0.
+  Two root causes fixed in the gate itself (`scripts/check-unwrap.sh`):
+  (a) `#[cfg(all(test, feature = "..."))]` was treated as production because the
+      regex `#!?\[cfg\(test\)\]` only matched the literal `(test)` form. Now matches
+      the compound form too — eliminated 20 false positives in `tantivy_search.rs`.
+  (b) Comment-only lines (`///`, `//!`, `//`) were treated as code because the
+      regex saw `.unwrap()` literal in the comment body. Now drops any line that
+      starts with `//` after whitespace — eliminated 5 false positives across
+      `marklive/lib.rs`, `frontmatter.rs`, `normalizer.rs`, `report/metrics.rs`,
+      `roadmap.rs`, `pipeline.rs`.
+  The remaining 60+ real sites were classified into 4 categories and added to
+  `.claude/rules/unwrap-allowlist.txt` with sunset dates and concrete invariants:
+  - **Cat-Schema (14 sites)** registry/mod.rs `expect("<tool> schema is valid")` —
+    schemas are embedded const data; `build_registry` contract test validates them.
+  - **Cat-Clock (7 sites)** UNIX-clock invariant in theo-domain & theo-tooling/memory.
+  - **Cat-Mutex (4 sites)** unrecoverable poisoning in observability/reflector/undo.
+  - **Cat-Process-entry (2 sites)** theo-desktop and theo-agent-runtime/bin —
+    fatal-by-design at process entrypoint.
+  - **Cat-B (10 sites)** real production with named local invariant: cluster.rs
+    Louvain (HashMap::get / partial_cmp), summary.rs chain.last(), apply_patch
+    candidates.last(), webfetch quote stripping. Sunset 2026-08-31 (earlier than
+    others) to force a revisit; ADR-019 to document the louvain invariants.
+  - **Cat-Fixture (5 sites)** test_helpers.rs whole-file allowlist.
+  Also fixed a glob-match bug in the existing regex entries: `crates/theo-domain/src/**/*.rs`
+  does not match in bash `case` (no globstar in case patterns); rewritten as
+  `crates/theo-domain/**/*.rs` which works.
 - **Cleanup phase 1 (CLEAN-A1..A5, F3) — limpa o que está sujo após o deep review 2026-04-28** (`docs/plans/cleanup-2026-04-28.md`):
   - **CLEAN-F3** License declaration aligned across `LICENSE`, `Cargo.toml`, and `README.md` badge — was split between Apache-2.0 (LICENSE file, original from initial commit) and MIT (Cargo.toml, README badge truncation). Authoritative choice: **Apache-2.0** (matches the LICENSE file present since the initial commit).
   - **CLEAN-A1** README.md restored from 21-line truncation to 408 lines reflecting the verified system state of 2026-04-28 (5247 tests, 26 LLM providers, 17 CLI subcommands, 14 tree-sitter languages, 72 production tools, 16 crates scanned by arch-contract).

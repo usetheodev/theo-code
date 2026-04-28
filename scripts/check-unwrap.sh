@@ -133,10 +133,12 @@ filter_production_only() {
         {
           path=$1
           if (!(path in cfg_line)) {
-            # Match both outer (`#[cfg(test)]`) and inner
-            # (`#![cfg(test)]`) attribute forms — the latter scopes
-            # an entire sibling-test file, e.g. dap/tool_tests.rs.
-            cmd = "grep -nE '\''^[[:space:]]*#!?\\[cfg\\(test\\)\\]'\'' " path " | head -1"
+            # Match outer (`#[cfg(test)]`) and inner (`#![cfg(test)]`)
+            # forms PLUS the compound form `#[cfg(all(test, feature = "..."))]`
+            # used by feature-gated test modules (e.g. tantivy-backend).
+            # The latter scopes an entire sibling-test file when used as
+            # `#![cfg(...)]` and a tests-mod block when used as `#[cfg(...)]`.
+            cmd = "grep -nE '\''^[[:space:]]*#!?\\[cfg\\((all\\([^)]*\\b)?test\\b'\'' " path " | head -1"
             got = (cmd | getline first) ; close(cmd)
             if (got > 0) {
               split(first, parts, ":"); cfg_line[path] = parts[1] + 0
@@ -145,7 +147,16 @@ filter_production_only() {
             }
           }
           if (cfg_line[path] == 0 || ($2 + 0) < cfg_line[path]) {
-            print
+            # Drop comment-only lines: rustdoc (`///`, `//!`) AND plain
+            # line comments (`//`). The match string already triggered
+            # on a `.unwrap()` literal in the line; if the line *starts*
+            # with `//` (after whitespace), it is documentation/comment,
+            # not executed code.
+            content=$0
+            sub("^[^:]+:[0-9]+:", "", content)
+            if (content !~ /^[[:space:]]*\/\//) {
+              print
+            }
           }
         }'
 }
