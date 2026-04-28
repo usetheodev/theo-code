@@ -4,6 +4,9 @@
 //!
 //! Do not edit the path attribute — it is what keeps this file linked.
 
+
+#![cfg(test)]
+
     use super::*;
     use theo_engine_graph::bridge::*;
 

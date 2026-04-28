@@ -2,6 +2,9 @@
 //! Extracted by `scripts/extract-tests-to-sibling.py` (T0.2 of god-files-2026-07-23-plan.md).
 //! Included from `types.rs` via `#[path = "types_tests.rs"] mod tests;`.
 
+
+#![cfg(test)]
+
     #![allow(unused_imports)]
     use super::*;
     use crate::types::*;

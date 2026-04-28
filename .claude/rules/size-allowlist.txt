@@ -132,7 +132,7 @@ crates/theo-agent-runtime/src/subagent/resume_tests.rs|850|2026-10-31|Sibling te
 # crates/theo-infra-mcp/src/discovery.rs — T5.7 split 2026-04-28: production half now 286 LOC.
 
 # ── UI (>400 LOC) ──────────────────────────────────────────────────────
-apps/theo-ui/src/components/ui/sidebar.tsx|800|2026-10-31|T4.4 follow-up (third-party shadcn/ui Sidebar primitive; sub-component split deferred per ADR-020)
+# apps/theo-ui/src/components/ui/sidebar.tsx — RESOLVED 2026-04-28 (T5.8: 771 → 325 LOC; menu/structure/triggers extracted to sidebar/ subdir)
 # apps/theo-ui/src/features/settings/pages/SettingsPage.tsx — decomposed
 # in T4.4 into useSettings hook + 7 section sub-components; page is now
 # 83 LOC, well under the 400-LOC UI limit. Entry removed 2026-04-23.

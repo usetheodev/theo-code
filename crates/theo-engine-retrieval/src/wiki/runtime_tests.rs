@@ -4,6 +4,9 @@
 //!
 //! Do not edit the path attribute — it is what keeps this file linked.
 
+
+#![cfg(test)]
+
     use super::*;
 
     fn sample_insight(success: bool, command: &str, error: Option<&str>) -> RuntimeInsight {

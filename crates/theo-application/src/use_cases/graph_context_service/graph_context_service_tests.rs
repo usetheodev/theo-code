@@ -4,6 +4,9 @@
 //!
 //! Do not edit the path attribute — it is what keeps this file linked.
 
+
+#![cfg(test)]
+
     #![allow(unused_imports)]
     use super::*;
     use crate::use_cases::graph_context_service::*;

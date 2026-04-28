@@ -1,5 +1,8 @@
 //! Sibling test body of `symbols.rs` (T2.4 of god-files-2026-07-23-plan.md).
 
+
+#![cfg(test)]
+
 #![allow(unused_imports)]
 
 use super::*;

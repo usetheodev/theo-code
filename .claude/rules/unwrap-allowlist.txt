@@ -28,8 +28,10 @@ crates/theo-infra-llm/src/mock.rs|2026-10-23|Mock LLM provider used only from te
 
 # regex: entries use @@ as field separator so `|` is free inside regexes.
 regex:crates/**/*.rs@@\.(lock|read|write)\(\)\.expect\(.*(poisoned|lock)@@2026-10-23@@Mutex/RwLock poison is unrecoverable; .expect() documents the invariant.
+regex:crates/theo-engine-graph/**/*.rs@@\.unwrap\(\)@@2026-10-31@@Louvain heuristic invariants in cluster/subdivide.rs + cluster/lpa.rs — partial_cmp on non-NaN floats and HashMap::get on label-set built from same iterated ids. Inherited from cluster.rs Cat-B in B1 (T4.2 split).
+regex:crates/theo-tooling/src/lsp/tool_common.rs@@\.unwrap\(\)@@2026-10-31@@Inherited from lsp/tool.rs Cat-B in B1.
 regex:apps/**/*.rs@@\.(lock|read|write)\(\)\.expect\(.*(poisoned|lock)@@2026-10-23@@Same poison idiom in apps.
-regex:apps/theo-cli/src/main.rs@@tokio::runtime::Runtime::new\(\)\.expect\(@@2026-10-23@@Runtime spawn failure at process entrypoint is fatal by design.
+regex:apps/theo-cli/**/*.rs@@tokio::runtime::Runtime::new\(\)\.expect\(@@2026-10-31@@Runtime spawn failure at process entrypoint is fatal by design (T5.3 cmd/*.rs split).
 regex:crates/theo-agent-runtime/src/observability/**/*.rs@@\.expect\(.*(metrics|spawn)@@2026-10-23@@Observability writer thread spawn/metrics lock — fatal if breaks.
 regex:apps/theo-cli/src/render/code_block.rs@@themes\.values\(\)\.next\(\)\.expect\("at least one theme"\)@@2026-10-23@@Syntect bundles at least one theme at compile time; invariant proven by test.
 
@@ -40,7 +42,7 @@ regex:apps/theo-cli/src/render/code_block.rs@@themes\.values\(\)\.next\(\)\.expe
 # the typed-error refactor for those modules ships.
 regex:crates/theo-domain/**/*.rs@@\.expect\("system clock before UNIX epoch"\)@@2026-10-31@@SystemTime::duration_since(UNIX_EPOCH) only fails if the system clock is set before 1970-01-01 — fatal misconfiguration; expect() documents the invariant.
 regex:crates/theo-tooling/src/memory/mod.rs@@\.expect\("system clock before UNIX epoch"\)@@2026-10-31@@Same UNIX-clock invariant as theo-domain.
-regex:crates/theo-tooling/src/registry/mod.rs@@\.expect\(".*tool schema is valid"\)@@2026-10-31@@Tool schemas are embedded const data; the `build_registry` contract test validates each one at compile-and-test time.
+regex:crates/theo-tooling/**/*.rs@@\.expect\(".*tool schema is valid"\)@@2026-10-31@@Tool schemas are embedded const data; the `build_registry` contract test validates each one at compile-and-test time. Path widened in T1.5 (registry/builders.rs).
 regex:crates/theo-tooling/src/sandbox/executor.rs@@\.expect\(@@2026-10-31@@Sandbox backend decision was already proven to be Some by the BackendDecision::* match arm above; the .expect() makes the invariant explicit.
 regex:crates/theo-tooling/src/bash/mod.rs@@\.expect\("checked is_some above"\)@@2026-10-31@@Local guard checked is_some immediately above; the .expect() documents the proven-non-empty invariant.
 regex:crates/theo-tooling/src/undo.rs@@\.expect\("snapshot lock"\)@@2026-10-31@@Mutex poisoning is unrecoverable; .expect() documents the invariant.

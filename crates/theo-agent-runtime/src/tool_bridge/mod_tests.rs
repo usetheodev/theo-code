@@ -4,6 +4,9 @@
 //!
 //! Do not edit the path attribute — it is what keeps this file linked.
 
+
+#![cfg(test)]
+
     use super::*;
     use async_trait::async_trait;
     use std::path::PathBuf;

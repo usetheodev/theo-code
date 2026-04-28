@@ -4,6 +4,9 @@
 //!
 //! Do not edit the path attribute — it is what keeps this file linked.
 
+
+#![cfg(test)]
+
     use super::*;
     use theo_domain::event::{DomainEvent, EventType};
     use theo_domain::graph_context::ContextBlock;

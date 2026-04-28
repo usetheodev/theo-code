@@ -62,15 +62,15 @@ ARTIFACTS=(
     # Phase 1 — Multimodal / Vision
     "1|screenshot tool (T1.1)|crates/theo-tooling/src/screenshot/mod.rs|pub struct ScreenshotTool"
     "1|read_image tool (T1.2)|crates/theo-tooling/src/read_image/mod.rs|pub struct ReadImageTool"
-    "1|read_image registered (T1.2)|crates/theo-tooling/src/registry/mod.rs|ReadImageTool"
+    "1|read_image registered (T1.2)|crates/theo-tooling/src/registry/builders.rs|ReadImageTool"
     # Phase 2 — Browser automation
     "2|BrowserSessionManager (T2.1)|crates/theo-tooling/src/browser/session_manager.rs|pub struct BrowserSessionManager"
-    "2|browser_status tool (T2.1 follow-up)|crates/theo-tooling/src/browser/tool.rs|pub struct BrowserStatusTool"
-    "2|browser_open tool (T2.1)|crates/theo-tooling/src/browser/tool.rs|pub struct BrowserOpenTool"
+    "2|browser_status tool (T2.1 follow-up)|crates/theo-tooling/src/browser/status.rs|pub struct BrowserStatusTool"
+    "2|browser_open tool (T2.1)|crates/theo-tooling/src/browser/open.rs|pub struct BrowserOpenTool"
     # Phase 3 — LSP
     "3|LspSessionManager (T3.1)|crates/theo-tooling/src/lsp/session_manager.rs|pub struct LspSessionManager"
-    "3|lsp_status tool (T3.1 follow-up)|crates/theo-tooling/src/lsp/tool.rs|pub struct LspStatusTool"
-    "3|lsp_rename PREVIEW (T3.1)|crates/theo-tooling/src/lsp/tool.rs|pub struct LspRenameTool"
+    "3|lsp_status tool (T3.1 follow-up)|crates/theo-tooling/src/lsp/status.rs|pub struct LspStatusTool"
+    "3|lsp_rename PREVIEW (T3.1)|crates/theo-tooling/src/lsp/rename.rs|pub struct LspRenameTool"
     # Phase 4 — Computer Use
     "4|ComputerActionTool (T4.1)|crates/theo-tooling/src/computer/tool.rs|pub struct ComputerActionTool"
     # Phase 5 — Auto-test-gen
@@ -79,7 +79,7 @@ ARTIFACTS=(
     # Phase 6 — Adaptive replanning
     "6|PlanPatch enum (T6.1)|crates/theo-domain/src/plan_patch.rs|enum PlanPatch"
     "6|PlanTask.failure_count (T6.1)|crates/theo-domain/src/plan.rs|pub failure_count: u32"
-    "6|plan_replan tool (T6.1)|crates/theo-tooling/src/plan/mod.rs|pub struct ReplanTool"
+    "6|plan_replan tool (T6.1)|crates/theo-tooling/src/plan/replan.rs|pub struct ReplanTool"
     # Phase 7 — Multi-agent claim
     "7|PlanTask.assignee (T7.1)|crates/theo-domain/src/plan.rs|pub assignee: Option<String>"
     "7|Plan.version_counter (T7.1)|crates/theo-domain/src/plan.rs|pub version_counter: u64"
@@ -95,8 +95,8 @@ ARTIFACTS=(
     "12|eval CI workflow (T12.1)|.github/workflows/eval.yml|name: eval"
     # Phase 13 — DAP
     "13|DapSessionManager (T13.1)|crates/theo-tooling/src/dap/session_manager.rs|pub struct DapSessionManager"
-    "13|debug_status tool (T13.1 follow-up)|crates/theo-tooling/src/dap/tool.rs|pub struct DebugStatusTool"
-    "13|debug_launch tool (T13.1)|crates/theo-tooling/src/dap/tool.rs|pub struct DebugLaunchTool"
+    "13|debug_status tool (T13.1 follow-up)|crates/theo-tooling/src/dap/status.rs|pub struct DebugStatusTool"
+    "13|debug_launch tool (T13.1)|crates/theo-tooling/src/dap/launch.rs|pub struct DebugLaunchTool"
     # Phase 14 — Live tool streaming
     "14|partial-progress emit_progress (T14.1)|crates/theo-tooling/src/partial.rs|pub fn emit_progress"
     "14|RuntimeContext.partial_progress_tx (T14.1)|crates/theo-agent-runtime/src/run_engine|partial_progress_tx"

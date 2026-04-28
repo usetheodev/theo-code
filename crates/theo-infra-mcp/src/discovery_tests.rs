@@ -1,5 +1,8 @@
 //! Sibling test body of `discovery.rs` (T5.7 of god-files-2026-07-23-plan.md).
 
+
+#![cfg(test)]
+
 #![allow(unused_imports)]
 
 use super::*;
