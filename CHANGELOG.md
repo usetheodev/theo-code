@@ -3,6 +3,11 @@
 ## [Unreleased]
 
 ### Fixed
+- **god-files T5.3.b + T4.1 structural — cmd.rs and wiki/generator.rs decomposed** (`docs/plans/god-files-2026-07-23-plan.md`).
+  Two structural splits:
+  - `apps/theo-cli/src/cmd.rs` (940) → `cmd/{auth,context,dashboard,headless,helpers,impact,init,agent,pilot,stats,trajectory}.rs` + `mod.rs`. Each per-cmd file ≤ 239 LOC. ADR D6's strict "one file per subcommand" satisfied.
+  - `crates/theo-engine-retrieval/src/wiki/generator.rs` (1418) → `generator/{doc,metadata,summary,hashing,incremental,concepts}.rs` + `mod.rs`. Each per-purpose file ≤ 503 LOC.
+  Allowlist net: 24 → 22 entries (-2). Validation: cargo test 5247 PASS / 0 FAIL / 24 IGNORED, clippy `--all-targets` 0 warnings, sizes gate exit 0.
 - **god-files T5.2 structural — provider catalog split (Phase 5, ADR D5)** (`docs/plans/god-files-2026-07-23-plan.md` follow-up).
   Both `theo-infra-llm/src/providers/anthropic.rs` (1074) and `openai.rs` (964) decomposed into module-dirs:
   - `providers/anthropic/{request,response,streaming,image}.rs` + `mod.rs` (each ≤ 469 LOC)

@@ -4,8 +4,13 @@
 //!
 //! Do not edit the path attribute — it is what keeps this file linked.
 
+    #![allow(unused_imports)]
     use super::*;
-    use theo_engine_graph::model::{Edge, Node};
+    use std::collections::{HashMap, HashSet};
+    use crate::wiki::generator::*;
+    use crate::wiki::model::*;
+    use theo_engine_graph::cluster::Community;
+    use theo_engine_graph::model::{CodeGraph, Edge, EdgeType, Node, NodeType, SymbolKind};
 
     fn test_graph() -> (CodeGraph, Vec<Community>) {
         let mut graph = CodeGraph::new();

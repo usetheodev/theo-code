@@ -27,7 +27,7 @@
 # pre-SOTA; allowlist entries follow the new paths.
 # crates/theo-agent-runtime/src/run_engine/mod.rs — T3.1 split 2026-04-28: production half now 423 LOC.
 crates/theo-agent-runtime/src/run_engine/mod_tests.rs|1260|2026-10-31|Sibling test body of run_engine/mod.rs (T3.1)
-crates/theo-engine-retrieval/src/wiki/generator.rs|1430|2026-10-31|T4.5 god file (T4.1 partial: tests extracted; production half 2018 → 1418 LOC)
+# crates/theo-engine-retrieval/src/wiki/generator.rs — T4.1 split 2026-04-28: decomposed to generator/{doc,metadata,summary,hashing,incremental,concepts}.rs.
 crates/theo-engine-parser/src/extractors/language_behavior.rs|1340|2026-10-31|T4.5 god file (T2.2 partial: tests extracted to language_behavior_tests.rs; production half 1757 → 1331 LOC. Per-language module decomposition still needed)
 crates/theo-engine-parser/src/extractors/language_behavior_tests.rs|450|2026-10-31|Sibling test body of language_behavior.rs (T2.2 partial)
 crates/theo-application/src/use_cases/graph_context_service.rs|1430|2026-10-31|T4.5 god file (T4.5 partial: tests extracted; production half 1959 → 1423 LOC)
@@ -60,7 +60,7 @@ crates/theo-engine-parser/src/extractors/data_models.rs|970|2026-10-31|Phase 4 d
 # so no allowlist entry needed. Removed 2026-04-27 after stale-path
 # audit (`scripts/check-allowlist-paths.sh`).
 # apps/theo-cli/src/main.rs — T5.3 split 2026-04-28: production half now 569 LOC (clap definition + main() + dispatch).
-apps/theo-cli/src/cmd.rs|940|2026-10-31|T5.3 — extracted cmd_* handlers from main.rs (ADR D6). Per-cmd file split deferred.
+# apps/theo-cli/src/cmd.rs — T5.3.b split 2026-04-28: decomposed to cmd/{auth,context,dashboard,headless,helpers,impact,init,agent,pilot,stats,trajectory}.rs (each ≤ 239 LOC). mod.rs is 33 LOC.
 # crates/theo-application/src/use_cases/pipeline.rs — T5.5 split 2026-04-28: production half now 601 LOC.
 # crates/theo-engine-parser/src/extractors/python.rs — T2.4 split 2026-04-28: production half now 560 LOC.
 # crates/theo-infra-llm/src/providers/openai.rs — T5.2 split 2026-04-28: decomposed to openai/{request,response,streaming}.rs.
