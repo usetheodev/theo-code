@@ -133,7 +133,11 @@ crates/theo-tooling/src/lsp/tool_tests.rs|850|2026-10-31|T3.1 — sibling test b
 #   - registry/mod_tests.rs (832 LOC) — 25 contract tests, sibling test body
 crates/theo-tooling/src/registry/mod_tests.rs|850|2026-10-31|T1.5 — sibling test body covering 25 contract tests on the registry public surface. Per-test split deferred.
 # crates/theo-agent-runtime/src/subagent/mod.rs — T3.3 split 2026-04-28: production half now 481 LOC.
-crates/theo-agent-runtime/src/subagent/mod_tests.rs|1050|2026-10-31|Sibling test body of subagent/mod.rs (T3.3)
+# crates/theo-agent-runtime/src/subagent/mod_tests.rs — RESOLVED 2026-04-28 (T3.5 of code-hygiene-5x5).
+# Split per-feature: subagent_spawn_tests.rs (537), subagent_builders_tests.rs (121),
+# subagent_discovery_tests.rs (108), subagent_builtin_tests.rs (54),
+# subagent_misc_tests.rs (~60), subagent_worktree_tests.rs (161)
+# + subagent_test_helpers.rs (44 LOC). All ≤ 800 LOC.
 # crates/theo-agent-runtime/src/subagent/resume.rs — T3.3 split 2026-04-28: production half now 319 LOC.
 crates/theo-agent-runtime/src/subagent/resume_tests.rs|850|2026-10-31|Sibling test body of subagent/resume.rs (T3.3)
 # crates/theo-agent-runtime/src/compaction_stages.rs — T3.4 split 2026-04-28: production half now 418 LOC.

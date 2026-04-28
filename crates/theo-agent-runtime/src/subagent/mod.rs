@@ -476,6 +476,25 @@ impl crate::event_bus::EventListener for PrefixedEventForwarder {
 // Tests
 // ---------------------------------------------------------------------------
 
+// Sibling tests split per-feature (T3.5 of code-hygiene-5x5).
 #[cfg(test)]
-#[path = "mod_tests.rs"]
-mod tests;
+#[path = "subagent_test_helpers.rs"]
+mod subagent_test_helpers;
+#[cfg(test)]
+#[path = "subagent_spawn_tests.rs"]
+mod subagent_spawn_tests;
+#[cfg(test)]
+#[path = "subagent_builders_tests.rs"]
+mod subagent_builders_tests;
+#[cfg(test)]
+#[path = "subagent_discovery_tests.rs"]
+mod subagent_discovery_tests;
+#[cfg(test)]
+#[path = "subagent_builtin_tests.rs"]
+mod subagent_builtin_tests;
+#[cfg(test)]
+#[path = "subagent_misc_tests.rs"]
+mod subagent_misc_tests;
+#[cfg(test)]
+#[path = "subagent_worktree_tests.rs"]
+mod subagent_worktree_tests;

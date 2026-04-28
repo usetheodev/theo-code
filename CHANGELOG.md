@@ -3,6 +3,16 @@
 ## [Unreleased]
 
 ### Changed
+- **code-hygiene-5x5 T3.5 — `subagent/mod_tests.rs` (1020 LOC, 34 tests) split per-feature** (`docs/plans/code-hygiene-5x5-plan.md`).
+  `crates/theo-agent-runtime/src/subagent/mod_tests.rs` decomposed into 6 per-feature sibling files plus shared helpers:
+  - `subagent_test_helpers.rs` (44 LOC) — `mcp_env_lock` + `CaptureListener` (pub(super))
+  - `subagent_spawn_tests.rs` (537 LOC) — spawn_with_spec_* (13 tests)
+  - `subagent_builders_tests.rs` (121 LOC) — with_*_builder/registry/new (8)
+  - `subagent_discovery_tests.rs` (108 LOC) — needs_discovery + cache (5)
+  - `subagent_builtin_tests.rs` (54 LOC) — builtin_*_capability (4)
+  - `subagent_misc_tests.rs` (~60 LOC) — events/max_depth/spec_based (3)
+  - `subagent_worktree_tests.rs` (161 LOC) — `mod worktree_override { … }` block (4)
+  All ≤ 800 LOC. size-allowlist entry resolved.
 - **code-hygiene-5x5 T3.4 — `domain/plan_tests.rs` (1093 LOC, 62 tests) split per-feature** (`docs/plans/code-hygiene-5x5-plan.md`).
   `crates/theo-domain/src/plan_tests.rs` decomposed into 5 per-feature sibling files:
   - `plan_test_helpers.rs` (59 LOC) — shared `make_plan/task/phase/plan_with_two_tasks` builders
