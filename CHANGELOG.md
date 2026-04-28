@@ -3,6 +3,10 @@
 ## [Unreleased]
 
 ### Fixed
+- **CLEAN-F1 — theo-compat-harness explicitly excluded from workspace + README** (`docs/plans/cleanup-2026-04-28.md`).
+  `crates/theo-compat-harness/` declared dependencies on `../commands`, `../tools`, `../runtime` — three sibling crates that do not exist anywhere in this repository. Origin: commits `914534d` / `3140ce8` ("CLI professionalization review"). The crate cannot compile and was sitting silently in `crates/` despite being absent from `[workspace.members]`, confusing readers. Now: (a) `Cargo.toml [workspace.exclude]` lists it explicitly so cargo never tries to resolve it, (b) `crates/theo-compat-harness/README.md` documents the situation and exposes the deletion path. Source preserved for git-history reference until someone with context decides revive vs delete.
+- **CLEAN-F2 — apps/theo-ui now has a README** (`docs/plans/cleanup-2026-04-28.md`).
+  Documents the React 18 + Vite + TypeScript + Tailwind + Radix UI stack, install/build/test commands, the build-time dependency from `apps/theo-desktop`, and the layout convention. `apps/theo-benchmark/README.md` already existed; both sub-apps now self-document.
 - **CLEAN-B1 — production unwrap/expect strict gate now passes** (`docs/plans/cleanup-2026-04-28.md`).
   Before: `bash scripts/check-unwrap.sh` → 85 violations + 36 allowlisted, EXIT 1.
   After:  `bash scripts/check-unwrap.sh` → 0 violations + 90 allowlisted, EXIT 0.

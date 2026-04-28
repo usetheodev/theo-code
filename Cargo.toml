@@ -19,6 +19,14 @@ members = [
     "apps/theo-cli",
     "apps/theo-marklive",
 ]
+exclude = [
+    # CLEAN-F1 / 2026-04-28 — orphaned satellite Cargo project.
+    # Depends on ../commands, ../tools, ../runtime which do not exist
+    # in this repository (experimental harness from commits 914534d/3140ce8).
+    # Preserved for git-history reference; see crates/theo-compat-harness/README.md.
+    # Workspace excludes it explicitly so cargo never tries to resolve it.
+    "crates/theo-compat-harness",
+]
 resolver = "3"
 
 [workspace.package]
