@@ -6,163 +6,47 @@
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd, CodeBlockKind};
 use ratatui::prelude::*;
 
+struct MarkdownState {
+    lines: Vec<Line<'static>>,
+    current_spans: Vec<Span<'static>>,
+    style_stack: Vec<Style>,
+    in_code_block: bool,
+    code_block_lang: String,
+    code_buffer: String,
+    list_depth: usize,
+}
+
 /// Convert a markdown string to styled ratatui Lines.
 pub fn markdown_to_lines(text: &str) -> Vec<Line<'static>> {
     let mut opts = Options::empty();
     opts.insert(Options::ENABLE_STRIKETHROUGH);
     let parser = Parser::new_ext(text, opts);
 
-    let mut lines: Vec<Line<'static>> = Vec::new();
-    let mut current_spans: Vec<Span<'static>> = Vec::new();
-    let mut style_stack: Vec<Style> = vec![Style::default()];
-    let mut in_code_block = false;
-    let mut code_block_lang = String::new();
-    let mut code_buffer = String::new();
-    let mut list_depth: usize = 0;
+    let mut state = MarkdownState {
+        lines: Vec::new(),
+        current_spans: Vec::new(),
+        style_stack: vec![Style::default()],
+        in_code_block: false,
+        code_block_lang: String::new(),
+        code_buffer: String::new(),
+        list_depth: 0,
+    };
 
     for event in parser {
         match event {
-            Event::Start(tag) => {
-                match tag {
-                    Tag::Heading { level, .. } => {
-                        let style = match level {
-                            pulldown_cmark::HeadingLevel::H1 => Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-                            pulldown_cmark::HeadingLevel::H2 => Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD),
-                            _ => Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
-                        };
-                        style_stack.push(style);
-                    }
-                    Tag::Strong => {
-                        let base = *style_stack.last().unwrap_or(&Style::default());
-                        style_stack.push(base.add_modifier(Modifier::BOLD));
-                    }
-                    Tag::Emphasis => {
-                        let base = *style_stack.last().unwrap_or(&Style::default());
-                        style_stack.push(base.add_modifier(Modifier::ITALIC));
-                    }
-                    Tag::CodeBlock(kind) => {
-                        in_code_block = true;
-                        code_buffer.clear();
-                        code_block_lang = match kind {
-                            CodeBlockKind::Fenced(lang) => lang.to_string(),
-                            CodeBlockKind::Indented => String::new(),
-                        };
-                    }
-                    Tag::List(_) => {
-                        list_depth += 1;
-                    }
-                    Tag::Item => {
-                        let indent = "  ".repeat(list_depth.saturating_sub(1));
-                        current_spans.push(Span::styled(
-                            format!("{indent}  "),
-                            Style::default(),
-                        ));
-                        current_spans.push(Span::styled(
-                            "• ",
-                            Style::default().fg(Color::Cyan),
-                        ));
-                    }
-                    Tag::Link { dest_url, .. } => {
-                        let base = *style_stack.last().unwrap_or(&Style::default());
-                        style_stack.push(base.fg(Color::Cyan).add_modifier(Modifier::UNDERLINED));
-                        // Store URL for later display
-                        current_spans.push(Span::styled(
-                            "[".to_string(),
-                            Style::default().fg(Color::DarkGray),
-                        ));
-                        let _ = dest_url; // URL displayed after text
-                    }
-                    Tag::Paragraph => {}
-                    _ => {}
-                }
-            }
-            Event::End(tag_end) => {
-                match tag_end {
-                    TagEnd::Heading(_) => {
-                        style_stack.pop();
-                        flush_line(&mut lines, &mut current_spans);
-                        lines.push(Line::from(""));
-                    }
-                    TagEnd::Strong | TagEnd::Emphasis => {
-                        style_stack.pop();
-                    }
-                    TagEnd::CodeBlock => {
-                        in_code_block = false;
-                        // Render code block with background
-                        let lang_label = if code_block_lang.is_empty() {
-                            String::new()
-                        } else {
-                            format!(" {}", code_block_lang)
-                        };
-                        lines.push(Line::from(Span::styled(
-                            format!("  ┌─{lang_label}─────"),
-                            Style::default().fg(Color::DarkGray),
-                        )));
-                        for code_line in code_buffer.lines() {
-                            let styled_spans = highlight_code_line(code_line, &code_block_lang);
-                            let mut line_spans = vec![
-                                Span::styled("  │ ", Style::default().fg(Color::DarkGray)),
-                            ];
-                            line_spans.extend(styled_spans);
-                            lines.push(Line::from(line_spans));
-                        }
-                        lines.push(Line::from(Span::styled(
-                            "  └─────",
-                            Style::default().fg(Color::DarkGray),
-                        )));
-                        code_buffer.clear();
-                    }
-                    TagEnd::List(_) => {
-                        list_depth = list_depth.saturating_sub(1);
-                    }
-                    TagEnd::Item => {
-                        flush_line(&mut lines, &mut current_spans);
-                    }
-                    TagEnd::Link => {
-                        style_stack.pop();
-                        current_spans.push(Span::styled(
-                            "]",
-                            Style::default().fg(Color::DarkGray),
-                        ));
-                    }
-                    TagEnd::Paragraph => {
-                        flush_line(&mut lines, &mut current_spans);
-                        lines.push(Line::from(""));
-                    }
-                    _ => {}
-                }
-            }
-            Event::Text(text) => {
-                if in_code_block {
-                    code_buffer.push_str(&text);
-                } else {
-                    let style = *style_stack.last().unwrap_or(&Style::default());
-                    // Handle multi-line text
-                    let text_str = text.to_string();
-                    let mut first = true;
-                    for line in text_str.split('\n') {
-                        if !first {
-                            flush_line(&mut lines, &mut current_spans);
-                        }
-                        if !line.is_empty() {
-                            current_spans.push(Span::styled(line.to_string(), style));
-                        }
-                        first = false;
-                    }
-                }
-            }
-            Event::Code(code) => {
-                current_spans.push(Span::styled(
-                    format!("`{code}`"),
-                    Style::default().fg(Color::Yellow).bg(Color::DarkGray),
-                ));
-            }
+            Event::Start(tag) => handle_start_tag(&mut state, tag),
+            Event::End(tag_end) => handle_end_tag(&mut state, tag_end),
+            Event::Text(text) => handle_text_event(&mut state, &text),
+            Event::Code(code) => state.current_spans.push(Span::styled(
+                format!("`{code}`"),
+                Style::default().fg(Color::Yellow).bg(Color::DarkGray),
+            )),
             Event::SoftBreak | Event::HardBreak => {
-                flush_line(&mut lines, &mut current_spans);
+                flush_line(&mut state.lines, &mut state.current_spans);
             }
             Event::Rule => {
-                flush_line(&mut lines, &mut current_spans);
-                lines.push(Line::from(Span::styled(
+                flush_line(&mut state.lines, &mut state.current_spans);
+                state.lines.push(Line::from(Span::styled(
                     "────────────────────",
                     Style::default().fg(Color::DarkGray),
                 )));
@@ -170,6 +54,11 @@ pub fn markdown_to_lines(text: &str) -> Vec<Line<'static>> {
             _ => {}
         }
     }
+    let MarkdownState {
+        mut lines,
+        mut current_spans,
+        ..
+    } = state;
 
     // Flush remaining spans
     if !current_spans.is_empty() {
@@ -181,6 +70,143 @@ pub fn markdown_to_lines(text: &str) -> Vec<Line<'static>> {
 
 /// Simple keyword-based syntax highlighting for code blocks.
 /// Not as sophisticated as syntect but covers common patterns without heavy deps.
+fn handle_start_tag(state: &mut MarkdownState, tag: Tag) {
+    match tag {
+        Tag::Heading { level, .. } => {
+            let style = match level {
+                pulldown_cmark::HeadingLevel::H1 => {
+                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                }
+                pulldown_cmark::HeadingLevel::H2 => {
+                    Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD)
+                }
+                _ => Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            };
+            state.style_stack.push(style);
+        }
+        Tag::Strong => {
+            let base = *state.style_stack.last().unwrap_or(&Style::default());
+            state.style_stack.push(base.add_modifier(Modifier::BOLD));
+        }
+        Tag::Emphasis => {
+            let base = *state.style_stack.last().unwrap_or(&Style::default());
+            state.style_stack.push(base.add_modifier(Modifier::ITALIC));
+        }
+        Tag::CodeBlock(kind) => {
+            state.in_code_block = true;
+            state.code_buffer.clear();
+            state.code_block_lang = match kind {
+                CodeBlockKind::Fenced(lang) => lang.to_string(),
+                CodeBlockKind::Indented => String::new(),
+            };
+        }
+        Tag::List(_) => {
+            state.list_depth += 1;
+        }
+        Tag::Item => {
+            let indent = "  ".repeat(state.list_depth.saturating_sub(1));
+            state
+                .current_spans
+                .push(Span::styled(format!("{indent}  "), Style::default()));
+            state
+                .current_spans
+                .push(Span::styled("• ", Style::default().fg(Color::Cyan)));
+        }
+        Tag::Link { dest_url, .. } => {
+            let base = *state.style_stack.last().unwrap_or(&Style::default());
+            state
+                .style_stack
+                .push(base.fg(Color::Cyan).add_modifier(Modifier::UNDERLINED));
+            state.current_spans.push(Span::styled(
+                "[".to_string(),
+                Style::default().fg(Color::DarkGray),
+            ));
+            let _ = dest_url;
+        }
+        Tag::Paragraph => {}
+        _ => {}
+    }
+}
+
+fn handle_end_tag(state: &mut MarkdownState, tag_end: TagEnd) {
+    match tag_end {
+        TagEnd::Heading(_) => {
+            state.style_stack.pop();
+            flush_line(&mut state.lines, &mut state.current_spans);
+            state.lines.push(Line::from(""));
+        }
+        TagEnd::Strong | TagEnd::Emphasis => {
+            state.style_stack.pop();
+        }
+        TagEnd::CodeBlock => {
+            state.in_code_block = false;
+            render_code_block(state);
+            state.code_buffer.clear();
+        }
+        TagEnd::List(_) => {
+            state.list_depth = state.list_depth.saturating_sub(1);
+        }
+        TagEnd::Item => {
+            flush_line(&mut state.lines, &mut state.current_spans);
+        }
+        TagEnd::Link => {
+            state.style_stack.pop();
+            state
+                .current_spans
+                .push(Span::styled("]", Style::default().fg(Color::DarkGray)));
+        }
+        TagEnd::Paragraph => {
+            flush_line(&mut state.lines, &mut state.current_spans);
+            state.lines.push(Line::from(""));
+        }
+        _ => {}
+    }
+}
+
+fn render_code_block(state: &mut MarkdownState) {
+    let lang_label = if state.code_block_lang.is_empty() {
+        String::new()
+    } else {
+        format!(" {}", state.code_block_lang)
+    };
+    state.lines.push(Line::from(Span::styled(
+        format!("  ┌─{lang_label}─────"),
+        Style::default().fg(Color::DarkGray),
+    )));
+    for code_line in state.code_buffer.lines() {
+        let styled_spans = highlight_code_line(code_line, &state.code_block_lang);
+        let mut line_spans = vec![Span::styled("  │ ", Style::default().fg(Color::DarkGray))];
+        line_spans.extend(styled_spans);
+        state.lines.push(Line::from(line_spans));
+    }
+    state.lines.push(Line::from(Span::styled(
+        "  └─────",
+        Style::default().fg(Color::DarkGray),
+    )));
+}
+
+fn handle_text_event(state: &mut MarkdownState, text: &str) {
+    if state.in_code_block {
+        state.code_buffer.push_str(text);
+        return;
+    }
+    let style = *state.style_stack.last().unwrap_or(&Style::default());
+    let mut first = true;
+    for line in text.split('\n') {
+        if !first {
+            flush_line(&mut state.lines, &mut state.current_spans);
+        }
+        if !line.is_empty() {
+            state
+                .current_spans
+                .push(Span::styled(line.to_string(), style));
+        }
+        first = false;
+    }
+}
+
 fn highlight_code_line(line: &str, lang: &str) -> Vec<Span<'static>> {
     let keywords: &[&str] = match lang {
         "rust" | "rs" => &[
