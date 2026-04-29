@@ -238,153 +238,170 @@ pub fn from_codex_response(body: &serde_json::Value) -> Option<ChatResponse> {
 /// data: {"type":"response.completed","response":{"id":"resp_1","output":[...],...}}
 /// ```
 pub fn from_codex_stream(stream_body: &str) -> Option<ChatResponse> {
-    // Strategy: look for response.completed event which has the full response.
-    // If not found, accumulate deltas.
-    for chunk in stream_body.split("\n\n") {
-        let lines: Vec<&str> = chunk.lines().collect();
-        let event_line = lines.iter().find(|l| l.starts_with("event: "));
-        let data_line = lines.iter().find(|l| l.starts_with("data: "));
-
-        let Some(event) = event_line.and_then(|l| l.strip_prefix("event: ")) else {
-            continue;
-        };
-        let Some(data) = data_line.and_then(|l| l.strip_prefix("data: ")) else {
-            continue;
-        };
-
-        if event.trim() == "response.completed" {
-            // T2.7: bound SSE completed-event payload.
-            let json: serde_json::Value = theo_domain::safe_json::from_str_bounded(
-                data,
-                theo_domain::safe_json::DEFAULT_JSON_LIMIT,
-            )
-            .ok()?;
-            // The completed event has a "response" field with the full response
-            let response = json.get("response").unwrap_or(&json);
-            // Some Codex responses ship an empty `output` array in the completed
-            // event even when the stream emitted message/function_call items via
-            // delta events. In that case we must fall through to the delta
-            // accumulator instead of returning an empty response.
-            let output_empty = response
-                .get("output")
-                .and_then(|o| o.as_array())
-                .map(|a| a.is_empty())
-                .unwrap_or(true);
-            if !output_empty {
-                return from_codex_response(response);
-            }
-            // else: fall through to delta accumulation below
-            break;
-        }
+    if let Some(response) = try_completed_event_response(stream_body) {
+        return Some(response);
     }
+    let acc = accumulate_deltas(stream_body);
+    finalise_streamed_response(acc)
+}
 
-    // Fallback: accumulate text and tool call deltas.
-    // Also extract usage from response.completed even though output was empty.
-    let mut text = String::new();
-    let mut tool_calls: Vec<ToolCall> = Vec::new();
-    let mut current_tc_name: Option<String> = None;
-    let mut current_tc_id: Option<String> = None;
-    let mut current_tc_args = String::new();
-    let mut usage: Option<Usage> = None;
-    let mut response_id: Option<String> = None;
-
+/// Strategy 1: Look for the `response.completed` SSE event with a non-empty
+/// `output` array. Returns the parsed full response when found.
+fn try_completed_event_response(stream_body: &str) -> Option<ChatResponse> {
     for chunk in stream_body.split("\n\n") {
-        let lines: Vec<&str> = chunk.lines().collect();
-        let event_line = lines.iter().find(|l| l.starts_with("event: "));
-        let data_line = lines.iter().find(|l| l.starts_with("data: "));
-
-        let Some(event) = event_line.and_then(|l| l.strip_prefix("event: ")) else {
+        let (event, data) = parse_sse_event_data(chunk)?;
+        if event != "response.completed" {
             continue;
-        };
-        let Some(data) = data_line.and_then(|l| l.strip_prefix("data: ")) else {
-            continue;
-        };
-        let event = event.trim();
-
-        // T2.7: bound each SSE delta chunk.
-        let json: serde_json::Value = match theo_domain::safe_json::from_str_bounded(
+        }
+        let json: serde_json::Value = theo_domain::safe_json::from_str_bounded(
             data,
             theo_domain::safe_json::DEFAULT_JSON_LIMIT,
-        ) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
+        )
+        .ok()?;
+        let response = json.get("response").unwrap_or(&json);
+        // Some Codex responses ship an empty `output` array in the completed
+        // event even when the stream emitted message/function_call items via
+        // delta events. Fall through to the delta accumulator in that case.
+        let output_empty = response
+            .get("output")
+            .and_then(|o| o.as_array())
+            .map(|a| a.is_empty())
+            .unwrap_or(true);
+        if !output_empty {
+            return from_codex_response(response);
+        }
+        break;
+    }
+    None
+}
 
-        match event {
-            "response.output_text.delta" => {
-                if let Some(d) = json.get("delta").and_then(|d| d.as_str()) {
-                    text.push_str(d);
-                }
-            }
-            "response.output_item.added" => {
-                if let Some(name) = current_tc_name.take() {
-                    tool_calls.push(ToolCall::new(
-                        current_tc_id.take().unwrap_or_default(),
-                        name,
-                        std::mem::take(&mut current_tc_args),
-                    ));
-                }
-
-                if let Some(item) = json.get("item")
-                    && item.get("type").and_then(|t| t.as_str()) == Some("function_call") {
-                        current_tc_name =
-                            item.get("name").and_then(|n| n.as_str()).map(String::from);
-                        current_tc_id = item.get("id").and_then(|i| i.as_str()).map(String::from);
-                        current_tc_args.clear();
-                    }
-            }
-            "response.function_call_arguments.delta" => {
-                if let Some(d) = json.get("delta").and_then(|d| d.as_str()) {
-                    current_tc_args.push_str(d);
-                }
-            }
-            "response.completed" => {
-                let resp = json.get("response").unwrap_or(&json);
-                if let Some(u) = resp.get("usage") {
-                    let inp = u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-                    let out = u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-                    usage = Some(Usage {
-                        prompt_tokens: inp,
-                        completion_tokens: out,
-                        total_tokens: inp + out,
-                    });
-                }
-                response_id = resp.get("id").and_then(|i| i.as_str()).map(String::from);
-            }
-            _ => {}
+/// Returns `(event, data)` for a single SSE chunk; both fields stripped of
+/// their `event: ` / `data: ` prefixes.
+fn parse_sse_event_data(chunk: &str) -> Option<(&str, &str)> {
+    let mut event_line: Option<&str> = None;
+    let mut data_line: Option<&str> = None;
+    for l in chunk.lines() {
+        if event_line.is_none()
+            && let Some(rest) = l.strip_prefix("event: ")
+        {
+            event_line = Some(rest);
+        }
+        if data_line.is_none()
+            && let Some(rest) = l.strip_prefix("data: ")
+        {
+            data_line = Some(rest);
         }
     }
+    Some((event_line?.trim_end(), data_line?))
+}
 
-    // Flush last tool call
-    if let Some(name) = current_tc_name.take() {
-        tool_calls.push(ToolCall::new(
-            current_tc_id.take().unwrap_or_default(),
+#[derive(Default)]
+struct StreamedAccumulator {
+    text: String,
+    tool_calls: Vec<ToolCall>,
+    current_tc_name: Option<String>,
+    current_tc_id: Option<String>,
+    current_tc_args: String,
+    usage: Option<Usage>,
+    response_id: Option<String>,
+}
+
+/// Strategy 2: Walk every SSE chunk, accumulating `output_text.delta`,
+/// `output_item.added` (function calls), and `function_call_arguments.delta`.
+fn accumulate_deltas(stream_body: &str) -> StreamedAccumulator {
+    let mut acc = StreamedAccumulator::default();
+    for chunk in stream_body.split("\n\n") {
+        let Some((event, data)) = parse_sse_event_data(chunk) else {
+            continue;
+        };
+        let Ok(json) = theo_domain::safe_json::from_str_bounded::<serde_json::Value>(
+            data,
+            theo_domain::safe_json::DEFAULT_JSON_LIMIT,
+        ) else {
+            continue;
+        };
+        apply_codex_delta(event, &json, &mut acc);
+    }
+    if let Some(name) = acc.current_tc_name.take() {
+        acc.tool_calls.push(ToolCall::new(
+            acc.current_tc_id.take().unwrap_or_default(),
             name,
-            current_tc_args,
+            std::mem::take(&mut acc.current_tc_args),
         ));
     }
+    acc
+}
 
-    if text.is_empty() && tool_calls.is_empty() {
+fn apply_codex_delta(event: &str, json: &serde_json::Value, acc: &mut StreamedAccumulator) {
+    match event {
+        "response.output_text.delta" => {
+            if let Some(d) = json.get("delta").and_then(|d| d.as_str()) {
+                acc.text.push_str(d);
+            }
+        }
+        "response.output_item.added" => {
+            if let Some(name) = acc.current_tc_name.take() {
+                acc.tool_calls.push(ToolCall::new(
+                    acc.current_tc_id.take().unwrap_or_default(),
+                    name,
+                    std::mem::take(&mut acc.current_tc_args),
+                ));
+            }
+            if let Some(item) = json.get("item")
+                && item.get("type").and_then(|t| t.as_str()) == Some("function_call")
+            {
+                acc.current_tc_name = item.get("name").and_then(|n| n.as_str()).map(String::from);
+                acc.current_tc_id = item.get("id").and_then(|i| i.as_str()).map(String::from);
+                acc.current_tc_args.clear();
+            }
+        }
+        "response.function_call_arguments.delta" => {
+            if let Some(d) = json.get("delta").and_then(|d| d.as_str()) {
+                acc.current_tc_args.push_str(d);
+            }
+        }
+        "response.completed" => {
+            let resp = json.get("response").unwrap_or(json);
+            if let Some(u) = resp.get("usage") {
+                let inp = u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                let out = u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+                acc.usage = Some(Usage {
+                    prompt_tokens: inp,
+                    completion_tokens: out,
+                    total_tokens: inp + out,
+                });
+            }
+            acc.response_id = resp.get("id").and_then(|i| i.as_str()).map(String::from);
+        }
+        _ => {}
+    }
+}
+
+fn finalise_streamed_response(acc: StreamedAccumulator) -> Option<ChatResponse> {
+    if acc.text.is_empty() && acc.tool_calls.is_empty() {
         return None;
     }
-
-    let has_tool_calls = !tool_calls.is_empty();
+    let has_tool_calls = !acc.tool_calls.is_empty();
     Some(ChatResponse {
-        id: response_id,
+        id: acc.response_id,
         choices: vec![Choice {
             index: 0,
             message: ChoiceMessage {
                 role: Role::Assistant,
-                content: if text.is_empty() { None } else { Some(text) },
-                tool_calls: if tool_calls.is_empty() {
+                content: if acc.text.is_empty() {
                     None
                 } else {
-                    Some(tool_calls)
+                    Some(acc.text)
+                },
+                tool_calls: if acc.tool_calls.is_empty() {
+                    None
+                } else {
+                    Some(acc.tool_calls)
                 },
             },
             finish_reason: Some(if has_tool_calls { "tool_calls" } else { "stop" }.to_string()),
         }],
-        usage,
+        usage: acc.usage,
     })
 }
 
