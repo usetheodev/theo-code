@@ -135,37 +135,6 @@ fn run_writer_loop(
     let mut since_flush: usize = 0;
     let mut retry_queue: VecDeque<Vec<u8>> = VecDeque::with_capacity(RETRY_QUEUE_CAP);
 
-    // Helper: attempt to write a line; if it fails return the bytes back.
-    fn try_write_line(
-        writer: &mut BufWriter<File>,
-        write_errors: &Arc<AtomicU64>,
-        bytes: &[u8],
-    ) -> Result<(), std::io::Error> {
-        writer.write_all(bytes).and_then(|_| writer.write_all(b"\n")).inspect_err(|_e| {
-            write_errors.fetch_add(1, Ordering::Relaxed);
-        })
-    }
-
-    let drain_retry_queue = |writer: &mut BufWriter<File>,
-                             retry_queue: &mut VecDeque<Vec<u8>>,
-                             write_errors: &Arc<AtomicU64>|
-     -> (u64, Option<String>) {
-        let mut drained = 0u64;
-        while let Some(front) = retry_queue.front() {
-            match try_write_line(writer, write_errors, front) {
-                Ok(_) => {
-                    retry_queue.pop_front();
-                    drained += 1;
-                }
-                Err(e) => {
-                    return (drained, Some(e.to_string()));
-                }
-            }
-        }
-        (drained, None)
-    };
-
-    // Periodic flush loop: use `recv_timeout` so we can flush on idle too.
     let flush_interval = std::time::Duration::from_millis(FORCE_FLUSH_MS);
     loop {
         let bytes = match receiver.recv_timeout(flush_interval) {
@@ -179,86 +148,36 @@ fn run_writer_loop(
             }
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
         };
-        // If the retry queue has pending bytes, try to drain them first.
-        if !retry_queue.is_empty() {
-            let (drained, err) = drain_retry_queue(&mut writer, &mut retry_queue, &write_errors);
-            if err.is_none() && drained > 0 {
-                // Emit recovery sentinel.
-                let env = TrajectoryEnvelope::writer_recovered(&run_id, seq, now_ms(), drained, "recovered");
-                if let Ok(line) = serde_json::to_vec(&env) {
-                    let _ = try_write_line(&mut writer, &write_errors, &line);
-                    seq += 1;
-                }
-            }
-        }
-
-        // Emit any drop sentinel before the next event.
-        let dropped = dropped_events.swap(0, Ordering::Relaxed);
-        if dropped > 0 {
-            let env = TrajectoryEnvelope::drop_sentinel(&run_id, seq, now_ms(), dropped);
-            if let Ok(line) = serde_json::to_vec(&env) {
-                match try_write_line(&mut writer, &write_errors, &line) {
-                    Ok(_) => {
-                        seq += 1;
-                    }
-                    Err(_) => {
-                        if retry_queue.len() < RETRY_QUEUE_CAP {
-                            retry_queue.push_back(line);
-                            seq += 1;
-                        } else {
-                            dropped_events.fetch_add(dropped, Ordering::Relaxed);
-                        }
-                    }
-                }
-            }
-        }
-
-        // Parse incoming DomainEvent bytes and wrap in envelope.
-        let env = match serde_json::from_slice::<DomainEvent>(&bytes) {
-            Ok(ev) => TrajectoryEnvelope::from_event(&ev, &run_id, seq),
-            Err(_) => {
-                // Store as raw — unknown payload wrapped into an event envelope.
-                TrajectoryEnvelope {
-                    v: ENVELOPE_SCHEMA_VERSION,
-                    seq,
-                    ts: now_ms(),
-                    run_id: run_id.clone(),
-                    kind: EnvelopeKind::Event,
-                    event_type: None,
-                    event_kind: None,
-                    entity_id: None,
-                    payload: serde_json::Value::Null,
-                    dropped_since_last: 0,
-                }
-            }
-        };
-        let line = match serde_json::to_vec(&env) {
-            Ok(l) => l,
-            Err(_) => continue,
-        };
-
-        match try_write_line(&mut writer, &write_errors, &line) {
-            Ok(_) => {
-                seq += 1;
-                since_flush += 1;
-                if since_flush >= FLUSH_EVERY {
-                    let _ = writer.flush();
-                    since_flush = 0;
-                }
-            }
-            Err(_) => {
-                if retry_queue.len() < RETRY_QUEUE_CAP {
-                    retry_queue.push_back(line);
-                    seq += 1;
-                } else {
-                    dropped_events.fetch_add(1, Ordering::Relaxed);
-                }
-            }
-        }
+        try_drain_retry_queue_with_recovery(
+            &mut writer,
+            &mut retry_queue,
+            &write_errors,
+            &run_id,
+            &mut seq,
+        );
+        try_emit_drop_sentinel(
+            &mut writer,
+            &mut retry_queue,
+            &write_errors,
+            &dropped_events,
+            &run_id,
+            &mut seq,
+        );
+        let line = build_envelope_line(&bytes, &run_id, seq);
+        let Some(line) = line else { continue };
+        write_or_queue(
+            &mut writer,
+            &mut retry_queue,
+            &write_errors,
+            &dropped_events,
+            line,
+            &mut seq,
+            &mut since_flush,
+        );
     }
 
     // Shutdown — attempt final drain.
-    if !retry_queue.is_empty() {
+        if !retry_queue.is_empty() {
         let (drained, _err) = drain_retry_queue(&mut writer, &mut retry_queue, &write_errors);
         if drained > 0 {
             let env = TrajectoryEnvelope::writer_recovered(&run_id, seq, now_ms(), drained, "recovered");
@@ -271,6 +190,136 @@ fn run_writer_loop(
     let _ = writer.flush();
     if let Ok(f) = writer.into_inner() {
         let _ = f.sync_data();
+    }
+}
+
+fn try_write_line(
+    writer: &mut BufWriter<File>,
+    write_errors: &Arc<AtomicU64>,
+    bytes: &[u8],
+) -> Result<(), std::io::Error> {
+    writer
+        .write_all(bytes)
+        .and_then(|_| writer.write_all(b"\n"))
+        .inspect_err(|_e| {
+            write_errors.fetch_add(1, Ordering::Relaxed);
+        })
+}
+
+fn drain_retry_queue(
+    writer: &mut BufWriter<File>,
+    retry_queue: &mut VecDeque<Vec<u8>>,
+    write_errors: &Arc<AtomicU64>,
+) -> (u64, Option<String>) {
+    let mut drained = 0u64;
+    while let Some(front) = retry_queue.front() {
+        match try_write_line(writer, write_errors, front) {
+            Ok(_) => {
+                retry_queue.pop_front();
+                drained += 1;
+            }
+            Err(e) => return (drained, Some(e.to_string())),
+        }
+    }
+    (drained, None)
+}
+
+fn try_drain_retry_queue_with_recovery(
+    writer: &mut BufWriter<File>,
+    retry_queue: &mut VecDeque<Vec<u8>>,
+    write_errors: &Arc<AtomicU64>,
+    run_id: &str,
+    seq: &mut u64,
+) {
+    if retry_queue.is_empty() {
+        return;
+    }
+    let (drained, err) = drain_retry_queue(writer, retry_queue, write_errors);
+    if err.is_none() && drained > 0 {
+        let env = TrajectoryEnvelope::writer_recovered(run_id, *seq, now_ms(), drained, "recovered");
+        if let Ok(line) = serde_json::to_vec(&env) {
+            let _ = try_write_line(writer, write_errors, &line);
+            *seq += 1;
+        }
+    }
+}
+
+fn try_emit_drop_sentinel(
+    writer: &mut BufWriter<File>,
+    retry_queue: &mut VecDeque<Vec<u8>>,
+    write_errors: &Arc<AtomicU64>,
+    dropped_events: &Arc<AtomicU64>,
+    run_id: &str,
+    seq: &mut u64,
+) {
+    let dropped = dropped_events.swap(0, Ordering::Relaxed);
+    if dropped == 0 {
+        return;
+    }
+    let env = TrajectoryEnvelope::drop_sentinel(run_id, *seq, now_ms(), dropped);
+    let Ok(line) = serde_json::to_vec(&env) else {
+        return;
+    };
+    match try_write_line(writer, write_errors, &line) {
+        Ok(_) => {
+            *seq += 1;
+        }
+        Err(_) => {
+            if retry_queue.len() < RETRY_QUEUE_CAP {
+                retry_queue.push_back(line);
+                *seq += 1;
+            } else {
+                dropped_events.fetch_add(dropped, Ordering::Relaxed);
+            }
+        }
+    }
+}
+
+fn build_envelope_line(bytes: &[u8], run_id: &str, seq: u64) -> Option<Vec<u8>> {
+    let env = match serde_json::from_slice::<DomainEvent>(bytes) {
+        Ok(ev) => TrajectoryEnvelope::from_event(&ev, run_id, seq),
+        Err(_) => TrajectoryEnvelope {
+            v: ENVELOPE_SCHEMA_VERSION,
+            seq,
+            ts: now_ms(),
+            run_id: run_id.to_string(),
+            kind: EnvelopeKind::Event,
+            event_type: None,
+            event_kind: None,
+            entity_id: None,
+            payload: serde_json::Value::Null,
+            dropped_since_last: 0,
+        },
+    };
+    serde_json::to_vec(&env).ok()
+}
+
+fn write_or_queue(
+    writer: &mut BufWriter<File>,
+    retry_queue: &mut VecDeque<Vec<u8>>,
+    write_errors: &Arc<AtomicU64>,
+    dropped_events: &Arc<AtomicU64>,
+    line: Vec<u8>,
+    seq: &mut u64,
+    since_flush: &mut usize,
+) {
+    match try_write_line(writer, write_errors, &line) {
+        Ok(_) => {
+            *seq += 1;
+            *since_flush += 1;
+            if *since_flush >= FLUSH_EVERY {
+                let _ = writer.flush();
+                *since_flush = 0;
+            }
+        }
+        Err(_) => {
+            if retry_queue.len() < RETRY_QUEUE_CAP {
+                retry_queue.push_back(line);
+                *seq += 1;
+            } else {
+                dropped_events.fetch_add(1, Ordering::Relaxed);
+            }
+        }
     }
 }
 
