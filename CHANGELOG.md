@@ -3,6 +3,15 @@
 ## [Unreleased]
 
 ### Changed
+- **code-hygiene-5x5 T4.2 partial — theo-engine-retrieval 24 → 22** (`docs/plans/code-hygiene-5x5-plan.md`).
+  `search/file_bm25::FileBm25::search_inner` (110 LOC) decomposed into:
+  - `collect_file_nodes` (file-iterator)
+  - `build_inverted_index` (per-file BM25F-boosted token weights)
+  - `boost_filename` / `boost_path_segments` / `boost_children` /
+    `boost_neighbor_symbols` (per-source-of-evidence sub-helpers)
+  - `score_documents` (BM25 scoring with k1=1.2, b=0.75)
+  Side benefit: each helper is independently testable.
+  Complexity total: 52 → 50.
 - **code-hygiene-5x5 T4.3 partial — theo (CLI) 11 → 9** (`docs/plans/code-hygiene-5x5-plan.md`).
   2 of 11 too_many_lines functions decomposed:
   - `cmd::context::cmd_context` (116 LOC) → `validate_args_or_exit`,

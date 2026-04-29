@@ -75,128 +75,16 @@ impl FileBm25 {
             .into_iter()
             .filter(|t| !is_stop_word(t))
             .collect();
-
         if query_tokens.is_empty() {
             return HashMap::new();
         }
-
-        let file_nodes: Vec<(&str, &str)> = graph
-            .node_ids()
-            .filter_map(|id| {
-                let n = graph.get_node(id)?;
-                if n.node_type == NodeType::File {
-                    Some((id, n.file_path.as_deref().unwrap_or(&n.name)))
-                } else {
-                    None
-                }
-            })
-            .collect();
-
+        let file_nodes: Vec<(&str, &str)> = collect_file_nodes(graph);
         let doc_count = file_nodes.len();
         if doc_count == 0 {
             return HashMap::new();
         }
-
-        let mut postings: HashMap<String, Vec<(usize, f64)>> = HashMap::new();
-        let mut doc_lengths: Vec<f64> = Vec::with_capacity(doc_count);
-
-        for (idx, (file_id, _)) in file_nodes.iter().enumerate() {
-            let Some(file_node) = graph.get_node(file_id) else {
-                continue;
-            };
-            let mut weighted_tf: HashMap<String, f64> = HashMap::new();
-
-            // Filename: 5x boost (BM25F — Zoekt pattern)
-            for token in tokenise(&file_node.name) {
-                if !is_stop_word(&token) {
-                    *weighted_tf.entry(token).or_default() += 5.0;
-                }
-            }
-
-            // Path segments: 3x boost. Directory names like "routing", "extract", "middleware"
-            // disambiguate files with generic names (mod.rs, lib.rs).
-            // Increased from 2x to 3x after multi-repo benchmark showed axum mod.rs confusion.
-            if let Some(fp) = &file_node.file_path {
-                for segment in fp.split('/') {
-                    for token in tokenise(segment) {
-                        if !is_stop_word(&token) {
-                            *weighted_tf.entry(token).or_default() += 3.0;
-                        }
-                    }
-                }
-            }
-
-            // Children via Contains edges
-            for child_id in graph.contains_children(file_id) {
-                if let Some(child) = graph.get_node(child_id) {
-                    // Symbol name: 3x boost
-                    for token in tokenise(&child.name) {
-                        if !is_stop_word(&token) {
-                            *weighted_tf.entry(token).or_default() += 3.0;
-                        }
-                    }
-                    // Signature: 1x
-                    if let Some(sig) = &child.signature {
-                        for token in tokenise(sig) {
-                            if !is_stop_word(&token) {
-                                *weighted_tf.entry(token).or_default() += 1.0;
-                            }
-                        }
-                    }
-                    // Doc first line: 1x
-                    if let Some(doc) = &child.doc
-                        && let Some(fl) = doc.lines().next() {
-                            for token in tokenise(fl) {
-                                if !is_stop_word(&token) {
-                                    *weighted_tf.entry(token).or_default() += 1.0;
-                                }
-                            }
-                        }
-                    // 2-hop import enrichment: symbols this child CALLS/IMPORTS.
-                    // Low boost (0.15x) to minimize IDF dilution in BM25.
-                    // Higher values tested (0.3x, 0.5x) hurt BM25 baseline.
-                    for target_id in graph.neighbors(child_id) {
-                        if let Some(target) = graph.get_node(target_id)
-                            && target.node_type == NodeType::Symbol {
-                                for token in tokenise(&target.name) {
-                                    if !is_stop_word(&token) {
-                                        *weighted_tf.entry(token).or_default() += 0.15;
-                                    }
-                                }
-                            }
-                    }
-                }
-            }
-
-            let len: f64 = weighted_tf.values().sum();
-            doc_lengths.push(len);
-            for (term, freq) in weighted_tf {
-                postings.entry(term).or_default().push((idx, freq));
-            }
-        }
-
-        let avg_dl = if doc_count > 0 {
-            doc_lengths.iter().sum::<f64>() / doc_count as f64
-        } else {
-            1.0
-        };
-        let (k1, b) = (1.2f64, 0.75f64);
-        let n = doc_count as f64;
-
-        let mut scores = vec![0.0f64; doc_count];
-        for term in &query_tokens {
-            let Some(posts) = postings.get(term.as_str()) else {
-                continue;
-            };
-            let n_t = posts.len() as f64;
-            let idf = ((n - n_t + 0.5) / (n_t + 0.5) + 1.0).ln();
-            for &(doc_idx, tf) in posts {
-                let dl = doc_lengths[doc_idx];
-                let norm = tf * (k1 + 1.0) / (tf + k1 * (1.0 - b + b * dl / avg_dl));
-                scores[doc_idx] += idf * norm;
-            }
-        }
-
+        let (postings, doc_lengths) = build_inverted_index(graph, &file_nodes);
+        let scores = score_documents(&query_tokens, &postings, &doc_lengths);
         let mut result = HashMap::new();
         for (idx, (_, file_path)) in file_nodes.iter().enumerate() {
             if scores[idx] > 0.0 {
@@ -230,6 +118,148 @@ impl FileBm25 {
             })
             .collect()
     }
+}
+
+fn collect_file_nodes(graph: &CodeGraph) -> Vec<(&str, &str)> {
+    graph
+        .node_ids()
+        .filter_map(|id| {
+            let n = graph.get_node(id)?;
+            if n.node_type == NodeType::File {
+                Some((id, n.file_path.as_deref().unwrap_or(&n.name)))
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+/// Build a per-file inverted index with BM25F-style boosts:
+/// filename 5x, path segments 3x, child-symbol names 3x, signatures
+/// + doc-first-line 1x, neighbor-symbol enrichment 0.15x.
+fn build_inverted_index(
+    graph: &CodeGraph,
+    file_nodes: &[(&str, &str)],
+) -> (HashMap<String, Vec<(usize, f64)>>, Vec<f64>) {
+    let doc_count = file_nodes.len();
+    let mut postings: HashMap<String, Vec<(usize, f64)>> = HashMap::new();
+    let mut doc_lengths: Vec<f64> = Vec::with_capacity(doc_count);
+    for (idx, (file_id, _)) in file_nodes.iter().enumerate() {
+        let Some(file_node) = graph.get_node(file_id) else {
+            doc_lengths.push(0.0);
+            continue;
+        };
+        let mut weighted_tf: HashMap<String, f64> = HashMap::new();
+        boost_filename(file_node, &mut weighted_tf);
+        boost_path_segments(file_node, &mut weighted_tf);
+        boost_children(graph, file_id, &mut weighted_tf);
+        let len: f64 = weighted_tf.values().sum();
+        doc_lengths.push(len);
+        for (term, freq) in weighted_tf {
+            postings.entry(term).or_default().push((idx, freq));
+        }
+    }
+    (postings, doc_lengths)
+}
+
+fn boost_filename(file_node: &theo_engine_graph::model::Node, weighted_tf: &mut HashMap<String, f64>) {
+    for token in tokenise(&file_node.name) {
+        if !is_stop_word(&token) {
+            *weighted_tf.entry(token).or_default() += 5.0;
+        }
+    }
+}
+
+fn boost_path_segments(file_node: &theo_engine_graph::model::Node, weighted_tf: &mut HashMap<String, f64>) {
+    let Some(fp) = &file_node.file_path else {
+        return;
+    };
+    for segment in fp.split('/') {
+        for token in tokenise(segment) {
+            if !is_stop_word(&token) {
+                *weighted_tf.entry(token).or_default() += 3.0;
+            }
+        }
+    }
+}
+
+fn boost_children(graph: &CodeGraph, file_id: &str, weighted_tf: &mut HashMap<String, f64>) {
+    for child_id in graph.contains_children(file_id) {
+        let Some(child) = graph.get_node(child_id) else {
+            continue;
+        };
+        for token in tokenise(&child.name) {
+            if !is_stop_word(&token) {
+                *weighted_tf.entry(token).or_default() += 3.0;
+            }
+        }
+        if let Some(sig) = &child.signature {
+            for token in tokenise(sig) {
+                if !is_stop_word(&token) {
+                    *weighted_tf.entry(token).or_default() += 1.0;
+                }
+            }
+        }
+        if let Some(doc) = &child.doc
+            && let Some(fl) = doc.lines().next()
+        {
+            for token in tokenise(fl) {
+                if !is_stop_word(&token) {
+                    *weighted_tf.entry(token).or_default() += 1.0;
+                }
+            }
+        }
+        boost_neighbor_symbols(graph, child_id, weighted_tf);
+    }
+}
+
+/// 2-hop import enrichment: symbols this child CALLS/IMPORTS at low
+/// boost (0.15x) — higher values regress BM25 baseline.
+fn boost_neighbor_symbols(
+    graph: &CodeGraph,
+    child_id: &str,
+    weighted_tf: &mut HashMap<String, f64>,
+) {
+    for target_id in graph.neighbors(child_id) {
+        if let Some(target) = graph.get_node(target_id)
+            && target.node_type == NodeType::Symbol
+        {
+            for token in tokenise(&target.name) {
+                if !is_stop_word(&token) {
+                    *weighted_tf.entry(token).or_default() += 0.15;
+                }
+            }
+        }
+    }
+}
+
+fn score_documents(
+    query_tokens: &[String],
+    postings: &HashMap<String, Vec<(usize, f64)>>,
+    doc_lengths: &[f64],
+) -> Vec<f64> {
+    let doc_count = doc_lengths.len();
+    let avg_dl = if doc_count > 0 {
+        doc_lengths.iter().sum::<f64>() / doc_count as f64
+    } else {
+        1.0
+    };
+    let (k1, b) = (1.2f64, 0.75f64);
+    let n = doc_count as f64;
+    let mut scores = vec![0.0f64; doc_count];
+    for term in query_tokens {
+        let Some(posts) = postings.get(term.as_str()) else {
+            continue;
+        };
+        let n_t = posts.len() as f64;
+        let idf = ((n - n_t + 0.5) / (n_t + 0.5) + 1.0).ln();
+        for &(doc_idx, tf) in posts {
+            let dl = doc_lengths[doc_idx];
+            let norm = tf * (k1 + 1.0) / (tf + k1 * (1.0 - b + b * dl / avg_dl));
+            scores[doc_idx] += idf * norm;
+        }
+    }
+    scores
 }
 
 // ---------------------------------------------------------------------------
