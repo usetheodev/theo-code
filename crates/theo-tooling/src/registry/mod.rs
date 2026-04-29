@@ -168,6 +168,19 @@ pub fn register_plugin_tools(
     }
 }
 
+// Sibling tests split per-area (T3.7 of code-hygiene-5x5).
 #[cfg(test)]
-#[path = "mod_tests.rs"]
-mod tests;
+#[path = "registry_test_helpers.rs"]
+mod registry_test_helpers;
+#[cfg(test)]
+#[path = "registry_registration_tests.rs"]
+mod registry_registration_tests;
+#[cfg(test)]
+#[path = "registry_discovery_tests.rs"]
+mod registry_discovery_tests;
+#[cfg(test)]
+#[path = "registry_contract_tests.rs"]
+mod registry_contract_tests;
+#[cfg(test)]
+#[path = "registry_project_tests.rs"]
+mod registry_project_tests;

@@ -117,6 +117,25 @@ impl Tool for LspTool {
     }
 }
 
+// Sibling tests split per-tool (T3.7 of code-hygiene-5x5).
 #[cfg(test)]
-#[path = "tool_tests.rs"]
-mod tests;
+#[path = "lsp_test_helpers.rs"]
+mod lsp_test_helpers;
+#[cfg(test)]
+#[path = "lsp_status_tests.rs"]
+mod lsp_status_tests;
+#[cfg(test)]
+#[path = "lsp_definition_tests.rs"]
+mod lsp_definition_tests;
+#[cfg(test)]
+#[path = "lsp_references_tests.rs"]
+mod lsp_references_tests;
+#[cfg(test)]
+#[path = "lsp_hover_tests.rs"]
+mod lsp_hover_tests;
+#[cfg(test)]
+#[path = "lsp_rename_tests.rs"]
+mod lsp_rename_tests;
+#[cfg(test)]
+#[path = "lsp_common_tests.rs"]
+mod lsp_common_tests;

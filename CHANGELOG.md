@@ -3,6 +3,13 @@
 ## [Unreleased]
 
 ### Changed
+- **code-hygiene-5x5 T3.7 — 4 remaining sibling-test files split (size-allowlist drained to 0)** (`docs/plans/code-hygiene-5x5-plan.md`).
+  Split the last 4 sibling test files >800 LOC; size-allowlist now has **0 active entries**:
+  - `lsp/tool_tests.rs` (822 LOC, 131 tests) → `lsp_{status,definition,references,hover,rename,common}_tests.rs` + `lsp_test_helpers.rs` (≤ 260 LOC each)
+  - `registry/mod_tests.rs` (835 LOC, 27 tests) → `registry_{registration,discovery,contract,project}_tests.rs` + `registry_test_helpers.rs` (DeferredStub) (≤ 363 LOC each)
+  - `symbol_table_tests.rs` (833 LOC, 41 tests) → `symbol_table_{resolve,import_index,name_extraction}_tests.rs` + `symbol_table_test_helpers.rs` (≤ 480 LOC each)
+  - `subagent/resume_tests.rs` (835 LOC, 17 tests) → `resume_{build_context,reconstruct_history,resume}_tests.rs` + `resume_test_helpers.rs` (≤ 583 LOC each)
+  All sibling files ≤ 800 LOC. **Phase 3 fully complete.** size-allowlist now empty.
 - **code-hygiene-5x5 T3.6 — `theo-tooling plan/mod_tests.rs` (961 LOC, 37 tests) split per-tool** (`docs/plans/code-hygiene-5x5-plan.md`).
   `crates/theo-tooling/src/plan/mod_tests.rs` decomposed into 9 per-tool sibling files
   (`plan_{registry,advance_phase,log_entry,create,next_task,summary,update_task,replan,failure_status}_tests.rs`)

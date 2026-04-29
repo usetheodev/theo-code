@@ -44,7 +44,9 @@
 # Split per-language: symbols_{ts,python,java,go,csharp,rust,php,ruby,common}_lang_tests.rs
 # (36-241 LOC each) + symbols_test_helpers.rs (13 LOC). All ≤ 800 LOC.
 # crates/theo-engine-parser/src/symbol_table.rs — T2.4 split 2026-04-28: production half now 525 LOC (under 800), tests extracted.
-crates/theo-engine-parser/src/symbol_table_tests.rs|850|2026-10-31|Sibling test body of symbol_table.rs (T2.4); 826-line test body of high-fidelity name resolution
+# crates/theo-engine-parser/src/symbol_table_tests.rs — RESOLVED 2026-04-29 (T3.7 of code-hygiene-5x5).
+# Split per-area: symbol_table_{resolve,import_index,name_extraction}_tests.rs
+# + symbol_table_test_helpers.rs. All ≤ 480 LOC.
 # crates/theo-domain/src/episode.rs — T5.1 split 2026-04-28: production half now 726 LOC.
 # apps/theo-cli/src/tui/app.rs — REMOVED 2026-04-28 (file moved to module-dir form during god-files refactor)
 
@@ -123,7 +125,9 @@ crates/theo-engine-parser/src/symbol_table_tests.rs|850|2026-10-31|Sibling test 
 # references/hover/rename.rs); shared helpers (PositionArgs, position_schema,
 # extension_or_error, map_session_error, open_and_request, lang_id_for_extension,
 # LocationEntry, collect_locations, extract_location) moved to lsp/tool_common.rs.
-crates/theo-tooling/src/lsp/tool_tests.rs|850|2026-10-31|T3.1 — sibling test body covering 131 lsp_* tests. Per-tool test split deferred.
+# crates/theo-tooling/src/lsp/tool_tests.rs — RESOLVED 2026-04-28 (T3.7 of code-hygiene-5x5).
+# Split per-tool: lsp_{status,definition,references,hover,rename,common}_tests.rs
+# + lsp_test_helpers.rs. All ≤ 260 LOC.
 # crates/theo-tooling/src/browser/tool.rs — REMOVED 2026-04-28 (T1.4 of god-files-2026-07-23-plan.md).
 # The 8 browser_* tools were decomposed into per-tool files (status/open/click/
 # screenshot/type_text/eval/wait_for_selector/close.rs); shared helpers moved
@@ -134,7 +138,9 @@ crates/theo-tooling/src/lsp/tool_tests.rs|850|2026-10-31|T3.1 — sibling test b
 #   - registry/builders.rs (398 LOC) — create_default_registry +
 #     create_default_registry_with_project + browser sidecar helpers
 #   - registry/mod_tests.rs (832 LOC) — 25 contract tests, sibling test body
-crates/theo-tooling/src/registry/mod_tests.rs|850|2026-10-31|T1.5 — sibling test body covering 25 contract tests on the registry public surface. Per-test split deferred.
+# crates/theo-tooling/src/registry/mod_tests.rs — RESOLVED 2026-04-29 (T3.7 of code-hygiene-5x5).
+# Split per-area: registry_{registration,discovery,contract,project}_tests.rs
+# + registry_test_helpers.rs (DeferredStub). All ≤ 363 LOC.
 # crates/theo-agent-runtime/src/subagent/mod.rs — T3.3 split 2026-04-28: production half now 481 LOC.
 # crates/theo-agent-runtime/src/subagent/mod_tests.rs — RESOLVED 2026-04-28 (T3.5 of code-hygiene-5x5).
 # Split per-feature: subagent_spawn_tests.rs (537), subagent_builders_tests.rs (121),
@@ -142,7 +148,10 @@ crates/theo-tooling/src/registry/mod_tests.rs|850|2026-10-31|T1.5 — sibling te
 # subagent_misc_tests.rs (~60), subagent_worktree_tests.rs (161)
 # + subagent_test_helpers.rs (44 LOC). All ≤ 800 LOC.
 # crates/theo-agent-runtime/src/subagent/resume.rs — T3.3 split 2026-04-28: production half now 319 LOC.
-crates/theo-agent-runtime/src/subagent/resume_tests.rs|850|2026-10-31|Sibling test body of subagent/resume.rs (T3.3)
+# crates/theo-agent-runtime/src/subagent/resume_tests.rs — RESOLVED 2026-04-29 (T3.7 of code-hygiene-5x5).
+# Split per-area: resume_{build_context,reconstruct_history,resume}_tests.rs
+# + resume_test_helpers.rs. Resume tests file is 583 LOC (large because of nested
+# `mod worktree { … }` covering recreate/reuse strategies); under the 800 ceiling.
 # crates/theo-agent-runtime/src/compaction_stages.rs — T3.4 split 2026-04-28: production half now 418 LOC.
 # crates/theo-agent-runtime/src/compaction_stages_tests.rs — RESOLVED 2026-04-28 (now under 800 LOC default ceiling)
 # crates/theo-agent-runtime/src/lifecycle_hooks.rs — T3.5 split 2026-04-28: production half now 362 LOC.

@@ -520,6 +520,16 @@ fn normalize_path(path: &Path) -> PathBuf {
     components.iter().collect()
 }
 
+// Sibling tests split per-area (T3.7 of code-hygiene-5x5).
 #[cfg(test)]
-#[path = "symbol_table_tests.rs"]
-mod tests;
+#[path = "symbol_table_test_helpers.rs"]
+mod symbol_table_test_helpers;
+#[cfg(test)]
+#[path = "symbol_table_resolve_tests.rs"]
+mod symbol_table_resolve_tests;
+#[cfg(test)]
+#[path = "symbol_table_import_index_tests.rs"]
+mod symbol_table_import_index_tests;
+#[cfg(test)]
+#[path = "symbol_table_name_extraction_tests.rs"]
+mod symbol_table_name_extraction_tests;

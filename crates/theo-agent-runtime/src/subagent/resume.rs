@@ -314,6 +314,16 @@ pub fn reconstruct_executed_tool_calls(
 }
 
 
+// Sibling tests split per-area (T3.7 of code-hygiene-5x5).
 #[cfg(test)]
-#[path = "resume_tests.rs"]
-mod tests;
+#[path = "resume_test_helpers.rs"]
+mod resume_test_helpers;
+#[cfg(test)]
+#[path = "resume_build_context_tests.rs"]
+mod resume_build_context_tests;
+#[cfg(test)]
+#[path = "resume_reconstruct_history_tests.rs"]
+mod resume_reconstruct_history_tests;
+#[cfg(test)]
+#[path = "resume_resume_tests.rs"]
+mod resume_resume_tests;
