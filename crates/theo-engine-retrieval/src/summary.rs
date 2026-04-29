@@ -76,46 +76,87 @@ fn generate_one(
     graph: &CodeGraph,
     git_info: &HashMap<String, FileGitInfo>,
 ) -> CommunitySummary {
-    let mut lines: Vec<String> = Vec::new();
+    let CommunityNodeStats {
+        files,
+        mut symbols,
+        test_count,
+        total_lines,
+    } = collect_community_node_stats(community, graph);
+    mark_tested_symbols(community, graph, &mut symbols);
+    let tested_count = symbols.iter().filter(|s| s.has_test).count();
+    let sym_count = symbols.len();
+    let text = render_summary_text(
+        community,
+        graph,
+        git_info,
+        &files,
+        &symbols,
+        sym_count,
+        tested_count,
+        test_count,
+        total_lines,
+    );
+    let token_count = estimate_tokens(&text);
+    let structured = build_structured_data(community, graph, &files, &symbols);
+    CommunitySummary {
+        community_id: community.id.clone(),
+        name: community.name.clone(),
+        text,
+        token_count,
+        structured,
+    }
+}
 
-    // Collect node info
+struct CommunityNodeStats {
+    files: HashSet<String>,
+    symbols: Vec<SymbolInfo>,
+    test_count: usize,
+    total_lines: usize,
+}
+
+/// Walk every node in the community, collecting file paths, symbol info,
+/// test counts, and aggregate line counts.
+fn collect_community_node_stats(community: &Community, graph: &CodeGraph) -> CommunityNodeStats {
     let mut files: HashSet<String> = HashSet::new();
     let mut symbols: Vec<SymbolInfo> = Vec::new();
     let mut test_count = 0;
-    let mut total_lines = 0;
-
+    let mut total_lines = 0usize;
     for node_id in &community.node_ids {
-        if let Some(node) = graph.get_node(node_id) {
-            if let Some(fp) = &node.file_path {
-                files.insert(fp.clone());
+        let Some(node) = graph.get_node(node_id) else {
+            continue;
+        };
+        if let Some(fp) = &node.file_path {
+            files.insert(fp.clone());
+        }
+        match node.node_type {
+            NodeType::Symbol => {
+                let line_span = match (node.line_start, node.line_end) {
+                    (Some(s), Some(e)) => e.saturating_sub(s) + 1,
+                    _ => 0,
+                };
+                total_lines += line_span;
+                symbols.push(SymbolInfo {
+                    id: node_id.clone(),
+                    name: node.name.clone(),
+                    signature: node.signature.clone(),
+                    doc: node.doc.clone(),
+                    file: node.file_path.clone().unwrap_or_default(),
+                    has_test: false,
+                });
             }
-
-            match node.node_type {
-                NodeType::Symbol => {
-                    let line_span = match (node.line_start, node.line_end) {
-                        (Some(s), Some(e)) => e.saturating_sub(s) + 1,
-                        _ => 0,
-                    };
-                    total_lines += line_span;
-
-                    symbols.push(SymbolInfo {
-                        id: node_id.clone(),
-                        name: node.name.clone(),
-                        signature: node.signature.clone(),
-                        doc: node.doc.clone(),
-                        file: node.file_path.clone().unwrap_or_default(),
-                        has_test: false, // filled below
-                    });
-                }
-                NodeType::Test => {
-                    test_count += 1;
-                }
-                _ => {}
-            }
+            NodeType::Test => test_count += 1,
+            _ => {}
         }
     }
+    CommunityNodeStats {
+        files,
+        symbols,
+        test_count,
+        total_lines,
+    }
+}
 
-    // Determine which symbols are tested
+fn mark_tested_symbols(community: &Community, graph: &CodeGraph, symbols: &mut [SymbolInfo]) {
     let tested_symbols: HashSet<String> = graph
         .all_edges()
         .iter()
@@ -123,15 +164,24 @@ fn generate_one(
         .filter(|e| community.node_ids.contains(&e.source))
         .map(|e| e.target.clone())
         .collect();
-
-    for sym in &mut symbols {
+    for sym in symbols {
         sym.has_test = tested_symbols.contains(&sym.id);
     }
+}
 
-    let tested_count = symbols.iter().filter(|s| s.has_test).count();
-    let sym_count = symbols.len();
-
-    // --- WHERE ---
+#[allow(clippy::too_many_arguments)]
+fn render_summary_text(
+    community: &Community,
+    graph: &CodeGraph,
+    git_info: &HashMap<String, FileGitInfo>,
+    files: &HashSet<String>,
+    symbols: &[SymbolInfo],
+    sym_count: usize,
+    tested_count: usize,
+    test_count: usize,
+    total_lines: usize,
+) -> String {
+    let mut lines: Vec<String> = Vec::new();
     let file_list: Vec<&str> = files.iter().map(|s| s.as_str()).collect();
     let file_display = if file_list.len() <= 3 {
         file_list.join(", ")
@@ -143,20 +193,15 @@ fn generate_one(
             file_list.len() - 2
         )
     };
-
     lines.push(format!(
         "## {} ({} funções, {} linhas, {})",
         community.name, sym_count, total_lines, file_display
     ));
-
-    // --- HOW: call flow ---
-    let call_flow = build_call_flow(&symbols, graph);
+    let call_flow = build_call_flow(symbols, graph);
     if !call_flow.is_empty() {
         lines.push(String::new());
         lines.push(format!("Fluxo: {}", call_flow));
     }
-
-    // --- Signatures (top 5) ---
     let top_sigs: Vec<String> = symbols
         .iter()
         .filter_map(|s| s.signature.as_ref().map(|sig| format!("  {}", sig)))
@@ -170,25 +215,17 @@ fn generate_one(
             lines.push(format!("  ... e +{} funções", sym_count - 5));
         }
     }
-
-    // --- Docstrings (first available) ---
-    let first_doc = symbols.iter().find_map(|s| s.doc.as_ref());
-    if let Some(doc) = first_doc {
+    if let Some(doc) = symbols.iter().find_map(|s| s.doc.as_ref()) {
         let trimmed = doc.lines().next().unwrap_or("").trim();
         if !trimmed.is_empty() {
             lines.push(String::new());
             lines.push(format!("Descrição: {}", trimmed));
         }
     }
-
-    // --- Dependencies (outgoing edges to other communities) ---
     let deps = find_dependencies(community, graph);
     if !deps.is_empty() {
-        let dep_display = deps.join(", ");
-        lines.push(format!("Depende de: {}", dep_display));
+        lines.push(format!("Depende de: {}", deps.join(", ")));
     }
-
-    // --- Co-change partners ---
     let cochanges = find_cochanges(community, graph);
     if !cochanges.is_empty() {
         let cc_display: Vec<String> = cochanges
@@ -198,8 +235,6 @@ fn generate_one(
             .collect();
         lines.push(format!("Co-muda com: {}", cc_display.join(", ")));
     }
-
-    // --- Tests ---
     if test_count > 0 || sym_count > 0 {
         let coverage = if sym_count > 0 {
             (tested_count as f64 / sym_count as f64 * 100.0) as usize
@@ -210,8 +245,6 @@ fn generate_one(
             "Testes: {} testes, {}/{} funções cobertas ({}%)",
             test_count, tested_count, sym_count, coverage
         ));
-
-        // Flag untested symbols
         let untested: Vec<&str> = symbols
             .iter()
             .filter(|s| !s.has_test)
@@ -222,9 +255,7 @@ fn generate_one(
             lines.push(format!("  Sem teste: {}", untested.join(", ")));
         }
     }
-
-    // --- WHY: git messages ---
-    let git_messages = collect_git_messages(&files, git_info);
+    let git_messages = collect_git_messages(files, git_info);
     if !git_messages.is_empty() {
         lines.push(String::new());
         lines.push("Mudanças recentes:".into());
@@ -232,20 +263,21 @@ fn generate_one(
             lines.push(format!("  - {}", msg));
         }
     }
+    lines.join("\n")
+}
 
-    let text = lines.join("\n");
-    let token_count = estimate_tokens(&text);
-
-    // Build structured data (machine-readable, no LLM needed).
+fn build_structured_data(
+    community: &Community,
+    graph: &CodeGraph,
+    files: &HashSet<String>,
+    symbols: &[SymbolInfo],
+) -> CommunityStructuredData {
     let member_set: HashSet<&str> = community.node_ids.iter().map(String::as_str).collect();
 
     // Top functions: symbols with highest in-degree (most called)
     let mut top_functions: Vec<(String, usize)> = symbols
         .iter()
-        .map(|s| {
-            let in_degree = graph.reverse_neighbors(&s.id).len();
-            (s.name.clone(), in_degree)
-        })
+        .map(|s| (s.name.clone(), graph.reverse_neighbors(&s.id).len()))
         .collect();
     top_functions.sort_by_key(|item| std::cmp::Reverse(item.1));
     let top_functions: Vec<String> = top_functions
@@ -266,17 +298,19 @@ fn generate_one(
     // Cross-community deps: external files that members import/call (max 5)
     let mut external_deps: HashSet<String> = HashSet::new();
     for edge in graph.all_edges() {
-        if member_set.contains(edge.source.as_str()) && !member_set.contains(edge.target.as_str())
+        if member_set.contains(edge.source.as_str())
+            && !member_set.contains(edge.target.as_str())
             && let Some(node) = graph.get_node(&edge.target)
-                && let Some(fp) = &node.file_path {
-                    external_deps.insert(fp.clone());
-                }
+            && let Some(fp) = &node.file_path
+        {
+            external_deps.insert(fp.clone());
+        }
     }
     let cross_community_deps: Vec<String> = external_deps.into_iter().take(5).collect();
 
     // Primary language by extension
     let mut ext_counts: HashMap<String, usize> = HashMap::new();
-    for f in &files {
+    for f in files {
         if let Some(ext) = std::path::Path::new(f).extension().and_then(|e| e.to_str()) {
             *ext_counts.entry(ext.to_string()).or_default() += 1;
         }
@@ -287,18 +321,12 @@ fn generate_one(
         .map(|(ext, _)| ext)
         .unwrap_or_default();
 
-    CommunitySummary {
-        community_id: community.id.clone(),
-        name: community.name.clone(),
-        text,
-        token_count,
-        structured: CommunityStructuredData {
-            top_functions,
-            edge_types_present,
-            cross_community_deps,
-            file_count: files.len(),
-            primary_language,
-        },
+    CommunityStructuredData {
+        top_functions,
+        edge_types_present,
+        cross_community_deps,
+        file_count: files.len(),
+        primary_language,
     }
 }
 
