@@ -305,6 +305,48 @@ invariant = "Whole crate is the test-fixture container; same dummy-fixture contr
 adr = "021-recognized-rust-idioms.md#9-test_fixture_dummy_keys"
 alternative_rejected = "see test_fixture_dummy_keys"
 
+[[secret_pattern]]
+name = "test_fixture_dummy_keys_secret_scrubber"
+scope_path = "secret_scrubber.rs"
+invariant = "secret_scrubber.rs is the redaction module; its tests MUST contain dummy AWS/Anthropic/RSA shapes to validate the regex — that's literally what it tests"
+adr = "021-recognized-rust-idioms.md#9-test_fixture_dummy_keys"
+alternative_rejected = "PRNG dummies — would break golden-test reproducibility on the canonical AWS docs example"
+
+[[secret_pattern]]
+name = "test_fixture_dummy_keys_env_sanitizer"
+scope_path = "sandbox/env_sanitizer.rs"
+invariant = "env_sanitizer.rs validates that AWS/OpenAI/Anthropic/GitHub keys are stripped from child-process env; its tests need real-shape dummies"
+adr = "021-recognized-rust-idioms.md#9-test_fixture_dummy_keys"
+alternative_rejected = "see test_fixture_dummy_keys_secret_scrubber"
+
+[[secret_pattern]]
+name = "test_fixture_dummy_keys_sibling_tests"
+scope_path = "_tests.rs"
+invariant = "Sibling test files (suffix _tests.rs) extracted by T0.2 of god-files plan are tests by construction; same dummy-fixture contract"
+adr = "021-recognized-rust-idioms.md#9-test_fixture_dummy_keys"
+alternative_rejected = "Move every _tests.rs file under tests/ — would break the per-feature sibling split codified in ADR-017 v2"
+
+[[secret_pattern]]
+name = "test_fixture_dummy_keys_auth_use_case"
+scope_path = "use_cases/auth.rs"
+invariant = "Auth use-case unit tests verify provider redaction; require dummy `sk-` shaped tokens"
+adr = "021-recognized-rust-idioms.md#9-test_fixture_dummy_keys"
+alternative_rejected = "see test_fixture_dummy_keys_secret_scrubber"
+
+[[secret_pattern]]
+name = "test_fixture_dummy_keys_adr_docs"
+scope_path = "docs/adr/"
+invariant = "ADR docs cite canonical dummy keys (sk-test-..., AKIAIOSFODNN7EXAMPLE) verbatim to illustrate codified patterns; redacting them defeats the documentation"
+adr = "021-recognized-rust-idioms.md#9-test_fixture_dummy_keys"
+alternative_rejected = "Use placeholder names — but then the doc doesn't actually demonstrate the regex shape"
+
+[[secret_pattern]]
+name = "test_fixture_dummy_keys_changelog"
+scope_path = "CHANGELOG.md"
+invariant = "CHANGELOG entries describing scrubber/env-sanitizer changes cite the same canonical dummy keys for traceability"
+adr = "021-recognized-rust-idioms.md#9-test_fixture_dummy_keys"
+alternative_rejected = "Drop the references — but then commit traceability to AWS docs / OpenAI shape is lost"
+
 # ---------------------------------------------------------------------------
 # io_test_pattern entries (consumed by scripts/check-inline-io-tests.sh v2)
 # T5.1 of code-hygiene-5x5 — see docs/adr/017-inline-io-tests.md.

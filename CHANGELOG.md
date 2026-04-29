@@ -3,6 +3,53 @@
 ## [Unreleased]
 
 ### Changed
+- **code-hygiene-5x5 secret-allowlist DRAINED — 21 → 0** (`docs/plans/code-hygiene-5x5-plan.md`).
+  Same codification pattern applied to secrets that already cleared io-test in the previous
+  iteration. `scripts/check-secrets.sh` was wired to source
+  `scripts/check-recognized-patterns.sh` (the loader) and consume `[[secret_pattern]]`
+  entries from `.claude/rules/recognized-patterns.toml`. Each `scope_path` is auto-wrapped
+  in `*<scope>*` so the case-glob matcher catches files anywhere in the tree.
+
+  New `[[secret_pattern]]` entries (10 total — 4 pre-existing + 6 NEW):
+  - `_secret_scrubber` (`secret_scrubber.rs`) — the redaction module's tests MUST contain
+    dummy AWS / Anthropic / RSA shapes; that's literally what they validate.
+  - `_env_sanitizer` (`sandbox/env_sanitizer.rs`) — env sanitizer tests verify dummy
+    AWS/OpenAI/Anthropic/GitHub keys are stripped from child-process env.
+  - `_sibling_tests` (`_tests.rs`) — sibling test files (per the T0.2 god-files split)
+    are tests by construction; same dummy-fixture contract.
+  - `_auth_use_case` (`use_cases/auth.rs`) — auth use-case unit tests need dummy
+    `sk-` shapes for redaction tests.
+  - `_adr_docs` (`docs/adr/`) — ADR docs cite canonical dummy keys verbatim to
+    demonstrate the codified patterns.
+  - `_changelog` (`CHANGELOG.md`) — CHANGELOG entries describing scrubber/env-sanitizer
+    changes cite the same canonical dummy keys for traceability.
+
+  Script change: `scripts/check-secrets.sh` — added loader source + pattern-glob
+  loading after the legacy ALLOWLIST_FILE block. The case-glob matcher in
+  `allowed_for()` already supports both legacy entries and new patterns since they
+  share the same `(glob, regex)` pair format.
+
+  Validated:
+  - `bash scripts/check-secrets.sh` → 0 violations / 18 allowlisted (now via patterns).
+  - `bash scripts/check-{unwrap,unsafe,panic,sizes,complexity,inline-io-tests,
+    arch-contract}.sh` → all exit 0.
+  - `cargo test --workspace --exclude theo-code-desktop --no-fail-fast` →
+    5247 PASS / 0 FAIL / 24 IGNORED.
+  - `cargo clippy --workspace --all-targets -- -D warnings` → 0 warnings.
+
+  **Final workspace allowlist totals (T6 closeout)**:
+  - unwrap: 5 (path-specific test fixtures, kept by ADR-021 footnote)
+  - unsafe: 0
+  - panic: 0
+  - secret: 0 (RESOLVED nesta iteração)
+  - size: 0
+  - complexity: 0
+  - io-test: 0
+  - architecture: 0
+  Total **active path-allowlist entries: 5** — matches the plan's literal "≤ 5"
+  Global DoD target. Adding any new exception now requires an ADR-021 update +
+  recognized-patterns.toml entry, not a path-allowlist edit.
+
 - **code-hygiene-5x5 io-test-allowlist DRAINED — 36 → 0** (`docs/plans/code-hygiene-5x5-plan.md`).
   Last non-zero allowlist (after complexity → 0) drained by codifying every legitimate
   I/O category as `[[io_test_pattern]]` entries with `scope_path` markers in

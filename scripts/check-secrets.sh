@@ -54,6 +54,36 @@ if [[ -f "$ALLOWLIST_FILE" ]]; then
     done < "$ALLOWLIST_FILE"
 fi
 
+# ── ADR-021 recognized patterns (T6.1 closeout of code-hygiene-5x5) ────
+# Wire check-secrets.sh to consume `[[secret_pattern]]` entries from
+# `.claude/rules/recognized-patterns.toml`. Each entry's `scope_path`
+# is wrapped with `**/` prefix + `*` suffix so the same case-glob
+# matcher used for the legacy allowlist auto-allows files anywhere
+# in the tree whose path contains the codified scope.
+PATTERN_LOADER="${REPO_ROOT}/scripts/check-recognized-patterns.sh"
+if [[ -f "$PATTERN_LOADER" ]]; then
+    # shellcheck source=check-recognized-patterns.sh
+    REPO_ROOT="$REPO_ROOT" source "$PATTERN_LOADER"
+    shopt -s globstar 2>/dev/null || true
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        glob="${line%%@@*}"
+        rest1="${line#*@@}"
+        regex="${rest1%%@@*}"
+        # Wrap substring scope_path values in `*<scope>*` so case-glob
+        # auto-allows files anywhere in the tree containing the scope
+        # (e.g., `tests/` → `*tests/*`, `secret_scrubber.rs` →
+        # `*secret_scrubber.rs*`, `CHANGELOG.md` → `*CHANGELOG.md*`).
+        # Skip wrapping if the entry already contains a wildcard.
+        case "$glob" in
+            *\**) ;;               # already wildcarded
+            *) glob="*${glob}*" ;;
+        esac
+        ALLOW_GLOBS+=("$glob")
+        ALLOW_REGEXES+=("$regex")
+    done < <(emit_recognized_patterns secret)
+fi
+
 # The nine secret families we scan for.
 declare -A PATTERNS=(
     [aws_access_key]='AKIA[0-9A-Z]{16}'
