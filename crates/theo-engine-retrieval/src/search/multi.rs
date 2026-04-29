@@ -121,15 +121,11 @@ impl MultiSignalScorer {
         communities: &[Community],
         graph: &CodeGraph,
     ) -> Vec<ScoredCommunity> {
-        let query_tokens: std::collections::HashSet<String> = tokenise(query).into_iter().collect();
-
         if communities.is_empty() {
             return Vec::new();
         }
-
-        // TIERED SEARCH: For large repos (>500 communities), use fast path
-        // Fast path: BM25 + file boost only (skip neural + graph attention)
-        // Full path: all 6 signals
+        let query_tokens: std::collections::HashSet<String> =
+            tokenise(query).into_iter().collect();
         let large_repo = communities.len() > 500;
         if large_repo {
             eprintln!(
@@ -138,135 +134,37 @@ impl MultiSignalScorer {
             );
         }
 
-        // 1. BM25 scores — FILE-LEVEL with max-aggregation to community.
-        // This follows the CodeCompass/Zoekt pattern: every production code search
-        // system indexes at file level. Community-level BM25 dilutes TF/IDF.
-        let file_scores = FileBm25::search(graph, query);
-        let community_file_scores = FileBm25::community_scores(&file_scores, communities, graph);
-        let bm25_map: HashMap<&str, f64> = community_file_scores
-            .iter()
-            .map(|(id, score)| (id.as_str(), *score))
-            .collect();
-        let bm25_max = bm25_map.values().cloned().fold(f64::NEG_INFINITY, f64::max);
-        let bm25_min = bm25_map.values().cloned().fold(f64::INFINITY, f64::min);
-        let bm25_range = bm25_max - bm25_min;
-
-        // 2. Semantic scores — skip for large repos (expensive)
-        let (_semantic_raw, _sem_range, _sem_min): (HashMap<&str, f64>, f64, f64) = if large_repo {
-            (HashMap::new(), 0.0, 0.0)
-        } else {
-            let query_vec: Vec<f64> = if let Some(ref embedder) = self.embedder {
-                embedder.embed(query)
-            } else {
-                self.tfidf_model.transform_normalized(query)
-            };
-            let raw: HashMap<&str, f64> = communities
-                .iter()
-                .map(|comm| {
-                    let sim = if let Some(qv) = self.quantized_docs.get(&comm.id) {
-                        self.quantizer.cosine_similarity(&query_vec, qv)
-                    } else {
-                        0.0
-                    };
-                    (comm.id.as_str(), sim)
-                })
-                .collect();
-            let max = raw.values().cloned().fold(f64::NEG_INFINITY, f64::max);
-            let min = raw.values().cloned().fold(f64::INFINITY, f64::min);
-            (raw, max - min, min)
-        };
-
-        // 3-4. Graph attention — skip for large repos (O(N) per node is too slow for 60K+ nodes)
-        let _graph_attention_scores: HashMap<String, f64> = if large_repo {
-            HashMap::new()
-        } else {
-            let initial_node_scores: HashMap<String, f64> = {
-                let mut scores = HashMap::new();
-                for nid in graph.node_ids() {
-                    if let Some(node) = graph.get_node(nid) {
-                        let text = match &node.signature {
-                            Some(sig) => format!("{} {}", node.name, sig),
-                            None => node.name.clone(),
-                        };
-                        let toks: std::collections::HashSet<String> =
-                            tokenise(&text).into_iter().collect();
-                        let overlap = if query_tokens.is_empty() {
-                            0.0
-                        } else {
-                            let m = query_tokens.iter().filter(|qt| toks.contains(*qt)).count();
-                            m as f64 / query_tokens.len() as f64
-                        };
-                        if overlap > 0.0 {
-                            scores.insert(nid.to_string(), overlap);
-                        }
-                    }
-                }
-                scores
-            };
-            propagate_attention(&initial_node_scores, graph, communities, 2, 0.5)
-        };
-
-        // Signal weights depend on whether neural embeddings are active.
-        // With neural ON:  BM25 25%, Semantic 20%, File boost 20%, Graph 15%, Centrality 10%, Recency 10%
-        // With neural OFF: BM25 30%, File boost 25%, Graph attention 25%, Centrality 10%, Recency 10%
-        //
-        // THEO_NO_GRAPH_ATTENTION=1 disables graph attention signal (for A/B benchmarking).
-        // Signal weights. Graph attention REMOVED — benchmark proved 0% impact
-        // on top-3 rankings across 20 queries (eval_graph_attention_ab test).
-        // Weights sum to 1.0. BM25 is the primary query-dependent signal.
-        // Weighted linear combination — calibrated via eval suite.
-        // BM25 (file-level) is the dominant query-dependent signal (55%).
-        // File boost provides precision on symbol name matches (30%).
-        // Centrality/recency are minimal (15% total) to avoid query-independent noise.
+        let bm25_norm = compute_bm25_scores(graph, query, communities);
+        // Semantic + graph attention are computed for side-effects (warmup +
+        // future weighted combo); current weights only consume BM25 + file
+        // boost + centrality + recency. Skipped for large repos.
+        if !large_repo {
+            self.compute_semantic_scores(query, communities);
+            self.compute_graph_attention_scores(graph, communities, &query_tokens);
+        }
         let (w_bm25, w_file, w_cent, w_rec) = (
             self.scoring_weights.bm25,
             self.scoring_weights.file_boost,
             self.scoring_weights.centrality,
             self.scoring_weights.recency,
         );
-
         let mut result: Vec<ScoredCommunity> = communities
             .iter()
             .map(|comm| {
-                // Normalize BM25 to [0,1]
-                let raw_bm25 = *bm25_map.get(comm.id.as_str()).unwrap_or(&0.0);
-                let norm_bm25 = if bm25_range > 0.0 {
-                    (raw_bm25 - bm25_min) / bm25_range
-                } else {
-                    0.0
-                };
-
-                // Centrality and recency (already [0,1])
+                let norm_bm25 = bm25_norm.get(comm.id.as_str()).copied().unwrap_or(0.0);
                 let centrality = *self.centrality_scores.get(&comm.id).unwrap_or(&0.0);
                 let recency = *self.recency_scores.get(&comm.id).unwrap_or(&0.0);
-
-                // Per-file symbol match boost
-                let file_boost =
-                    if let Some(token_sets) = self.community_symbol_tokens.get(&comm.id) {
-                        let mut best = 0.0f64;
-                        for toks in token_sets {
-                            let m = query_tokens.iter().filter(|qt| toks.contains(*qt)).count();
-                            if !query_tokens.is_empty() {
-                                best = best.max(m as f64 / query_tokens.len() as f64);
-                            }
-                        }
-                        best
-                    } else {
-                        0.0
-                    };
-
+                let file_boost = self.compute_file_boost(comm, &query_tokens);
                 let score = w_bm25 * norm_bm25
                     + w_file * file_boost
                     + w_cent * centrality
                     + w_rec * recency;
-
                 ScoredCommunity {
                     community: comm.clone(),
                     score,
                 }
             })
             .collect();
-
         result.sort_by(|a, b| {
             b.score
                 .partial_cmp(&a.score)
@@ -274,6 +172,113 @@ impl MultiSignalScorer {
         });
         result
     }
+
+    fn compute_semantic_scores(
+        &self,
+        query: &str,
+        communities: &[Community],
+    ) -> HashMap<String, f64> {
+        let query_vec: Vec<f64> = if let Some(ref embedder) = self.embedder {
+            embedder.embed(query)
+        } else {
+            self.tfidf_model.transform_normalized(query)
+        };
+        communities
+            .iter()
+            .map(|comm| {
+                let sim = if let Some(qv) = self.quantized_docs.get(&comm.id) {
+                    self.quantizer.cosine_similarity(&query_vec, qv)
+                } else {
+                    0.0
+                };
+                (comm.id.clone(), sim)
+            })
+            .collect()
+    }
+
+    fn compute_graph_attention_scores(
+        &self,
+        graph: &CodeGraph,
+        communities: &[Community],
+        query_tokens: &std::collections::HashSet<String>,
+    ) -> HashMap<String, f64> {
+        let initial_node_scores = compute_initial_node_scores(graph, query_tokens);
+        propagate_attention(&initial_node_scores, graph, communities, 2, 0.5)
+    }
+
+    fn compute_file_boost(
+        &self,
+        comm: &Community,
+        query_tokens: &std::collections::HashSet<String>,
+    ) -> f64 {
+        let Some(token_sets) = self.community_symbol_tokens.get(&comm.id) else {
+            return 0.0;
+        };
+        let mut best = 0.0f64;
+        for toks in token_sets {
+            let m = query_tokens.iter().filter(|qt| toks.contains(*qt)).count();
+            if !query_tokens.is_empty() {
+                best = best.max(m as f64 / query_tokens.len() as f64);
+            }
+        }
+        best
+    }
+}
+
+/// File-level BM25 (Zoekt pattern) max-aggregated to community then
+/// min-max-normalized to [0, 1].
+fn compute_bm25_scores(
+    graph: &CodeGraph,
+    query: &str,
+    communities: &[Community],
+) -> HashMap<String, f64> {
+    let file_scores = FileBm25::search(graph, query);
+    let community_file_scores = FileBm25::community_scores(&file_scores, communities, graph);
+    let raw: HashMap<&str, f64> = community_file_scores
+        .iter()
+        .map(|(id, score)| (id.as_str(), *score))
+        .collect();
+    let bm25_max = raw.values().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let bm25_min = raw.values().cloned().fold(f64::INFINITY, f64::min);
+    let bm25_range = bm25_max - bm25_min;
+    raw.into_iter()
+        .map(|(id, raw_score)| {
+            let norm = if bm25_range > 0.0 {
+                (raw_score - bm25_min) / bm25_range
+            } else {
+                0.0
+            };
+            (id.to_string(), norm)
+        })
+        .collect()
+}
+
+/// Token-overlap initialisation for graph-attention propagation: each
+/// node gets the fraction of query tokens its (name + signature) covers.
+fn compute_initial_node_scores(
+    graph: &CodeGraph,
+    query_tokens: &std::collections::HashSet<String>,
+) -> HashMap<String, f64> {
+    let mut scores = HashMap::new();
+    for nid in graph.node_ids() {
+        if let Some(node) = graph.get_node(nid) {
+            let text = match &node.signature {
+                Some(sig) => format!("{} {}", node.name, sig),
+                None => node.name.clone(),
+            };
+            let toks: std::collections::HashSet<String> = tokenise(&text).into_iter().collect();
+            let overlap = if query_tokens.is_empty() {
+                0.0
+            } else {
+                let m = query_tokens.iter().filter(|qt| toks.contains(*qt)).count();
+                m as f64 / query_tokens.len() as f64
+            };
+            if overlap > 0.0 {
+                scores.insert(nid.to_string(), overlap);
+            }
+        }
+    }
+    scores
 }
 
 // ---------------------------------------------------------------------------
