@@ -3,6 +3,22 @@
 ## [Unreleased]
 
 ### Changed
+- **code-hygiene-5x5 T4.4 partial — theo-infra-llm 3 → 2** (`docs/plans/code-hygiene-5x5-plan.md`).
+  `providers/anthropic/request::to_request` (211 LOC `CommonRequest → Anthropic Messages JSON` converter)
+  decomposed into 12 helpers:
+  - `next_cache_control` / `apply_cache_control` — Anthropic prompt-caching counter (first 4 cacheable blocks
+    receive `cache_control: ephemeral`).
+  - `append_system_block` — system text block with cache_control.
+  - `append_user_message` / `build_user_part_block` — user text/image parts dispatch.
+  - `append_assistant_message` / `build_tool_use_block` — assistant text + tool_use blocks.
+  - `append_tool_result_message` — Tool-role messages converted to user-role tool_result.
+  - `convert_request_tools` — tool definitions with cache_control.
+  - `convert_request_tool_choice` — auto/any/tool dispatch.
+  - `convert_stop_sequences` — Single/Multiple → JSON array.
+  - `assemble_anthropic_request` — final JSON object construction.
+  Body of `to_request` is now ~22 LOC (loop + 3 converters + assemble). Behaviour preserved.
+  Cumulative metric across workspace: 27 → 26 violations.
+
 - **code-hygiene-5x5 T4.4 partial — theo-infra-llm 4 → 3** (`docs/plans/code-hygiene-5x5-plan.md`).
   `providers/openai/streaming::from_chunk` (166 LOC SSE chunk parser) decomposed into:
   - `build_initial_chunk` — id/object/created/model from response wrapper.

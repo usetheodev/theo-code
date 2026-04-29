@@ -269,154 +269,163 @@ fn parse_stop_sequences(body: &Value) -> Option<StopSequence> {
 
 /// Convert a CommonRequest to Anthropic Messages API format.
 pub fn to_request(body: &CommonRequest) -> Value {
-    let mut system_blocks = Vec::new();
-    let mut messages_out: Vec<Value> = Vec::new();
     let mut cc_count = 0u32;
-
-    let cc = |count: &mut u32| -> Value {
-        *count += 1;
-        if *count <= 4 {
-            serde_json::json!({ "cache_control": { "type": "ephemeral" } })
-        } else {
-            serde_json::json!({})
-        }
-    };
-
+    let mut system_blocks: Vec<Value> = Vec::new();
+    let mut messages_out: Vec<Value> = Vec::new();
     for msg in &body.messages {
         match msg.role {
-            Role::System => {
-                if let Some(content) = &msg.content {
-                    let text = content.to_text();
-                    if !text.is_empty() {
-                        let mut block = serde_json::json!({ "type": "text", "text": text });
-                        let cache = cc(&mut cc_count);
-                        if let Some(obj) = cache.as_object() {
-                            for (k, v) in obj {
-                                block[k] = v.clone();
-                            }
-                        }
-                        system_blocks.push(block);
-                    }
-                }
-            }
-            Role::User => {
-                if let Some(content) = &msg.content {
-                    let parts = match content {
-                        Content::Text(text) => {
-                            let mut block = serde_json::json!({ "type": "text", "text": text });
-                            let cache = cc(&mut cc_count);
-                            if let Some(obj) = cache.as_object() {
-                                for (k, v) in obj {
-                                    block[k] = v.clone();
-                                }
-                            }
-                            vec![block]
-                        }
-                        Content::Parts(parts) => parts
-                            .iter()
-                            .map(|p| match p {
-                                ContentPart::Text { text } => {
-                                    let mut block =
-                                        serde_json::json!({ "type": "text", "text": text });
-                                    let cache = cc(&mut cc_count);
-                                    if let Some(obj) = cache.as_object() {
-                                        for (k, v) in obj {
-                                            block[k] = v.clone();
-                                        }
-                                    }
-                                    block
-                                }
-                                ContentPart::ImageUrl { image_url } => {
-                                    let source = convert_url_to_anthropic_source(&image_url.url);
-                                    let mut block =
-                                        serde_json::json!({ "type": "image", "source": source });
-                                    let cache = cc(&mut cc_count);
-                                    if let Some(obj) = cache.as_object() {
-                                        for (k, v) in obj {
-                                            block[k] = v.clone();
-                                        }
-                                    }
-                                    block
-                                }
-                            })
-                            .collect(),
-                    };
-                    messages_out.push(serde_json::json!({ "role": "user", "content": parts }));
-                }
-            }
-            Role::Assistant => {
-                let mut content_blocks: Vec<Value> = Vec::new();
-
-                if let Some(content) = &msg.content {
-                    let text = content.to_text();
-                    if !text.is_empty() {
-                        let mut block = serde_json::json!({ "type": "text", "text": text });
-                        let cache = cc(&mut cc_count);
-                        if let Some(obj) = cache.as_object() {
-                            for (k, v) in obj {
-                                block[k] = v.clone();
-                            }
-                        }
-                        content_blocks.push(block);
-                    }
-                }
-
-                if let Some(tool_calls) = &msg.tool_calls {
-                    for tc in tool_calls {
-                        // T2.7: bound tool-call arguments so a malicious
-                        // provider cannot force unbounded allocation.
-                        let input: Value = theo_domain::safe_json::from_str_bounded(
-                            &tc.function.arguments,
-                            theo_domain::safe_json::DEFAULT_JSON_LIMIT,
-                        )
-                        .unwrap_or_else(|_| Value::String(tc.function.arguments.clone()));
-                        let mut block = serde_json::json!({
-                            "type": "tool_use",
-                            "id": tc.id,
-                            "name": tc.function.name,
-                            "input": input,
-                        });
-                        let cache = cc(&mut cc_count);
-                        if let Some(obj) = cache.as_object() {
-                            for (k, v) in obj {
-                                block[k] = v.clone();
-                            }
-                        }
-                        content_blocks.push(block);
-                    }
-                }
-
-                if !content_blocks.is_empty() {
-                    messages_out.push(serde_json::json!({
-                        "role": "assistant",
-                        "content": content_blocks,
-                    }));
-                }
-            }
-            Role::Tool => {
-                let content_str = msg
-                    .content
-                    .as_ref()
-                    .map(|c| c.to_text())
-                    .unwrap_or_default();
-                let mut block = serde_json::json!({
-                    "type": "tool_result",
-                    "tool_use_id": msg.tool_call_id,
-                    "content": content_str,
-                });
-                let cache = cc(&mut cc_count);
-                if let Some(obj) = cache.as_object() {
-                    for (k, v) in obj {
-                        block[k] = v.clone();
-                    }
-                }
-                messages_out.push(serde_json::json!({ "role": "user", "content": [block] }));
-            }
+            Role::System => append_system_block(msg, &mut system_blocks, &mut cc_count),
+            Role::User => append_user_message(msg, &mut messages_out, &mut cc_count),
+            Role::Assistant => append_assistant_message(msg, &mut messages_out, &mut cc_count),
+            Role::Tool => append_tool_result_message(msg, &mut messages_out, &mut cc_count),
         }
     }
+    let tools = convert_request_tools(body.tools.as_ref(), &mut cc_count);
+    let tool_choice = convert_request_tool_choice(body.tool_choice.as_ref());
+    let stop_sequences = convert_stop_sequences(body.stop.as_ref());
+    assemble_anthropic_request(
+        body,
+        system_blocks,
+        messages_out,
+        tools,
+        tool_choice,
+        stop_sequences,
+    )
+}
 
-    // Convert tools
-    let tools: Option<Vec<Value>> = body.tools.as_ref().map(|tools| {
+/// Anthropic prompt-caching: only the first 4 cacheable blocks
+/// receive `cache_control: {type: ephemeral}`. Subsequent blocks
+/// produce an empty object (caller still merges, but no-op).
+fn next_cache_control(count: &mut u32) -> Value {
+    *count += 1;
+    if *count <= 4 {
+        serde_json::json!({ "cache_control": { "type": "ephemeral" } })
+    } else {
+        serde_json::json!({})
+    }
+}
+
+fn apply_cache_control(block: &mut Value, count: &mut u32) {
+    let cache = next_cache_control(count);
+    if let Some(obj) = cache.as_object() {
+        for (k, v) in obj {
+            block[k] = v.clone();
+        }
+    }
+}
+
+fn append_system_block(msg: &CommonMessage, system_blocks: &mut Vec<Value>, cc_count: &mut u32) {
+    let Some(content) = &msg.content else {
+        return;
+    };
+    let text = content.to_text();
+    if text.is_empty() {
+        return;
+    }
+    let mut block = serde_json::json!({ "type": "text", "text": text });
+    apply_cache_control(&mut block, cc_count);
+    system_blocks.push(block);
+}
+
+fn append_user_message(msg: &CommonMessage, messages_out: &mut Vec<Value>, cc_count: &mut u32) {
+    let Some(content) = &msg.content else {
+        return;
+    };
+    let parts = match content {
+        Content::Text(text) => {
+            let mut block = serde_json::json!({ "type": "text", "text": text });
+            apply_cache_control(&mut block, cc_count);
+            vec![block]
+        }
+        Content::Parts(parts) => parts
+            .iter()
+            .map(|p| build_user_part_block(p, cc_count))
+            .collect(),
+    };
+    messages_out.push(serde_json::json!({ "role": "user", "content": parts }));
+}
+
+fn build_user_part_block(part: &ContentPart, cc_count: &mut u32) -> Value {
+    let mut block = match part {
+        ContentPart::Text { text } => serde_json::json!({ "type": "text", "text": text }),
+        ContentPart::ImageUrl { image_url } => {
+            let source = convert_url_to_anthropic_source(&image_url.url);
+            serde_json::json!({ "type": "image", "source": source })
+        }
+    };
+    apply_cache_control(&mut block, cc_count);
+    block
+}
+
+fn append_assistant_message(
+    msg: &CommonMessage,
+    messages_out: &mut Vec<Value>,
+    cc_count: &mut u32,
+) {
+    let mut content_blocks: Vec<Value> = Vec::new();
+    if let Some(content) = &msg.content {
+        let text = content.to_text();
+        if !text.is_empty() {
+            let mut block = serde_json::json!({ "type": "text", "text": text });
+            apply_cache_control(&mut block, cc_count);
+            content_blocks.push(block);
+        }
+    }
+    if let Some(tool_calls) = &msg.tool_calls {
+        for tc in tool_calls {
+            content_blocks.push(build_tool_use_block(tc, cc_count));
+        }
+    }
+    if !content_blocks.is_empty() {
+        messages_out.push(serde_json::json!({
+            "role": "assistant",
+            "content": content_blocks,
+        }));
+    }
+}
+
+fn build_tool_use_block(tc: &CommonToolCall, cc_count: &mut u32) -> Value {
+    // T2.7: bound tool-call arguments so a malicious provider cannot
+    // force unbounded allocation.
+    let input: Value = theo_domain::safe_json::from_str_bounded(
+        &tc.function.arguments,
+        theo_domain::safe_json::DEFAULT_JSON_LIMIT,
+    )
+    .unwrap_or_else(|_| Value::String(tc.function.arguments.clone()));
+    let mut block = serde_json::json!({
+        "type": "tool_use",
+        "id": tc.id,
+        "name": tc.function.name,
+        "input": input,
+    });
+    apply_cache_control(&mut block, cc_count);
+    block
+}
+
+fn append_tool_result_message(
+    msg: &CommonMessage,
+    messages_out: &mut Vec<Value>,
+    cc_count: &mut u32,
+) {
+    let content_str = msg
+        .content
+        .as_ref()
+        .map(|c| c.to_text())
+        .unwrap_or_default();
+    let mut block = serde_json::json!({
+        "type": "tool_result",
+        "tool_use_id": msg.tool_call_id,
+        "content": content_str,
+    });
+    apply_cache_control(&mut block, cc_count);
+    messages_out.push(serde_json::json!({ "role": "user", "content": [block] }));
+}
+
+fn convert_request_tools(
+    tools: Option<&Vec<CommonTool>>,
+    cc_count: &mut u32,
+) -> Option<Vec<Value>> {
+    tools.map(|tools| {
         tools
             .iter()
             .filter(|t| t.tool_type == "function")
@@ -426,18 +435,15 @@ pub fn to_request(body: &CommonRequest) -> Value {
                     "description": t.function.description,
                     "input_schema": t.function.parameters,
                 });
-                let cache = cc(&mut cc_count);
-                if let Some(obj) = cache.as_object() {
-                    for (k, v) in obj {
-                        tool[k] = v.clone();
-                    }
-                }
+                apply_cache_control(&mut tool, cc_count);
                 tool
             })
             .collect()
-    });
+    })
+}
 
-    let tool_choice = body.tool_choice.as_ref().map(|tc| match tc {
+fn convert_request_tool_choice(tc: Option<&ToolChoice>) -> Option<Value> {
+    tc.map(|tc| match tc {
         ToolChoice::Mode(mode) => match mode.as_str() {
             "auto" => serde_json::json!({ "type": "auto" }),
             "required" => serde_json::json!({ "type": "any" }),
@@ -446,19 +452,29 @@ pub fn to_request(body: &CommonRequest) -> Value {
         ToolChoice::Function { function, .. } => {
             serde_json::json!({ "type": "tool", "name": function.name })
         }
-    });
+    })
+}
 
-    let stop_sequences = body.stop.as_ref().map(|s| match s {
+fn convert_stop_sequences(stop: Option<&StopSequence>) -> Option<Value> {
+    stop.map(|s| match s {
         StopSequence::Single(s) => serde_json::json!([s]),
         StopSequence::Multiple(v) => serde_json::json!(v),
-    });
+    })
+}
 
+fn assemble_anthropic_request(
+    body: &CommonRequest,
+    system_blocks: Vec<Value>,
+    messages_out: Vec<Value>,
+    tools: Option<Vec<Value>>,
+    tool_choice: Option<Value>,
+    stop_sequences: Option<Value>,
+) -> Value {
     let mut result = serde_json::json!({
         "max_tokens": body.max_tokens.unwrap_or(32_000),
         "messages": messages_out,
         "stream": body.stream.unwrap_or(false),
     });
-
     if let Some(temp) = body.temperature {
         result["temperature"] = serde_json::json!(temp);
     }
@@ -477,6 +493,5 @@ pub fn to_request(body: &CommonRequest) -> Value {
     if let Some(stop) = stop_sequences {
         result["stop_sequences"] = stop;
     }
-
     result
 }
