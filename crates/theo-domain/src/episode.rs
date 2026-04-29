@@ -436,152 +436,16 @@ impl EpisodeSummary {
             .iter()
             .map(|e| e.event_id.as_str().to_string())
             .collect();
+        let (window_start, window_end) = window_bounds(events);
+        let key_actions = extract_key_actions(events);
+        let affected_files = extract_affected_files(events);
+        let mut learned_constraints = extract_learned_constraints(events);
+        let unresolved = extract_unresolved_hypotheses(events);
+        let successful_steps = extract_successful_steps(events);
+        let failed_attempts = extract_failed_attempts(events);
+        let outcome = derive_outcome(events);
 
-        let window_start = events
-            .first()
-            .map(|e| e.event_id.as_str().to_string())
-            .unwrap_or_default();
-        let window_end = events
-            .last()
-            .map(|e| e.event_id.as_str().to_string())
-            .unwrap_or_default();
-
-        // Extract key actions from tool calls
-        let key_actions: Vec<String> = events
-            .iter()
-            .filter(|e| e.event_type == crate::event::EventType::ToolCallCompleted)
-            .filter_map(|e| {
-                e.payload
-                    .get("tool_name")
-                    .and_then(|v| v.as_str())
-                    .map(String::from)
-            })
-            .collect();
-
-        // Extract affected files from tool payloads
-        let affected_files: Vec<String> = events
-            .iter()
-            .filter_map(|e| {
-                e.payload
-                    .get("file")
-                    .and_then(|v| v.as_str())
-                    .map(String::from)
-            })
-            .collect::<std::collections::HashSet<_>>()
-            .into_iter()
-            .collect();
-
-        // Extract learned constraints from ConstraintLearned events
-        let mut learned_constraints: Vec<String> = events
-            .iter()
-            .filter(|e| e.event_type == crate::event::EventType::ConstraintLearned)
-            .filter_map(|e| {
-                e.payload
-                    .get("constraint")
-                    .and_then(|v| v.as_str())
-                    .map(String::from)
-            })
-            .collect();
-
-        // Extract unresolved hypotheses (formed but not invalidated)
-        let invalidated_refs: std::collections::HashSet<String> = events
-            .iter()
-            .filter(|e| e.event_type == crate::event::EventType::HypothesisInvalidated)
-            .filter_map(|e| {
-                e.payload
-                    .get("prior_event_id")
-                    .and_then(|v| v.as_str())
-                    .map(String::from)
-            })
-            .collect();
-        let unresolved: Vec<String> = events
-            .iter()
-            .filter(|e| e.event_type == crate::event::EventType::HypothesisFormed)
-            .filter(|e| !invalidated_refs.contains(e.event_id.as_str()))
-            .filter_map(|e| {
-                e.payload
-                    .get("hypothesis")
-                    .and_then(|v| v.as_str())
-                    .map(String::from)
-            })
-            .collect();
-
-        // Extract successful steps (tool calls with success: true)
-        let successful_steps: Vec<String> = events
-            .iter()
-            .filter(|e| e.event_type == crate::event::EventType::ToolCallCompleted)
-            .filter(|e| {
-                e.payload
-                    .get("success")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false)
-            })
-            .map(|e| {
-                let tool = e
-                    .payload
-                    .get("tool_name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown");
-                let file = e.payload.get("file").and_then(|v| v.as_str()).unwrap_or("");
-                if file.is_empty() {
-                    tool.to_string()
-                } else {
-                    format!("{}: {}", tool, file)
-                }
-            })
-            .collect();
-
-        // Extract failed attempts (failed tool calls + error events)
-        let mut failed_attempts: Vec<String> = events
-            .iter()
-            .filter(|e| e.event_type == crate::event::EventType::ToolCallCompleted)
-            .filter(|e| e.payload.get("success").and_then(|v| v.as_bool()) == Some(false))
-            .map(|e| {
-                let tool = e
-                    .payload
-                    .get("tool_name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown");
-                let err = e
-                    .payload
-                    .get("error")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("failed");
-                format!("{}: {}", tool, err)
-            })
-            .collect();
-        // Also include Error events
-        for e in events
-            .iter()
-            .filter(|e| e.event_type == crate::event::EventType::Error)
-        {
-            let msg = e
-                .payload
-                .get("message")
-                .and_then(|v| v.as_str())
-                .unwrap_or("error");
-            failed_attempts.push(msg.to_string());
-        }
-
-        // Determine outcome
-        let has_errors = events
-            .iter()
-            .any(|e| e.event_type == crate::event::EventType::Error);
-        let has_failures = events.iter().any(|e| {
-            e.event_type == crate::event::EventType::ToolCallCompleted
-                && e.payload.get("success").and_then(|v| v.as_bool()) == Some(false)
-        });
-        let outcome = if has_errors || has_failures {
-            EpisodeOutcome::Partial
-        } else {
-            EpisodeOutcome::Success
-        };
-
-        // Extract failure-derived constraints (threshold ≥ 3)
-        let failure_constraints = extract_failure_constraints(events, 3);
-        learned_constraints.extend(failure_constraints);
-
-        // Infer TTL from constraint scopes
+        learned_constraints.extend(extract_failure_constraints(events, 3));
         let ttl_policy = infer_ttl_policy(events);
         let memory_kind = infer_memory_kind(&ttl_policy);
 
@@ -614,6 +478,164 @@ impl EpisodeSummary {
             memory_kind,
             token_usage: None,
         }
+    }
+}
+
+/// First/last event IDs framing the summary window.
+fn window_bounds(events: &[DomainEvent]) -> (String, String) {
+    let start = events
+        .first()
+        .map(|e| e.event_id.as_str().to_string())
+        .unwrap_or_default();
+    let end = events
+        .last()
+        .map(|e| e.event_id.as_str().to_string())
+        .unwrap_or_default();
+    (start, end)
+}
+
+/// Tool names from every `ToolCallCompleted` event, in order.
+fn extract_key_actions(events: &[DomainEvent]) -> Vec<String> {
+    events
+        .iter()
+        .filter(|e| e.event_type == crate::event::EventType::ToolCallCompleted)
+        .filter_map(|e| {
+            e.payload
+                .get("tool_name")
+                .and_then(|v| v.as_str())
+                .map(String::from)
+        })
+        .collect()
+}
+
+/// Distinct file paths mentioned in any event payload's `file` field.
+fn extract_affected_files(events: &[DomainEvent]) -> Vec<String> {
+    events
+        .iter()
+        .filter_map(|e| {
+            e.payload
+                .get("file")
+                .and_then(|v| v.as_str())
+                .map(String::from)
+        })
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+/// Constraints emitted explicitly via `ConstraintLearned` events.
+fn extract_learned_constraints(events: &[DomainEvent]) -> Vec<String> {
+    events
+        .iter()
+        .filter(|e| e.event_type == crate::event::EventType::ConstraintLearned)
+        .filter_map(|e| {
+            e.payload
+                .get("constraint")
+                .and_then(|v| v.as_str())
+                .map(String::from)
+        })
+        .collect()
+}
+
+/// `HypothesisFormed` events that have NO matching `HypothesisInvalidated`.
+fn extract_unresolved_hypotheses(events: &[DomainEvent]) -> Vec<String> {
+    let invalidated_refs: std::collections::HashSet<String> = events
+        .iter()
+        .filter(|e| e.event_type == crate::event::EventType::HypothesisInvalidated)
+        .filter_map(|e| {
+            e.payload
+                .get("prior_event_id")
+                .and_then(|v| v.as_str())
+                .map(String::from)
+        })
+        .collect();
+    events
+        .iter()
+        .filter(|e| e.event_type == crate::event::EventType::HypothesisFormed)
+        .filter(|e| !invalidated_refs.contains(e.event_id.as_str()))
+        .filter_map(|e| {
+            e.payload
+                .get("hypothesis")
+                .and_then(|v| v.as_str())
+                .map(String::from)
+        })
+        .collect()
+}
+
+/// `ToolCallCompleted` events flagged success=true, formatted as `tool` or `tool: file`.
+fn extract_successful_steps(events: &[DomainEvent]) -> Vec<String> {
+    events
+        .iter()
+        .filter(|e| e.event_type == crate::event::EventType::ToolCallCompleted)
+        .filter(|e| {
+            e.payload
+                .get("success")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+        })
+        .map(|e| {
+            let tool = e
+                .payload
+                .get("tool_name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
+            let file = e.payload.get("file").and_then(|v| v.as_str()).unwrap_or("");
+            if file.is_empty() {
+                tool.to_string()
+            } else {
+                format!("{}: {}", tool, file)
+            }
+        })
+        .collect()
+}
+
+/// Failed tool calls plus standalone `Error` events, formatted for the summary.
+fn extract_failed_attempts(events: &[DomainEvent]) -> Vec<String> {
+    let mut out: Vec<String> = events
+        .iter()
+        .filter(|e| e.event_type == crate::event::EventType::ToolCallCompleted)
+        .filter(|e| e.payload.get("success").and_then(|v| v.as_bool()) == Some(false))
+        .map(|e| {
+            let tool = e
+                .payload
+                .get("tool_name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
+            let err = e
+                .payload
+                .get("error")
+                .and_then(|v| v.as_str())
+                .unwrap_or("failed");
+            format!("{}: {}", tool, err)
+        })
+        .collect();
+    for e in events
+        .iter()
+        .filter(|e| e.event_type == crate::event::EventType::Error)
+    {
+        let msg = e
+            .payload
+            .get("message")
+            .and_then(|v| v.as_str())
+            .unwrap_or("error");
+        out.push(msg.to_string());
+    }
+    out
+}
+
+/// `Partial` if any `Error` event OR any `ToolCallCompleted` with success=false; else `Success`.
+fn derive_outcome(events: &[DomainEvent]) -> EpisodeOutcome {
+    let has_errors = events
+        .iter()
+        .any(|e| e.event_type == crate::event::EventType::Error);
+    let has_failures = events.iter().any(|e| {
+        e.event_type == crate::event::EventType::ToolCallCompleted
+            && e.payload.get("success").and_then(|v| v.as_bool()) == Some(false)
+    });
+    if has_errors || has_failures {
+        EpisodeOutcome::Partial
+    } else {
+        EpisodeOutcome::Success
     }
 }
 

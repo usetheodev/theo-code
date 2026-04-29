@@ -216,12 +216,27 @@ pub fn build_graph(files: &[FileData]) -> (CodeGraph, BridgeStats) {
     // Index: short_name → Vec<node_id> for fuzzy resolution
     let mut name_index: HashMap<String, Vec<String>> = HashMap::new();
 
-    // --- Pass 1: Create all nodes ---
+    pass1_create_nodes(files, &mut graph, &mut stats, &mut symbol_index, &mut name_index);
+    pass2_resolve_references(files, &mut graph, &mut stats, &symbol_index, &name_index);
+    pass3_infer_tests_edges(files, &mut graph, &mut stats, &symbol_index, &name_index);
+    pass4_inheritance_edges(files, &mut graph, &mut stats, &symbol_index, &name_index);
 
+    (graph, stats)
+}
+
+/// Pass 1 — create File / Symbol / Test / Import / Type nodes plus their
+/// `Contains` and `Imports` edges, populating the resolution indexes for
+/// later passes.
+fn pass1_create_nodes(
+    files: &[FileData],
+    graph: &mut CodeGraph,
+    stats: &mut BridgeStats,
+    symbol_index: &mut HashMap<String, String>,
+    name_index: &mut HashMap<String, Vec<String>>,
+) {
     for file in files {
         let fid = file_node_id(&file.path);
 
-        // File node
         graph.add_node(Node {
             id: fid.clone(),
             node_type: NodeType::File,
@@ -236,173 +251,153 @@ pub fn build_graph(files: &[FileData]) -> (CodeGraph, BridgeStats) {
         });
         stats.files += 1;
 
-        // Symbol nodes
         for sym in &file.symbols {
-            let is_test = sym.is_test;
-
-            if is_test {
-                // Test node
-                let tid = test_node_id(&file.path, &sym.qualified_name);
-                graph.add_node(Node {
-                    id: tid.clone(),
-                    node_type: NodeType::Test,
-                    name: sym.name.clone(),
-                    file_path: Some(file.path.clone()),
-                    signature: sym.signature.clone(),
-                    kind: Some(sym.kind.into()),
-                    line_start: Some(sym.line_start),
-                    line_end: Some(sym.line_end),
-                    last_modified: file.last_modified,
-                    doc: sym.doc.clone(),
-                });
-                stats.tests += 1;
-
-                // Contains edge: file → test
-                graph.add_edge(Edge {
-                    source: fid.clone(),
-                    target: tid.clone(),
-                    edge_type: EdgeType::Contains,
-                    weight: EdgeType::Contains.default_weight(),
-                });
-                stats.edges_contains += 1;
-
-                symbol_index.insert(sym.qualified_name.clone(), tid.clone());
-                name_index.entry(sym.name.clone()).or_default().push(tid);
-            } else {
-                // Regular symbol node
-                let sid = symbol_node_id(&file.path, &sym.qualified_name);
-                graph.add_node(Node {
-                    id: sid.clone(),
-                    node_type: NodeType::Symbol,
-                    name: sym.name.clone(),
-                    file_path: Some(file.path.clone()),
-                    signature: sym.signature.clone(),
-                    kind: Some(sym.kind.into()),
-                    line_start: Some(sym.line_start),
-                    line_end: Some(sym.line_end),
-                    last_modified: file.last_modified,
-                    doc: sym.doc.clone(),
-                });
-                stats.symbols += 1;
-
-                // Contains edge: file → symbol
-                graph.add_edge(Edge {
-                    source: fid.clone(),
-                    target: sid.clone(),
-                    edge_type: EdgeType::Contains,
-                    weight: EdgeType::Contains.default_weight(),
-                });
-                stats.edges_contains += 1;
-
-                symbol_index.insert(sym.qualified_name.clone(), sid.clone());
-                name_index.entry(sym.name.clone()).or_default().push(sid);
-            }
+            create_symbol_or_test_node(file, sym, &fid, graph, stats, symbol_index, name_index);
         }
-
-        // Import nodes
         for imp in &file.imports {
-            let iid = import_node_id(&file.path, &imp.source, imp.line);
-            graph.add_node(Node {
-                id: iid.clone(),
-                node_type: NodeType::Import,
-                name: imp.source.clone(),
-                file_path: Some(file.path.clone()),
-                signature: None,
-                kind: None,
-                line_start: Some(imp.line),
-                line_end: Some(imp.line),
-                last_modified: file.last_modified,
-                doc: None,
-            });
-            stats.imports += 1;
-
-            // Imports edge: file → import
-            graph.add_edge(Edge {
-                source: fid.clone(),
-                target: iid.clone(),
-                edge_type: EdgeType::Imports,
-                weight: EdgeType::Imports.default_weight(),
-            });
-            stats.edges_imports += 1;
+            create_import_node(file, imp, &fid, graph, stats);
         }
-
-        // Type nodes (from data models)
         for dm in &file.data_models {
-            let tid = type_node_id(&file.path, &dm.name);
-            graph.add_node(Node {
-                id: tid.clone(),
-                node_type: NodeType::Type,
-                name: dm.name.clone(),
-                file_path: Some(file.path.clone()),
-                signature: None,
-                kind: None,
-                line_start: Some(dm.line_start),
-                line_end: Some(dm.line_end),
-                last_modified: file.last_modified,
-                doc: None,
-            });
-            stats.types += 1;
-
-            // Contains edge: file → type
-            graph.add_edge(Edge {
-                source: fid.clone(),
-                target: tid.clone(),
-                edge_type: EdgeType::Contains,
-                weight: EdgeType::Contains.default_weight(),
-            });
-            stats.edges_contains += 1;
-
-            // Register in symbol_index for inheritance resolution
-            symbol_index.insert(dm.name.clone(), tid.clone());
-            name_index.entry(dm.name.clone()).or_default().push(tid);
+            create_type_node(file, dm, &fid, graph, stats, symbol_index, name_index);
         }
     }
+}
 
-    // --- Pass 2: Resolve references into edges ---
+fn create_symbol_or_test_node(
+    file: &FileData,
+    sym: &SymbolData,
+    fid: &str,
+    graph: &mut CodeGraph,
+    stats: &mut BridgeStats,
+    symbol_index: &mut HashMap<String, String>,
+    name_index: &mut HashMap<String, Vec<String>>,
+) {
+    let (node_id, node_type) = if sym.is_test {
+        (test_node_id(&file.path, &sym.qualified_name), NodeType::Test)
+    } else {
+        (
+            symbol_node_id(&file.path, &sym.qualified_name),
+            NodeType::Symbol,
+        )
+    };
+    graph.add_node(Node {
+        id: node_id.clone(),
+        node_type,
+        name: sym.name.clone(),
+        file_path: Some(file.path.clone()),
+        signature: sym.signature.clone(),
+        kind: Some(sym.kind.into()),
+        line_start: Some(sym.line_start),
+        line_end: Some(sym.line_end),
+        last_modified: file.last_modified,
+        doc: sym.doc.clone(),
+    });
+    if sym.is_test {
+        stats.tests += 1;
+    } else {
+        stats.symbols += 1;
+    }
+    graph.add_edge(Edge {
+        source: fid.into(),
+        target: node_id.clone(),
+        edge_type: EdgeType::Contains,
+        weight: EdgeType::Contains.default_weight(),
+    });
+    stats.edges_contains += 1;
+    symbol_index.insert(sym.qualified_name.clone(), node_id.clone());
+    name_index.entry(sym.name.clone()).or_default().push(node_id);
+}
 
+fn create_import_node(
+    file: &FileData,
+    imp: &ImportData,
+    fid: &str,
+    graph: &mut CodeGraph,
+    stats: &mut BridgeStats,
+) {
+    let iid = import_node_id(&file.path, &imp.source, imp.line);
+    graph.add_node(Node {
+        id: iid.clone(),
+        node_type: NodeType::Import,
+        name: imp.source.clone(),
+        file_path: Some(file.path.clone()),
+        signature: None,
+        kind: None,
+        line_start: Some(imp.line),
+        line_end: Some(imp.line),
+        last_modified: file.last_modified,
+        doc: None,
+    });
+    stats.imports += 1;
+    graph.add_edge(Edge {
+        source: fid.into(),
+        target: iid,
+        edge_type: EdgeType::Imports,
+        weight: EdgeType::Imports.default_weight(),
+    });
+    stats.edges_imports += 1;
+}
+
+fn create_type_node(
+    file: &FileData,
+    dm: &DataModelData,
+    fid: &str,
+    graph: &mut CodeGraph,
+    stats: &mut BridgeStats,
+    symbol_index: &mut HashMap<String, String>,
+    name_index: &mut HashMap<String, Vec<String>>,
+) {
+    let tid = type_node_id(&file.path, &dm.name);
+    graph.add_node(Node {
+        id: tid.clone(),
+        node_type: NodeType::Type,
+        name: dm.name.clone(),
+        file_path: Some(file.path.clone()),
+        signature: None,
+        kind: None,
+        line_start: Some(dm.line_start),
+        line_end: Some(dm.line_end),
+        last_modified: file.last_modified,
+        doc: None,
+    });
+    stats.types += 1;
+    graph.add_edge(Edge {
+        source: fid.into(),
+        target: tid.clone(),
+        edge_type: EdgeType::Contains,
+        weight: EdgeType::Contains.default_weight(),
+    });
+    stats.edges_contains += 1;
+    symbol_index.insert(dm.name.clone(), tid.clone());
+    name_index.entry(dm.name.clone()).or_default().push(tid);
+}
+
+/// Pass 2 — translate every `ReferenceDto` into a graph edge
+/// (Calls / Inherits / TypeDepends / Imports), skipping self-loops.
+fn pass2_resolve_references(
+    files: &[FileData],
+    graph: &mut CodeGraph,
+    stats: &mut BridgeStats,
+    symbol_index: &HashMap<String, String>,
+    name_index: &HashMap<String, Vec<String>>,
+) {
     for file in files {
         for reference in &file.references {
             let source_id = resolve_symbol(
                 &reference.source_symbol,
                 &reference.source_file,
-                &symbol_index,
-                &name_index,
+                symbol_index,
+                name_index,
             );
-
             let target_id = match &reference.target_file {
-                Some(tf) => {
-                    resolve_symbol(&reference.target_symbol, tf, &symbol_index, &name_index)
-                }
-                None => resolve_by_name(&reference.target_symbol, &symbol_index, &name_index),
+                Some(tf) => resolve_symbol(&reference.target_symbol, tf, symbol_index, name_index),
+                None => resolve_by_name(&reference.target_symbol, symbol_index, name_index),
             };
-
             if let (Some(src), Some(tgt)) = (source_id, target_id) {
                 if src == tgt {
-                    continue; // skip self-references
+                    continue;
                 }
-
-                let (edge_type, weight) = match reference.kind {
-                    ReferenceKindDto::Call => {
-                        stats.edges_calls += 1;
-                        (EdgeType::Calls, EdgeType::Calls.default_weight())
-                    }
-                    ReferenceKindDto::Extends | ReferenceKindDto::Implements => {
-                        stats.edges_inherits += 1;
-                        (EdgeType::Inherits, EdgeType::Inherits.default_weight())
-                    }
-                    ReferenceKindDto::TypeUsage => {
-                        stats.edges_type_depends += 1;
-                        (
-                            EdgeType::TypeDepends,
-                            EdgeType::TypeDepends.default_weight(),
-                        )
-                    }
-                    ReferenceKindDto::Import => {
-                        stats.edges_imports += 1;
-                        (EdgeType::Imports, EdgeType::Imports.default_weight())
-                    }
-                };
-
+                let (edge_type, weight) = edge_for_reference(&reference.kind, stats);
                 graph.add_edge(Edge {
                     source: src,
                     target: tgt,
@@ -412,70 +407,102 @@ pub fn build_graph(files: &[FileData]) -> (CodeGraph, BridgeStats) {
             }
         }
     }
+}
 
-    // --- Pass 3: Infer Tests edges ---
-    // Test nodes that reference non-test symbols get a Tests edge.
-    // We look at test nodes' references (Calls) to non-test symbols.
+fn edge_for_reference(kind: &ReferenceKindDto, stats: &mut BridgeStats) -> (EdgeType, f64) {
+    match kind {
+        ReferenceKindDto::Call => {
+            stats.edges_calls += 1;
+            (EdgeType::Calls, EdgeType::Calls.default_weight())
+        }
+        ReferenceKindDto::Extends | ReferenceKindDto::Implements => {
+            stats.edges_inherits += 1;
+            (EdgeType::Inherits, EdgeType::Inherits.default_weight())
+        }
+        ReferenceKindDto::TypeUsage => {
+            stats.edges_type_depends += 1;
+            (
+                EdgeType::TypeDepends,
+                EdgeType::TypeDepends.default_weight(),
+            )
+        }
+        ReferenceKindDto::Import => {
+            stats.edges_imports += 1;
+            (EdgeType::Imports, EdgeType::Imports.default_weight())
+        }
+    }
+}
 
+/// Pass 3 — for every `Call` reference originating from a test symbol,
+/// add a `Tests` edge to the production target (if the target is a
+/// regular Symbol, not a Test).
+fn pass3_infer_tests_edges(
+    files: &[FileData],
+    graph: &mut CodeGraph,
+    stats: &mut BridgeStats,
+    symbol_index: &HashMap<String, String>,
+    name_index: &HashMap<String, Vec<String>>,
+) {
     for file in files {
         for sym in &file.symbols {
             if !sym.is_test {
                 continue;
             }
             let test_id = test_node_id(&file.path, &sym.qualified_name);
-
-            // Find all Call references from this test function
             for reference in &file.references {
-                if reference.source_symbol != sym.qualified_name {
+                if reference.source_symbol != sym.qualified_name
+                    || reference.kind != ReferenceKindDto::Call
+                {
                     continue;
                 }
-                if reference.kind != ReferenceKindDto::Call {
-                    continue;
-                }
-
                 let target_id = match &reference.target_file {
                     Some(tf) => {
-                        resolve_symbol(&reference.target_symbol, tf, &symbol_index, &name_index)
+                        resolve_symbol(&reference.target_symbol, tf, symbol_index, name_index)
                     }
-                    None => resolve_by_name(&reference.target_symbol, &symbol_index, &name_index),
+                    None => resolve_by_name(&reference.target_symbol, symbol_index, name_index),
                 };
-
-                if let Some(tgt) = target_id {
-                    // Only add Tests edge if target is a regular symbol (not a test)
-                    if let Some(node) = graph.get_node(&tgt)
-                        && matches!(node.node_type, NodeType::Symbol) {
-                            graph.add_edge(Edge {
-                                source: test_id.clone(),
-                                target: tgt,
-                                edge_type: EdgeType::Tests,
-                                weight: EdgeType::Tests.default_weight(),
-                            });
-                            stats.edges_tests += 1;
-                        }
+                if let Some(tgt) = target_id
+                    && let Some(node) = graph.get_node(&tgt)
+                    && matches!(node.node_type, NodeType::Symbol)
+                {
+                    graph.add_edge(Edge {
+                        source: test_id.clone(),
+                        target: tgt,
+                        edge_type: EdgeType::Tests,
+                        weight: EdgeType::Tests.default_weight(),
+                    });
+                    stats.edges_tests += 1;
                 }
             }
         }
     }
+}
 
-    // --- Pass 4: Inheritance edges from data models ---
-
+/// Pass 4 — emit `Inherits` edges from `DataModel`s to their parent
+/// types and implemented interfaces.
+fn pass4_inheritance_edges(
+    files: &[FileData],
+    graph: &mut CodeGraph,
+    stats: &mut BridgeStats,
+    symbol_index: &HashMap<String, String>,
+    name_index: &HashMap<String, Vec<String>>,
+) {
     for file in files {
         for dm in &file.data_models {
             let dm_id = type_node_id(&file.path, &dm.name);
-
             if let Some(parent) = &dm.parent_type
-                && let Some(parent_id) = resolve_by_name(parent, &symbol_index, &name_index) {
-                    graph.add_edge(Edge {
-                        source: dm_id.clone(),
-                        target: parent_id,
-                        edge_type: EdgeType::Inherits,
-                        weight: EdgeType::Inherits.default_weight(),
-                    });
-                    stats.edges_inherits += 1;
-                }
-
+                && let Some(parent_id) = resolve_by_name(parent, symbol_index, name_index)
+            {
+                graph.add_edge(Edge {
+                    source: dm_id.clone(),
+                    target: parent_id,
+                    edge_type: EdgeType::Inherits,
+                    weight: EdgeType::Inherits.default_weight(),
+                });
+                stats.edges_inherits += 1;
+            }
             for iface in &dm.implemented_interfaces {
-                if let Some(iface_id) = resolve_by_name(iface, &symbol_index, &name_index) {
+                if let Some(iface_id) = resolve_by_name(iface, symbol_index, name_index) {
                     graph.add_edge(Edge {
                         source: dm_id.clone(),
                         target: iface_id,
@@ -487,8 +514,6 @@ pub fn build_graph(files: &[FileData]) -> (CodeGraph, BridgeStats) {
             }
         }
     }
-
-    (graph, stats)
 }
 
 // ---------------------------------------------------------------------------

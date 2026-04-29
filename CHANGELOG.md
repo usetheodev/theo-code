@@ -3,6 +3,20 @@
 ## [Unreleased]
 
 ### Changed
+- **code-hygiene-5x5 T4.8 + T4.9 — complexity decomposition: theo-domain + theo-engine-graph → 0** (`docs/plans/code-hygiene-5x5-plan.md`).
+  Two crates fully drained on the complexity-allowlist:
+  - `theo-engine-graph::bridge::build_graph` (229 LOC, 4 passes) → decomposed into
+    `pass1_create_nodes`, `pass2_resolve_references`, `pass3_infer_tests_edges`,
+    `pass4_inheritance_edges` + `add_symbol_node` / `add_import_node` /
+    `add_type_node` / `edge_type_for_reference` helpers. Body now 12 LOC.
+  - `theo-domain::episode::from_events` (165 LOC) → decomposed into 7 pure
+    extractors: `window_bounds`, `extract_key_actions`, `extract_affected_files`,
+    `extract_learned_constraints`, `extract_unresolved_hypotheses`,
+    `extract_successful_steps`, `extract_failed_attempts`, `derive_outcome`.
+  - `theo-domain::task::can_transition_to` (101 LOC, exhaustive nested match)
+    → `matches!`-per-arm table (~24 LOC) with terminal-state guard.
+  Complexity total: 74 → 71. theo-domain ceiling 2 → 0; theo-engine-graph 1 → 0.
+  Validation: cargo test 5247 PASS / 0 FAIL / 24 IGNORED, clippy 0 warnings.
 - **code-hygiene-5x5 T6.2 — maturity score updated 3.2 → 4.1 / 5** (`docs/audit/maturity-gap-analysis-2026-04-29.md`).
   Authored a fresh maturity gap analysis (replaces 2026-04-27 baseline). Largest delta:
   "Dívida histórica ativa" 2.5 → 5 / 5 (158 / 158 allowlist entries mapped via

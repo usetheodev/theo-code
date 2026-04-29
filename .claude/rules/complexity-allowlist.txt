@@ -24,5 +24,5 @@ theo-infra-llm|10|provider catalogs + format converters host the longest functio
 theo-agent-runtime|10|run_engine, subagent, compaction_stages, pilot — all on the size-allowlist with sunset 2026-07-23.
 theo-application|9|graph_context_service.rs + use_cases/pipeline.rs; sunset 2026-07-23.
 theo-tooling|7|dap/lsp/browser/plan tool families. Refreshed 2026-04-29 (T4.1 of code-hygiene-5x5).
-theo-domain|2|plan.rs apply_patch + a serde helper; harmless but worth refactoring.
-theo-engine-graph|1|cluster.rs label-propagation loop.
+theo-domain|0|RESOLVED 2026-04-29 (T4.8 of code-hygiene-5x5): episode.rs::from_events (165 LOC) decomposed into 7 extractors (window_bounds, extract_key_actions, extract_affected_files, extract_learned_constraints, extract_unresolved_hypotheses, extract_successful_steps, extract_failed_attempts, derive_outcome). task.rs::can_transition_to (101 LOC) collapsed to matches! table (28 LOC).
+theo-engine-graph|0|RESOLVED 2026-04-29 (T4.9 of code-hygiene-5x5): bridge.rs::build_graph (283 LOC) decomposed into pass1/pass2/pass3/pass4 helpers + edge_for_reference + per-node-type creators. All 11 bridge tests pass.
