@@ -15,136 +15,113 @@
     use theo_engine_graph::cluster::Community;
     use theo_engine_graph::model::{CodeGraph, Edge, EdgeType, Node, NodeType, SymbolKind};
 
+    fn gt_file_node(id: &str, name: &str, path: &str, last_modified: f64) -> Node {
+        Node {
+            id: id.into(),
+            name: name.into(),
+            node_type: NodeType::File,
+            file_path: Some(path.into()),
+            signature: None,
+            doc: None,
+            kind: None,
+            line_start: None,
+            line_end: None,
+            last_modified,
+        }
+    }
+
+    fn gt_symbol_node(
+        id: &str,
+        name: &str,
+        path: &str,
+        signature: &str,
+        doc: Option<&str>,
+        line_range: (usize, usize),
+        last_modified: f64,
+    ) -> Node {
+        Node {
+            id: id.into(),
+            name: name.into(),
+            node_type: NodeType::Symbol,
+            file_path: Some(path.into()),
+            signature: Some(signature.into()),
+            doc: doc.map(String::from),
+            kind: Some(SymbolKind::Function),
+            line_start: Some(line_range.0),
+            line_end: Some(line_range.1),
+            last_modified,
+        }
+    }
+
+    fn gt_edge(source: &str, target: &str, et: EdgeType) -> Edge {
+        Edge { source: source.into(), target: target.into(), edge_type: et, weight: 1.0 }
+    }
+
+    fn gt_community(id: &str, name: &str, node_ids: Vec<&str>) -> Community {
+        Community {
+            id: id.into(),
+            name: name.into(),
+            node_ids: node_ids.into_iter().map(String::from).collect(),
+            level: 0,
+            parent_id: None,
+            version: 0,
+        }
+    }
+
+    fn add_auth_community_nodes(graph: &mut CodeGraph) {
+        graph.add_node(gt_file_node("file:auth.rs", "auth.rs", "src/auth.rs", 100.0));
+        graph.add_node(gt_symbol_node(
+            "sym:verify",
+            "verify_token",
+            "src/auth.rs",
+            "pub fn verify_token(t: &str) -> bool",
+            Some("Verify JWT token"),
+            (10, 30),
+            100.0,
+        ));
+        graph.add_node(gt_file_node(
+            "file:auth_utils.rs",
+            "auth_utils.rs",
+            "src/auth_utils.rs",
+            100.0,
+        ));
+        graph.add_edge(gt_edge("file:auth.rs", "sym:verify", EdgeType::Contains));
+    }
+
+    fn add_handler_community_nodes(graph: &mut CodeGraph) {
+        graph.add_node(gt_file_node("file:handler.rs", "handler.rs", "src/handler.rs", 200.0));
+        graph.add_node(gt_symbol_node(
+            "sym:handle",
+            "handle_request",
+            "src/handler.rs",
+            "pub fn handle_request(req: Request) -> Response",
+            None,
+            (5, 20),
+            200.0,
+        ));
+        graph.add_node(gt_file_node(
+            "file:middleware.rs",
+            "middleware.rs",
+            "src/middleware.rs",
+            200.0,
+        ));
+        graph.add_edge(gt_edge("file:handler.rs", "sym:handle", EdgeType::Contains));
+    }
+
     fn test_graph() -> (CodeGraph, Vec<Community>) {
         let mut graph = CodeGraph::new();
-
-        // File: auth.rs
-        graph.add_node(Node {
-            id: "file:auth.rs".into(),
-            name: "auth.rs".into(),
-            node_type: NodeType::File,
-            file_path: Some("src/auth.rs".into()),
-            signature: None,
-            doc: None,
-            kind: None,
-            line_start: None,
-            line_end: None,
-            last_modified: 100.0,
-        });
-        graph.add_node(Node {
-            id: "sym:verify".into(),
-            name: "verify_token".into(),
-            node_type: NodeType::Symbol,
-            file_path: Some("src/auth.rs".into()),
-            signature: Some("pub fn verify_token(t: &str) -> bool".into()),
-            doc: Some("Verify JWT token".into()),
-            kind: Some(SymbolKind::Function),
-            line_start: Some(10),
-            line_end: Some(30),
-            last_modified: 100.0,
-        });
-        graph.add_edge(Edge {
-            source: "file:auth.rs".into(),
-            target: "sym:verify".into(),
-            edge_type: EdgeType::Contains,
-            weight: 1.0,
-        });
-
-        // File: handler.rs (different community)
-        graph.add_node(Node {
-            id: "file:handler.rs".into(),
-            name: "handler.rs".into(),
-            node_type: NodeType::File,
-            file_path: Some("src/handler.rs".into()),
-            signature: None,
-            doc: None,
-            kind: None,
-            line_start: None,
-            line_end: None,
-            last_modified: 200.0,
-        });
-        graph.add_node(Node {
-            id: "sym:handle".into(),
-            name: "handle_request".into(),
-            node_type: NodeType::Symbol,
-            file_path: Some("src/handler.rs".into()),
-            signature: Some("pub fn handle_request(req: Request) -> Response".into()),
-            doc: None,
-            kind: Some(SymbolKind::Function),
-            line_start: Some(5),
-            line_end: Some(20),
-            last_modified: 200.0,
-        });
-        graph.add_edge(Edge {
-            source: "file:handler.rs".into(),
-            target: "sym:handle".into(),
-            edge_type: EdgeType::Contains,
-            weight: 1.0,
-        });
-
-        // Second file in auth community
-        graph.add_node(Node {
-            id: "file:auth_utils.rs".into(),
-            name: "auth_utils.rs".into(),
-            node_type: NodeType::File,
-            file_path: Some("src/auth_utils.rs".into()),
-            signature: None,
-            doc: None,
-            kind: None,
-            line_start: None,
-            line_end: None,
-            last_modified: 100.0,
-        });
-
-        // handler calls verify (cross-community)
-        graph.add_edge(Edge {
-            source: "sym:handle".into(),
-            target: "sym:verify".into(),
-            edge_type: EdgeType::Calls,
-            weight: 1.0,
-        });
-
-        // Second file in handler community
-        graph.add_node(Node {
-            id: "file:middleware.rs".into(),
-            name: "middleware.rs".into(),
-            node_type: NodeType::File,
-            file_path: Some("src/middleware.rs".into()),
-            signature: None,
-            doc: None,
-            kind: None,
-            line_start: None,
-            line_end: None,
-            last_modified: 200.0,
-        });
-
+        add_auth_community_nodes(&mut graph);
+        add_handler_community_nodes(&mut graph);
+        // Cross-community call: handler → verify.
+        graph.add_edge(gt_edge("sym:handle", "sym:verify", EdgeType::Calls));
         let communities = vec![
-            Community {
-                id: "c1".into(),
-                name: "auth".into(),
-                node_ids: vec![
-                    "file:auth.rs".into(),
-                    "sym:verify".into(),
-                    "file:auth_utils.rs".into(),
-                ],
-                level: 0,
-                parent_id: None,
-                version: 0,
-            },
-            Community {
-                id: "c2".into(),
-                name: "handler".into(),
-                node_ids: vec![
-                    "file:handler.rs".into(),
-                    "sym:handle".into(),
-                    "file:middleware.rs".into(),
-                ],
-                level: 0,
-                parent_id: None,
-                version: 0,
-            },
+            gt_community("c1", "auth", vec!["file:auth.rs", "sym:verify", "file:auth_utils.rs"]),
+            gt_community(
+                "c2",
+                "handler",
+                vec!["file:handler.rs", "sym:handle", "file:middleware.rs"],
+            ),
         ];
-
         (graph, communities)
     }
 
@@ -270,126 +247,37 @@
         assert_eq!(stats.propagated, 0);
     }
 
+    /// Same shape as `test_graph()` but the auth.rs file + its symbol
+    /// have `last_modified = 999.0` (vs 100.0 in the baseline) so the
+    /// incremental generator detects the change.
     fn test_graph_modified() -> (CodeGraph, Vec<Community>) {
-        // Same as test_graph but auth.rs has different mtime
         let mut graph = CodeGraph::new();
-        graph.add_node(Node {
-            id: "file:auth.rs".into(),
-            name: "auth.rs".into(),
-            node_type: NodeType::File,
-            file_path: Some("src/auth.rs".into()),
-            signature: None,
-            doc: None,
-            kind: None,
-            line_start: None,
-            line_end: None,
-            last_modified: 999.0, // CHANGED
-        });
-        graph.add_node(Node {
-            id: "sym:verify".into(),
-            name: "verify_token".into(),
-            node_type: NodeType::Symbol,
-            file_path: Some("src/auth.rs".into()),
-            signature: Some("pub fn verify_token(t: &str) -> bool".into()),
-            doc: Some("Verify JWT token".into()),
-            kind: Some(SymbolKind::Function),
-            line_start: Some(10),
-            line_end: Some(30),
-            last_modified: 999.0,
-        });
-        graph.add_edge(Edge {
-            source: "file:auth.rs".into(),
-            target: "sym:verify".into(),
-            edge_type: EdgeType::Contains,
-            weight: 1.0,
-        });
-        graph.add_node(Node {
-            id: "file:handler.rs".into(),
-            name: "handler.rs".into(),
-            node_type: NodeType::File,
-            file_path: Some("src/handler.rs".into()),
-            signature: None,
-            doc: None,
-            kind: None,
-            line_start: None,
-            line_end: None,
-            last_modified: 200.0,
-        });
-        graph.add_node(Node {
-            id: "sym:handle".into(),
-            name: "handle_request".into(),
-            node_type: NodeType::Symbol,
-            file_path: Some("src/handler.rs".into()),
-            signature: Some("pub fn handle_request(req: Request) -> Response".into()),
-            doc: None,
-            kind: Some(SymbolKind::Function),
-            line_start: Some(5),
-            line_end: Some(20),
-            last_modified: 200.0,
-        });
-        graph.add_edge(Edge {
-            source: "file:handler.rs".into(),
-            target: "sym:handle".into(),
-            edge_type: EdgeType::Contains,
-            weight: 1.0,
-        });
-        graph.add_edge(Edge {
-            source: "sym:handle".into(),
-            target: "sym:verify".into(),
-            edge_type: EdgeType::Calls,
-            weight: 1.0,
-        });
-        // Second files (same as test_graph)
-        graph.add_node(Node {
-            id: "file:auth_utils.rs".into(),
-            name: "auth_utils.rs".into(),
-            node_type: NodeType::File,
-            file_path: Some("src/auth_utils.rs".into()),
-            signature: None,
-            doc: None,
-            kind: None,
-            line_start: None,
-            line_end: None,
-            last_modified: 100.0,
-        });
-        graph.add_node(Node {
-            id: "file:middleware.rs".into(),
-            name: "middleware.rs".into(),
-            node_type: NodeType::File,
-            file_path: Some("src/middleware.rs".into()),
-            signature: None,
-            doc: None,
-            kind: None,
-            line_start: None,
-            line_end: None,
-            last_modified: 200.0,
-        });
-
+        graph.add_node(gt_file_node("file:auth.rs", "auth.rs", "src/auth.rs", 999.0));
+        graph.add_node(gt_symbol_node(
+            "sym:verify",
+            "verify_token",
+            "src/auth.rs",
+            "pub fn verify_token(t: &str) -> bool",
+            Some("Verify JWT token"),
+            (10, 30),
+            999.0,
+        ));
+        graph.add_node(gt_file_node(
+            "file:auth_utils.rs",
+            "auth_utils.rs",
+            "src/auth_utils.rs",
+            100.0,
+        ));
+        graph.add_edge(gt_edge("file:auth.rs", "sym:verify", EdgeType::Contains));
+        add_handler_community_nodes(&mut graph);
+        graph.add_edge(gt_edge("sym:handle", "sym:verify", EdgeType::Calls));
         let communities = vec![
-            Community {
-                id: "c1".into(),
-                name: "auth".into(),
-                node_ids: vec![
-                    "file:auth.rs".into(),
-                    "sym:verify".into(),
-                    "file:auth_utils.rs".into(),
-                ],
-                level: 0,
-                parent_id: None,
-                version: 0,
-            },
-            Community {
-                id: "c2".into(),
-                name: "handler".into(),
-                node_ids: vec![
-                    "file:handler.rs".into(),
-                    "sym:handle".into(),
-                    "file:middleware.rs".into(),
-                ],
-                level: 0,
-                parent_id: None,
-                version: 0,
-            },
+            gt_community("c1", "auth", vec!["file:auth.rs", "sym:verify", "file:auth_utils.rs"]),
+            gt_community(
+                "c2",
+                "handler",
+                vec!["file:handler.rs", "sym:handle", "file:middleware.rs"],
+            ),
         ];
         (graph, communities)
     }
@@ -423,103 +311,70 @@
         assert_eq!(result.docs.len(), 2, "should still have all pages");
     }
 
+    fn empty_test_coverage() -> TestCoverage {
+        TestCoverage { tested: 0, total: 0, percentage: 0.0, untested: vec![] }
+    }
+
+    fn make_topology_doc(
+        slug: &str,
+        title: &str,
+        community_id: &str,
+        file_count: usize,
+        symbol_count: usize,
+        deps: Vec<DepEntry>,
+    ) -> WikiDoc {
+        WikiDoc {
+            slug: slug.into(),
+            title: title.into(),
+            community_id: community_id.into(),
+            file_count,
+            symbol_count,
+            primary_language: "rs".into(),
+            files: vec![],
+            entry_points: vec![],
+            public_api: vec![],
+            dependencies: deps,
+            call_flow: vec![],
+            test_coverage: empty_test_coverage(),
+            source_refs: vec![],
+            summary: String::new(),
+            tags: vec![],
+            crate_description: None,
+            module_doc: None,
+            generated_at: "0".into(),
+            enriched: false,
+        }
+    }
+
+    fn dep(target_slug: &str, target_name: &str, edge_type: &str) -> DepEntry {
+        DepEntry {
+            target_slug: target_slug.into(),
+            target_name: target_name.into(),
+            edge_type: edge_type.into(),
+        }
+    }
+
     #[test]
     fn topology_concept_detection_with_cross_deps() {
-        // Build docs with enough cross-deps to form topology clusters
-        let doc_a = WikiDoc {
-            slug: "mod-a".into(),
-            title: "Module A".into(),
-            community_id: "c1".into(),
-            file_count: 5,
-            symbol_count: 10,
-            primary_language: "rs".into(),
-            files: vec![],
-            entry_points: vec![],
-            public_api: vec![],
-            dependencies: vec![
-                DepEntry {
-                    target_slug: "mod-b".into(),
-                    target_name: "B".into(),
-                    edge_type: "Calls".into(),
-                },
-                DepEntry {
-                    target_slug: "mod-b".into(),
-                    target_name: "B".into(),
-                    edge_type: "Imports".into(),
-                },
-            ],
-            call_flow: vec![],
-            test_coverage: TestCoverage {
-                tested: 0,
-                total: 0,
-                percentage: 0.0,
-                untested: vec![],
-            },
-            source_refs: vec![],
-            summary: String::new(),
-            tags: vec![],
-            crate_description: None,
-            module_doc: None,
-            generated_at: "0".into(),
-            enriched: false,
-        };
-        let doc_b = WikiDoc {
-            slug: "mod-b".into(),
-            title: "Module B".into(),
-            community_id: "c2".into(),
-            file_count: 5,
-            symbol_count: 10,
-            primary_language: "rs".into(),
-            files: vec![],
-            entry_points: vec![],
-            public_api: vec![],
-            dependencies: vec![DepEntry {
-                target_slug: "mod-a".into(),
-                target_name: "A".into(),
-                edge_type: "Calls".into(),
-            }],
-            call_flow: vec![],
-            test_coverage: TestCoverage {
-                tested: 0,
-                total: 0,
-                percentage: 0.0,
-                untested: vec![],
-            },
-            source_refs: vec![],
-            summary: String::new(),
-            tags: vec![],
-            crate_description: None,
-            module_doc: None,
-            generated_at: "0".into(),
-            enriched: false,
-        };
-        // C and D are isolated
-        let doc_c = WikiDoc {
-            slug: "other-c".into(),
-            title: "Other C".into(),
-            community_id: "c3".into(),
-            file_count: 3,
-            symbol_count: 5,
-            primary_language: "rs".into(),
-            files: vec![],
-            entry_points: vec![],
-            public_api: vec![],
-            dependencies: vec![],
-            call_flow: vec![],
-            test_coverage: TestCoverage {
-                tested: 0,
-                total: 0,
-                percentage: 0.0,
-                untested: vec![],
-            },
-            source_refs: vec![],
-            summary: String::new(),
-            tags: vec![],
-            crate_description: None,
-            module_doc: None,
-            generated_at: "0".into(),
-            enriched: false,
-        };
+        // A → B (Calls + Imports), B → A (Calls): 3 mutual edges form a
+        // topology cluster. C is isolated (no dependencies).
+        let doc_a = make_topology_doc(
+            "mod-a",
+            "Module A",
+            "c1",
+            5,
+            10,
+            vec![dep("mod-b", "B", "Calls"), dep("mod-b", "B", "Imports")],
+        );
+        let doc_b = make_topology_doc(
+            "mod-b",
+            "Module B",
+            "c2",
+            5,
+            10,
+            vec![dep("mod-a", "A", "Calls")],
+        );
+        let doc_c = make_topology_doc("other-c", "Other C", "c3", 3, 5, vec![]);
 
         let docs = vec![doc_a, doc_b, doc_c];
         let concepts = detect_concepts(&docs);

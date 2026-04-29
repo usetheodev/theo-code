@@ -24,6 +24,13 @@ struct GoldenCase {
 }
 
 fn golden_cases() -> Vec<GoldenCase> {
+    let mut all = Vec::new();
+    all.extend(golden_cases_1_to_5());
+    all.extend(golden_cases_6_to_10());
+    all
+}
+
+fn golden_cases_1_to_5() -> Vec<GoldenCase> {
     vec![
         // Case 1: Perfect hit — top result is expected
         GoldenCase {
@@ -99,6 +106,11 @@ fn golden_cases() -> Vec<GoldenCase> {
                 target: "crates/theo-domain/src/agent_run.rs".into(),
             }],
         },
+    ]
+}
+
+fn golden_cases_6_to_10() -> Vec<GoldenCase> {
+    vec![
         // Case 6: Assembler query
         GoldenCase {
             name: "context_assembler",

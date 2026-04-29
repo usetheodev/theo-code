@@ -3,6 +3,57 @@
 ## [Unreleased]
 
 ### Changed
+- **code-hygiene-5x5 T4 RESOLVED — workspace complexity ceiling 0** (`docs/plans/code-hygiene-5x5-plan.md`).
+  Phase 4 of the plan now reaches the absolute zero state: **0 too_many_lines violations
+  across the entire workspace** (74 → 0, -100%). Every Cargo crate has `ceiling=0`. The
+  last holdout, `theo-engine-retrieval` (14 fns in test fixtures + benchmark suites),
+  fully drained in this iteration:
+
+  - **`src/experimental/compress.rs::build_test_graph`** (130 LOC) → `file_node` +
+    `symbol_node` + `add_test_graph_nodes` + `add_test_graph_edges`.
+  - **`src/assembly/assembly_tests.rs`** (2 fns, 130+112 LOC): `setup_code_test` and
+    `test_assemble_with_code_large_file_truncation` decomposed via shared `at_file_node`
+    + `at_symbol_node` + `at_edge` + `at_empty_summary` + `write_*_sources` +
+    `build_*_graph` helpers + `setup_big_module_test`.
+  - **`src/wiki/generator/generator_tests.rs`** (3 fns, 118+118+103 LOC): `test_graph`,
+    `test_graph_modified`, `topology_concept_detection_with_cross_deps` decomposed via
+    `gt_file_node` / `gt_symbol_node` / `gt_edge` / `gt_community` factories +
+    `add_auth_community_nodes` / `add_handler_community_nodes` + `make_topology_doc` +
+    `dep` + `empty_test_coverage`.
+  - **`tests/eval_golden.rs::golden_cases`** (126 LOC) → `golden_cases_1_to_5` +
+    `golden_cases_6_to_10`.
+  - **`tests/eval_suite.rs::ground_truth`** (180 LOC) → 4 per-section helpers
+    (`symbol_exact`, `module`, `semantic`, `cross_cutting`).
+  - **`tests/eval_suite.rs::eval_graphctx_retrieval_quality`** (165 LOC) → `maybe_merge_scip_edges`
+    + `debug_bm25_index_quality` + `run_query_evaluations` + `debug_failing_query` +
+    `print_query_row` + `EvalTotals` / `CategoryScores` types.
+  - **`tests/eval_suite.rs::eval_tantivy_vs_custom`** (110 LOC) → `print_tvc_table_header` +
+    `run_tantivy_vs_custom_loop` + `print_tantivy_vs_custom_summary` + `TvcTotals` struct
+    (all `#[cfg(feature = "tantivy-backend")]`).
+  - **`tests/benchmark_suite.rs::emit_report`** (122 LOC) → `print_report_header` +
+    `print_overall_metrics` + `print_sota_gates` + `print_breakdown_by_category` +
+    `print_breakdown_by_difficulty` + `print_query_failures` + `print_one_failure` +
+    `group_by` (generic helper).
+  - **`tests/benchmark_suite.rs::wiki_knowledge_loop`** (154 LOC) → 6 step-helpers
+    (`kl_step1_initial_lookup` → `kl_step6_lint`) + `kl_print_summary`.
+  - **`tests/benchmark_suite.rs::wiki_eval`** (372 LOC — the largest in the workspace)
+    → `wiki_eval_load_data` + `wiki_eval_run_floor_sweep` + `wiki_eval_count_floor_pass` +
+    `wiki_eval_match_expected` + `wiki_eval_run_category_breakdown` +
+    `wiki_eval_print_per_query_decisions` + `wiki_eval_export_traces` +
+    `wiki_eval_export_summary` + `wiki_eval_category_pass` + `WikiEvalQuery` /
+    `WikiEvalData` / `FloorPassCounts` structs + `WIKI_EVAL_CATEGORIES` module-const.
+  - **`tests/benchmark_suite.rs::wiki_ab_benchmark`** (143 LOC) → `AbTotals` struct +
+    `ab_run_one_query` + `ab_extract_files_from_wiki` + `print_ab_results` +
+    `print_wiki_health`.
+
+  Allowlist: `theo-engine-retrieval` 14 → 0. Plan-specific cumulative: **74 → 0
+  workspace-wide** (target met).
+  Validated:
+  - `cargo test --workspace --exclude theo-code-desktop --no-fail-fast` →
+    5247 PASS / 0 FAIL / 24 IGNORED across 69 suites.
+  - `cargo clippy --workspace --all-targets -- -D warnings` → 0 warnings.
+  - `bash scripts/check-complexity.sh` → **total 0 / every crate ceiling=0**.
+
 - **code-hygiene-5x5 T4 — theo-agent-runtime + theo-application RESOLVED to ceiling 0** (`docs/plans/code-hygiene-5x5-plan.md`).
   Drained the last 4 fns to drive these two crates from `ceiling=N` to `ceiling=0`:
   - **`crates/theo-agent-runtime/tests/observability_e2e.rs::e2e_observability_pipeline_full_flow`**

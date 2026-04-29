@@ -103,25 +103,32 @@ fn extract_files_from_scores(scores: &HashMap<String, f64>) -> Vec<String> {
 fn emit_report(repo: &RepoInfo, results: &[QueryResult], pipeline_name: &str) {
     let all_metrics: Vec<RetrievalMetrics> = results.iter().map(|r| r.metrics.clone()).collect();
     let overall = RetrievalMetrics::average(&all_metrics);
+    let by_category = group_by(results, |r| r.category.as_str());
+    let by_difficulty = group_by(results, |r| r.difficulty.as_str());
+    print_report_header(repo, results, pipeline_name);
+    print_overall_metrics(&overall);
+    print_sota_gates(&overall);
+    print_breakdown_by_category(&by_category);
+    print_breakdown_by_difficulty(&by_difficulty);
+    print_query_failures(results);
+    eprintln!("\n{}", "=".repeat(100));
+}
 
-    // Per-category aggregation
-    let mut by_category: HashMap<&str, Vec<RetrievalMetrics>> = HashMap::new();
+fn group_by<'a, F>(
+    results: &'a [QueryResult],
+    key: F,
+) -> HashMap<&'a str, Vec<RetrievalMetrics>>
+where
+    F: Fn(&'a QueryResult) -> &'a str,
+{
+    let mut grouped: HashMap<&'a str, Vec<RetrievalMetrics>> = HashMap::new();
     for r in results {
-        by_category
-            .entry(r.category.as_str())
-            .or_default()
-            .push(r.metrics.clone());
+        grouped.entry(key(r)).or_default().push(r.metrics.clone());
     }
+    grouped
+}
 
-    // Per-difficulty aggregation
-    let mut by_difficulty: HashMap<&str, Vec<RetrievalMetrics>> = HashMap::new();
-    for r in results {
-        by_difficulty
-            .entry(r.difficulty.as_str())
-            .or_default()
-            .push(r.metrics.clone());
-    }
-
+fn print_report_header(repo: &RepoInfo, results: &[QueryResult], pipeline_name: &str) {
     eprintln!("\n{}", "=".repeat(100));
     eprintln!("GRAPHCTX PROFESSIONAL BENCHMARK REPORT");
     eprintln!("{}", "=".repeat(100));
@@ -129,33 +136,20 @@ fn emit_report(repo: &RepoInfo, results: &[QueryResult], pipeline_name: &str) {
     eprintln!("Repo:      {} ({})", repo.name, repo.language);
     eprintln!("Queries:   {}", results.len());
     eprintln!();
+}
 
-    // Overall metrics
+fn print_overall_metrics(overall: &RetrievalMetrics) {
     eprintln!("OVERALL METRICS:");
-    eprintln!(
-        "  Recall@5  = {:.3}    Recall@10 = {:.3}",
-        overall.recall_at_5, overall.recall_at_10
-    );
-    eprintln!(
-        "  P@5       = {:.3}    MRR       = {:.3}",
-        overall.precision_at_5, overall.mrr
-    );
-    eprintln!(
-        "  Hit@5     = {:.3}    Hit@10    = {:.3}",
-        overall.hit_rate_at_5, overall.hit_rate_at_10
-    );
-    eprintln!(
-        "  nDCG@5    = {:.3}    nDCG@10   = {:.3}",
-        overall.ndcg_at_5, overall.ndcg_at_10
-    );
+    eprintln!("  Recall@5  = {:.3}    Recall@10 = {:.3}", overall.recall_at_5, overall.recall_at_10);
+    eprintln!("  P@5       = {:.3}    MRR       = {:.3}", overall.precision_at_5, overall.mrr);
+    eprintln!("  Hit@5     = {:.3}    Hit@10    = {:.3}", overall.hit_rate_at_5, overall.hit_rate_at_10);
+    eprintln!("  nDCG@5    = {:.3}    nDCG@10   = {:.3}", overall.ndcg_at_5, overall.ndcg_at_10);
     eprintln!("  MAP       = {:.3}", overall.average_precision);
-    eprintln!(
-        "  DepCov    = {:.3}    MissDep   = {:.3}",
-        overall.dep_coverage, overall.missing_dep_rate
-    );
+    eprintln!("  DepCov    = {:.3}    MissDep   = {:.3}", overall.dep_coverage, overall.missing_dep_rate);
     eprintln!();
+}
 
-    // Gates
+fn print_sota_gates(overall: &RetrievalMetrics) {
     eprintln!("GATES (SOTA targets):");
     let gates = [
         ("Recall@5", overall.recall_at_5, 0.92, true),
@@ -166,24 +160,18 @@ fn emit_report(repo: &RepoInfo, results: &[QueryResult], pipeline_name: &str) {
         ("MissDep", overall.missing_dep_rate, 0.10, false), // lower is better
     ];
     for (name, actual, target, higher_better) in &gates {
-        let pass = if *higher_better {
-            *actual >= *target
-        } else {
-            *actual <= *target
-        };
+        let pass = if *higher_better { *actual >= *target } else { *actual <= *target };
         eprintln!(
             "  {:<12} {:.3} / {:.3}  {}",
-            name,
-            actual,
-            target,
-            if pass { "PASS" } else { "FAIL" }
+            name, actual, target, if pass { "PASS" } else { "FAIL" }
         );
     }
     eprintln!();
+}
 
-    // By category
+fn print_breakdown_by_category(by_category: &HashMap<&str, Vec<RetrievalMetrics>>) {
     eprintln!("BY CATEGORY:");
-    for (cat, cat_metrics) in &by_category {
+    for (cat, cat_metrics) in by_category {
         let avg = RetrievalMetrics::average(cat_metrics);
         eprintln!(
             "  {:<15} R@5={:.3}  R@10={:.3}  MRR={:.3}  nDCG@5={:.3}  DepCov={:.3}",
@@ -191,54 +179,54 @@ fn emit_report(repo: &RepoInfo, results: &[QueryResult], pipeline_name: &str) {
         );
     }
     eprintln!();
+}
 
-    // By difficulty
+fn print_breakdown_by_difficulty(by_difficulty: &HashMap<&str, Vec<RetrievalMetrics>>) {
     eprintln!("BY DIFFICULTY:");
-    for (diff, diff_metrics) in &by_difficulty {
+    for (diff, diff_metrics) in by_difficulty {
         let avg = RetrievalMetrics::average(diff_metrics);
         eprintln!(
             "  {:<10} R@5={:.3}  MRR={:.3}  nDCG@5={:.3}  ({} queries)",
-            diff,
-            avg.recall_at_5,
-            avg.mrr,
-            avg.ndcg_at_5,
-            diff_metrics.len()
+            diff, avg.recall_at_5, avg.mrr, avg.ndcg_at_5, diff_metrics.len()
         );
     }
     eprintln!();
+}
 
-    // Per-query detail (failures)
+fn print_query_failures(results: &[QueryResult]) {
     eprintln!("FAILURES (P@5 < 0.40):");
     for r in results {
         if r.metrics.precision_at_5 < 0.40 {
-            eprintln!(
-                "  {} '{}' P@5={:.2} R@5={:.2} MRR={:.2} DepCov={:.2}",
-                r.id,
-                r.query,
-                r.metrics.precision_at_5,
-                r.metrics.recall_at_5,
-                r.metrics.mrr,
-                r.metrics.dep_coverage
-            );
-            eprintln!(
-                "    Expected: {:?}",
-                r.expected_files
-                    .iter()
-                    .map(|f| f.split('/').next_back().unwrap_or(f))
-                    .collect::<Vec<_>>()
-            );
-            eprintln!(
-                "    Got top5: {:?}",
-                r.returned_top_10
-                    .iter()
-                    .take(5)
-                    .map(|f| f.split('/').next_back().unwrap_or(f))
-                    .collect::<Vec<_>>()
-            );
+            print_one_failure(r);
         }
     }
+}
 
-    eprintln!("\n{}", "=".repeat(100));
+fn print_one_failure(r: &QueryResult) {
+    eprintln!(
+        "  {} '{}' P@5={:.2} R@5={:.2} MRR={:.2} DepCov={:.2}",
+        r.id,
+        r.query,
+        r.metrics.precision_at_5,
+        r.metrics.recall_at_5,
+        r.metrics.mrr,
+        r.metrics.dep_coverage
+    );
+    eprintln!(
+        "    Expected: {:?}",
+        r.expected_files
+            .iter()
+            .map(|f| f.split('/').next_back().unwrap_or(f))
+            .collect::<Vec<_>>()
+    );
+    eprintln!(
+        "    Got top5: {:?}",
+        r.returned_top_10
+            .iter()
+            .take(5)
+            .map(|f| f.split('/').next_back().unwrap_or(f))
+            .collect::<Vec<_>>()
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -834,43 +822,48 @@ fn wiki_e2e() {
 #[test]
 #[ignore]
 fn wiki_knowledge_loop() {
-    use theo_engine_retrieval::wiki;
-
     let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
         .parent()
         .unwrap();
-
     let wiki_dir = workspace_root.join(".theo/wiki");
     if !wiki_dir.exists() {
         eprintln!("Wiki not found. Run wiki_e2e first.");
         return;
     }
-
     eprintln!("══════════════════════════════════════════════════");
     eprintln!(" KNOWLEDGE COMPOUNDING LOOP — LIVE DEMO");
     eprintln!("══════════════════════════════════════════════════\n");
-
-    // ─── STEP 1: Query that should MISS (no cache yet) ───
     let query = "authentication oauth device flow token";
-    eprintln!("STEP 1: Query -> Wiki Lookup");
-    eprintln!("  Query: \"{}\"", query);
-
-    // Clean cache for fresh demo
     let cache_dir = wiki_dir.join("cache");
     let _ = std::fs::remove_dir_all(&cache_dir);
+    let (t1, results1) = kl_step1_initial_lookup(&wiki_dir, query);
+    let slug = "authentication-oauth-device-flow";
+    kl_step2_write_back(workspace_root, &cache_dir, slug, query);
+    let (t3, results2) = kl_step3_rehit(&wiki_dir, query, slug);
+    let (t5, results3) = kl_step4_related_query(&wiki_dir, slug);
+    kl_step5_unrelated_query(&wiki_dir, slug);
+    kl_step6_lint(&wiki_dir, &cache_dir);
+    kl_print_summary(t1, results1.len(), t3, results2.len(), t5, results3.len());
+}
 
+fn kl_step1_initial_lookup(
+    wiki_dir: &std::path::Path,
+    query: &str,
+) -> (std::time::Duration, Vec<theo_engine_retrieval::wiki::lookup::WikiLookupResult>) {
+    use theo_engine_retrieval::wiki;
+    eprintln!("STEP 1: Query -> Wiki Lookup");
+    eprintln!("  Query: \"{}\"", query);
     let t0 = std::time::Instant::now();
-    let results1 = wiki::lookup::lookup(&wiki_dir, query, 3);
-    let t1 = t0.elapsed();
-
-    eprintln!("  Latency: {:.2}ms", t1.as_secs_f64() * 1000.0);
-    if results1.is_empty() {
+    let results = wiki::lookup::lookup(wiki_dir, query, 3);
+    let t = t0.elapsed();
+    eprintln!("  Latency: {:.2}ms", t.as_secs_f64() * 1000.0);
+    if results.is_empty() {
         eprintln!("  Result: MISS — no relevant pages found");
     } else {
-        eprintln!("  Result: {} hits from module pages:", results1.len());
-        for r in &results1 {
+        eprintln!("  Result: {} hits from module pages:", results.len());
+        for r in &results {
             eprintln!(
                 "    - {} (conf: {:.0}%, ~{} tokens)",
                 r.title,
@@ -879,21 +872,24 @@ fn wiki_knowledge_loop() {
             );
         }
     }
+    (t, results)
+}
 
-    // ─── STEP 2: Simulate RRF result → Write-back ───
+fn kl_step2_write_back(
+    workspace_root: &std::path::Path,
+    cache_dir: &std::path::Path,
+    slug: &str,
+    query: &str,
+) {
+    use theo_engine_retrieval::wiki;
     eprintln!("\nSTEP 2: RRF Pipeline -> Write-back to wiki cache");
-
-    std::fs::create_dir_all(&cache_dir).unwrap();
-    let slug = "authentication-oauth-device-flow";
-    let cache_path = cache_dir.join(format!("{}.md", slug));
-
+    std::fs::create_dir_all(cache_dir).unwrap();
     let manifest = wiki::persistence::load_manifest(workspace_root);
     let graph_hash = manifest.as_ref().map(|m| m.graph_hash).unwrap_or(0);
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-
     let cache_md = format!(
         "---\ngraph_hash: {}\ngenerated_at: \"{}\"\nquery: \"{}\"\n---\n\n\
         # Authentication: OAuth & Device Flow\n\n\
@@ -918,22 +914,26 @@ fn wiki_knowledge_loop() {
         ---\n*Synthesized by GRAPHCTX | 5 blocks, 2400 tokens*\n",
         graph_hash, now, query
     );
-
+    let cache_path = cache_dir.join(format!("{}.md", slug));
     std::fs::write(&cache_path, &cache_md).unwrap();
     eprintln!("  Written: cache/{}.md ({} bytes)", slug, cache_md.len());
     eprintln!("  Frontmatter: graph_hash={}", graph_hash);
+}
 
-    // ─── STEP 3: Same query again → should HIT from cache ───
+fn kl_step3_rehit(
+    wiki_dir: &std::path::Path,
+    query: &str,
+    slug: &str,
+) -> (std::time::Duration, Vec<theo_engine_retrieval::wiki::lookup::WikiLookupResult>) {
+    use theo_engine_retrieval::wiki;
     eprintln!("\nSTEP 3: Re-query -> Wiki Lookup (with cache)");
     eprintln!("  Query: \"{}\"", query);
-
-    let t2 = std::time::Instant::now();
-    let results2 = wiki::lookup::lookup(&wiki_dir, query, 3);
-    let t3 = t2.elapsed();
-
-    eprintln!("  Latency: {:.2}ms", t3.as_secs_f64() * 1000.0);
-    eprintln!("  Result: {} hits:", results2.len());
-    for r in &results2 {
+    let t = std::time::Instant::now();
+    let results = wiki::lookup::lookup(wiki_dir, query, 3);
+    let dt = t.elapsed();
+    eprintln!("  Latency: {:.2}ms", dt.as_secs_f64() * 1000.0);
+    eprintln!("  Result: {} hits:", results.len());
+    for r in &results {
         let source = if r.slug == slug { " <-- CACHE HIT" } else { "" };
         eprintln!(
             "    - {} (conf: {:.0}%, ~{} tokens){}",
@@ -943,32 +943,31 @@ fn wiki_knowledge_loop() {
             source
         );
     }
-
-    let cache_hit = results2.iter().find(|r| r.slug == slug);
+    let cache_hit = results.iter().find(|r| r.slug == slug);
     assert!(cache_hit.is_some(), "Cache page should appear in results");
     eprintln!(
         "\n  Cache page found with confidence: {:.0}%",
         cache_hit.unwrap().confidence * 100.0
     );
+    (dt, results)
+}
 
-    // ─── STEP 4: Related query → also benefits from cache ───
+fn kl_step4_related_query(
+    wiki_dir: &std::path::Path,
+    slug: &str,
+) -> (std::time::Duration, Vec<theo_engine_retrieval::wiki::lookup::WikiLookupResult>) {
+    use theo_engine_retrieval::wiki;
     let query2 = "device flow RFC 8628 headless CLI";
     eprintln!("\nSTEP 4: Related query -> also benefits from cache");
     eprintln!("  Query: \"{}\"", query2);
-
-    let t4 = std::time::Instant::now();
-    let results3 = wiki::lookup::lookup(&wiki_dir, query2, 3);
-    let t5 = t4.elapsed();
-
-    eprintln!("  Latency: {:.2}ms", t5.as_secs_f64() * 1000.0);
-    if !results3.is_empty() {
-        eprintln!("  Result: {} hits:", results3.len());
-        for r in &results3 {
-            let source = if r.slug == slug {
-                " <-- CACHE COMPOUND"
-            } else {
-                ""
-            };
+    let t = std::time::Instant::now();
+    let results = wiki::lookup::lookup(wiki_dir, query2, 3);
+    let dt = t.elapsed();
+    eprintln!("  Latency: {:.2}ms", dt.as_secs_f64() * 1000.0);
+    if !results.is_empty() {
+        eprintln!("  Result: {} hits:", results.len());
+        for r in &results {
+            let source = if r.slug == slug { " <-- CACHE COMPOUND" } else { "" };
             eprintln!(
                 "    - {} (conf: {:.0}%, ~{} tokens){}",
                 r.title,
@@ -978,44 +977,42 @@ fn wiki_knowledge_loop() {
             );
         }
     }
+    (dt, results)
+}
 
-    // ─── STEP 5: Third unrelated query → MISS (control) ───
+fn kl_step5_unrelated_query(wiki_dir: &std::path::Path, slug: &str) {
+    use theo_engine_retrieval::wiki;
     let query3 = "mermaid diagram rendering SVG";
     eprintln!("\nSTEP 5: Unrelated query -> should NOT hit auth cache");
     eprintln!("  Query: \"{}\"", query3);
-
-    let results4 = wiki::lookup::lookup(&wiki_dir, query3, 3);
-    let auth_hit = results4.iter().any(|r| r.slug == slug);
+    let results = wiki::lookup::lookup(wiki_dir, query3, 3);
+    let auth_hit = results.iter().any(|r| r.slug == slug);
     eprintln!("  Auth cache hit: {} (expected: false)", auth_hit);
+}
 
-    // ─── STEP 6: Lint health check ───
+fn kl_step6_lint(wiki_dir: &std::path::Path, cache_dir: &std::path::Path) {
+    use theo_engine_retrieval::wiki;
     eprintln!("\nSTEP 6: Wiki Lint (health check)");
-    let report = wiki::lint::lint(&wiki_dir);
+    let report = wiki::lint::lint(wiki_dir);
     eprintln!("  {}", format!("{}", report).lines().next().unwrap_or(""));
-    let cache_count = std::fs::read_dir(&cache_dir)
-        .map(|e| e.count())
-        .unwrap_or(0);
+    let cache_count = std::fs::read_dir(cache_dir).map(|e| e.count()).unwrap_or(0);
     eprintln!("  Cache pages: {}", cache_count);
+}
 
-    // ─── Summary ───
+fn kl_print_summary(
+    t1: std::time::Duration,
+    n1: usize,
+    t3: std::time::Duration,
+    n2: usize,
+    t5: std::time::Duration,
+    n3: usize,
+) {
     eprintln!("\n══════════════════════════════════════════════════");
     eprintln!(" KNOWLEDGE COMPOUNDING PROVEN:");
-    eprintln!(
-        "  1. Initial query: {:?}ms ({} results)",
-        t1.as_millis(),
-        results1.len()
-    );
+    eprintln!("  1. Initial query: {:?}ms ({} results)", t1.as_millis(), n1);
     eprintln!("  2. Write-back: cache page created");
-    eprintln!(
-        "  3. Re-query:   {:?}ms ({} results, cache HIT)",
-        t3.as_millis(),
-        results2.len()
-    );
-    eprintln!(
-        "  4. Related:    {:?}ms ({} results, compound benefit)",
-        t5.as_millis(),
-        results3.len()
-    );
+    eprintln!("  3. Re-query:   {:?}ms ({} results, cache HIT)", t3.as_millis(), n2);
+    eprintln!("  4. Related:    {:?}ms ({} results, compound benefit)", t5.as_millis(), n3);
     eprintln!("  5. Unrelated:  auth cache correctly NOT returned");
     eprintln!("  6. Wiki grows with usage, not just with ingest");
     eprintln!("══════════════════════════════════════════════════");
@@ -1028,129 +1025,97 @@ fn wiki_knowledge_loop() {
 /// 2. Decision: evaluate_direct_return() — the actual production policy
 ///
 /// Run: cargo test -p theo-engine-retrieval --test benchmark_suite -- --ignored --nocapture wiki_eval
+#[derive(serde::Deserialize)]
+struct WikiEvalQuery {
+    id: String,
+    query: String,
+    category: String,
+    #[allow(dead_code)]
+    difficulty: String,
+    expected_slug_contains: Option<String>,
+    should_hit_layer0: bool,
+}
+
+#[derive(serde::Deserialize)]
+struct WikiEvalData {
+    queries: Vec<WikiEvalQuery>,
+}
+
+const WIKI_EVAL_CATEGORIES: &[&str] = &[
+    "api_lookup",
+    "architecture",
+    "call_flow",
+    "concept",
+    "onboarding",
+    "negative",
+];
+
 #[test]
 #[ignore]
 fn wiki_eval() {
-    use theo_engine_retrieval::wiki;
-    use wiki::lookup::{DEFAULT_BM25_FLOOR, evaluate_direct_return};
-    use wiki::model::classify_query;
-
     let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
         .parent()
         .unwrap();
-
     let wiki_dir = workspace_root.join(".theo/wiki");
     if !wiki_dir.exists() {
         eprintln!("Wiki not found. Run wiki_e2e first.");
         return;
     }
-
-    #[derive(serde::Deserialize)]
-    struct EvalQuery {
-        id: String,
-        query: String,
-        category: String,
-        #[allow(dead_code)]
-        difficulty: String,
-        expected_slug_contains: Option<String>,
-        should_hit_layer0: bool,
-    }
-
-    #[derive(serde::Deserialize)]
-    struct EvalData {
-        queries: Vec<EvalQuery>,
-    }
-
-    let eval_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/benchmarks/ground_truth/wiki-eval.json");
-    let eval_json = std::fs::read_to_string(&eval_path).expect("wiki-eval.json not found");
-    let eval: EvalData = serde_json::from_str(&eval_json).expect("Failed to parse");
-
+    let eval = wiki_eval_load_data();
     eprintln!("══════════════════════════════════════════════════════════════════════════");
     eprintln!(
         " WIKI EVAL — RANKING + DECISION POLICY ({} queries)",
         eval.queries.len()
     );
     eprintln!("══════════════════════════════════════════════════════════════════════════\n");
+    wiki_eval_run_floor_sweep(&eval, &wiki_dir);
+    wiki_eval_run_category_breakdown(&eval, &wiki_dir);
+    wiki_eval_print_per_query_decisions(&eval, &wiki_dir);
+    let bundle_dir = std::path::Path::new("/tmp/wiki-eval-bundle");
+    let _ = std::fs::create_dir_all(bundle_dir);
+    wiki_eval_export_traces(&eval, &wiki_dir, bundle_dir);
+    wiki_eval_export_summary(&eval, &wiki_dir, bundle_dir);
+    eprintln!("\n══════════════════════════════════════════════════════════════════════════");
+    eprintln!(" WIKI EVAL COMPLETE — bundle at /tmp/wiki-eval-bundle/");
+    eprintln!("══════════════════════════════════════════════════════════════════════════");
+}
 
-    // ═══════════════════════════════════════════
-    // BLOCK 1: Decision Policy (production path)
-    // ═══════════════════════════════════════════
+fn wiki_eval_load_data() -> WikiEvalData {
+    let eval_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/benchmarks/ground_truth/wiki-eval.json");
+    let eval_json = std::fs::read_to_string(&eval_path).expect("wiki-eval.json not found");
+    serde_json::from_str(&eval_json).expect("Failed to parse")
+}
+
+fn wiki_eval_run_floor_sweep(eval: &WikiEvalData, wiki_dir: &std::path::Path) {
+    use theo_engine_retrieval::wiki;
+    use wiki::lookup::{DEFAULT_BM25_FLOOR, evaluate_direct_return};
     eprintln!("─── DECISION POLICY (evaluate_direct_return, 3-gate) ───\n");
-
     let floors = [1.0, 1.5, 2.0, 2.5, 3.0];
-
     eprintln!(
         "{:>5} | {:>7} | {:>9} | {:>8} | {:>6} | {:>12}",
         "Floor", "Direct%", "Precision", "Fallback", "FP%", "Tier[D/E/P/R]"
     );
     eprintln!("{}", "-".repeat(65));
-
+    let total = eval.queries.len();
+    let negatives = eval.queries.iter().filter(|q| q.category == "negative").count();
     for &floor in &floors {
-        let mut direct_returns = 0usize;
-        let mut correct_directs = 0usize;
-        let mut false_positives = 0usize;
-        let mut tier_dist = [0usize; 4];
-        let total = eval.queries.len();
-        let negatives = eval
-            .queries
-            .iter()
-            .filter(|q| q.category == "negative")
-            .count();
-
-        for q in &eval.queries {
-            let results = wiki::lookup::lookup(&wiki_dir, &q.query, 3);
-            let (allow, _conf, _reason) = evaluate_direct_return(&results, &q.query, floor);
-
-            if allow {
-                direct_returns += 1;
-                let top = &results[0];
-
-                let tier_idx = match top.authority_tier {
-                    wiki::model::AuthorityTier::Deterministic => 0,
-                    wiki::model::AuthorityTier::Enriched => 1,
-                    wiki::model::AuthorityTier::PromotedCache => 2,
-                    wiki::model::AuthorityTier::RawCache => 3,
-                    wiki::model::AuthorityTier::EpisodicCache => 4,
-                };
-                tier_dist[tier_idx] += 1;
-
-                if q.should_hit_layer0 {
-                    if let Some(ref expected) = q.expected_slug_contains {
-                        if top.slug.contains(expected.as_str())
-                            || top.title.to_lowercase().contains(&expected.to_lowercase())
-                        {
-                            correct_directs += 1;
-                        }
-                    } else {
-                        correct_directs += 1;
-                    }
-                } else {
-                    false_positives += 1;
-                }
-            }
-        }
-
-        let direct_rate = direct_returns as f64 / total as f64;
-        let precision = if direct_returns > 0 {
-            correct_directs as f64 / direct_returns as f64
+        let counts = wiki_eval_count_floor_pass(eval, wiki_dir, floor);
+        let direct_rate = counts.direct as f64 / total as f64;
+        let precision = if counts.direct > 0 {
+            counts.correct as f64 / counts.direct as f64
         } else {
             1.0
         };
         let fallback_rate = 1.0 - direct_rate;
         let fp_rate = if negatives > 0 {
-            false_positives as f64 / negatives as f64
+            counts.false_positives as f64 / negatives as f64
         } else {
             0.0
         };
-        let marker = if floor == DEFAULT_BM25_FLOOR {
-            " ← current"
-        } else {
-            ""
-        };
-
+        let marker = if floor == DEFAULT_BM25_FLOOR { " ← current" } else { "" };
         eprintln!(
             "{:>5.1} | {:>6.0}% | {:>8.0}% | {:>7.0}% | {:>5.0}% | {:>3}/{}/{}/{}{}",
             floor,
@@ -1158,72 +1123,110 @@ fn wiki_eval() {
             precision * 100.0,
             fallback_rate * 100.0,
             fp_rate * 100.0,
-            tier_dist[0],
-            tier_dist[1],
-            tier_dist[2],
-            tier_dist[3],
+            counts.tier_dist[0],
+            counts.tier_dist[1],
+            counts.tier_dist[2],
+            counts.tier_dist[3],
             marker
         );
+        let _ = evaluate_direct_return; // silence warning if unused
     }
+}
 
-    // ═══════════════════════════════════════════
-    // BLOCK 2: Category breakdown (decision policy)
-    // ═══════════════════════════════════════════
-    eprintln!(
-        "\n─── CATEGORY BREAKDOWN (floor={:.1}) ───\n",
-        DEFAULT_BM25_FLOOR
-    );
+struct FloorPassCounts {
+    direct: usize,
+    correct: usize,
+    false_positives: usize,
+    tier_dist: [usize; 4],
+}
 
-    let categories = [
-        "api_lookup",
-        "architecture",
-        "call_flow",
-        "concept",
-        "onboarding",
-        "negative",
-    ];
+fn wiki_eval_count_floor_pass(
+    eval: &WikiEvalData,
+    wiki_dir: &std::path::Path,
+    floor: f64,
+) -> FloorPassCounts {
+    use theo_engine_retrieval::wiki;
+    use wiki::lookup::evaluate_direct_return;
+    let mut counts = FloorPassCounts {
+        direct: 0,
+        correct: 0,
+        false_positives: 0,
+        tier_dist: [0usize; 4],
+    };
+    for q in &eval.queries {
+        let results = wiki::lookup::lookup(wiki_dir, &q.query, 3);
+        let (allow, _conf, _reason) = evaluate_direct_return(&results, &q.query, floor);
+        if !allow {
+            continue;
+        }
+        counts.direct += 1;
+        let top = &results[0];
+        let tier_idx = match top.authority_tier {
+            wiki::model::AuthorityTier::Deterministic => 0,
+            wiki::model::AuthorityTier::Enriched => 1,
+            wiki::model::AuthorityTier::PromotedCache => 2,
+            wiki::model::AuthorityTier::RawCache => 3,
+            wiki::model::AuthorityTier::EpisodicCache => 4,
+        };
+        if tier_idx < 4 {
+            counts.tier_dist[tier_idx] += 1;
+        }
+        if q.should_hit_layer0 {
+            if wiki_eval_match_expected(top, q.expected_slug_contains.as_deref()) {
+                counts.correct += 1;
+            }
+        } else {
+            counts.false_positives += 1;
+        }
+    }
+    counts
+}
+
+fn wiki_eval_match_expected(
+    top: &theo_engine_retrieval::wiki::lookup::WikiLookupResult,
+    expected: Option<&str>,
+) -> bool {
+    match expected {
+        Some(exp) => {
+            top.slug.contains(exp) || top.title.to_lowercase().contains(&exp.to_lowercase())
+        }
+        None => true,
+    }
+}
+
+fn wiki_eval_run_category_breakdown(eval: &WikiEvalData, wiki_dir: &std::path::Path) {
+    use theo_engine_retrieval::wiki;
+    use wiki::lookup::{DEFAULT_BM25_FLOOR, evaluate_direct_return};
+    use wiki::model::classify_query;
+    eprintln!("\n─── CATEGORY BREAKDOWN (floor={:.1}) ───\n", DEFAULT_BM25_FLOOR);
     eprintln!(
         "{:>12} | {:>5} | {:>7} | {:>9} | {:>10} | {:>7}",
         "Category", "Total", "Direct%", "Precision", "QueryClass", "AvgBM25"
     );
     eprintln!("{}", "-".repeat(70));
-
-    for cat in &categories {
-        let cat_queries: Vec<&EvalQuery> =
+    for cat in WIKI_EVAL_CATEGORIES {
+        let cat_queries: Vec<&WikiEvalQuery> =
             eval.queries.iter().filter(|q| q.category == *cat).collect();
         let mut cat_directs = 0;
         let mut cat_correct = 0;
         let mut total_bm25 = 0.0f64;
         let mut bm25_count = 0;
-
         for q in &cat_queries {
-            let results = wiki::lookup::lookup(&wiki_dir, &q.query, 3);
-
+            let results = wiki::lookup::lookup(wiki_dir, &q.query, 3);
             if let Some(top) = results.first() {
                 total_bm25 += top.bm25_raw;
                 bm25_count += 1;
             }
-
             let (allow, _, _) = evaluate_direct_return(&results, &q.query, DEFAULT_BM25_FLOOR);
             if allow {
                 cat_directs += 1;
-                if q.should_hit_layer0 {
-                    if let Some(ref exp) = q.expected_slug_contains {
-                        if results[0].slug.contains(exp.as_str())
-                            || results[0]
-                                .title
-                                .to_lowercase()
-                                .contains(&exp.to_lowercase())
-                        {
-                            cat_correct += 1;
-                        }
-                    } else {
-                        cat_correct += 1;
-                    }
+                if q.should_hit_layer0
+                    && wiki_eval_match_expected(&results[0], q.expected_slug_contains.as_deref())
+                {
+                    cat_correct += 1;
                 }
             }
         }
-
         let direct = if !cat_queries.is_empty() {
             cat_directs as f64 / cat_queries.len() as f64
         } else {
@@ -1243,7 +1246,6 @@ fn wiki_eval() {
             .first()
             .map(|q| classify_query(&q.query).as_str())
             .unwrap_or("?");
-
         eprintln!(
             "{:>12} | {:>5} | {:>6.0}% | {:>8.0}% | {:>10} | {:>7.1}",
             cat,
@@ -1254,42 +1256,42 @@ fn wiki_eval() {
             avg_bm25
         );
     }
+}
 
-    // ═══════════════════════════════════════════
-    // BLOCK 3: Per-query detail (reason codes)
-    // ═══════════════════════════════════════════
+fn wiki_eval_print_per_query_decisions(eval: &WikiEvalData, wiki_dir: &std::path::Path) {
+    use theo_engine_retrieval::wiki;
+    use wiki::lookup::{DEFAULT_BM25_FLOOR, evaluate_direct_return};
     eprintln!("\n─── PER-QUERY DECISIONS (first 15) ───\n");
     eprintln!(
         "{:>10} | {:>12} | {:>5} | {:>6} | {:>5} | {:>12} | Top Slug",
         "ID", "Category", "Allow", "Conf", "BM25", "Reason"
     );
     eprintln!("{}", "-".repeat(80));
-
     for q in eval.queries.iter().take(15) {
-        let results = wiki::lookup::lookup(&wiki_dir, &q.query, 3);
+        let results = wiki::lookup::lookup(wiki_dir, &q.query, 3);
         let (allow, conf, reason) = evaluate_direct_return(&results, &q.query, DEFAULT_BM25_FLOOR);
         let top_slug = results.first().map(|r| r.slug.as_str()).unwrap_or("-");
         let top_bm25 = results.first().map(|r| r.bm25_raw).unwrap_or(0.0);
-
         eprintln!(
             "{:>10} | {:>12} | {:>5} | {:>5.2} | {:>5.1} | {:>12} | {}",
             q.id, q.category, allow, conf, top_bm25, reason, top_slug
         );
     }
+}
 
-    // ═══════════════════════════════════════════
-    // BLOCK 4: Export eval bundle files
-    // ═══════════════════════════════════════════
-    let bundle_dir = std::path::Path::new("/tmp/wiki-eval-bundle");
-    let _ = std::fs::create_dir_all(bundle_dir);
-
-    // --- eval_traces.jsonl ---
+fn wiki_eval_export_traces(
+    eval: &WikiEvalData,
+    wiki_dir: &std::path::Path,
+    bundle_dir: &std::path::Path,
+) {
+    use theo_engine_retrieval::wiki;
+    use wiki::lookup::{DEFAULT_BM25_FLOOR, evaluate_direct_return};
+    use wiki::model::classify_query;
     let mut traces = String::new();
     for q in &eval.queries {
-        let results = wiki::lookup::lookup(&wiki_dir, &q.query, 3);
+        let results = wiki::lookup::lookup(wiki_dir, &q.query, 3);
         let (allow, conf, reason) = evaluate_direct_return(&results, &q.query, DEFAULT_BM25_FLOOR);
         let qclass = classify_query(&q.query);
-
         let top1_slug = results.first().map(|r| r.slug.as_str()).unwrap_or("-");
         let top1_bm25 = results.first().map(|r| r.bm25_raw).unwrap_or(0.0);
         let top1_tier = results
@@ -1299,28 +1301,16 @@ fn wiki_eval() {
         let top2_slug = results.get(1).map(|r| r.slug.as_str()).unwrap_or("-");
         let top2_bm25 = results.get(1).map(|r| r.bm25_raw).unwrap_or(0.0);
         let gap = top1_bm25 - top2_bm25;
-
-        let expected = if q.should_hit_layer0 {
-            "direct_return"
-        } else {
-            "fallback"
-        };
+        let expected = if q.should_hit_layer0 { "direct_return" } else { "fallback" };
         let actual = if allow { "direct_return" } else { "fallback" };
         let correct = if q.should_hit_layer0 {
-            if allow {
-                q.expected_slug_contains.as_ref().is_none_or(|exp| {
-                    top1_slug.contains(exp.as_str())
-                        || results.first().is_some_and(|r| {
-                            r.title.to_lowercase().contains(&exp.to_lowercase())
-                        })
+            allow
+                && results.first().is_some_and(|r| {
+                    wiki_eval_match_expected(r, q.expected_slug_contains.as_deref())
                 })
-            } else {
-                false
-            }
         } else {
             !allow
         };
-
         traces += &format!(
             "{{\"id\":\"{}\",\"query\":\"{}\",\"category\":\"{}\",\"query_class\":\"{}\",\"top1\":\"{}\",\"top1_tier\":\"{}\",\"top2\":\"{}\",\"bm25_top1\":{:.1},\"bm25_top2\":{:.1},\"gap\":{:.1},\"threshold\":{:.1},\"decision_confidence\":{:.2},\"decision\":\"{}\",\"reason\":\"{}\",\"expected\":\"{}\",\"correct\":{}}}\n",
             q.id,
@@ -1342,122 +1332,109 @@ fn wiki_eval() {
         );
     }
     std::fs::write(bundle_dir.join("eval_traces.jsonl"), &traces).unwrap();
-    eprintln!(
-        "\nExported: eval_traces.jsonl ({} queries)",
-        eval.queries.len()
-    );
-
-    // --- eval_summary.md ---
-    {
-        let mut total_direct = 0usize;
-        let mut total_correct = 0usize;
-        let mut total_fp = 0usize;
-        let negatives = eval
-            .queries
-            .iter()
-            .filter(|q| q.category == "negative")
-            .count();
-
-        for q in &eval.queries {
-            let results = wiki::lookup::lookup(&wiki_dir, &q.query, 3);
-            let (allow, _, _) = evaluate_direct_return(&results, &q.query, DEFAULT_BM25_FLOOR);
-            if allow {
-                total_direct += 1;
-                if q.should_hit_layer0 {
-                    let top = &results[0];
-                    let ok = q.expected_slug_contains.as_ref().is_none_or(|exp| {
-                        top.slug.contains(exp.as_str())
-                            || top.title.to_lowercase().contains(&exp.to_lowercase())
-                    });
-                    if ok {
-                        total_correct += 1;
-                    }
-                } else {
-                    total_fp += 1;
-                }
-            }
-        }
-
-        let total = eval.queries.len();
-        let direct_rate = total_direct as f64 / total as f64;
-        let precision = if total_direct > 0 {
-            total_correct as f64 / total_direct as f64
-        } else {
-            1.0
-        };
-        let fp_rate = if negatives > 0 {
-            total_fp as f64 / negatives as f64
-        } else {
-            0.0
-        };
-
-        let mut md = "# Wiki Eval Summary\n\n".to_string();
-        md += &format!("**Commit**: `{}`\n", env!("CARGO_PKG_VERSION"));
-        md += "**Policy**: absolute_confidence_v1\n";
-        md += &format!("**BM25 Floor**: {:.1}\n", DEFAULT_BM25_FLOOR);
-        md += &format!("**Total Queries**: {}\n\n", total);
-
-        md += "## Overall Metrics\n\n";
-        md += "| Metric | Value |\n|--------|-------|\n";
-        md += &format!("| Direct Return Rate | {:.0}% |\n", direct_rate * 100.0);
-        md += &format!("| Direct Return Precision | {:.0}% |\n", precision * 100.0);
-        md += &format!("| Fallback Rate | {:.0}% |\n", (1.0 - direct_rate) * 100.0);
-        md += &format!("| Negative FP Rate | {:.0}% |\n", fp_rate * 100.0);
-        md += "| Stale Direct Return | 0% |\n\n";
-
-        md += "## Per-Category Thresholds\n\n";
-        md += "| Category | Threshold | Direct% | Precision |\n|----------|-----------|---------|----------|\n";
-        for cat in &categories {
-            let cq: Vec<&EvalQuery> = eval.queries.iter().filter(|q| q.category == *cat).collect();
-            let mut cd = 0;
-            let mut cc = 0;
-            for q in &cq {
-                let results = wiki::lookup::lookup(&wiki_dir, &q.query, 3);
-                let (allow, _, _) = evaluate_direct_return(&results, &q.query, DEFAULT_BM25_FLOOR);
-                if allow {
-                    cd += 1;
-                    if q.should_hit_layer0 {
-                        let ok = q.expected_slug_contains.as_ref().is_none_or(|exp| {
-                            results[0].slug.contains(exp.as_str())
-                                || results[0]
-                                    .title
-                                    .to_lowercase()
-                                    .contains(&exp.to_lowercase())
-                        });
-                        if ok {
-                            cc += 1;
-                        }
-                    }
-                }
-            }
-            let dr = if !cq.is_empty() {
-                cd as f64 / cq.len() as f64
-            } else {
-                0.0
-            };
-            let pr = if cd > 0 { cc as f64 / cd as f64 } else { 1.0 };
-            let sample_class = cq
-                .first()
-                .map(|q| classify_query(&q.query))
-                .unwrap_or(wiki::model::QueryClass::Unknown);
-            let thr = wiki::lookup::default_category_threshold(sample_class);
-            md += &format!(
-                "| {} | {:.1} | {:.0}% | {:.0}% |\n",
-                cat,
-                thr,
-                dr * 100.0,
-                pr * 100.0
-            );
-        }
-
-        std::fs::write(bundle_dir.join("eval_summary.md"), &md).unwrap();
-        eprintln!("Exported: eval_summary.md");
-    }
-
-    eprintln!("\n══════════════════════════════════════════════════════════════════════════");
-    eprintln!(" WIKI EVAL COMPLETE — bundle at /tmp/wiki-eval-bundle/");
-    eprintln!("══════════════════════════════════════════════════════════════════════════");
+    eprintln!("\nExported: eval_traces.jsonl ({} queries)", eval.queries.len());
 }
+
+fn wiki_eval_export_summary(
+    eval: &WikiEvalData,
+    wiki_dir: &std::path::Path,
+    bundle_dir: &std::path::Path,
+) {
+    use theo_engine_retrieval::wiki;
+    use wiki::lookup::{DEFAULT_BM25_FLOOR, evaluate_direct_return};
+    use wiki::model::classify_query;
+    let mut total_direct = 0usize;
+    let mut total_correct = 0usize;
+    let mut total_fp = 0usize;
+    let negatives = eval.queries.iter().filter(|q| q.category == "negative").count();
+    for q in &eval.queries {
+        let results = wiki::lookup::lookup(wiki_dir, &q.query, 3);
+        let (allow, _, _) = evaluate_direct_return(&results, &q.query, DEFAULT_BM25_FLOOR);
+        if !allow {
+            continue;
+        }
+        total_direct += 1;
+        if q.should_hit_layer0 {
+            let top = &results[0];
+            if wiki_eval_match_expected(top, q.expected_slug_contains.as_deref()) {
+                total_correct += 1;
+            }
+        } else {
+            total_fp += 1;
+        }
+    }
+    let total = eval.queries.len();
+    let direct_rate = total_direct as f64 / total as f64;
+    let precision = if total_direct > 0 {
+        total_correct as f64 / total_direct as f64
+    } else {
+        1.0
+    };
+    let fp_rate = if negatives > 0 {
+        total_fp as f64 / negatives as f64
+    } else {
+        0.0
+    };
+    let mut md = "# Wiki Eval Summary\n\n".to_string();
+    md += &format!("**Commit**: `{}`\n", env!("CARGO_PKG_VERSION"));
+    md += "**Policy**: absolute_confidence_v1\n";
+    md += &format!("**BM25 Floor**: {:.1}\n", DEFAULT_BM25_FLOOR);
+    md += &format!("**Total Queries**: {}\n\n", total);
+    md += "## Overall Metrics\n\n";
+    md += "| Metric | Value |\n|--------|-------|\n";
+    md += &format!("| Direct Return Rate | {:.0}% |\n", direct_rate * 100.0);
+    md += &format!("| Direct Return Precision | {:.0}% |\n", precision * 100.0);
+    md += &format!("| Fallback Rate | {:.0}% |\n", (1.0 - direct_rate) * 100.0);
+    md += &format!("| Negative FP Rate | {:.0}% |\n", fp_rate * 100.0);
+    md += "| Stale Direct Return | 0% |\n\n";
+    md += "## Per-Category Thresholds\n\n";
+    md += "| Category | Threshold | Direct% | Precision |\n|----------|-----------|---------|----------|\n";
+    for cat in WIKI_EVAL_CATEGORIES {
+        let cq: Vec<&WikiEvalQuery> =
+            eval.queries.iter().filter(|q| q.category == *cat).collect();
+        let (cd, cc) = wiki_eval_category_pass(&cq, wiki_dir);
+        let dr = if !cq.is_empty() { cd as f64 / cq.len() as f64 } else { 0.0 };
+        let pr = if cd > 0 { cc as f64 / cd as f64 } else { 1.0 };
+        let sample_class = cq
+            .first()
+            .map(|q| classify_query(&q.query))
+            .unwrap_or(wiki::model::QueryClass::Unknown);
+        let thr = wiki::lookup::default_category_threshold(sample_class);
+        md += &format!(
+            "| {} | {:.1} | {:.0}% | {:.0}% |\n",
+            cat,
+            thr,
+            dr * 100.0,
+            pr * 100.0
+        );
+    }
+    std::fs::write(bundle_dir.join("eval_summary.md"), &md).unwrap();
+    eprintln!("Exported: eval_summary.md");
+}
+
+fn wiki_eval_category_pass(
+    cq: &[&WikiEvalQuery],
+    wiki_dir: &std::path::Path,
+) -> (usize, usize) {
+    use theo_engine_retrieval::wiki;
+    use wiki::lookup::{DEFAULT_BM25_FLOOR, evaluate_direct_return};
+    let mut cd = 0;
+    let mut cc = 0;
+    for q in cq {
+        let results = wiki::lookup::lookup(wiki_dir, &q.query, 3);
+        let (allow, _, _) = evaluate_direct_return(&results, &q.query, DEFAULT_BM25_FLOOR);
+        if allow {
+            cd += 1;
+            if q.should_hit_layer0
+                && wiki_eval_match_expected(&results[0], q.expected_slug_contains.as_deref())
+            {
+                cc += 1;
+            }
+        }
+    }
+    (cd, cc)
+}
+
 
 /// A/B Benchmark: Wiki Cache vs RRF-only.
 ///
@@ -1468,28 +1445,32 @@ fn wiki_eval() {
 /// Metrics: latency, tokens, hit rate, quality (MRR/P@5)
 ///
 /// Run: cargo test -p theo-engine-retrieval --test benchmark_suite -- --ignored --nocapture wiki_ab_benchmark
+#[derive(Default)]
+struct AbTotals {
+    wiki_hits: usize,
+    wiki_total_lat: f64,
+    rrf_total_lat: f64,
+    wiki_total_p5: f64,
+    rrf_total_p5: f64,
+    wiki_total_tokens: usize,
+    rrf_total_tokens: usize,
+}
+
 #[test]
 #[ignore]
 fn wiki_ab_benchmark() {
     use theo_engine_graph::bridge;
     use theo_engine_graph::cluster::{ClusterAlgorithm, hierarchical_cluster};
-    use theo_engine_retrieval::search::FileBm25;
     use theo_engine_retrieval::wiki;
-
     let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
         .parent()
         .unwrap();
-
     eprintln!("=== A/B BENCHMARK: Wiki Cache vs RRF-only ===\n");
-
-    // Step 1: Build graph + generate wiki (if not exists)
     let (files, _stats) = theo_application::use_cases::extraction::extract_repo(workspace_root);
     let (graph, _) = bridge::build_graph(&files);
     let cluster = hierarchical_cluster(&graph, ClusterAlgorithm::FileLeiden { resolution: 1.0 });
-
-    // Ensure wiki exists
     let wiki_hash = wiki::generator::compute_graph_hash(&graph);
     if !wiki::persistence::is_fresh(workspace_root, wiki_hash) {
         let wiki_data = wiki::generator::generate_wiki_with_root(
@@ -1501,150 +1482,141 @@ fn wiki_ab_benchmark() {
         wiki::persistence::write_to_disk(&wiki_data, workspace_root).unwrap();
     }
     let wiki_dir = workspace_root.join(".theo/wiki");
-
-    // Step 2: Load ground truth
     let gt = load_ground_truth("theo-code");
     let k = 5;
-
-    // Step 3: Run A/B for each query
     eprintln!(
         "{:<5} {:<40} {:>8} {:>8} {:>10} {:>10} {:>8}",
         "#", "Query", "Wiki?", "P@5", "Lat(ms)A", "Lat(ms)B", "Delta"
     );
     eprintln!("{}", "-".repeat(95));
-
-    let mut wiki_hits = 0;
-    let mut wiki_total_lat = 0.0;
-    let mut rrf_total_lat = 0.0;
-    let mut wiki_total_p5 = 0.0;
-    let mut rrf_total_p5 = 0.0;
-    let mut wiki_total_tokens = 0usize;
-    let mut rrf_total_tokens = 0usize;
-
+    let mut totals = AbTotals::default();
     for (i, bq) in gt.queries.iter().enumerate() {
-        let expected: Vec<&str> = bq.expected_files.iter().map(|s| s.as_str()).collect();
+        ab_run_one_query(&graph, &wiki_dir, bq, k, i, &mut totals);
+    }
+    let n = gt.queries.len() as f64;
+    print_ab_results(&totals, n, gt.queries.len());
+    print_wiki_health(&wiki_dir);
+    eprintln!("\n=== A/B BENCHMARK COMPLETE ===");
+}
 
-        // GROUP A: Wiki lookup first, then BM25 fallback
-        let start_a = std::time::Instant::now();
-        let wiki_results = wiki::lookup::lookup(&wiki_dir, &bq.query, 3);
-        let wiki_hit = !wiki_results.is_empty() && wiki_results[0].confidence >= 0.6;
+fn ab_run_one_query(
+    graph: &theo_engine_graph::model::CodeGraph,
+    wiki_dir: &std::path::Path,
+    bq: &BenchmarkQuery,
+    k: usize,
+    i: usize,
+    totals: &mut AbTotals,
+) {
+    use theo_engine_retrieval::search::FileBm25;
+    use theo_engine_retrieval::wiki;
+    let expected: Vec<&str> = bq.expected_files.iter().map(|s| s.as_str()).collect();
+    // GROUP A: Wiki lookup first, then BM25 fallback.
+    let start_a = std::time::Instant::now();
+    let wiki_results = wiki::lookup::lookup(wiki_dir, &bq.query, 3);
+    let wiki_hit = !wiki_results.is_empty() && wiki_results[0].confidence >= 0.6;
+    let (a_files, a_tokens) = if wiki_hit {
+        totals.wiki_hits += 1;
+        ab_extract_files_from_wiki(&wiki_results)
+    } else {
+        let scores = FileBm25::search(graph, &bq.query);
+        let files = extract_files_from_scores(&scores);
+        let tokens: usize = files.len() * 500;
+        (files, tokens)
+    };
+    let lat_a = start_a.elapsed().as_secs_f64() * 1000.0;
+    // GROUP B: BM25 only.
+    let start_b = std::time::Instant::now();
+    let scores = FileBm25::search(graph, &bq.query);
+    let b_files = extract_files_from_scores(&scores);
+    let b_tokens: usize = b_files.len() * 500;
+    let lat_b = start_b.elapsed().as_secs_f64() * 1000.0;
+    let p5_a = metrics::precision_at_k(&a_files, &expected, k);
+    let p5_b = metrics::precision_at_k(&b_files, &expected, k);
+    totals.wiki_total_lat += lat_a;
+    totals.rrf_total_lat += lat_b;
+    totals.wiki_total_p5 += p5_a;
+    totals.rrf_total_p5 += p5_b;
+    totals.wiki_total_tokens += a_tokens;
+    totals.rrf_total_tokens += b_tokens;
+    let hit_str = if wiki_hit { "HIT" } else { "miss" };
+    let delta = if lat_a < lat_b { "faster" } else { "slower" };
+    eprintln!(
+        "{:<5} {:<40} {:>8} {:>8.2} {:>10.1} {:>10.1} {:>8}",
+        format!("{}.", i + 1),
+        if bq.query.len() > 39 { &bq.query[..39] } else { &bq.query },
+        hit_str,
+        p5_a,
+        lat_a,
+        lat_b,
+        delta
+    );
+}
 
-        let (a_files, a_tokens) = if wiki_hit {
-            wiki_hits += 1;
-            // Extract file paths from wiki content (best effort)
-            let mut files = Vec::new();
-            for r in &wiki_results {
-                // Wiki pages mention file paths in backticks
-                for line in r.content.lines() {
-                    if line.contains('`')
-                        && (line.contains(".rs") || line.contains(".py") || line.contains(".ts"))
+fn ab_extract_files_from_wiki(
+    wiki_results: &[theo_engine_retrieval::wiki::lookup::WikiLookupResult],
+) -> (Vec<String>, usize) {
+    let mut files = Vec::new();
+    for r in wiki_results {
+        for line in r.content.lines() {
+            if line.contains('`')
+                && (line.contains(".rs") || line.contains(".py") || line.contains(".ts"))
+            {
+                for part in line.split('`') {
+                    if part.contains('/')
+                        && (part.ends_with(".rs")
+                            || part.ends_with(".py")
+                            || part.ends_with(".ts"))
                     {
-                        // Extract path from backtick
-                        for part in line.split('`') {
-                            if part.contains('/')
-                                && (part.ends_with(".rs")
-                                    || part.ends_with(".py")
-                                    || part.ends_with(".ts"))
-                            {
-                                files.push(part.to_string());
-                            }
-                        }
+                        files.push(part.to_string());
                     }
                 }
             }
-            files.dedup();
-            let tokens: usize = wiki_results.iter().map(|r| r.token_count).sum();
-            (files, tokens)
-        } else {
-            // Fallback to BM25
-            let scores = FileBm25::search(&graph, &bq.query);
-            let files = extract_files_from_scores(&scores);
-            let tokens: usize = files.len() * 500; // Estimate 500 tokens per file context
-            (files, tokens)
-        };
-        let lat_a = start_a.elapsed().as_secs_f64() * 1000.0;
-
-        // GROUP B: BM25 only (no wiki)
-        let start_b = std::time::Instant::now();
-        let scores = FileBm25::search(&graph, &bq.query);
-        let b_files = extract_files_from_scores(&scores);
-        let b_tokens: usize = b_files.len() * 500;
-        let lat_b = start_b.elapsed().as_secs_f64() * 1000.0;
-
-        let p5_a = metrics::precision_at_k(&a_files, &expected, k);
-        let p5_b = metrics::precision_at_k(&b_files, &expected, k);
-
-        wiki_total_lat += lat_a;
-        rrf_total_lat += lat_b;
-        wiki_total_p5 += p5_a;
-        rrf_total_p5 += p5_b;
-        wiki_total_tokens += a_tokens;
-        rrf_total_tokens += b_tokens;
-
-        let hit_str = if wiki_hit { "HIT" } else { "miss" };
-        let delta = if lat_a < lat_b { "faster" } else { "slower" };
-
-        eprintln!(
-            "{:<5} {:<40} {:>8} {:>8.2} {:>10.1} {:>10.1} {:>8}",
-            format!("{}.", i + 1),
-            if bq.query.len() > 39 {
-                &bq.query[..39]
-            } else {
-                &bq.query
-            },
-            hit_str,
-            p5_a,
-            lat_a,
-            lat_b,
-            delta
-        );
+        }
     }
+    files.dedup();
+    let tokens: usize = wiki_results.iter().map(|r| r.token_count).sum();
+    (files, tokens)
+}
 
-    let n = gt.queries.len() as f64;
-    let hit_rate = wiki_hits as f64 / n * 100.0;
-
+fn print_ab_results(totals: &AbTotals, n: f64, query_count: usize) {
     eprintln!("\n{}", "=".repeat(95));
-    eprintln!("RESULTS ({} queries):\n", gt.queries.len());
-
-    eprintln!(
-        "{:<25} {:>15} {:>15} {:>15}",
-        "", "Wiki+Fallback", "BM25-only", "Improvement"
-    );
+    eprintln!("RESULTS ({} queries):\n", query_count);
+    eprintln!("{:<25} {:>15} {:>15} {:>15}", "", "Wiki+Fallback", "BM25-only", "Improvement");
     eprintln!("{}", "-".repeat(70));
     eprintln!(
         "{:<25} {:>15.1} {:>15.1} {:>14.0}%",
         "Avg latency (ms)",
-        wiki_total_lat / n,
-        rrf_total_lat / n,
-        (1.0 - wiki_total_lat / rrf_total_lat) * 100.0
+        totals.wiki_total_lat / n,
+        totals.rrf_total_lat / n,
+        (1.0 - totals.wiki_total_lat / totals.rrf_total_lat) * 100.0
     );
     eprintln!(
         "{:<25} {:>15.3} {:>15.3} {:>+14.3}",
         "Avg P@5",
-        wiki_total_p5 / n,
-        rrf_total_p5 / n,
-        wiki_total_p5 / n - rrf_total_p5 / n
+        totals.wiki_total_p5 / n,
+        totals.rrf_total_p5 / n,
+        totals.wiki_total_p5 / n - totals.rrf_total_p5 / n
     );
     eprintln!(
         "{:<25} {:>15} {:>15} {:>14.0}%",
         "Total tokens",
-        wiki_total_tokens,
-        rrf_total_tokens,
-        (1.0 - wiki_total_tokens as f64 / rrf_total_tokens as f64) * 100.0
+        totals.wiki_total_tokens,
+        totals.rrf_total_tokens,
+        (1.0 - totals.wiki_total_tokens as f64 / totals.rrf_total_tokens as f64) * 100.0
     );
-    eprintln!("{:<25} {:>14.0}%", "Wiki hit rate", hit_rate);
-    eprintln!("{:<25} {:>15}", "Wiki hits", wiki_hits);
+    eprintln!("{:<25} {:>14.0}%", "Wiki hit rate", totals.wiki_hits as f64 / n * 100.0);
+    eprintln!("{:<25} {:>15}", "Wiki hits", totals.wiki_hits);
+}
 
-    // Lint the wiki
-    let lint_report = wiki::lint::lint(&wiki_dir);
+fn print_wiki_health(wiki_dir: &std::path::Path) {
+    use theo_engine_retrieval::wiki;
+    let lint_report = wiki::lint::lint(wiki_dir);
     eprintln!("\nWIKI HEALTH:");
     eprintln!("  Pages: {}", lint_report.total_pages);
     eprintln!("  Issues: {}", lint_report.total_issues);
     eprintln!("  Orphan pages: {}", lint_report.orphan_pages.len());
     eprintln!("  Broken links: {}", lint_report.broken_links.len());
     eprintln!("  Large pages: {}", lint_report.large_pages.len());
-
-    eprintln!("\n=== A/B BENCHMARK COMPLETE ===");
 }
 
 /// Generate Code Wiki for an external repo + render HTML.
