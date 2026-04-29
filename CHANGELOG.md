@@ -3,6 +3,28 @@
 ## [Unreleased]
 
 ### Changed
+- **code-hygiene-5x5 T4.3 partial — theo (CLI) 2 → 1** (`docs/plans/code-hygiene-5x5-plan.md`).
+  `apps/theo-cli/src/tui/app/update.rs::update` (371 LOC TUI Msg dispatcher with ~70 arms)
+  decomposed into 25+ per-Msg helpers. Remaining body of `update` is now a thin Msg →
+  helper-call dispatcher (1-line arms with 3 inline 1-liners for `Quit`, `Resize`, `CursorBlink`
+  + the trivial picker-down increments).
+  Helpers added (free fns at module bottom):
+  - Search family: `apply_search_start/char/backspace/next/prev/close`.
+  - Scroll family: `apply_scroll_up/down/to_bottom`.
+  - Picker family: `apply_toggle_model_picker`, `apply_model_picker_up/down`,
+    `apply_toggle_theme_picker`, `apply_theme_picker_up`.
+  - Autocomplete family: `apply_autocomplete_up/down` (existing `apply_autocomplete_accept` reused).
+  - Tab family: `apply_new_tab`, `apply_close_tab`, `apply_switch_tab`.
+  - Auth/clipboard family: `apply_copy_to_clipboard`, `apply_interrupt_agent`,
+    `apply_logout_request`, `apply_copy_last_response`, `apply_copy_last_code_block`,
+    `apply_toggle_copy_mode`.
+  - Misc state mutators: `apply_events_lost`, `apply_cycle_mode`, `apply_restore_last_prompt`,
+    `apply_clear_transcript`, `apply_agent_complete`, `apply_notify_completion`,
+    `apply_memory_command`, `apply_set_mode`, `apply_set_theme`.
+  Also collapsed `Msg::ApproveDecision | Msg::RejectDecision` into a shared arm.
+  Behaviour preserved — all 507 lib + 13 e2e_smoke tests pass.
+  Cumulative metric across workspace: 22 → 21 violations.
+
 - **code-hygiene-5x5 T4.6 partial — theo-application 4 → 3** (`docs/plans/code-hygiene-5x5-plan.md`).
   `graph_context_service/service.rs::GraphContextService::query_context` (270 LOC dense retrieval
   pipeline) decomposed into 6 helpers:
