@@ -233,6 +233,43 @@ invariant = "Internal LSP helpers — JSON-RPC contract guarantees field presenc
 adr = "021-recognized-rust-idioms.md#13-lsp_tool_common_unwrap"
 alternative_rejected = "duplicate LspError typing in helpers — ceremony without info"
 
+# Test-fixture / mock crates — `.unwrap()` is the canonical idiom for
+# Mutex::lock() and tempdir-based file I/O inside test scaffolding.
+# These 4 patterns codify the last 5 path entries in unwrap-allowlist.txt
+# (T6 closeout of code-hygiene-5x5).
+
+[[unwrap_pattern]]
+name = "test_memory_fixtures_crate"
+regex = '\.unwrap\(\)'
+scope = "crates/theo-test-memory-fixtures/**/*.rs"
+invariant = "theo-test-memory-fixtures is publish=false test scaffolding (mock_llm.rs, mock_retrieval.rs); Mutex::lock().unwrap() is the canonical idiom in mocks"
+adr = "021-recognized-rust-idioms.md#14-test_fixture_unwrap"
+alternative_rejected = "Result<MutexGuard, PoisonError> propagation in mocks — ceremony without info; mocks never recover from a poisoned lock"
+
+[[unwrap_pattern]]
+name = "infra_llm_mock_provider"
+regex = '\.unwrap\(\)'
+scope = "crates/theo-infra-llm/src/mock.rs"
+invariant = "Mock LLM provider used only from test harnesses; same Mutex/test-fixture contract as theo-test-memory-fixtures"
+adr = "021-recognized-rust-idioms.md#14-test_fixture_unwrap"
+alternative_rejected = "see test_memory_fixtures_crate"
+
+[[unwrap_pattern]]
+name = "tooling_test_helpers"
+regex = '(\.unwrap\(\)|\.expect\(")'
+scope = "crates/theo-tooling/src/test_helpers.rs"
+invariant = "Test helpers exposed to sibling crates' test harnesses; every site is .expect(\"Failed to <fs op>\") against a freshly-created tempdir that cannot fail in any realistic test environment"
+adr = "021-recognized-rust-idioms.md#14-test_fixture_unwrap"
+alternative_rejected = "Result-returning helpers — every test would have to .unwrap() the result anyway"
+
+[[unwrap_pattern]]
+name = "tooling_read_base64_test_helper"
+regex = '\.unwrap\(\)'
+scope = "crates/theo-tooling/src/read/mod.rs"
+invariant = "Test-only base64 helper inside Read tool's binary file rendering tests; the input is a known-good fixture"
+adr = "021-recognized-rust-idioms.md#14-test_fixture_unwrap"
+alternative_rejected = "fallible decoder — would only matter if input were untrusted; this is a test fixture"
+
 # ---------------------------------------------------------------------------
 # unsafe_pattern entries (consumed by scripts/check-unsafe.sh)
 # ---------------------------------------------------------------------------

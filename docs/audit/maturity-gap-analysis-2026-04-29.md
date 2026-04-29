@@ -173,9 +173,9 @@ ceiling=0. Estado final**:
 | io-test (entries) | 86 | **0** (codificado via 22 io_test_patterns) |
 | architecture | 0 | **0** |
 
-**Total active path-allowlist entries: 158 → 5** (-97%).
+**Total active path-allowlist entries: 158 → 0** (-100%).
 
-**Plan-target literal "≤ 5 path-allowlist entries" agora atingido**.
+**Plan-target literal "≤ 5 path-allowlist entries" excedido — 0 entries**.
 Adicionar nova exceção é uma update ADR-021 + recognized-patterns.toml
 (não path-allowlist edit). A sub-dimensão "Code hygiene" da
 "Dívida histórica ativa" atinge **5.0/5** literalmente — todos os

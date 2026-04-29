@@ -1,41 +1,18 @@
-# Allowlist for `.unwrap()` / `.expect(...)` sites that the T2.5 gate
-# (`scripts/check-unwrap.sh`) should tolerate in production.
+# unwrap/expect allowlist (T6.2 of code-hygiene-5x5).
 #
-# Format:  <path[:line]>|<sunset-YYYY-MM-DD>|<reason>
+# Format: <path>|<sunset-yyyy-mm-dd>|<reason>
 #
-# Rules:
-#   - Every entry MUST carry a concrete reason that explains why an unwrap
-#     is safer than a typed error (typically a type-system-inexpressible
-#     invariant that is proven elsewhere in the file).
-#   - Every entry MUST carry a sunset date. The gate fails when today > sunset.
-#   - Whole-file allowlisting is supported (omit `:line`) for test-fixture
-#     crates where every site is a `Mutex::lock().unwrap()` and rewriting
-#     to `?` would add noise without safety gain.
-#   - Prefer refactoring over allowlisting for production code.
-
-# ── Test fixtures: Mutex::lock().unwrap() is idiomatic for mocks ──────
-# These crates exist solely to feed test suites in other workspaces;
-# they never run in production code paths. Sunset aligned with Phase-5
-# test-migration window.
-crates/theo-test-memory-fixtures/src/mock_llm.rs|2026-10-23|Test-fixture crate (publish=false); Mutex::lock().unwrap() is acceptable in mocks.
-crates/theo-test-memory-fixtures/src/mock_retrieval.rs|2026-10-23|Test-fixture crate (publish=false); Mutex::lock().unwrap() is acceptable in mocks.
-crates/theo-infra-llm/src/mock.rs|2026-10-23|Mock LLM provider used only from test harnesses; Mutex::lock().unwrap() acceptable.
-crates/theo-tooling/src/test_helpers.rs|2026-10-31|Test helpers: file is `pub` only because the test harness in sibling crates imports it; every site is `expect("Failed to <fs op>")` against a freshly-created tempdir that cannot fail in any realistic test environment.
-crates/theo-tooling/src/read/mod.rs|2026-10-31|Inside a test-only base64 helper used by Read tool's binary file rendering; refactor to fallible decoder tracked.
-
-# ── ALL OTHER ENTRIES MIGRATED TO ADR-021 + recognized-patterns.toml ──
-# T2.3 (code-hygiene-5x5) drained 21 regex/path entries:
-#   - mutex_poison_lock (×3)        : undo.rs snapshot_lock, loop_detector, lsp/tool_common
-#   - system_clock_unix_epoch (×2)  : theo-domain, theo-tooling
-#   - embedded_tool_schema_valid    : theo-tooling
-#   - observability_writer_spawn    : theo-agent-runtime
-#   - syntect_default_theme         : theo-cli
-#   - local_proven_invariant (×13)  : bash, skill_catalog, session_tree, snapshot,
-#                                     subagent, secret_scrubber, sandbox/executor,
-#                                     summary, apply_patch, test_gen/property,
-#                                     lsp/tool, webfetch, php extractor
-#   - process_entrypoint_desktop    : apps/theo-desktop
-#   - process_entrypoint_agent_bin  : crates/theo-agent-runtime/src/bin/theo-agent.rs
+# DRAINED 2026-04-29 (final T6.1 closeout of code-hygiene-5x5):
+# All 5 prior path entries are now codified in
+# `.claude/rules/recognized-patterns.toml` under `[[unwrap_pattern]]`
+# with explicit scope+regex:
+#   - test_memory_fixtures_crate    (mock_llm.rs + mock_retrieval.rs)
+#   - infra_llm_mock_provider       (theo-infra-llm/src/mock.rs)
+#   - tooling_test_helpers          (theo-tooling/src/test_helpers.rs)
+#   - tooling_read_base64_test_helper (theo-tooling/src/read/mod.rs)
 #
-# See `docs/adr/021-recognized-rust-idioms.md` and
-# `.claude/rules/recognized-patterns.toml` for the canonical listing.
+# `scripts/check-unwrap.sh` reads these patterns via
+# `scripts/check-recognized-patterns.sh unwrap`. Adding a new
+# legitimate test-fixture unwrap site is now an ADR-021 update,
+# not a path-allowlist edit. This file remains as a soft escape
+# hatch but is intentionally empty.

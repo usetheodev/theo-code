@@ -3,6 +3,43 @@
 ## [Unreleased]
 
 ### Changed
+- **code-hygiene-5x5 unwrap-allowlist DRAINED — 5 → 0; total active path-allowlist 158 → 0** (`docs/plans/code-hygiene-5x5-plan.md`).
+  Final residual drain. The 5 remaining unwrap-allowlist path-fixtures (kept by ADR-021
+  footnote until now) are codified as `[[unwrap_pattern]]` entries in
+  `.claude/rules/recognized-patterns.toml`. The path-allowlist file is now intentionally
+  empty.
+
+  4 NEW `[[unwrap_pattern]]` entries:
+  - `test_memory_fixtures_crate` (`crates/theo-test-memory-fixtures/**/*.rs`) — the crate
+    is publish=false test scaffolding (mock_llm.rs + mock_retrieval.rs); Mutex::lock().unwrap()
+    is the canonical idiom.
+  - `infra_llm_mock_provider` (`crates/theo-infra-llm/src/mock.rs`) — mock LLM provider
+    used only from test harnesses; same Mutex/test-fixture contract.
+  - `tooling_test_helpers` (`crates/theo-tooling/src/test_helpers.rs`) — every site is
+    `.expect("Failed to <fs op>")` against a freshly-created tempdir.
+  - `tooling_read_base64_test_helper` (`crates/theo-tooling/src/read/mod.rs`) — test-only
+    base64 helper with known-good fixture input.
+
+  `scripts/check-unwrap.sh` already wired to the recognized-patterns loader (T2.2 of the
+  plan); no script change needed.
+
+  **Final workspace allowlist totals (all 8 hygiene gates)**:
+  - unwrap: 0 (drenado nesta iteração)
+  - unsafe: 0 / panic: 0 / secret: 0 / size: 0 / complexity: 0 / io-test: 0 / architecture: 0
+  - **TOTAL: 0** path-allowlist entries across the workspace.
+
+  The `code-hygiene-5x5-plan.md` Global DoD literal target "≤ 5 path-allowlist entries"
+  is now exceeded — **0 entries** (-100% from the 158-entry baseline). Adding any new
+  exception requires an ADR-021 update + a `recognized-patterns.toml` entry. Path-allowlist
+  files remain as soft escape hatches but are intentionally empty.
+
+  Validated:
+  - 8 hygiene gates (unwrap, unsafe, panic, secret, size, complexity, inline-io-tests,
+    arch-contract) → all exit 0.
+  - cargo test --workspace --exclude theo-code-desktop --no-fail-fast →
+    5247 PASS / 0 FAIL / 24 IGNORED.
+  - cargo clippy --workspace --all-targets -- -D warnings → 0 warnings.
+
 - **code-hygiene-5x5 secret-allowlist DRAINED — 21 → 0** (`docs/plans/code-hygiene-5x5-plan.md`).
   Same codification pattern applied to secrets that already cleared io-test in the previous
   iteration. `scripts/check-secrets.sh` was wired to source
