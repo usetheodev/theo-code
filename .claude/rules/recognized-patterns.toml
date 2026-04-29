@@ -304,3 +304,23 @@ scope_path = "theo-test-memory-fixtures"
 invariant = "Whole crate is the test-fixture container; same dummy-fixture contract"
 adr = "021-recognized-rust-idioms.md#9-test_fixture_dummy_keys"
 alternative_rejected = "see test_fixture_dummy_keys"
+
+# ---------------------------------------------------------------------------
+# io_test_pattern entries (consumed by scripts/check-inline-io-tests.sh v2)
+# T5.1 of code-hygiene-5x5 — see docs/adr/017-inline-io-tests.md.
+# ---------------------------------------------------------------------------
+
+[[io_test_pattern]]
+name = "tempfile_isolated_fs"
+markers = [
+    "tempfile::TempDir",
+    "tempfile::tempdir",
+    "tempfile::NamedTempFile",
+    "tempfile::Builder",
+    "use tempfile::",
+    "TestDir::",
+]
+scope = "crates/**/*.rs|apps/**/*.rs"
+invariant = "Inline #[cfg(test)] I/O is allowed when the test isolates FS via tempfile (RAII per-test scratch dir, no shared mutable state)"
+adr = "017-inline-io-tests.md#pattern-inline_io_test"
+alternative_rejected = "move every I/O test to crates/<crate>/tests/ — slow tests still need a home; tempfile handles isolation"

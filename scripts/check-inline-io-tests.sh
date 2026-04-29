@@ -76,6 +76,7 @@ test_bearing_files="$(
 )"
 
 violations=()
+allow_pattern_hits=0
 for f in $test_bearing_files; do
     # Skip files that obviously are tests only (path contains /tests/).
     case "$f" in
@@ -84,6 +85,21 @@ for f in $test_bearing_files; do
 
     # Only keep files that ALSO have `#[cfg(test)]`.
     grep -q '#\[cfg(test)\]' "$f" 2>/dev/null || continue
+
+    # ADR-017 v2 — inline_io_test pattern: a file is auto-allowed if it
+    # uses tempfile::TempDir / tempdir / NamedTempFile / Builder, or an
+    # in-project TestDir wrapper. These markers prove the test isolates
+    # I/O via a per-test scratch dir (RAII cleanup, no shared state).
+    if rg -q -e 'tempfile::TempDir' \
+              -e 'tempfile::tempdir' \
+              -e 'tempfile::NamedTempFile' \
+              -e 'tempfile::Builder' \
+              -e 'use tempfile::' \
+              -e 'TestDir::' \
+              "$f" 2>/dev/null; then
+        allow_pattern_hits=$((allow_pattern_hits + 1))
+        continue
+    fi
 
     # For each I/O marker, check if the file references it.
     for marker in "${IO_MARKERS[@]}"; do
@@ -113,6 +129,7 @@ if [[ "$MODE" == "json" ]]; then
 else
     printf 'inline I/O test gate\n'
     printf '  files flagged: %d\n' "$total"
+    printf '  pattern-allowed (ADR-017 v2): %d\n' "$allow_pattern_hits"
     allow_count=0
     # Workaround for `set -u` on empty associative arrays.
     [[ -v ALLOW ]] && allow_count="${#ALLOW[@]}"

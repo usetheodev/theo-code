@@ -23,6 +23,6 @@ theo|11|apps/theo-cli/src/main.rs subcommand bodies + tui/widgets/diff_viewer; p
 theo-infra-llm|10|provider catalogs + format converters host the longest functions (anthropic.rs, openai.rs, openai_compatible.rs).
 theo-agent-runtime|10|run_engine, subagent, compaction_stages, pilot — all on the size-allowlist with sunset 2026-07-23.
 theo-application|9|graph_context_service.rs + use_cases/pipeline.rs; sunset 2026-07-23.
-theo-tooling|8|dap/lsp/browser/plan tool families — same sunset as the size-allowlist entries.
+theo-tooling|7|dap/lsp/browser/plan tool families. Refreshed 2026-04-29 (T4.1 of code-hygiene-5x5).
 theo-domain|2|plan.rs apply_patch + a serde helper; harmless but worth refactoring.
 theo-engine-graph|1|cluster.rs label-propagation loop.

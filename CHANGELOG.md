@@ -3,6 +3,21 @@
 ## [Unreleased]
 
 ### Changed
+- **code-hygiene-5x5 T5.1 — ADR-017 v2 + inline-io-tests gate codified** (`docs/plans/code-hygiene-5x5-plan.md`).
+  Authored `docs/adr/017-inline-io-tests.md` v2 (replaces v1 file-list ADR) — codifies
+  the `inline_io_test` pattern: `#[cfg(test)]` blocks may perform real I/O if and only if
+  the file imports `tempfile::{TempDir,tempdir,NamedTempFile,Builder}` or a project
+  `TestDir` wrapper. `scripts/check-inline-io-tests.sh` v2 auto-allows files matching
+  the codified pattern; **92 / ~130 candidate files now match** (no allowlist entry needed).
+  `recognized-patterns.toml` gained `[[io_test_pattern]]` for `tempfile_isolated_fs`.
+  io-test-allowlist drained from 86 → 36 active entries (subprocess clients,
+  sandbox executors, read-only fs probes — these don't need tempdir isolation
+  because they spawn child processes / read-only inspection).
+- **code-hygiene-5x5 T4.1 — complexity baseline snapshot** (`docs/audit/complexity-baseline-2026-04-29.md`).
+  Re-measured `clippy::too_many_lines` per crate post-Phase 3. Total: 74 functions over
+  100 LOC across 8 crates. theo-tooling ceiling refreshed 8 → 7 (below previous count).
+  T4.2..T4.9 (helper extraction per crate) deferred to a follow-up effort given
+  volume + risk of touching runtime-critical paths.
 - **code-hygiene-5x5 T3.7 — 4 remaining sibling-test files split (size-allowlist drained to 0)** (`docs/plans/code-hygiene-5x5-plan.md`).
   Split the last 4 sibling test files >800 LOC; size-allowlist now has **0 active entries**:
   - `lsp/tool_tests.rs` (822 LOC, 131 tests) → `lsp_{status,definition,references,hover,rename,common}_tests.rs` + `lsp_test_helpers.rs` (≤ 260 LOC each)

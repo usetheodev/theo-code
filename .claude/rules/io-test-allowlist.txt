@@ -1,101 +1,67 @@
-# Whole-file allowlist — inline I/O tests that isolate via tempfile or TestDir.
-# See ADR-017 for rationale. Populated 2026-04-23.
+# Inline I/O test allowlist (ADR-017 v2 — see docs/adr/017-inline-io-tests.md).
+#
+# REVERSED POLARITY (T5.1 of code-hygiene-5x5):
+# Files that use `tempfile::TempDir` / `tempfile::tempdir()` / TestDir wrapper
+# are AUTOMATICALLY allowed by `scripts/check-inline-io-tests.sh` v2.
+# 92 / ~130 candidate files now match the codified pattern and need no entry.
+#
+# Remaining 36 entries are tests that exercise:
+#   - subprocess JSON-RPC protocols (LSP, DAP, MCP, browser CDP)
+#   - HTTP transports / OAuth callback servers
+#   - Sandbox subprocess execution (echo/false/etc. — no FS writes)
+#   - Git / env-info subprocess inspection
+#   - Read-only fs probes / hash helpers (no FS writes)
 
-apps/theo-cli/src/init.rs
-apps/theo-cli/src/input/completer.rs
-apps/theo-cli/src/input/mention.rs
-apps/theo-marklive/src/lib.rs
-crates/theo-agent-runtime/src/autodream.rs
-crates/theo-agent-runtime/src/failure_tracker.rs
-crates/theo-agent-runtime/src/hooks.rs
-crates/theo-agent-runtime/src/hypothesis_pipeline.rs
-crates/theo-agent-runtime/src/lesson_pipeline.rs
-crates/theo-agent-runtime/src/memory_lifecycle.rs
-crates/theo-agent-runtime/src/observability/reader.rs
-crates/theo-agent-runtime/src/observability/writer.rs
-crates/theo-agent-runtime/src/onboarding.rs
-crates/theo-agent-runtime/src/persistence.rs
-crates/theo-agent-runtime/src/pilot.rs
-crates/theo-agent-runtime/src/plugin.rs
-crates/theo-agent-runtime/src/project_config.rs
-crates/theo-agent-runtime/src/roadmap.rs
-crates/theo-agent-runtime/src/sensor.rs
-crates/theo-agent-runtime/src/session_bootstrap.rs
-crates/theo-agent-runtime/src/session_tree.rs
-crates/theo-agent-runtime/src/skill/mod.rs
-crates/theo-agent-runtime/src/state_manager.rs
-crates/theo-application/src/use_cases/context_assembler.rs
-crates/theo-application/src/use_cases/graph_context_service.rs
-crates/theo-application/src/use_cases/memory_factory.rs
-crates/theo-application/src/use_cases/observability_ui.rs
-crates/theo-application/src/use_cases/pipeline.rs
-crates/theo-engine-graph/src/scip/indexer.rs
-crates/theo-engine-parser/src/workspace/detect.rs
-crates/theo-engine-retrieval/src/assembly.rs
-crates/theo-engine-retrieval/src/embedding/cache.rs
-crates/theo-engine-retrieval/src/file_retriever.rs
-crates/theo-engine-retrieval/src/fs_source_provider.rs
-crates/theo-engine-retrieval/src/memory_tantivy.rs
-crates/theo-engine-retrieval/src/wiki/lint.rs
-crates/theo-engine-retrieval/src/wiki/lookup.rs
-crates/theo-engine-retrieval/src/wiki/persistence.rs
-crates/theo-engine-retrieval/src/wiki/runtime.rs
-crates/theo-governance/src/sandbox_audit.rs
-crates/theo-infra-auth/src/anthropic.rs
-crates/theo-infra-auth/src/copilot.rs
-crates/theo-infra-auth/src/google_vertex.rs
-crates/theo-infra-auth/src/mcp.rs
-crates/theo-infra-auth/src/store.rs
-crates/theo-infra-auth/src/wellknown.rs
-crates/theo-infra-memory/src/builtin.rs
-crates/theo-infra-memory/src/fs_util.rs
-crates/theo-infra-memory/src/session_search_fs.rs
-crates/theo-infra-memory/src/wiki/hash.rs
-crates/theo-tooling/src/apply_patch/mod.rs
-crates/theo-tooling/src/bash/mod.rs
-crates/theo-tooling/src/edit/mod.rs
-crates/theo-tooling/src/grep/mod.rs
-crates/theo-tooling/src/memory/mod.rs
-crates/theo-tooling/src/path.rs
-crates/theo-tooling/src/read/mod.rs
-crates/theo-tooling/src/shell_tool.rs
-crates/theo-tooling/src/skill/mod.rs
-crates/theo-tooling/src/write/mod.rs
+# ── Subprocess transport / session managers ──────────────────────────
+crates/theo-infra-mcp/src/transport_http.rs
+crates/theo-infra-mcp/src/transport_stdio.rs
+crates/theo-infra-mcp/src/dispatch.rs
+crates/theo-tooling/src/browser/client.rs
+crates/theo-tooling/src/dap/client.rs
+crates/theo-tooling/src/dap/session_manager.rs
+crates/theo-tooling/src/jsonrpc_session.rs
+crates/theo-tooling/src/jsonrpc_subprocess.rs
+crates/theo-tooling/src/lsp/client.rs
+crates/theo-tooling/src/lsp/session_manager.rs
 
-# ── False-positive allowlist — #[cfg(test)] + prod I/O, test doesn't touch fs ──
-# These files have production std::fs/tokio::process calls and a separate
-# #[cfg(test)] module whose tests don't exercise the I/O. Verified manually.
-apps/theo-cli/src/tui/app.rs
-apps/theo-cli/src/tui/autocomplete.rs
-apps/theo-cli/src/tui/config.rs
-crates/theo-agent-runtime/src/agent_loop.rs
-crates/theo-agent-runtime/src/convergence.rs
-crates/theo-agent-runtime/src/observability/mod.rs
-crates/theo-agent-runtime/src/run_engine.rs
-crates/theo-domain/src/truncate.rs
-crates/theo-engine-graph/src/bridge.rs
-crates/theo-engine-graph/src/git.rs
-crates/theo-engine-graph/src/scip/reader.rs
-crates/theo-engine-parser/src/import_resolver.rs
-crates/theo-engine-retrieval/src/wiki/generator.rs
-crates/theo-infra-auth/src/callback.rs
-crates/theo-infra-auth/src/openai.rs
-crates/theo-infra-llm/src/routing/rules.rs
-crates/theo-tooling/src/apply_patch/mod.rs
-crates/theo-tooling/src/bash/mod.rs
-crates/theo-tooling/src/edit/mod.rs
-crates/theo-tooling/src/env_info/mod.rs
-crates/theo-tooling/src/git/mod.rs
-crates/theo-tooling/src/grep/mod.rs
-crates/theo-tooling/src/memory/mod.rs
-crates/theo-tooling/src/read/mod.rs
-crates/theo-tooling/src/sandbox/bwrap.rs
-crates/theo-tooling/src/sandbox/env_sanitizer.rs
+# ── Native OS-level fs/screenshot drivers ────────────────────────────
+crates/theo-tooling/src/computer/driver.rs
+crates/theo-tooling/src/screenshot/mod.rs
+
+# ── Diagnostic / error-formatting helpers (no real I/O at test time) ─
+crates/theo-agent-runtime/src/fs_errors.rs
+crates/theo-infra-llm/src/client.rs
+
+# ── Sandbox subprocess executors (run echo/false; no FS writes) ──────
 crates/theo-tooling/src/sandbox/executor.rs
 crates/theo-tooling/src/sandbox/macos.rs
 crates/theo-tooling/src/sandbox/network.rs
 crates/theo-tooling/src/sandbox/probe.rs
 crates/theo-tooling/src/sandbox/rlimits.rs
-crates/theo-tooling/src/skill/mod.rs
+crates/theo-tooling/src/sandbox/bwrap.rs
+crates/theo-tooling/src/sandbox/env_sanitizer.rs
+
+# ── Git / env-info subprocess inspection (read-only) ─────────────────
+crates/theo-tooling/src/env_info/mod.rs
+crates/theo-tooling/src/git/mod.rs
+
+# ── Read-only fs probes / hash / mempack helpers ─────────────────────
 crates/theo-tooling/src/undo.rs
-crates/theo-tooling/src/write/mod.rs
+crates/theo-engine-graph/src/scip/reader.rs
+crates/theo-infra-memory/src/builtin.rs
+crates/theo-infra-memory/src/fs_util.rs
+crates/theo-infra-memory/src/wiki/hash.rs
+crates/theo-domain/src/truncate.rs
+
+# ── Auth callback HTTP test servers (ephemeral port per-test) ────────
+crates/theo-infra-auth/src/callback.rs
+crates/theo-infra-auth/src/openai.rs
+
+# ── Routing rules / convergence / observability (file-fingerprint only)
+crates/theo-agent-runtime/src/convergence.rs
+crates/theo-agent-runtime/src/observability/mod.rs
+crates/theo-infra-llm/src/routing/rules.rs
+
+# ── TUI config / autocomplete (read user dotfiles for completion test)
+apps/theo-cli/src/tui/autocomplete.rs
+apps/theo-cli/src/tui/config.rs
