@@ -95,111 +95,10 @@ impl AgentRunEngine {
         routing_reason: &str,
         estimated_context_tokens: usize,
     ) -> Result<ChatResponse, LlmError> {
-        // Publish LlmCallStart (triggers "Thinking..." in CLI).
-        // OTel payload lets OtelExportingListener build a
-        // `gen_ai.*`-attributed span.
         let provider_hint = derive_provider_hint(&self.config.llm().base_url);
-        let llm_start_span =
-            crate::observability::otel::llm_call_span(provider_hint, chosen_model);
-        self.event_bus.publish(DomainEvent::new(
-            EventType::LlmCallStart,
-            self.run.run_id.as_str(),
-            serde_json::json!({
-                "iteration": iteration,
-                "routing_reason": routing_reason,
-                "model": chosen_model,
-                "otel": llm_start_span.to_json(),
-            }),
-        ));
-
+        self.publish_llm_call_start(provider_hint, chosen_model, iteration, routing_reason);
         let llm_start = std::time::Instant::now();
-
-        // Retry loop — delegated to `RetryExecutor::with_retry`. The
-        // streaming callback still forwards deltas to the bus per attempt;
-        // it's rebuilt inside each invocation so the bus/run-id captures
-        // survive the FnMut requirement of `with_retry`.
-        let retry_policy = if self.config.loop_cfg().aggressive_retry {
-            theo_domain::retry_policy::RetryPolicy::benchmark()
-        } else {
-            theo_domain::retry_policy::RetryPolicy::default_llm()
-        };
-        let run_id_str = self.run.run_id.as_str().to_string();
-        let event_bus = self.event_bus.clone();
-        let client = &self.llm.client;
-
-        // Iter 71 finding follow-up — wire `MetricsCollector::record_retry`
-        // through the with_retry path. The executor doesn't own the
-        // metrics handle, so we count `f()` invocations via a shared
-        // atomic counter captured by the closure: every call after the
-        // first is a retry.
-        use std::sync::atomic::{AtomicU32, Ordering};
-        let attempt_count = std::sync::Arc::new(AtomicU32::new(0));
-        let attempt_count_inner = attempt_count.clone();
-
-        let resp_outcome = crate::retry::RetryExecutor::with_retry(
-            &retry_policy,
-            &run_id_str,
-            &event_bus,
-            || {
-                attempt_count_inner.fetch_add(1, Ordering::Relaxed);
-                let eb = event_bus.clone();
-                let rid = run_id_str.clone();
-                async move {
-                    // T6.4 — coalesce streaming chunks to reduce
-                    // publish overhead (a 5000-token response would
-                    // otherwise produce ~3000 publishes). The two
-                    // batchers are captured `&mut` by the FnMut
-                    // callback (chat_streaming takes FnMut) — no
-                    // RefCell / Mutex needed on the hot path.
-                    let mut reasoning_batcher =
-                        crate::run_engine::stream_batcher::StreamBatcher::new(
-                            EventType::ReasoningDelta,
-                            eb.clone(),
-                            rid.clone(),
-                        );
-                    let mut content_batcher =
-                        crate::run_engine::stream_batcher::StreamBatcher::new(
-                            EventType::ContentDelta,
-                            eb.clone(),
-                            rid.clone(),
-                        );
-                    let result = client
-                        .chat_streaming(request, |delta| match delta {
-                            theo_infra_llm::stream::StreamDelta::Reasoning(text) => {
-                                reasoning_batcher.push(text);
-                            }
-                            theo_infra_llm::stream::StreamDelta::Content(text) => {
-                                content_batcher.push(text);
-                            }
-                            theo_infra_llm::stream::StreamDelta::Done => {
-                                reasoning_batcher.flush_remainder();
-                                content_batcher.flush_remainder();
-                            }
-                            _ => {}
-                        })
-                        .await;
-                    // Guarantee flush even if the stream terminated
-                    // without an explicit Done frame (error / timeout).
-                    reasoning_batcher.flush_remainder();
-                    content_batcher.flush_remainder();
-                    result
-                }
-            },
-            LlmError::is_retryable,
-        )
-        .await;
-
-        // Record every retry (attempts - 1) on the metrics collector
-        // BEFORE we may propagate an error — even a failed run should
-        // surface the retry count via `AgentResult::retries`. The bus
-        // already saw each `Error{type:retry}` event; this keeps the
-        // counter in sync.
-        let total_attempts = attempt_count.load(Ordering::Relaxed);
-        for _ in 0..total_attempts.saturating_sub(1) {
-            self.obs.metrics.record_retry();
-        }
-
-        let resp = resp_outcome?;
+        let resp = self.execute_llm_with_retry(request).await?;
 
         // Success path: accumulate usage + publish LlmCallEnd.
         let llm_duration = llm_start.elapsed().as_millis() as u64;
@@ -259,6 +158,71 @@ impl AgentRunEngine {
         ));
 
         Ok(resp)
+    }
+
+    /// Publish `LlmCallStart` (triggers "Thinking..." in CLI). OTel
+    /// payload lets `OtelExportingListener` build a `gen_ai.*`-attributed span.
+    fn publish_llm_call_start(
+        &self,
+        provider_hint: &'static str,
+        chosen_model: &str,
+        iteration: usize,
+        routing_reason: &str,
+    ) {
+        let llm_start_span =
+            crate::observability::otel::llm_call_span(provider_hint, chosen_model);
+        self.event_bus.publish(DomainEvent::new(
+            EventType::LlmCallStart,
+            self.run.run_id.as_str(),
+            serde_json::json!({
+                "iteration": iteration,
+                "routing_reason": routing_reason,
+                "model": chosen_model,
+                "otel": llm_start_span.to_json(),
+            }),
+        ));
+    }
+
+    /// Run `client.chat_streaming` inside `RetryExecutor::with_retry`,
+    /// coalescing reasoning + content deltas through StreamBatcher to
+    /// reduce per-chunk publish overhead. Records retry count on the
+    /// metrics collector before propagating any error.
+    async fn execute_llm_with_retry(
+        &mut self,
+        request: &ChatRequest,
+    ) -> Result<ChatResponse, LlmError> {
+        let retry_policy = if self.config.loop_cfg().aggressive_retry {
+            theo_domain::retry_policy::RetryPolicy::benchmark()
+        } else {
+            theo_domain::retry_policy::RetryPolicy::default_llm()
+        };
+        let run_id_str = self.run.run_id.as_str().to_string();
+        let event_bus = self.event_bus.clone();
+        let client = &self.llm.client;
+        // Iter 71 follow-up: count retry attempts via shared atomic so
+        // MetricsCollector::record_retry sees every retry, not just the success.
+        use std::sync::atomic::{AtomicU32, Ordering};
+        let attempt_count = std::sync::Arc::new(AtomicU32::new(0));
+        let attempt_count_inner = attempt_count.clone();
+
+        let resp_outcome = crate::retry::RetryExecutor::with_retry(
+            &retry_policy,
+            &run_id_str,
+            &event_bus,
+            || {
+                attempt_count_inner.fetch_add(1, Ordering::Relaxed);
+                let eb = event_bus.clone();
+                let rid = run_id_str.clone();
+                async move { stream_with_batchers(client, request, eb, rid).await }
+            },
+            LlmError::is_retryable,
+        )
+        .await;
+        let total_attempts = attempt_count.load(Ordering::Relaxed);
+        for _ in 0..total_attempts.saturating_sub(1) {
+            self.obs.metrics.record_retry();
+        }
+        resp_outcome
     }
 
     /// Build the abort `AgentResult` for a non-retryable LLM failure.
@@ -321,4 +285,45 @@ impl AgentRunEngine {
             "context overflow recovery: compacted messages",
         );
     }
+}
+
+/// T6.4 — coalesce streaming chunks via StreamBatcher to reduce per-chunk
+/// publish overhead (a 5000-token response would otherwise produce ~3000
+/// publishes). Both batchers are captured `&mut` by the FnMut callback —
+/// no RefCell/Mutex needed on the hot path. Always flushes on exit so a
+/// stream that terminates without an explicit Done frame still surfaces.
+async fn stream_with_batchers(
+    client: &theo_infra_llm::LlmClient,
+    request: &ChatRequest,
+    eb: std::sync::Arc<crate::event_bus::EventBus>,
+    rid: String,
+) -> Result<ChatResponse, LlmError> {
+    let mut reasoning_batcher = crate::run_engine::stream_batcher::StreamBatcher::new(
+        EventType::ReasoningDelta,
+        eb.clone(),
+        rid.clone(),
+    );
+    let mut content_batcher = crate::run_engine::stream_batcher::StreamBatcher::new(
+        EventType::ContentDelta,
+        eb,
+        rid,
+    );
+    let result = client
+        .chat_streaming(request, |delta| match delta {
+            theo_infra_llm::stream::StreamDelta::Reasoning(text) => {
+                reasoning_batcher.push(text);
+            }
+            theo_infra_llm::stream::StreamDelta::Content(text) => {
+                content_batcher.push(text);
+            }
+            theo_infra_llm::stream::StreamDelta::Done => {
+                reasoning_batcher.flush_remainder();
+                content_batcher.flush_remainder();
+            }
+            _ => {}
+        })
+        .await;
+    reasoning_batcher.flush_remainder();
+    content_batcher.flush_remainder();
+    result
 }
