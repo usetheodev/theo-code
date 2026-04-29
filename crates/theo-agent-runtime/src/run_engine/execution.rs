@@ -31,93 +31,18 @@ impl AgentRunEngine {
         &mut self,
         history: Vec<Message>,
     ) -> crate::agent_loop::AgentResult {
-        // Fase 4 (T4.2): the 200-LOC setup phase — state-machine
-        // transitions, auto-init, autodream spawn, system prompt,
-        // memory prefetch, episode replay, git boot context, GRAPHCTX
-        // planning hints, skills summary, history merge, task
-        // objective — lives in `bootstrap.rs`.
+        // Fase 4 (T4.2): bootstrap.rs assembles initial messages.
         let mut messages = self.assemble_initial_messages(history).await;
-
-        // Initialize state manager for file-backed persistence (crash recovery).
-        // Best-effort: if creation fails, continue without persistence.
-        let mut state_manager = if !self.config.loop_cfg().is_subagent {
-            match crate::state_manager::StateManager::create(
-                &self.project_dir,
-                self.run.run_id.as_str(),
-            ) {
-                Ok(sm) => Some(sm),
-                Err(e) => {
-                    tracing::warn!(error = %e, "state manager init failed (non-fatal)");
-                    None
-                }
-            }
-        } else {
-            None
-        };
-
-        // Initialize hook runner for pre/post tool hooks
-        let hook_runner = if !self.config.loop_cfg().is_subagent {
-            Some(crate::hooks::HookRunner::new(
-                &self.project_dir,
-                crate::hooks::HookConfig::default(),
-            ))
-        } else {
-            None // Sub-agents don't run hooks
-        };
-
-        // Initialize sensor runner for computational verification after write tools.
-        // Sensors fire asynchronously and results are drained before each LLM call.
-        let sensor_runner = if !self.config.loop_cfg().is_subagent {
-            let runner = crate::sensor::SensorRunner::new(
-                &self.project_dir,
-                crate::hooks::HookConfig::default(),
-            );
-            if runner.has_sensors() {
-                Some(runner)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        // Doom loop detector — tracks recent tool calls to detect repetition
-        let mut doom_tracker = self.config.loop_cfg().doom_loop_threshold.map(DoomLoopTracker::new);
-
-        // Layer 1: Schema stripping — sub-agents get filtered tool definitions
-        // that exclude delegation meta-tools (subagent, subagent_parallel, skill).
-        let tool_defs = if self.config.loop_cfg().is_subagent {
-            tool_bridge::registry_to_definitions_for_subagent(&self.llm.registry)
-        } else {
-            tool_bridge::registry_to_definitions(&self.llm.registry)
-        };
-        // T1.1 / find_p7_001 / INV-008 — bridge user cancellation to the
-        // tools' watch::Receiver.
-        //
-        // Tools accept `watch::Receiver<bool>` for abort signalling, but
-        // the runtime's source-of-truth is `CancellationTree`. Without
-        // this bridge the sender of the abort channel was being prefixed
-        // with `_` which made Rust drop it immediately, leaving any tool
-        // long-running after a `cancel_agent()` call (the previous
-        // behaviour leaked dozens of seconds of latency on `git clone`,
-        // `web-fetch`, etc.).
-        //
-        // The sender is kept alive for the entire scope via
-        // `_abort_tx_keepalive` (the `_` prefix is intentional and only
-        // applies to the keep-alive binding, *not* to the original
-        // sender).
-        let (abort_tx, abort_rx) = tokio::sync::watch::channel(false);
-        if let Some(ct) = self.subagent.cancellation.as_ref() {
-            let token = ct.child(self.run.run_id.as_str());
-            let tx = abort_tx.clone();
-            tokio::spawn(async move {
-                token.cancelled().await;
-                let _ = tx.send(true);
-            });
-        }
-        // Keep `abort_tx` alive for the entire `execute_with_history` scope
-        // so the bridge above (and any future bridges) can still send.
-        let _abort_tx_keepalive = abort_tx;
+        let mut state_manager = self.init_state_manager();
+        let hook_runner = self.init_hook_runner();
+        let sensor_runner = self.init_sensor_runner();
+        let mut doom_tracker = self
+            .config
+            .loop_cfg()
+            .doom_loop_threshold
+            .map(DoomLoopTracker::new);
+        let tool_defs = self.build_tool_definitions();
+        let (abort_rx, _abort_tx_keepalive) = self.bridge_cancellation_to_abort_channel();
 
         loop {
             self.run.iteration += 1;
@@ -381,6 +306,87 @@ impl AgentRunEngine {
             // After executing tools, evaluate and loop back to Planning
             self.transition_run(RunState::Replanning);
         }
+    }
+
+    /// File-backed crash-recovery state manager. Best-effort — failure
+    /// to create logs and returns None. Disabled inside subagents.
+    fn init_state_manager(&self) -> Option<crate::state_manager::StateManager> {
+        if self.config.loop_cfg().is_subagent {
+            return None;
+        }
+        match crate::state_manager::StateManager::create(
+            &self.project_dir,
+            self.run.run_id.as_str(),
+        ) {
+            Ok(sm) => Some(sm),
+            Err(e) => {
+                tracing::warn!(error = %e, "state manager init failed (non-fatal)");
+                None
+            }
+        }
+    }
+
+    /// Pre/post-tool hooks runner. Disabled inside subagents.
+    fn init_hook_runner(&self) -> Option<crate::hooks::HookRunner> {
+        if self.config.loop_cfg().is_subagent {
+            return None;
+        }
+        Some(crate::hooks::HookRunner::new(
+            &self.project_dir,
+            crate::hooks::HookConfig::default(),
+        ))
+    }
+
+    /// Async sensor runner for computational verification after writes.
+    /// Returns None when no sensors are configured. Disabled in subagents.
+    fn init_sensor_runner(&self) -> Option<crate::sensor::SensorRunner> {
+        if self.config.loop_cfg().is_subagent {
+            return None;
+        }
+        let runner = crate::sensor::SensorRunner::new(
+            &self.project_dir,
+            crate::hooks::HookConfig::default(),
+        );
+        if runner.has_sensors() {
+            Some(runner)
+        } else {
+            None
+        }
+    }
+
+    /// Layer 1 schema stripping: subagents get filtered tool definitions
+    /// that exclude delegation meta-tools (subagent, subagent_parallel,
+    /// skill) so they can't recursively dispatch.
+    fn build_tool_definitions(&self) -> Vec<theo_infra_llm::types::ToolDefinition> {
+        if self.config.loop_cfg().is_subagent {
+            tool_bridge::registry_to_definitions_for_subagent(&self.llm.registry)
+        } else {
+            tool_bridge::registry_to_definitions(&self.llm.registry)
+        }
+    }
+
+    /// T1.1 / find_p7_001 / INV-008 — bridge user cancellation
+    /// (`CancellationTree`) to the tools' `watch::Receiver<bool>` so
+    /// long-running tools (`git clone`, `web-fetch`) abort within
+    /// milliseconds instead of running to completion. The returned
+    /// sender (`_keepalive`) MUST be held by the caller for the entire
+    /// agent loop scope; dropping it deactivates the bridge.
+    fn bridge_cancellation_to_abort_channel(
+        &self,
+    ) -> (
+        tokio::sync::watch::Receiver<bool>,
+        tokio::sync::watch::Sender<bool>,
+    ) {
+        let (abort_tx, abort_rx) = tokio::sync::watch::channel(false);
+        if let Some(ct) = self.subagent.cancellation.as_ref() {
+            let token = ct.child(self.run.run_id.as_str());
+            let tx = abort_tx.clone();
+            tokio::spawn(async move {
+                token.cancelled().await;
+                let _ = tx.send(true);
+            });
+        }
+        (abort_rx, abort_tx)
     }
 }
 
