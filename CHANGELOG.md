@@ -3,6 +3,18 @@
 ## [Unreleased]
 
 ### Changed
+- **code-hygiene-5x5 T4.4 partial — theo-infra-llm 10 → 7** (`docs/plans/code-hygiene-5x5-plan.md`).
+  3 of 10 too_many_lines provider-converter functions decomposed:
+  - `anthropic::response::from_response` (102 LOC) → `collect_text_blocks`,
+    `collect_tool_use_blocks`, `map_stop_reason`, `parse_usage`
+  - `anthropic::request::from_request` (225 LOC) → `extract_system_messages`,
+    `extract_chat_messages`, `extract_user_message`, `extract_assistant_message`,
+    `convert_tools`, `convert_tool_choice`, `parse_stop_sequences`
+  - `openai::response::from_response` (119 LOC) → `collect_output_text`,
+    `collect_function_calls`, `map_stop_reason`, `parse_usage`
+  Remaining: `anthropic::request::to_request`, `anthropic::streaming::*`,
+  `openai::request::to_request`, `openai::streaming::*`, `openai_compatible::*`,
+  `client.rs::*`, `codex.rs::*`. Complexity total: 60 → 57.
 - **code-hygiene-5x5 T4.6 partial — theo-application 9 → 5** (`docs/plans/code-hygiene-5x5-plan.md`).
   4 of 9 too_many_lines functions refactored:
   - `cache::compute_project_hash` (102 LOC) → 4 helpers (`load_hash_cache`,

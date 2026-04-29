@@ -6,11 +6,9 @@ use super::super::common::*;
 use serde_json::Value;
 
 pub fn from_response(resp: &Value) -> CommonResponse {
-    // If already in common format
     if resp.get("choices").and_then(|c| c.as_array()).is_some() {
         return serde_json::from_value(resp.clone()).unwrap_or_else(|_| empty_response());
     }
-
     let r = resp.get("response").unwrap_or(resp);
     let id = r
         .get("id")
@@ -23,14 +21,41 @@ pub fn from_response(resp: &Value) -> CommonResponse {
         .and_then(|m| m.as_str())
         .unwrap_or_default()
         .to_string();
-
     let output = r
         .get("output")
         .and_then(|o| o.as_array())
         .cloned()
         .unwrap_or_default();
+    let text = collect_output_text(&output);
+    let tool_calls = collect_function_calls(&output);
+    let finish_reason = map_stop_reason(r);
+    let usage_val = r.get("usage").or_else(|| resp.get("usage"));
+    let usage = usage_val.map(parse_usage);
 
-    let text: String = output
+    CommonResponse {
+        id,
+        object: "chat.completion".to_string(),
+        created: now_unix(),
+        model,
+        choices: vec![CommonChoice {
+            index: 0,
+            message: CommonChoiceMessage {
+                role: "assistant".to_string(),
+                content: if text.is_empty() { None } else { Some(text) },
+                tool_calls: if tool_calls.is_empty() {
+                    None
+                } else {
+                    Some(tool_calls)
+                },
+            },
+            finish_reason,
+        }],
+        usage,
+    }
+}
+
+fn collect_output_text(output: &[Value]) -> String {
+    output
         .iter()
         .filter(|o| o.get("type").and_then(|t| t.as_str()) == Some("message"))
         .filter_map(|o| o.get("content").and_then(|c| c.as_array()))
@@ -38,9 +63,11 @@ pub fn from_response(resp: &Value) -> CommonResponse {
         .filter(|p| p.get("type").and_then(|t| t.as_str()) == Some("output_text"))
         .filter_map(|p| p.get("text").and_then(|t| t.as_str()))
         .collect::<Vec<_>>()
-        .join("");
+        .join("")
+}
 
-    let tool_calls: Vec<CommonToolCall> = output
+fn collect_function_calls(output: &[Value]) -> Vec<CommonToolCall> {
+    output
         .iter()
         .filter(|o| o.get("type").and_then(|t| t.as_str()) == Some("function_call"))
         .map(|o| {
@@ -73,9 +100,11 @@ pub fn from_response(resp: &Value) -> CommonResponse {
                 },
             }
         })
-        .collect();
+        .collect()
+}
 
-    let finish_reason = r.get("stop_reason").and_then(|r| r.as_str()).map(|r| {
+fn map_stop_reason(r: &Value) -> Option<String> {
+    r.get("stop_reason").and_then(|r| r.as_str()).map(|r| {
         match r {
             "stop" => "stop",
             "tool_call" | "tool_calls" => "tool_calls",
@@ -83,55 +112,33 @@ pub fn from_response(resp: &Value) -> CommonResponse {
             other => other,
         }
         .to_string()
-    });
+    })
+}
 
-    let usage_val = r.get("usage").or_else(|| resp.get("usage"));
-    let usage = usage_val.map(|u| {
-        let pt = u
-            .get("input_tokens")
-            .and_then(|v| v.as_u64())
-            .map(|v| v as u32);
-        let ct = u
-            .get("output_tokens")
-            .and_then(|v| v.as_u64())
-            .map(|v| v as u32);
-        let cached = u
-            .get("input_tokens_details")
-            .and_then(|d| d.get("cached_tokens"))
-            .and_then(|c| c.as_u64())
-            .map(|v| v as u32);
-        CommonUsage {
-            prompt_tokens: pt,
-            completion_tokens: ct,
-            total_tokens: match (pt, ct) {
-                (Some(p), Some(c)) => Some(p + c),
-                _ => None,
-            },
-            prompt_tokens_details: cached.map(|c| PromptTokensDetails {
-                cached_tokens: Some(c),
-            }),
-        }
-    });
-
-    CommonResponse {
-        id,
-        object: "chat.completion".to_string(),
-        created: now_unix(),
-        model,
-        choices: vec![CommonChoice {
-            index: 0,
-            message: CommonChoiceMessage {
-                role: "assistant".to_string(),
-                content: if text.is_empty() { None } else { Some(text) },
-                tool_calls: if tool_calls.is_empty() {
-                    None
-                } else {
-                    Some(tool_calls)
-                },
-            },
-            finish_reason,
-        }],
-        usage,
+fn parse_usage(u: &Value) -> CommonUsage {
+    let pt = u
+        .get("input_tokens")
+        .and_then(|v| v.as_u64())
+        .map(|v| v as u32);
+    let ct = u
+        .get("output_tokens")
+        .and_then(|v| v.as_u64())
+        .map(|v| v as u32);
+    let cached = u
+        .get("input_tokens_details")
+        .and_then(|d| d.get("cached_tokens"))
+        .and_then(|c| c.as_u64())
+        .map(|v| v as u32);
+    CommonUsage {
+        prompt_tokens: pt,
+        completion_tokens: ct,
+        total_tokens: match (pt, ct) {
+            (Some(p), Some(c)) => Some(p + c),
+            _ => None,
+        },
+        prompt_tokens_details: cached.map(|c| PromptTokensDetails {
+            cached_tokens: Some(c),
+        }),
     }
 }
 

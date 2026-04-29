@@ -17,21 +17,48 @@ pub fn from_response(resp: &Value) -> CommonResponse {
         .and_then(|m| m.as_str())
         .unwrap_or_default()
         .to_string();
-
     let blocks = resp
         .get("content")
         .and_then(|c| c.as_array())
         .cloned()
         .unwrap_or_default();
+    let text = collect_text_blocks(&blocks);
+    let tool_calls = collect_tool_use_blocks(&blocks);
+    let finish_reason = map_stop_reason(resp);
+    let usage = parse_usage(resp);
+    CommonResponse {
+        id,
+        object: "chat.completion".to_string(),
+        created: now_unix(),
+        model,
+        choices: vec![CommonChoice {
+            index: 0,
+            message: CommonChoiceMessage {
+                role: "assistant".to_string(),
+                content: if text.is_empty() { None } else { Some(text) },
+                tool_calls: if tool_calls.is_empty() {
+                    None
+                } else {
+                    Some(tool_calls)
+                },
+            },
+            finish_reason,
+        }],
+        usage,
+    }
+}
 
-    let text: String = blocks
+fn collect_text_blocks(blocks: &[Value]) -> String {
+    blocks
         .iter()
         .filter(|b| b.get("type").and_then(|t| t.as_str()) == Some("text"))
         .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
         .collect::<Vec<_>>()
-        .join("");
+        .join("")
+}
 
-    let tool_calls: Vec<CommonToolCall> = blocks
+fn collect_tool_use_blocks(blocks: &[Value]) -> Vec<CommonToolCall> {
+    blocks
         .iter()
         .filter(|b| b.get("type").and_then(|t| t.as_str()) == Some("tool_use"))
         .map(|b| {
@@ -55,9 +82,11 @@ pub fn from_response(resp: &Value) -> CommonResponse {
                 function: CommonFunctionCall { name, arguments },
             }
         })
-        .collect();
+        .collect()
+}
 
-    let finish_reason = resp.get("stop_reason").and_then(|r| r.as_str()).map(|r| {
+fn map_stop_reason(resp: &Value) -> Option<String> {
+    resp.get("stop_reason").and_then(|r| r.as_str()).map(|r| {
         match r {
             "end_turn" => "stop",
             "tool_use" => "tool_calls",
@@ -66,9 +95,11 @@ pub fn from_response(resp: &Value) -> CommonResponse {
             _ => r,
         }
         .to_string()
-    });
+    })
+}
 
-    let usage = resp.get("usage").map(|u| {
+fn parse_usage(resp: &Value) -> Option<CommonUsage> {
+    resp.get("usage").map(|u| {
         let pt = u
             .get("input_tokens")
             .and_then(|v| v.as_u64())
@@ -93,28 +124,7 @@ pub fn from_response(resp: &Value) -> CommonResponse {
                 cached_tokens: Some(c),
             }),
         }
-    });
-
-    CommonResponse {
-        id,
-        object: "chat.completion".to_string(),
-        created: now_unix(),
-        model,
-        choices: vec![CommonChoice {
-            index: 0,
-            message: CommonChoiceMessage {
-                role: "assistant".to_string(),
-                content: if text.is_empty() { None } else { Some(text) },
-                tool_calls: if tool_calls.is_empty() {
-                    None
-                } else {
-                    Some(tool_calls)
-                },
-            },
-            finish_reason,
-        }],
-        usage,
-    }
+    })
 }
 
 /// Convert a CommonResponse to Anthropic Messages API response format.

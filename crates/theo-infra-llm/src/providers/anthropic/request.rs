@@ -9,226 +9,11 @@ use super::image::{convert_anthropic_image_source, convert_url_to_anthropic_sour
 /// Anthropic request conversion.
 pub fn from_request(body: &Value) -> CommonRequest {
     let mut messages = Vec::new();
-
-    // Extract system messages from "system" array
-    if let Some(sys) = body.get("system").and_then(|s| s.as_array()) {
-        for s in sys {
-            if s.get("type").and_then(|t| t.as_str()) != Some("text") {
-                continue;
-            }
-            if let Some(text) = s.get("text").and_then(|t| t.as_str())
-                && !text.is_empty() {
-                    messages.push(CommonMessage {
-                        role: Role::System,
-                        content: Some(Content::Text(text.to_string())),
-                        tool_call_id: None,
-                        tool_calls: None,
-                        name: None,
-                    });
-                }
-        }
-    }
-
-    // Process messages
-    if let Some(msgs) = body.get("messages").and_then(|m| m.as_array()) {
-        for m in msgs {
-            let Some(role) = m.get("role").and_then(|r| r.as_str()) else {
-                continue;
-            };
-
-            if role == "user" {
-                let parts_in = m
-                    .get("content")
-                    .and_then(|c| c.as_array())
-                    .cloned()
-                    .unwrap_or_default();
-                let mut text_parts = Vec::new();
-
-                for p in &parts_in {
-                    let Some(ptype) = p.get("type").and_then(|t| t.as_str()) else {
-                        continue;
-                    };
-
-                    match ptype {
-                        "text" => {
-                            if let Some(text) = p.get("text").and_then(|t| t.as_str()) {
-                                text_parts.push(ContentPart::Text {
-                                    text: text.to_string(),
-                                });
-                            }
-                        }
-                        "image" => {
-                            if let Some(img) = convert_anthropic_image_source(p.get("source")) {
-                                text_parts.push(img);
-                            }
-                        }
-                        "tool_result" => {
-                            let tool_call_id = p
-                                .get("tool_use_id")
-                                .and_then(|i| i.as_str())
-                                .map(String::from);
-                            let content = p.get("content").map(|c| {
-                                if let Some(s) = c.as_str() {
-                                    s.to_string()
-                                } else {
-                                    c.to_string()
-                                }
-                            });
-                            messages.push(CommonMessage {
-                                role: Role::Tool,
-                                content: content.map(Content::Text),
-                                tool_call_id,
-                                tool_calls: None,
-                                name: None,
-                            });
-                        }
-                        _ => {}
-                    }
-                }
-
-                if !text_parts.is_empty() {
-                    let content = if text_parts.len() == 1 {
-                        if let ContentPart::Text { text } = &text_parts[0] {
-                            Content::Text(text.clone())
-                        } else {
-                            Content::Parts(text_parts)
-                        }
-                    } else {
-                        Content::Parts(text_parts)
-                    };
-                    messages.push(CommonMessage {
-                        role: Role::User,
-                        content: Some(content),
-                        tool_call_id: None,
-                        tool_calls: None,
-                        name: None,
-                    });
-                }
-            } else if role == "assistant" {
-                let parts_in = m
-                    .get("content")
-                    .and_then(|c| c.as_array())
-                    .cloned()
-                    .unwrap_or_default();
-                let mut texts = Vec::new();
-                let mut tool_calls = Vec::new();
-
-                for p in &parts_in {
-                    let Some(ptype) = p.get("type").and_then(|t| t.as_str()) else {
-                        continue;
-                    };
-
-                    match ptype {
-                        "text" => {
-                            if let Some(text) = p.get("text").and_then(|t| t.as_str()) {
-                                texts.push(text.to_string());
-                            }
-                        }
-                        "tool_use" => {
-                            let name = p
-                                .get("name")
-                                .and_then(|n| n.as_str())
-                                .unwrap_or_default()
-                                .to_string();
-                            let id = p
-                                .get("id")
-                                .and_then(|i| i.as_str())
-                                .unwrap_or_default()
-                                .to_string();
-                            let arguments = match p.get("input") {
-                                Some(v) => v.as_str().map_or_else(|| v.to_string(), str::to_owned),
-                                None => "{}".to_string(),
-                            };
-                            tool_calls.push(CommonToolCall {
-                                id,
-                                call_type: "function".to_string(),
-                                function: CommonFunctionCall { name, arguments },
-                            });
-                        }
-                        _ => {}
-                    }
-                }
-
-                let content_str = texts.join("");
-                messages.push(CommonMessage {
-                    role: Role::Assistant,
-                    content: if content_str.is_empty() {
-                        None
-                    } else {
-                        Some(Content::Text(content_str))
-                    },
-                    tool_call_id: None,
-                    tool_calls: if tool_calls.is_empty() {
-                        None
-                    } else {
-                        Some(tool_calls)
-                    },
-                    name: None,
-                });
-            }
-        }
-    }
-
-    // Convert tools
-    let tools = body.get("tools").and_then(|t| t.as_array()).map(|arr| {
-        arr.iter()
-            .filter(|t| t.get("input_schema").is_some())
-            .map(|t| CommonTool {
-                tool_type: "function".to_string(),
-                function: CommonFunctionDef {
-                    name: t
-                        .get("name")
-                        .and_then(|n| n.as_str())
-                        .unwrap_or_default()
-                        .to_string(),
-                    description: t
-                        .get("description")
-                        .and_then(|d| d.as_str())
-                        .map(String::from),
-                    parameters: t.get("input_schema").cloned(),
-                },
-            })
-            .collect()
-    });
-
-    // Convert tool_choice
-    let tool_choice = body.get("tool_choice").and_then(|tc| {
-        let tc_type = tc.get("type").and_then(|t| t.as_str())?;
-        match tc_type {
-            "auto" => Some(ToolChoice::Mode("auto".to_string())),
-            "any" => Some(ToolChoice::Mode("required".to_string())),
-            "tool" => {
-                let name = tc.get("name").and_then(|n| n.as_str())?.to_string();
-                Some(ToolChoice::Function {
-                    choice_type: "function".to_string(),
-                    function: ToolChoiceFunction { name },
-                })
-            }
-            _ => None,
-        }
-    });
-
-    let stop = body.get("stop_sequences").and_then(|v| {
-        if let Some(arr) = v.as_array() {
-            let strs: Vec<String> = arr
-                .iter()
-                .filter_map(|s| s.as_str().map(String::from))
-                .collect();
-            let mut iter = strs.into_iter();
-            match (iter.next(), iter.next()) {
-                (Some(only), None) => Some(StopSequence::Single(only)),
-                (Some(first), Some(second)) => {
-                    let mut rest: Vec<String> = vec![first, second];
-                    rest.extend(iter);
-                    Some(StopSequence::Multiple(rest))
-                }
-                (None, _) => None
-            }
-        } else {
-            v.as_str().map(|s| StopSequence::Single(s.to_string()))
-        }
-    });
-
+    extract_system_messages(body, &mut messages);
+    extract_chat_messages(body, &mut messages);
+    let tools = convert_tools(body);
+    let tool_choice = convert_tool_choice(body);
+    let stop = parse_stop_sequences(body);
     CommonRequest {
         model: body
             .get("model")
@@ -250,6 +35,236 @@ pub fn from_request(body: &Value) -> CommonRequest {
         tools,
         tool_choice,
     }
+}
+
+fn extract_system_messages(body: &Value, messages: &mut Vec<CommonMessage>) {
+    let Some(sys) = body.get("system").and_then(|s| s.as_array()) else {
+        return;
+    };
+    for s in sys {
+        if s.get("type").and_then(|t| t.as_str()) != Some("text") {
+            continue;
+        }
+        if let Some(text) = s.get("text").and_then(|t| t.as_str())
+            && !text.is_empty()
+        {
+            messages.push(CommonMessage {
+                role: Role::System,
+                content: Some(Content::Text(text.to_string())),
+                tool_call_id: None,
+                tool_calls: None,
+                name: None,
+            });
+        }
+    }
+}
+
+fn extract_chat_messages(body: &Value, messages: &mut Vec<CommonMessage>) {
+    let Some(msgs) = body.get("messages").and_then(|m| m.as_array()) else {
+        return;
+    };
+    for m in msgs {
+        let Some(role) = m.get("role").and_then(|r| r.as_str()) else {
+            continue;
+        };
+        match role {
+            "user" => extract_user_message(m, messages),
+            "assistant" => extract_assistant_message(m, messages),
+            _ => {}
+        }
+    }
+}
+
+fn extract_user_message(m: &Value, messages: &mut Vec<CommonMessage>) {
+    let parts_in = m
+        .get("content")
+        .and_then(|c| c.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let mut text_parts = Vec::new();
+    for p in &parts_in {
+        let Some(ptype) = p.get("type").and_then(|t| t.as_str()) else {
+            continue;
+        };
+        match ptype {
+            "text" => {
+                if let Some(text) = p.get("text").and_then(|t| t.as_str()) {
+                    text_parts.push(ContentPart::Text {
+                        text: text.to_string(),
+                    });
+                }
+            }
+            "image" => {
+                if let Some(img) = convert_anthropic_image_source(p.get("source")) {
+                    text_parts.push(img);
+                }
+            }
+            "tool_result" => {
+                let tool_call_id = p
+                    .get("tool_use_id")
+                    .and_then(|i| i.as_str())
+                    .map(String::from);
+                let content = p.get("content").map(|c| {
+                    if let Some(s) = c.as_str() {
+                        s.to_string()
+                    } else {
+                        c.to_string()
+                    }
+                });
+                messages.push(CommonMessage {
+                    role: Role::Tool,
+                    content: content.map(Content::Text),
+                    tool_call_id,
+                    tool_calls: None,
+                    name: None,
+                });
+            }
+            _ => {}
+        }
+    }
+    if text_parts.is_empty() {
+        return;
+    }
+    let content = if text_parts.len() == 1 {
+        if let ContentPart::Text { text } = &text_parts[0] {
+            Content::Text(text.clone())
+        } else {
+            Content::Parts(text_parts)
+        }
+    } else {
+        Content::Parts(text_parts)
+    };
+    messages.push(CommonMessage {
+        role: Role::User,
+        content: Some(content),
+        tool_call_id: None,
+        tool_calls: None,
+        name: None,
+    });
+}
+
+fn extract_assistant_message(m: &Value, messages: &mut Vec<CommonMessage>) {
+    let parts_in = m
+        .get("content")
+        .and_then(|c| c.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let mut texts = Vec::new();
+    let mut tool_calls = Vec::new();
+    for p in &parts_in {
+        let Some(ptype) = p.get("type").and_then(|t| t.as_str()) else {
+            continue;
+        };
+        match ptype {
+            "text" => {
+                if let Some(text) = p.get("text").and_then(|t| t.as_str()) {
+                    texts.push(text.to_string());
+                }
+            }
+            "tool_use" => {
+                let name = p
+                    .get("name")
+                    .and_then(|n| n.as_str())
+                    .unwrap_or_default()
+                    .to_string();
+                let id = p
+                    .get("id")
+                    .and_then(|i| i.as_str())
+                    .unwrap_or_default()
+                    .to_string();
+                let arguments = match p.get("input") {
+                    Some(v) => v.as_str().map_or_else(|| v.to_string(), str::to_owned),
+                    None => "{}".to_string(),
+                };
+                tool_calls.push(CommonToolCall {
+                    id,
+                    call_type: "function".to_string(),
+                    function: CommonFunctionCall { name, arguments },
+                });
+            }
+            _ => {}
+        }
+    }
+    let content_str = texts.join("");
+    messages.push(CommonMessage {
+        role: Role::Assistant,
+        content: if content_str.is_empty() {
+            None
+        } else {
+            Some(Content::Text(content_str))
+        },
+        tool_call_id: None,
+        tool_calls: if tool_calls.is_empty() {
+            None
+        } else {
+            Some(tool_calls)
+        },
+        name: None,
+    });
+}
+
+fn convert_tools(body: &Value) -> Option<Vec<CommonTool>> {
+    body.get("tools").and_then(|t| t.as_array()).map(|arr| {
+        arr.iter()
+            .filter(|t| t.get("input_schema").is_some())
+            .map(|t| CommonTool {
+                tool_type: "function".to_string(),
+                function: CommonFunctionDef {
+                    name: t
+                        .get("name")
+                        .and_then(|n| n.as_str())
+                        .unwrap_or_default()
+                        .to_string(),
+                    description: t
+                        .get("description")
+                        .and_then(|d| d.as_str())
+                        .map(String::from),
+                    parameters: t.get("input_schema").cloned(),
+                },
+            })
+            .collect()
+    })
+}
+
+fn convert_tool_choice(body: &Value) -> Option<ToolChoice> {
+    body.get("tool_choice").and_then(|tc| {
+        let tc_type = tc.get("type").and_then(|t| t.as_str())?;
+        match tc_type {
+            "auto" => Some(ToolChoice::Mode("auto".to_string())),
+            "any" => Some(ToolChoice::Mode("required".to_string())),
+            "tool" => {
+                let name = tc.get("name").and_then(|n| n.as_str())?.to_string();
+                Some(ToolChoice::Function {
+                    choice_type: "function".to_string(),
+                    function: ToolChoiceFunction { name },
+                })
+            }
+            _ => None,
+        }
+    })
+}
+
+fn parse_stop_sequences(body: &Value) -> Option<StopSequence> {
+    body.get("stop_sequences").and_then(|v| {
+        if let Some(arr) = v.as_array() {
+            let strs: Vec<String> = arr
+                .iter()
+                .filter_map(|s| s.as_str().map(String::from))
+                .collect();
+            let mut iter = strs.into_iter();
+            match (iter.next(), iter.next()) {
+                (Some(only), None) => Some(StopSequence::Single(only)),
+                (Some(first), Some(second)) => {
+                    let mut rest: Vec<String> = vec![first, second];
+                    rest.extend(iter);
+                    Some(StopSequence::Multiple(rest))
+                }
+                (None, _) => None,
+            }
+        } else {
+            v.as_str().map(|s| StopSequence::Single(s.to_string()))
+        }
+    })
 }
 
 /// Convert a CommonRequest to Anthropic Messages API format.
