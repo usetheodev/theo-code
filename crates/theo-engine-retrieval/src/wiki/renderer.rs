@@ -5,15 +5,25 @@ use super::model::*;
 /// Render a single wiki page to markdown with canonical frontmatter.
 pub fn render_page(doc: &WikiDoc) -> String {
     let mut md = String::with_capacity(4096);
-
-    // Canonical frontmatter — source of truth for tier classification + LLM relevance
     let fm = PageFrontmatter::module(doc.enriched, &doc.summary, &doc.tags);
     md += &render_frontmatter(&fm);
+    render_page_header(&mut md, doc);
+    render_module_doc(&mut md, doc);
+    render_entry_points(&mut md, doc);
+    render_public_api(&mut md, doc);
+    render_files_section(&mut md, doc);
+    render_dependencies_section(&mut md, doc);
+    render_call_flow_section(&mut md, doc);
+    render_test_coverage_section(&mut md, doc);
+    render_footer(&mut md, doc);
+    md
+}
 
-    // Header with Karpathy pattern: title + summary + tags
-    md += &format!("# {}\n\n", doc.title);
+/// Karpathy header pattern: title + summary + tags + facts.
+fn render_page_header(md: &mut String, doc: &WikiDoc) {
+    md.push_str(&format!("# {}\n\n", doc.title));
     if !doc.summary.is_empty() {
-        md += &format!("**Summary**: {}\n\n", doc.summary);
+        md.push_str(&format!("**Summary**: {}\n\n", doc.summary));
     }
     if !doc.tags.is_empty() {
         let tag_str: String = doc
@@ -22,140 +32,148 @@ pub fn render_page(doc: &WikiDoc) -> String {
             .map(|t| format!("#{}", t))
             .collect::<Vec<_>>()
             .join(" ");
-        md += &format!("**Tags**: {}\n\n", tag_str);
+        md.push_str(&format!("**Tags**: {}\n\n", tag_str));
     }
-    md += &format!(
+    md.push_str(&format!(
         "> {} files | {} | {} symbols\n\n",
         doc.file_count, doc.primary_language, doc.symbol_count
-    );
+    ));
+}
 
-    // Module documentation (from //! comments in lib.rs — author's own words)
+/// Module-level doc (from `//!` in lib.rs/mod.rs — author's own words).
+fn render_module_doc(md: &mut String, doc: &WikiDoc) {
     if let Some(ref module_doc) = doc.module_doc {
-        md += "## Overview\n\n";
-        md += module_doc;
-        md += "\n\n";
+        md.push_str("## Overview\n\n");
+        md.push_str(module_doc);
+        md.push_str("\n\n");
     }
+}
 
-    // Entry Points
-    if !doc.entry_points.is_empty() {
-        md += "## Entry Points\n\n";
-        for api in &doc.entry_points {
-            md += &format!(
-                "```{}\n{}\n```\n",
-                lang_hint(&doc.primary_language),
-                api.signature
-            );
-            if let Some(doc_str) = &api.doc {
-                md += &format!("> {}\n", doc_str);
-            }
-            md += &format!("> Source: `{}`\n\n", api.source_ref.display());
+fn render_entry_points(md: &mut String, doc: &WikiDoc) {
+    if doc.entry_points.is_empty() {
+        return;
+    }
+    md.push_str("## Entry Points\n\n");
+    for api in &doc.entry_points {
+        md.push_str(&format!(
+            "```{}\n{}\n```\n",
+            lang_hint(&doc.primary_language),
+            api.signature
+        ));
+        if let Some(doc_str) = &api.doc {
+            md.push_str(&format!("> {}\n", doc_str));
         }
+        md.push_str(&format!("> Source: `{}`\n\n", api.source_ref.display()));
     }
+}
 
-    // Public API — grouped by kind for readability
-    if !doc.public_api.is_empty() {
-        md += "## Public API\n\n";
-
-        let groups: &[(&str, &str)] = &[
-            ("Trait", "Traits"),
-            ("Struct", "Types"),
-            ("Enum", "Enums"),
-            ("Function", "Functions"),
-            ("Method", "Methods"),
-        ];
-
-        let mut rendered_any_group = false;
-        for (kind, label) in groups {
-            let items: Vec<&ApiEntry> = doc.public_api.iter().filter(|a| a.kind == *kind).collect();
-            if items.is_empty() {
-                continue;
-            }
-
-            md += &format!("### {}\n\n", label);
-            md += &format!("```{}\n", lang_hint(&doc.primary_language));
-            for api in &items {
-                md += &format!("{}\n", api.signature);
-            }
-            md += "```\n";
-            // Add doc comments below the code block
-            for api in &items {
-                if let Some(ref doc_str) = api.doc {
-                    let first_line = doc_str.lines().next().unwrap_or("");
-                    if !first_line.is_empty() {
-                        md += &format!("> `{}` — {}\n", api.name, first_line);
-                    }
+fn render_public_api(md: &mut String, doc: &WikiDoc) {
+    if doc.public_api.is_empty() {
+        return;
+    }
+    md.push_str("## Public API\n\n");
+    let groups: &[(&str, &str)] = &[
+        ("Trait", "Traits"),
+        ("Struct", "Types"),
+        ("Enum", "Enums"),
+        ("Function", "Functions"),
+        ("Method", "Methods"),
+    ];
+    let mut rendered_any_group = false;
+    for (kind, label) in groups {
+        let items: Vec<&ApiEntry> = doc.public_api.iter().filter(|a| a.kind == *kind).collect();
+        if items.is_empty() {
+            continue;
+        }
+        md.push_str(&format!("### {}\n\n", label));
+        md.push_str(&format!("```{}\n", lang_hint(&doc.primary_language)));
+        for api in &items {
+            md.push_str(&format!("{}\n", api.signature));
+        }
+        md.push_str("```\n");
+        for api in &items {
+            if let Some(ref doc_str) = api.doc {
+                let first_line = doc_str.lines().next().unwrap_or("");
+                if !first_line.is_empty() {
+                    md.push_str(&format!("> `{}` — {}\n", api.name, first_line));
                 }
             }
-            md += "\n";
-            rendered_any_group = true;
         }
-
-        // Catch-all for ungrouped kinds
-        if !rendered_any_group {
-            md += &format!("```{}\n", lang_hint(&doc.primary_language));
-            for api in &doc.public_api {
-                md += &format!("{}\n", api.signature);
-            }
-            md += "```\n\n";
-        }
+        md.push('\n');
+        rendered_any_group = true;
     }
-
-    // Files
-    if !doc.files.is_empty() {
-        md += "## Files\n\n";
-        md += "| File | Symbols |\n|------|--------|\n";
-        for f in &doc.files {
-            md += &format!("| `{}` | {} |\n", f.path, f.symbol_count);
+    if !rendered_any_group {
+        md.push_str(&format!("```{}\n", lang_hint(&doc.primary_language)));
+        for api in &doc.public_api {
+            md.push_str(&format!("{}\n", api.signature));
         }
-        md += "\n";
+        md.push_str("```\n\n");
     }
+}
 
-    // Dependencies
-    if !doc.dependencies.is_empty() {
-        md += "## Dependencies\n\n";
-        for dep in &doc.dependencies {
-            md += &format!("- → [[{}]] ({})\n", dep.target_slug, dep.edge_type);
-        }
-        md += "\n";
+fn render_files_section(md: &mut String, doc: &WikiDoc) {
+    if doc.files.is_empty() {
+        return;
     }
-
-    // Call Flow
-    if !doc.call_flow.is_empty() {
-        md += "## Call Flow\n\n";
-        for step in &doc.call_flow {
-            md += &format!("`{}` → `{}`\n", step.from_symbol, step.to_symbol);
-        }
-        md += "\n";
+    md.push_str("## Files\n\n");
+    md.push_str("| File | Symbols |\n|------|--------|\n");
+    for f in &doc.files {
+        md.push_str(&format!("| `{}` | {} |\n", f.path, f.symbol_count));
     }
+    md.push('\n');
+}
 
-    // Test Coverage
-    md += "## Test Coverage\n\n";
-    md += &format!(
+fn render_dependencies_section(md: &mut String, doc: &WikiDoc) {
+    if doc.dependencies.is_empty() {
+        return;
+    }
+    md.push_str("## Dependencies\n\n");
+    for dep in &doc.dependencies {
+        md.push_str(&format!("- → [[{}]] ({})\n", dep.target_slug, dep.edge_type));
+    }
+    md.push('\n');
+}
+
+fn render_call_flow_section(md: &mut String, doc: &WikiDoc) {
+    if doc.call_flow.is_empty() {
+        return;
+    }
+    md.push_str("## Call Flow\n\n");
+    for step in &doc.call_flow {
+        md.push_str(&format!("`{}` → `{}`\n", step.from_symbol, step.to_symbol));
+    }
+    md.push('\n');
+}
+
+fn render_test_coverage_section(md: &mut String, doc: &WikiDoc) {
+    md.push_str("## Test Coverage\n\n");
+    md.push_str(&format!(
         "{}/{} functions tested ({:.0}%)\n\n",
         doc.test_coverage.tested, doc.test_coverage.total, doc.test_coverage.percentage
-    );
-    if !doc.test_coverage.untested.is_empty() {
-        md += "Untested: ";
-        md += &doc
-            .test_coverage
+    ));
+    if doc.test_coverage.untested.is_empty() {
+        return;
+    }
+    md.push_str("Untested: ");
+    md.push_str(
+        &doc.test_coverage
             .untested
             .iter()
             .map(|s| format!("`{}`", s))
             .collect::<Vec<_>>()
-            .join(", ");
-        md += "\n\n";
-    }
+            .join(", "),
+    );
+    md.push_str("\n\n");
+}
 
-    // Footer with provenance
-    md += "---\n";
-    md += &format!(
+fn render_footer(md: &mut String, doc: &WikiDoc) {
+    md.push_str("---\n");
+    md.push_str(&format!(
         "*Generated by GRAPHCTX {} | Sources: {} files, {} symbols*\n",
         WikiManifest::GENERATOR_VERSION,
         doc.file_count,
         doc.symbol_count
-    );
-
-    md
+    ));
 }
 
 /// Render the index page (TOC) — flat list using default groups.
