@@ -1,6 +1,6 @@
 //! Pilot CLI runner — autonomous development loop with real-time display.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 // T1.2: route runtime types through the theo-application facade.
@@ -17,19 +17,16 @@ fn caps() -> StyleCaps {
     TtyCaps::detect().style_caps()
 }
 
-/// Run the pilot loop with CLI rendering.
-pub async fn run_pilot(
-    config: AgentConfig,
-    pilot_config: PilotConfig,
-    project_dir: PathBuf,
-    promise: String,
-    complete: Option<String>,
-) -> PilotResult {
-    // Print banner
+fn print_pilot_banner(
+    promise: &str,
+    complete: Option<&str>,
+    project_dir: &Path,
+    pilot_config: &PilotConfig,
+) {
     let c = caps();
     eprintln!("{} — autonomous mode", bold("✈  Theo Pilot", c));
-    eprintln!("  Promise: {}", accent(truncate(&promise, 80), c));
-    if let Some(ref dod) = complete {
+    eprintln!("  Promise: {}", accent(truncate(promise, 80), c));
+    if let Some(dod) = complete {
         eprintln!("  Done when: {}", warn(truncate(dod, 80), c));
     }
     eprintln!("  Project: {}", project_dir.display());
@@ -38,16 +35,72 @@ pub async fn run_pilot(
         pilot_config.max_total_calls, pilot_config.max_loops_per_hour
     );
     eprintln!();
+}
 
-    // Create parent EventBus with renderer
+fn build_pilot_event_bus() -> Arc<EventBus> {
     let event_bus = Arc::new(EventBus::new());
     let renderer = Arc::new(PilotRenderer::new());
     event_bus.subscribe(renderer);
     let cli_renderer = Arc::new(CliRenderer::new());
     event_bus.subscribe(cli_renderer);
+    event_bus
+}
 
-    // SOTA Planning System: prefer .theo/plans/*.json over .md (legacy roadmap).
-    // `find_latest_plan` returns .json when present, otherwise falls back to .md.
+/// Fire-and-forget GRAPHCTX background build. Disabled when
+/// `THEO_NO_GRAPHCTX=1`; otherwise spawns the service and returns it.
+async fn init_graph_context(
+    project_dir: &Path,
+) -> Option<Arc<dyn theo_domain::graph_context::GraphContextProvider>> {
+    if std::env::var("THEO_NO_GRAPHCTX").is_ok() {
+        return None;
+    }
+    let service = Arc::new(
+        theo_application::use_cases::graph_context_service::GraphContextService::new(),
+    );
+    let _ = service.initialize(project_dir).await;
+    eprintln!("[theo] GRAPHCTX building in background");
+    Some(service)
+}
+
+/// T6.1 final — opt-in auto-replan advisor. `THEO_AUTO_REPLAN=1`
+/// builds an `LlmReplanAdvisor`; on threshold breach the pilot calls
+/// advisor.propose with a 5 s timeout and auto-applies the patch.
+/// Default OFF — manual `plan_failure_status` + `plan_replan` is the
+/// recommended workflow for human review.
+fn init_replan_advisor(
+    config: &AgentConfig,
+) -> Option<Arc<dyn theo_domain::plan_patch::ReplanAdvisor>> {
+    if !env_auto_replan_enabled() {
+        return None;
+    }
+    match build_replan_advisor(config) {
+        Some(adv) => {
+            eprintln!(
+                "[theo:auto_replan] enabled — threshold breaches will trigger \
+                 LLM-driven plan_replan automatically (5s timeout per call)"
+            );
+            Some(adv)
+        }
+        None => {
+            eprintln!(
+                "[theo:auto_replan] requested but provider construction \
+                 failed — falling back to manual replan flow"
+            );
+            None
+        }
+    }
+}
+
+/// Run the pilot loop with CLI rendering.
+pub async fn run_pilot(
+    config: AgentConfig,
+    pilot_config: PilotConfig,
+    project_dir: PathBuf,
+    promise: String,
+    complete: Option<String>,
+) -> PilotResult {
+    print_pilot_banner(&promise, complete.as_deref(), &project_dir, &pilot_config);
+    let event_bus = build_pilot_event_bus();
     let plan_path = theo_application::facade::agent::find_latest_plan(&project_dir);
     let is_json_plan = plan_path
         .as_ref()
@@ -55,57 +108,13 @@ pub async fn run_pilot(
         .and_then(|e| e.to_str())
         == Some("json");
     let roadmap_path: Option<PathBuf> = if is_json_plan {
-        // Found a JSON plan; ignore legacy .md roadmaps.
         None
     } else {
         plan_path.clone()
     };
+    let graph_context = init_graph_context(&project_dir).await;
+    let replan_advisor = init_replan_advisor(&config);
 
-    // Initialize GRAPHCTX — fire-and-forget background build.
-    // Disabled entirely when THEO_NO_GRAPHCTX=1.
-    let graph_context: Option<Arc<dyn theo_domain::graph_context::GraphContextProvider>> =
-        if std::env::var("THEO_NO_GRAPHCTX").is_ok() {
-            None // Enabled by default. Set THEO_NO_GRAPHCTX=1 to disable.
-        } else {
-            let service = Arc::new(
-                theo_application::use_cases::graph_context_service::GraphContextService::new(),
-            );
-            let _ = service.initialize(&project_dir).await;
-            eprintln!("[theo] GRAPHCTX building in background");
-            Some(service)
-        };
-
-    // T6.1 final — opt-in auto-replan advisor. THEO_AUTO_REPLAN=1
-    // builds an LlmReplanAdvisor from the same config the agent
-    // uses, and wires it into the pilot. On threshold breach the
-    // pilot calls advisor.propose with a 5 s timeout and applies
-    // the proposed PlanPatch automatically. Default OFF — manual
-    // `plan_failure_status` + `plan_replan` remains the recommended
-    // workflow for users who want per-failure human review.
-    let replan_advisor: Option<
-        Arc<dyn theo_domain::plan_patch::ReplanAdvisor>,
-    > = if env_auto_replan_enabled() {
-        match build_replan_advisor(&config) {
-            Some(adv) => {
-                eprintln!(
-                    "[theo:auto_replan] enabled — threshold breaches will trigger \
-                     LLM-driven plan_replan automatically (5s timeout per call)"
-                );
-                Some(adv)
-            }
-            None => {
-                eprintln!(
-                    "[theo:auto_replan] requested but provider construction \
-                     failed — falling back to manual replan flow"
-                );
-                None
-            }
-        }
-    } else {
-        None
-    };
-
-    // Create pilot loop
     let mut pilot = PilotLoop::new(
         config,
         pilot_config,
@@ -121,7 +130,6 @@ pub async fn run_pilot(
         pilot = pilot.with_replan_advisor(advisor);
     }
 
-    // Setup Ctrl+C handler
     let interrupt = pilot.interrupt_flag();
     tokio::spawn(async move {
         if tokio::signal::ctrl_c().await.is_ok() {
