@@ -66,117 +66,130 @@ pub fn load_registry_from_project(project_dir: &Path) -> McpRegistry {
     parse_registry_toml(&content).unwrap_or_default()
 }
 
-fn parse_registry_toml(content: &str) -> anyhow::Result<McpRegistry> {
-    use serde::Deserialize;
-    use std::collections::BTreeMap;
+/// Phase 39 (mcp-http-and-discover-flake): tagged enum for the
+/// `transport` discriminator. `transport = "stdio"` (default when
+/// the field is absent) yields the legacy stdio path; `transport =
+/// "http"` activates the HTTP/Streamable client.
+///
+/// D5 backward-compat: legacy `[[server]]` entries without an
+/// explicit `transport` field still parse as `Stdio` because we
+/// implement a custom `Deserialize` that defaults the tag.
+#[derive(Debug)]
+enum RawServer {
+    Stdio {
+        name: String,
+        command: String,
+        args: Vec<String>,
+        env: std::collections::BTreeMap<String, String>,
+        timeout_ms: Option<u64>,
+    },
+    Http {
+        name: String,
+        url: String,
+        headers: std::collections::BTreeMap<String, String>,
+        timeout_ms: Option<u64>,
+    },
+}
 
-    #[derive(Deserialize)]
-    struct File {
-        #[serde(default)]
-        server: Vec<RawServer>,
-    }
-    /// Phase 39 (mcp-http-and-discover-flake): tagged enum for the
-    /// `transport` discriminator. `transport = "stdio"` (default when
-    /// the field is absent) yields the legacy stdio path; `transport =
-    /// "http"` activates the HTTP/Streamable client.
-    ///
-    /// D5 backward-compat: legacy `[[server]]` entries without an
-    /// explicit `transport` field still parse as `Stdio` because we
-    /// implement a custom `Deserialize` that defaults the tag.
-    #[derive(Debug)]
-    enum RawServer {
-        Stdio {
-            name: String,
-            command: String,
-            args: Vec<String>,
-            env: BTreeMap<String, String>,
-            timeout_ms: Option<u64>,
-        },
-        Http {
-            name: String,
-            url: String,
-            headers: BTreeMap<String, String>,
-            timeout_ms: Option<u64>,
-        },
-    }
+#[derive(serde::Deserialize)]
+struct RawServerAll {
+    #[serde(default)]
+    transport: Option<String>,
+    name: String,
+    #[serde(default)]
+    command: Option<String>,
+    #[serde(default)]
+    args: Vec<String>,
+    #[serde(default)]
+    env: std::collections::BTreeMap<String, String>,
+    #[serde(default)]
+    url: Option<String>,
+    #[serde(default)]
+    headers: std::collections::BTreeMap<String, String>,
+    #[serde(default)]
+    timeout_ms: Option<u64>,
+}
 
-    impl<'de> Deserialize<'de> for RawServer {
-        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: serde::Deserializer<'de>,
-        {
-            #[derive(Deserialize)]
-            struct All {
-                #[serde(default)]
-                transport: Option<String>,
-                name: String,
-                #[serde(default)]
-                command: Option<String>,
-                #[serde(default)]
-                args: Vec<String>,
-                #[serde(default)]
-                env: BTreeMap<String, String>,
-                #[serde(default)]
-                url: Option<String>,
-                #[serde(default)]
-                headers: BTreeMap<String, String>,
-                #[serde(default)]
-                timeout_ms: Option<u64>,
+impl<'de> serde::Deserialize<'de> for RawServer {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let all = RawServerAll::deserialize(deserializer)?;
+        let kind = all.transport.as_deref().unwrap_or("stdio");
+        match kind {
+            "stdio" => {
+                let command = all.command.ok_or_else(|| {
+                    serde::de::Error::custom(format!(
+                        "stdio server '{}' is missing required `command` field",
+                        all.name
+                    ))
+                })?;
+                Ok(RawServer::Stdio {
+                    name: all.name,
+                    command,
+                    args: all.args,
+                    env: all.env,
+                    timeout_ms: all.timeout_ms,
+                })
             }
-            let all = All::deserialize(deserializer)?;
-            let kind = all.transport.as_deref().unwrap_or("stdio");
-            match kind {
-                "stdio" => {
-                    let command = all.command.ok_or_else(|| {
-                        serde::de::Error::custom(format!(
-                            "stdio server '{}' is missing required `command` field",
-                            all.name
-                        ))
-                    })?;
-                    Ok(RawServer::Stdio {
-                        name: all.name,
-                        command,
-                        args: all.args,
-                        env: all.env,
-                        timeout_ms: all.timeout_ms,
-                    })
-                }
-                "http" => {
-                    let url = all.url.ok_or_else(|| {
-                        serde::de::Error::custom(format!(
-                            "http server '{}' is missing required `url` field",
-                            all.name
-                        ))
-                    })?;
-                    Ok(RawServer::Http {
-                        name: all.name,
-                        url,
-                        headers: all.headers,
-                        timeout_ms: all.timeout_ms,
-                    })
-                }
-                other => Err(serde::de::Error::custom(format!(
-                    "unknown MCP transport '{}' for server '{}'; \
-                     supported: 'stdio' | 'http'",
-                    other, all.name
-                ))),
+            "http" => {
+                let url = all.url.ok_or_else(|| {
+                    serde::de::Error::custom(format!(
+                        "http server '{}' is missing required `url` field",
+                        all.name
+                    ))
+                })?;
+                Ok(RawServer::Http {
+                    name: all.name,
+                    url,
+                    headers: all.headers,
+                    timeout_ms: all.timeout_ms,
+                })
             }
+            other => Err(serde::de::Error::custom(format!(
+                "unknown MCP transport '{}' for server '{}'; \
+                 supported: 'stdio' | 'http'",
+                other, all.name
+            ))),
         }
     }
+}
 
-    let f: File = toml::from_str(content)?;
+#[derive(serde::Deserialize)]
+struct RegistryFile {
+    #[serde(default)]
+    server: Vec<RawServer>,
+}
+
+fn parse_registry_toml(content: &str) -> anyhow::Result<McpRegistry> {
+    let f: RegistryFile = toml::from_str(content)?;
     let mut reg = McpRegistry::new();
     for raw in f.server {
         let cfg = match raw {
             RawServer::Stdio {
-                name, command, args, env, timeout_ms,
+                name,
+                command,
+                args,
+                env,
+                timeout_ms,
             } => McpServerConfig::Stdio {
-                name, command, args, env, timeout_ms,
+                name,
+                command,
+                args,
+                env,
+                timeout_ms,
             },
             RawServer::Http {
-                name, url, headers, timeout_ms,
+                name,
+                url,
+                headers,
+                timeout_ms,
             } => McpServerConfig::Http {
-                name, url, headers, timeout_ms,
+                name,
+                url,
+                headers,
+                timeout_ms,
             },
         };
         reg.register(cfg);

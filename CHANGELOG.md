@@ -3,6 +3,18 @@
 ## [Unreleased]
 
 ### Changed
+- **code-hygiene-5x5 T4.3 partial — theo (CLI) 11 → 9** (`docs/plans/code-hygiene-5x5-plan.md`).
+  2 of 11 too_many_lines functions decomposed:
+  - `cmd::context::cmd_context` (116 LOC) → `validate_args_or_exit`,
+    `load_or_build_graph`, `print_context_report`. Side effect:
+    `theo-application::use_cases::pipeline::ContextPayload` is now
+    `pub use`'d so apps can name the type without violating ADR-010.
+  - `mcp_admin::parse_registry_toml` (104 LOC) → top-level
+    `RawServer` / `RawServerAll` / `RegistryFile` types
+    (extracted nested types and Deserialize impl).
+  Remaining: `cmd/headless::cmd_headless` (143), `pilot::*` (139),
+  `renderer::*` (168), `tui/{app/events_handler,app/update,commands}` (147+472+137).
+  Complexity total: 54 → 52.
 - **code-hygiene-5x5 T4.5 partial — theo-agent-runtime 10 → 7** (`docs/plans/code-hygiene-5x5-plan.md`).
   3 of 10 too_many_lines functions decomposed:
   - `skill::bundled::bundled_skills` (151 LOC) → 10 per-skill builders
