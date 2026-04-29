@@ -3,6 +3,28 @@
 ## [Unreleased]
 
 ### Changed
+- **code-hygiene-5x5 T4.3 RESOLVED — theo (CLI) 1 → 0** (`docs/plans/code-hygiene-5x5-plan.md`).
+  Final remaining theo CLI too_many_lines violation cleared: `apps/theo-cli/src/tui/mod.rs::run`
+  (421 LOC TUI event-loop) decomposed into 19+ single-purpose helpers:
+  - **Terminal lifecycle**: `setup_tui_terminal` (raw mode + alt screen + mouse + panic hook),
+    `cleanup_tui_terminal` (restoration), `spawn_input_and_event_tasks` (input + broadcast bridge).
+  - **Message dispatch**: `log_significant_msg`, `is_normal_mode`, `redirect_modal_msg` (returns
+    `Option<Msg>` — None to skip), `handle_normal_mode_msg` (Submit + slash-command interception),
+    `run_slash_command_messages`, `apply_export_session`.
+  - **IO commands**: `dispatch_io_command`, `spawn_memory_command`, `run_memory_command`,
+    `render_skills_list`.
+  - **Inline auth flows**: `handle_login_start_inline` (OpenAI device flow w/ terminal.draw between
+    steps), `handle_login_server_inline` (generic RFC 8628 server), `open_browser_silent`.
+  - **Render-loop side effects**: `sync_mouse_capture_for_copy_mode` (encapsulates the
+    `static mut LAST_COPY_MODE` mutation behind `// SAFETY:` docs).
+  - **Agent launch**: `launch_agent_for_prompt` (config refresh + memory attach + spawn) +
+    `run_agent_task` (drainer + AgentLoop + AgentComplete forwarding).
+  Body of `run` is now ~70 LOC (setup → message-drain loop with 5-line modal/normal dispatch →
+  agent launch → cursor tick → mouse-capture sync → draw → cleanup).
+  T4.3 of code-hygiene-5x5 now fully clean. theo CLI complexity ceiling 11 → 0 (RESOLVED).
+  Behaviour preserved — all 507 lib + 13 e2e_smoke tests pass.
+  Cumulative metric across workspace: 21 → 20 violations.
+
 - **code-hygiene-5x5 T4.3 partial — theo (CLI) 2 → 1** (`docs/plans/code-hygiene-5x5-plan.md`).
   `apps/theo-cli/src/tui/app/update.rs::update` (371 LOC TUI Msg dispatcher with ~70 arms)
   decomposed into 25+ per-Msg helpers. Remaining body of `update` is now a thin Msg →
