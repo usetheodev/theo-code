@@ -153,157 +153,229 @@ fn render_tool_completed(event: &DomainEvent, caps: StyleCaps) {
         .unwrap_or(0);
 
     match tool_name {
-        "read" => {
-            let path = tr::json_str(input, "filePath", "?");
-            let lines = output.lines().count();
-            eprintln!(
-                "{}",
-                tr::render_read(&prefix, path, lines, success, duration, caps)
-            );
+        "read" => render_read_tool(&prefix, input, output, success, duration, caps),
+        "write" => render_write_tool(&prefix, input, success, duration, caps),
+        "edit" => render_edit_tool(&prefix, input, success, duration, caps),
+        "apply_patch" => render_apply_patch_tool(&prefix, input, success, duration, caps),
+        "glob" => render_glob_tool(&prefix, input, output, success, duration, caps),
+        "grep" => render_grep_tool(&prefix, input, output, success, duration, caps),
+        "bash" => render_bash_tool(&prefix, input, output, success, duration, caps),
+        "think" => render_think_tool(input, caps),
+        "reflect" => render_reflect_tool(&prefix, input, success, duration, caps),
+        "memory" => render_memory_tool(&prefix, input, success, caps),
+        "task_create" => render_task_create_tool(input, caps),
+        "task_update" => render_task_update_tool(input, caps),
+        "done" => eprintln!(
+            "{}",
+            tr::render_generic(&prefix, "Done", success, duration, caps)
+        ),
+        _ => eprintln!(
+            "{}",
+            tr::render_generic(&prefix, tool_name, success, duration, caps)
+        ),
+    }
+}
+
+fn render_read_tool(
+    prefix: &str,
+    input: &serde_json::Value,
+    output: &str,
+    success: bool,
+    duration: u64,
+    caps: StyleCaps,
+) {
+    let path = tr::json_str(input, "filePath", "?");
+    let lines = output.lines().count();
+    eprintln!(
+        "{}",
+        tr::render_read(prefix, path, lines, success, duration, caps)
+    );
+}
+
+fn render_write_tool(
+    prefix: &str,
+    input: &serde_json::Value,
+    success: bool,
+    duration: u64,
+    caps: StyleCaps,
+) {
+    let path = tr::json_str(input, "filePath", "?");
+    let content = input.get("content").and_then(|v| v.as_str()).unwrap_or("");
+    let lines = content.lines().count();
+    eprintln!(
+        "{}",
+        tr::render_write_header(prefix, path, lines, success, duration, caps)
+    );
+    if success && !content.is_empty() {
+        for line in tr::render_write_preview(content, 3, caps) {
+            eprintln!("{line}");
         }
-        "write" => {
-            let path = tr::json_str(input, "filePath", "?");
-            let content = input.get("content").and_then(|v| v.as_str()).unwrap_or("");
-            let lines = content.lines().count();
+    }
+}
+
+fn render_edit_tool(
+    prefix: &str,
+    input: &serde_json::Value,
+    success: bool,
+    duration: u64,
+    caps: StyleCaps,
+) {
+    let path = tr::json_str(input, "filePath", "?");
+    eprintln!(
+        "{}",
+        tr::render_edit_header(prefix, path, success, duration, caps)
+    );
+    if !success {
+        return;
+    }
+    if let Some(old) = input.get("oldString").and_then(|v| v.as_str()) {
+        let first = old.lines().next().unwrap_or("");
+        eprintln!("{}", tr::render_diff_line('-', first, caps));
+    }
+    if let Some(new) = input.get("newString").and_then(|v| v.as_str()) {
+        let first = new.lines().next().unwrap_or("");
+        eprintln!("{}", tr::render_diff_line('+', first, caps));
+        let total = new.lines().count();
+        if total > 1 {
             eprintln!(
-                "{}",
-                tr::render_write_header(&prefix, path, lines, success, duration, caps)
-            );
-            if success && !content.is_empty() {
-                for line in tr::render_write_preview(content, 3, caps) {
-                    eprintln!("{line}");
-                }
-            }
-        }
-        "edit" => {
-            let path = tr::json_str(input, "filePath", "?");
-            eprintln!(
-                "{}",
-                tr::render_edit_header(&prefix, path, success, duration, caps)
-            );
-            if success {
-                if let Some(old) = input.get("oldString").and_then(|v| v.as_str()) {
-                    let first = old.lines().next().unwrap_or("");
-                    eprintln!("{}", tr::render_diff_line('-', first, caps));
-                }
-                if let Some(new) = input.get("newString").and_then(|v| v.as_str()) {
-                    let first = new.lines().next().unwrap_or("");
-                    eprintln!("{}", tr::render_diff_line('+', first, caps));
-                    let total = new.lines().count();
-                    if total > 1 {
-                        eprintln!(
-                            "    {}",
-                            crate::render::style::dim(
-                                format!("  … +{} more lines", total - 1),
-                                caps
-                            )
-                        );
-                    }
-                }
-            }
-        }
-        "apply_patch" => {
-            let patch = tr::json_str(input, "patchText", "");
-            let files: Vec<&str> = patch
-                .lines()
-                .filter(|l| l.starts_with("+++ "))
-                .filter_map(|l| l.strip_prefix("+++ b/").or(l.strip_prefix("+++ ")))
-                .filter(|f| *f != "/dev/null")
-                .collect();
-            let file_list = if files.is_empty() {
-                "patch".to_string()
-            } else {
-                files.join(", ")
-            };
-            let hunks = patch.lines().filter(|l| l.starts_with("@@")).count();
-            eprintln!(
-                "{}",
-                tr::render_patch(&prefix, &file_list, hunks, success, duration, caps)
-            );
-        }
-        "glob" => {
-            let pattern = tr::json_str(input, "pattern", "*");
-            let count = output.lines().filter(|l| !l.is_empty()).count();
-            eprintln!(
-                "{}",
-                tr::render_glob(&prefix, pattern, count, success, duration, caps)
-            );
-        }
-        "grep" => {
-            let pattern = tr::json_str(input, "pattern", "?");
-            let count = output.lines().filter(|l| !l.is_empty()).count();
-            eprintln!(
-                "{}",
-                tr::render_grep(&prefix, pattern, count, success, duration, caps)
-            );
-        }
-        "bash" => {
-            let cmd = tr::json_str(input, "command", "?");
-            eprintln!(
-                "{}",
-                tr::render_bash_header(&prefix, cmd, success, duration, caps)
-            );
-            if success && !output.is_empty() {
-                for line in tr::render_bash_preview(output, caps) {
-                    eprintln!("{line}");
-                }
-            }
-        }
-        "think" => {
-            let thought = tr::json_str(input, "thought", "");
-            eprintln!("{}", tr::render_think(thought, caps));
-        }
-        "reflect" => {
-            let confidence = input
-                .get("confidence")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0);
-            eprintln!(
-                "{}",
-                tr::render_reflect(&prefix, confidence, success, duration, caps)
-            );
-        }
-        "memory" => {
-            let action = tr::json_str(input, "action", "?");
-            let key = tr::json_str(input, "key", "");
-            eprintln!(
-                "{}",
-                tr::render_memory(&prefix, action, key, success, caps)
-            );
-        }
-        "task_create" => {
-            let content = tr::json_str(input, "content", "?");
-            eprintln!(
-                "  {} +task {}",
-                crate::render::style::accent("📋", caps),
-                content
-            );
-        }
-        "task_update" => {
-            let id = input.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
-            let new_status = tr::json_str(input, "status", "?");
-            let icon = match new_status {
-                "completed" => "✅",
-                "in_progress" => "🔄",
-                "cancelled" => "❌",
-                _ => "⬜",
-            };
-            eprintln!(
-                "  {} task {id} {icon} {new_status}",
-                crate::render::style::accent("📋", caps)
-            );
-        }
-        "done" => {
-            eprintln!(
-                "{}",
-                tr::render_generic(&prefix, "Done", success, duration, caps)
-            );
-        }
-        _ => {
-            eprintln!(
-                "{}",
-                tr::render_generic(&prefix, tool_name, success, duration, caps)
+                "    {}",
+                crate::render::style::dim(format!("  … +{} more lines", total - 1), caps)
             );
         }
     }
+}
+
+fn render_apply_patch_tool(
+    prefix: &str,
+    input: &serde_json::Value,
+    success: bool,
+    duration: u64,
+    caps: StyleCaps,
+) {
+    let patch = tr::json_str(input, "patchText", "");
+    let files: Vec<&str> = patch
+        .lines()
+        .filter(|l| l.starts_with("+++ "))
+        .filter_map(|l| l.strip_prefix("+++ b/").or(l.strip_prefix("+++ ")))
+        .filter(|f| *f != "/dev/null")
+        .collect();
+    let file_list = if files.is_empty() {
+        "patch".to_string()
+    } else {
+        files.join(", ")
+    };
+    let hunks = patch.lines().filter(|l| l.starts_with("@@")).count();
+    eprintln!(
+        "{}",
+        tr::render_patch(prefix, &file_list, hunks, success, duration, caps)
+    );
+}
+
+fn render_glob_tool(
+    prefix: &str,
+    input: &serde_json::Value,
+    output: &str,
+    success: bool,
+    duration: u64,
+    caps: StyleCaps,
+) {
+    let pattern = tr::json_str(input, "pattern", "*");
+    let count = output.lines().filter(|l| !l.is_empty()).count();
+    eprintln!(
+        "{}",
+        tr::render_glob(prefix, pattern, count, success, duration, caps)
+    );
+}
+
+fn render_grep_tool(
+    prefix: &str,
+    input: &serde_json::Value,
+    output: &str,
+    success: bool,
+    duration: u64,
+    caps: StyleCaps,
+) {
+    let pattern = tr::json_str(input, "pattern", "?");
+    let count = output.lines().filter(|l| !l.is_empty()).count();
+    eprintln!(
+        "{}",
+        tr::render_grep(prefix, pattern, count, success, duration, caps)
+    );
+}
+
+fn render_bash_tool(
+    prefix: &str,
+    input: &serde_json::Value,
+    output: &str,
+    success: bool,
+    duration: u64,
+    caps: StyleCaps,
+) {
+    let cmd = tr::json_str(input, "command", "?");
+    eprintln!(
+        "{}",
+        tr::render_bash_header(prefix, cmd, success, duration, caps)
+    );
+    if success && !output.is_empty() {
+        for line in tr::render_bash_preview(output, caps) {
+            eprintln!("{line}");
+        }
+    }
+}
+
+fn render_think_tool(input: &serde_json::Value, caps: StyleCaps) {
+    let thought = tr::json_str(input, "thought", "");
+    eprintln!("{}", tr::render_think(thought, caps));
+}
+
+fn render_reflect_tool(
+    prefix: &str,
+    input: &serde_json::Value,
+    success: bool,
+    duration: u64,
+    caps: StyleCaps,
+) {
+    let confidence = input
+        .get("confidence")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    eprintln!(
+        "{}",
+        tr::render_reflect(prefix, confidence, success, duration, caps)
+    );
+}
+
+fn render_memory_tool(
+    prefix: &str,
+    input: &serde_json::Value,
+    success: bool,
+    caps: StyleCaps,
+) {
+    let action = tr::json_str(input, "action", "?");
+    let key = tr::json_str(input, "key", "");
+    eprintln!("{}", tr::render_memory(prefix, action, key, success, caps));
+}
+
+fn render_task_create_tool(input: &serde_json::Value, caps: StyleCaps) {
+    let content = tr::json_str(input, "content", "?");
+    eprintln!(
+        "  {} +task {}",
+        crate::render::style::accent("📋", caps),
+        content
+    );
+}
+
+fn render_task_update_tool(input: &serde_json::Value, caps: StyleCaps) {
+    let id = input.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+    let new_status = tr::json_str(input, "status", "?");
+    let icon = match new_status {
+        "completed" => "✅",
+        "in_progress" => "🔄",
+        "cancelled" => "❌",
+        _ => "⬜",
+    };
+    eprintln!(
+        "  {} task {id} {icon} {new_status}",
+        crate::render::style::accent("📋", caps)
+    );
 }
