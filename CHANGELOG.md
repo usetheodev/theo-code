@@ -3,6 +3,39 @@
 ## [Unreleased]
 
 ### Changed
+- **code-hygiene-5x5 T4 — theo-agent-runtime + theo-application RESOLVED to ceiling 0** (`docs/plans/code-hygiene-5x5-plan.md`).
+  Drained the last 4 fns to drive these two crates from `ceiling=N` to `ceiling=0`:
+  - **`crates/theo-agent-runtime/tests/observability_e2e.rs::e2e_observability_pipeline_full_flow`**
+    (113 LOC E2E test) decomposed into 6 helpers + 1 owned-inputs struct:
+    `assert_e2e_streaming_events_filtered` / `assert_e2e_event_types_present` /
+    `assert_e2e_sequence_strictly_monotonic` (per-section assertion blocks),
+    `FullFlowOwnedInputs` + `build_full_flow_finalize_inputs` (owns the
+    `FinalizeInputs` lifetime borrows), `read_run_report`,
+    `assert_e2e_run_report_full_flow` (RunReport assertion table).
+    The single E2E test body is now ~25 LOC.
+  - **`crates/theo-application/tests/bench_real_repos.rs::bench_cases`** (233 LOC
+    `Vec<BenchCase>` factory) split into 4 per-tier helpers
+    (`tier1_baseline_cases`, `tier2_medium_cases`, `tier3_stress_cases`,
+    `tier4_meta_cases`); `bench_cases` body is now 6 LOC (4 `extend` calls).
+  - **`crates/theo-application/tests/bench_real_repos.rs::run_benchmark`**
+    (135 LOC pipeline runner) split into `bench_extract` (Phase 1),
+    `bench_build_and_cluster` (Phase 2), `run_one_query`,
+    `extract_returned_files`, `fuzzy_match_expected`, `compute_query_metrics`,
+    `aggregate_query_metrics`. Body now ~30 LOC.
+  - **`crates/theo-application/tests/bench_real_repos.rs::bench_real_repos_full_pipeline`**
+    (124 LOC test entry) split into `print_pipeline_banner`,
+    `print_results_table`, `GlobalAggregates` struct +
+    `compute_global_aggregates`, `print_aggregate_row`, `sota_verdict`,
+    `print_sota_scorecard`, `print_per_query_detail`. Body now ~20 LOC.
+  Allowlist: `theo-agent-runtime` 1 → 0, `theo-application` 3 → 0.
+  Cumulative metric across workspace: 18 → 14 violations (only
+  `theo-engine-retrieval` 14 fns in `tests/{benchmark_suite, eval_*}` and
+  `src/{assembly/assembly_tests, wiki/generator/generator_tests,
+  experimental/compress#tests}` remain — those are large fixture builders
+  for golden / benchmark suites, last allowlist holdout).
+  Validated: 5247 PASS / 0 FAIL / 24 IGNORED, clippy `-D warnings` 0,
+  check-complexity 14 total / all crates ≤ ceiling.
+
 - **code-hygiene-5x5 plan T6 closeout — six-phase summary** (`docs/plans/code-hygiene-5x5-plan.md`).
   All 11 T6.1 final-validation gates green. Cumulative six-phase outcome:
 

@@ -142,26 +142,35 @@ fn publish_sequence(bus: &EventBus, run_id: &str) {
 
 #[test]
 fn e2e_observability_pipeline_full_flow() {
+    // Single E2E test: bootstrap → publish → drain → read → finalize →
+    // re-read summary. Helpers below own the per-section assertion
+    // blocks so this body stays under the size budget.
     let tmp = tempfile::tempdir().unwrap();
-    let base = tmp.path().join(".theo").join("trajectories");
     let run_id = "e2e-run-001";
-
-    // 1. Bootstrap the pipeline (exact same call the run_engine uses).
+    let base = tmp.path().join(".theo").join("trajectories");
     let bus = EventBus::new();
     let pipeline = install_observability(&bus, run_id, base);
-
-    // 2. Publish a realistic run sequence.
     publish_sequence(&bus, run_id);
-
-    // 3. Finalize: drop the pipeline (triggers writer drain) and read back.
     let file_path = pipeline.finalize();
     assert!(file_path.exists(), "trajectory file must exist: {:?}", file_path);
-
     let (envelopes, integrity) = read_trajectory(&file_path).expect("reader must parse");
+    assert_e2e_streaming_events_filtered(&envelopes);
+    assert_e2e_event_types_present(&envelopes);
+    assert_e2e_sequence_strictly_monotonic(&envelopes);
+    assert!(integrity.confidence > 0.0, "confidence must be positive");
+    assert_eq!(integrity.schema_version, 1);
+    let inputs_owned = build_full_flow_finalize_inputs();
+    let (detected, _run_report) =
+        finalize_trajectory_summary(&file_path, &inputs_owned.as_inputs(run_id));
+    assert!(!detected.premature_termination, "run had edits — not premature");
+    assert!(!detected.weak_verification, "run had bash after edit — not weak");
+    assert!(!detected.task_derailment, "run referenced initial context");
+    assert!(!detected.conversation_history_loss, "no compaction — no loss");
+    let report = read_run_report(&file_path);
+    assert_e2e_run_report_full_flow(&report);
+}
 
-    // --- Event-layer assertions ---
-
-    // Streaming events must be filtered out.
+fn assert_e2e_streaming_events_filtered(envelopes: &[theo_agent_runtime::observability::envelope::TrajectoryEnvelope]) {
     let streaming_events: Vec<_> = envelopes
         .iter()
         .filter(|e| {
@@ -175,19 +184,28 @@ fn e2e_observability_pipeline_full_flow() {
         "streaming events must NOT appear in trajectory, found {:?}",
         streaming_events.len()
     );
+}
 
-    // Non-streaming events present.
+fn assert_e2e_event_types_present(envelopes: &[theo_agent_runtime::observability::envelope::TrajectoryEnvelope]) {
     let event_types: Vec<String> = envelopes
         .iter()
         .filter(|e| matches!(e.kind, EnvelopeKind::Event))
         .filter_map(|e| e.event_type.clone())
         .collect();
-    assert!(event_types.contains(&"RunInitialized".to_string()));
-    assert!(event_types.contains(&"ToolCallCompleted".to_string()));
-    assert!(event_types.contains(&"HypothesisFormed".to_string()));
-    assert!(event_types.contains(&"RunStateChanged".to_string()));
+    for expected in [
+        "RunInitialized",
+        "ToolCallCompleted",
+        "HypothesisFormed",
+        "RunStateChanged",
+    ] {
+        assert!(
+            event_types.contains(&expected.to_string()),
+            "missing expected event_type {expected}"
+        );
+    }
+}
 
-    // Sequence numbers strictly monotonic.
+fn assert_e2e_sequence_strictly_monotonic(envelopes: &[theo_agent_runtime::observability::envelope::TrajectoryEnvelope]) {
     let seqs: Vec<u64> = envelopes.iter().map(|e| e.seq).collect();
     for i in 1..seqs.len() {
         assert!(
@@ -198,76 +216,85 @@ fn e2e_observability_pipeline_full_flow() {
             i
         );
     }
+}
 
-    // --- Integrity assertions ---
-    assert!(integrity.confidence > 0.0, "confidence must be positive");
-    assert_eq!(integrity.schema_version, 1);
+/// Owned-data carrier for the FinalizeInputs lifetimes (Budget,
+/// BudgetUsage, TokenUsage, ContextMetricsReport, HashSet) — the
+/// real `FinalizeInputs` borrows from this.
+struct FullFlowOwnedInputs {
+    budget: Budget,
+    usage: BudgetUsage,
+    tokens: TokenUsage,
+    ctx_report: ContextMetricsReport,
+    initial_ctx: HashSet<String>,
+    pre_compaction: HashSet<String>,
+}
 
-    // 4. Finalize the summary with full inputs.
-    let budget = Budget::default();
-    let usage = BudgetUsage::default();
-    let tokens = TokenUsage {
-        input_tokens: 800,
-        output_tokens: 300,
-        cache_read_tokens: 100,
-        cache_write_tokens: 50,
-        reasoning_tokens: 25,
-        estimated_cost_usd: 0.0123,
-    };
-    let ctx_report = ContextMetricsReport {
-        avg_context_size: 1700.0,
-        max_context_size: 1900,
-        total_iterations: 2,
-        refetch_rate: 0.0,
-        action_repetition_rate: 0.0,
-        hypothesis_changes: 1,
-        unique_artifacts_fetched: 1,
-        unique_actions: 2,
-        top_refetched: vec![],
-        repeated_actions: vec![],
-        usefulness_scores: Default::default(),
-        causal_usefulness: Default::default(),
-        failure_constraints: vec![],
-    };
-    let initial_ctx: HashSet<String> = ["src/main.rs"].iter().map(|s| s.to_string()).collect();
-    let pre_compaction: HashSet<String> = HashSet::new();
-    let inputs = FinalizeInputs {
-        run_id,
-        token_usage: &tokens,
-        successful_edits: 1,
-        converged: true,
-        budget: &budget,
-        usage: &usage,
-        ctx_report: &ctx_report,
-        done_blocked_count: 0,
-        evolution_attempts: 0,
-        evolution_success: false,
-        episodes_injected: 2,
-        episodes_created: 1,
-        failure_fingerprints_new: 0,
-        failure_fingerprints_recurrent: 0,
-        initial_context_files: &initial_ctx,
-        pre_compaction_hot_files: &pre_compaction,
-    };
-    let (detected, _run_report) = finalize_trajectory_summary(&file_path, &inputs);
+impl FullFlowOwnedInputs {
+    fn as_inputs<'a>(&'a self, run_id: &'a str) -> FinalizeInputs<'a> {
+        FinalizeInputs {
+            run_id,
+            token_usage: &self.tokens,
+            successful_edits: 1,
+            converged: true,
+            budget: &self.budget,
+            usage: &self.usage,
+            ctx_report: &self.ctx_report,
+            done_blocked_count: 0,
+            evolution_attempts: 0,
+            evolution_success: false,
+            episodes_injected: 2,
+            episodes_created: 1,
+            failure_fingerprints_new: 0,
+            failure_fingerprints_recurrent: 0,
+            initial_context_files: &self.initial_ctx,
+            pre_compaction_hot_files: &self.pre_compaction,
+        }
+    }
+}
 
-    // No failure modes should trip on a well-formed run (edit + verification).
-    assert!(!detected.premature_termination, "run had edits — not premature");
-    assert!(!detected.weak_verification, "run had bash after edit — not weak");
-    assert!(!detected.task_derailment, "run referenced initial context");
-    assert!(!detected.conversation_history_loss, "no compaction — no loss");
+fn build_full_flow_finalize_inputs() -> FullFlowOwnedInputs {
+    FullFlowOwnedInputs {
+        budget: Budget::default(),
+        usage: BudgetUsage::default(),
+        tokens: TokenUsage {
+            input_tokens: 800,
+            output_tokens: 300,
+            cache_read_tokens: 100,
+            cache_write_tokens: 50,
+            reasoning_tokens: 25,
+            estimated_cost_usd: 0.0123,
+        },
+        ctx_report: ContextMetricsReport {
+            avg_context_size: 1700.0,
+            max_context_size: 1900,
+            total_iterations: 2,
+            refetch_rate: 0.0,
+            action_repetition_rate: 0.0,
+            hypothesis_changes: 1,
+            unique_artifacts_fetched: 1,
+            unique_actions: 2,
+            top_refetched: vec![],
+            repeated_actions: vec![],
+            usefulness_scores: Default::default(),
+            causal_usefulness: Default::default(),
+            failure_constraints: vec![],
+        },
+        initial_ctx: ["src/main.rs"].iter().map(|s| s.to_string()).collect(),
+        pre_compaction: HashSet::new(),
+    }
+}
 
-    // 5. Read back the summary line.
-    let (envelopes_final, _) = read_trajectory(&file_path).unwrap();
+fn read_run_report(file_path: &std::path::Path) -> RunReport {
+    let (envelopes_final, _) = read_trajectory(file_path).unwrap();
     let summary = envelopes_final
         .iter()
         .find(|e| matches!(e.kind, EnvelopeKind::Summary))
         .expect("summary line must exist");
+    serde_json::from_value(summary.payload.clone()).expect("summary payload is a RunReport")
+}
 
-    let report: RunReport =
-        serde_json::from_value(summary.payload.clone()).expect("summary payload is a RunReport");
-
-    // --- RunReport assertions ---
+fn assert_e2e_run_report_full_flow(report: &RunReport) {
     assert_eq!(report.memory_metrics.episodes_injected, 2);
     assert_eq!(report.memory_metrics.episodes_created, 1);
     assert_eq!(report.memory_metrics.hypotheses_formed, 1);
@@ -279,10 +306,7 @@ fn e2e_observability_pipeline_full_flow() {
     assert!(report.tool_breakdown.iter().any(|t| t.tool_name == "read"));
     assert!(report.tool_breakdown.iter().any(|t| t.tool_name == "edit"));
     assert!(report.tool_breakdown.iter().any(|t| t.tool_name == "bash"));
-
-    // Surrogate metrics are computed.
     assert!(report.surrogate_metrics.llm_efficiency.value > 0.0);
-    // Time to first tool: tool dispatched after RunInitialized.
     assert!(report.surrogate_metrics.time_to_first_tool_ms.value >= 0.0);
 }
 
