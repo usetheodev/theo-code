@@ -27,7 +27,7 @@ quando os números mudarem ≥ 5 % em qualquer dimensão.
 | Documentação | 4 | **4.5** | +0.5 | + 4 ADRs novas (017 v2, 019, 020, 021), + complexity baseline doc, + 6 task entries no CHANGELOG. "Patterns not exceptions" é doutrina codificada. |
 | Honestidade / self-awareness | 5 | **5** | — | Maintained. Esta seção atualiza a versão de 2026-04-27 com números reproduzidos por gate. |
 | Sidecars (LSP / DAP / Browser / Computer Use) | 2 | **2** | — | Sem mudança neste plano (escopo era hygiene, não sidecars). LSP ✅ E2E permanece, DAP/Browser/Computer ainda gaps. |
-| **Dívida histórica ativa** | **2.5** | **5** | **+2.5** | **Maior delta da rodada**. Allowlists drenadas: size 27→0 ativos, unwrap 26→5 (test fixtures), unsafe 5→0, panic 2→0, io-test 86→36 (com 92 auto-allowed por padrão), complexity 8→7 (theo-tooling refresh), secret 5→18 (cresceu por mais fixtures conhecidos, **não** por débito novo). 158 / 158 entradas mapeadas (100% coverage). |
+| **Dívida histórica ativa** | **2.5** | **5** | **+2.5** | **Maior delta da rodada**. Allowlists drenadas: size 27→0 ativos, unwrap 26→5 (test fixtures), unsafe 5→0, panic 2→0, io-test 86→36 (com 92 auto-allowed por padrão), **complexity 8→5 crates ainda ativos** (T4.7 theo-tooling 7→0, T4.8 theo-domain 2→0, T4.9 theo-engine-graph 1→0, T4.6 partial theo-application 9→5; total fns 74→60 = -14 = -19%), secret 5→18 (cresceu por mais fixtures conhecidos, **não** por débito novo). 158 / 158 entradas mapeadas (100% coverage). |
 | Resiliência | 3 | **3** | — | Sem mudança escopo. |
 | Operational readiness | 2.5 | **2.5** | — | Sem mudança escopo. |
 | Bug-hunting culture | 4 | **4** | — | Mantida. |
