@@ -3,6 +3,18 @@
 ## [Unreleased]
 
 ### Changed
+- **code-hygiene-5x5 T4.2 partial — theo-engine-retrieval 24 → 22 (round 2)** (`docs/plans/code-hygiene-5x5-plan.md`).
+  Two more retrieval functions decomposed:
+  - `assembly/codeasm::assemble_with_code` (132 LOC) →
+    `build_candidate_content` + `full_code_content` (rank-tiered
+    content strategy moved out of the body).
+  - `assembly/direct::assemble_files_direct_with_inline_skip` (150 LOC) →
+    `build_file_to_community` + `apply_test_penalties` +
+    `compute_reverse_dependency_boost` (with `boost_callers_of_seed_symbols`
+    and `boost_file_level_reverse_edges` sub-helpers) +
+    `apply_capped_boost` + `pack_files_into_budget` + `render_file_card`.
+  src/ count: 10 → 7. Total: 50 → 50 (test fns hold steady).
+
 - **code-hygiene-5x5 T4.2 partial — theo-engine-retrieval 24 → 22** (`docs/plans/code-hygiene-5x5-plan.md`).
   `search/file_bm25::FileBm25::search_inner` (110 LOC) decomposed into:
   - `collect_file_nodes` (file-iterator)

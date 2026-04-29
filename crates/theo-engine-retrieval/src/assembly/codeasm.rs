@@ -61,64 +61,17 @@ pub fn assemble_with_code(
         .iter()
         .enumerate()
         .map(|(rank, s)| {
-            let content = if rank < 2 {
-                // Top-2: always include FULL code
-                let summary_text = summaries
-                    .get(&s.community.id)
-                    .map(|sum| sum.text.as_str())
-                    .unwrap_or("");
-
-                if s.community.node_ids.len() > 5 {
-                    build_code_content_filtered(
-                        &s.community,
-                        summary_text,
-                        graph,
-                        repo_root,
-                        &query_tokens,
-                    )
-                } else {
-                    build_code_content(&s.community, summary_text, graph, repo_root)
-                }
-            } else if rank < 4 {
-                // Rank 2-3: use compressed representations for large communities
-                let symbol_count = s
-                    .community
-                    .node_ids
-                    .iter()
-                    .filter(|id| {
-                        graph
-                            .get_node(id)
-                            .is_some_and(|n| n.node_type == NodeType::Symbol)
-                    })
-                    .count();
-                let file_count = collect_file_symbols(&s.community, graph).len();
-
-                if symbol_count > symbol_count_threshold || file_count > file_count_threshold {
-                    build_compressed_content(&s.community, graph)
-                } else {
-                    let summary_text = summaries
-                        .get(&s.community.id)
-                        .map(|sum| sum.text.as_str())
-                        .unwrap_or("");
-                    if s.community.node_ids.len() > 5 {
-                        build_code_content_filtered(
-                            &s.community,
-                            summary_text,
-                            graph,
-                            repo_root,
-                            &query_tokens,
-                        )
-                    } else {
-                        build_code_content(&s.community, summary_text, graph, repo_root)
-                    }
-                }
-            } else {
-                // Rank 4+: signature-only (no full source code)
-                build_signature_content(&s.community, graph)
-            };
-
+            let content = build_candidate_content(
+                rank,
+                s,
+                summaries,
+                graph,
+                repo_root,
+                &query_tokens,
+                symbol_count_threshold,
+                file_count_threshold,
+            );
             let token_count = estimate_tokens(&content).max(1);
-
             Candidate {
                 community_id: s.community.id.clone(),
                 community_name: s.community.name.clone(),
@@ -181,6 +134,62 @@ pub fn assemble_with_code(
         total_tokens,
         budget_tokens,
         exploration_hints: excluded_names.join(", "),
+    }
+}
+
+/// Tiered content strategy by rank:
+///   rank 0-1 → full source code (highest fidelity)
+///   rank 2-3 → compressed if large, full if small
+///   rank 4+  → signature-only
+fn build_candidate_content(
+    rank: usize,
+    s: &&ScoredCommunity,
+    summaries: &std::collections::HashMap<String, crate::summary::CommunitySummary>,
+    graph: &CodeGraph,
+    repo_root: &Path,
+    query_tokens: &HashSet<String>,
+    symbol_count_threshold: usize,
+    file_count_threshold: usize,
+) -> String {
+    if rank < 2 {
+        return full_code_content(s, summaries, graph, repo_root, query_tokens);
+    }
+    if rank < 4 {
+        let symbol_count = s
+            .community
+            .node_ids
+            .iter()
+            .filter(|id| {
+                graph
+                    .get_node(id)
+                    .is_some_and(|n| n.node_type == NodeType::Symbol)
+            })
+            .count();
+        let file_count = collect_file_symbols(&s.community, graph).len();
+        if symbol_count > symbol_count_threshold || file_count > file_count_threshold {
+            return build_compressed_content(&s.community, graph);
+        }
+        return full_code_content(s, summaries, graph, repo_root, query_tokens);
+    }
+    build_signature_content(&s.community, graph)
+}
+
+/// Full code: filtered if community is large (>5 nodes), else complete.
+fn full_code_content(
+    s: &&ScoredCommunity,
+    summaries: &std::collections::HashMap<String, crate::summary::CommunitySummary>,
+    graph: &CodeGraph,
+    repo_root: &Path,
+    query_tokens: &HashSet<String>,
+) -> String {
+    let summary_text = summaries
+        .get(&s.community.id)
+        .map(|sum| sum.text.as_str())
+        .unwrap_or("");
+    if s.community.node_ids.len() > 5 {
+        build_code_content_filtered(&s.community, summary_text, graph, repo_root, query_tokens)
+    } else {
+        build_code_content(&s.community, summary_text, graph, repo_root)
     }
 }
 
