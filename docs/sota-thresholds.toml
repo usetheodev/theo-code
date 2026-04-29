@@ -234,3 +234,414 @@ unit = "USD per refinement cycle iteration"
 source = "budget constraint (meeting 20260429-143744)"
 confidence = 0.85
 note = "Hard budget cap for autoloop iterations"
+
+# ============================================================================
+# MEMORY SYSTEM THRESHOLDS
+# Ref: agent-memory-sota.md, agent-memory-plan.md, CoALA arXiv:2309.02427
+# ============================================================================
+
+[memory.wiki_to_recall_ratio]
+type = "dod-gate"
+floor = 0.30
+unit = "fraction of wiki pages returned in prefetch"
+current = "unmeasured"
+source = "agent-memory-plan.md success metrics"
+confidence = 0.75
+status = "UNMEASURED"
+note = "≥30% of pages useful when recalled — measures wiki compilation quality"
+
+[memory.reflections_per_compression]
+type = "dod-gate"
+floor = 2
+ceiling = 5
+unit = "MemoryLessons extracted per compaction event"
+current = "unmeasured"
+source = "agent-memory-plan.md success metrics"
+confidence = 0.70
+status = "UNMEASURED"
+note = "Too few = missing insights, too many = noise. Mean target 2-5"
+
+[memory.reflection_hit_rate_30d]
+type = "dod-gate"
+floor = 0.40
+unit = "fraction of lessons recalled at least once within 30 days"
+current = "unmeasured"
+source = "agent-memory-plan.md success metrics"
+confidence = 0.70
+status = "UNMEASURED"
+note = "Lessons never recalled are noise; MemoryBank forgetting curve applies"
+
+[memory.recall_p50_latency_ms]
+type = "dod-gate"
+floor = 500
+unit = "milliseconds (p50)"
+current = "unmeasured"
+source = "agent-memory-plan.md success metrics"
+confidence = 0.80
+status = "UNMEASURED"
+note = "Memory recall must not block interactive agent loop"
+
+[memory.orphan_episodes]
+type = "dod-gate"
+floor = 0
+unit = "episodes without link or reflection"
+current = "unmeasured"
+source = "agent-memory-plan.md success metrics"
+confidence = 0.85
+status = "UNMEASURED"
+note = "Every episode should produce at least one link or lesson"
+
+[memory.security_scan_coverage]
+type = "dod-gate"
+floor = 0.85
+unit = "fraction of injection patterns covered by security scan"
+current = "unmeasured"
+source = "hermes memory_tool.py:65-103"
+confidence = 0.80
+status = "UNMEASURED"
+note = "Memory injection scan must cover prompt injection, exfil, shell escape, unicode"
+
+[memory.provider_error_isolation]
+type = "dod-gate"
+floor = 1.0
+unit = "boolean (1 = panicking provider never crashes loop)"
+current = "unmeasured"
+source = "hermes memory_manager.py:183-206"
+confidence = 0.90
+status = "UNMEASURED"
+note = "CRITICAL: broken memory plugin must never crash agent loop"
+
+[memory.mem0_locomo_ref]
+type = "research-benchmark-ref"
+value = 91.6
+unit = "LoCoMo score"
+source = "Mem0 arXiv:2504.19413"
+confidence = 0.85
+note = "+20 over prior SOTA on long-context memory benchmark"
+
+[memory.zep_dmr_ref]
+type = "research-benchmark-ref"
+value = 94.8
+unit = "DMR benchmark score"
+source = "Zep/Graphiti arXiv:2501.13956"
+confidence = 0.85
+note = "vs MemGPT 93.4. Temporal knowledge graph with edge invalidation"
+
+[memory.coala_taxonomy_coverage]
+type = "dod-gate"
+floor = 6
+unit = "memory types implemented out of 8 (STM/WM/LTM-semantic-builtin/LTM-semantic-wiki/LTM-episodic/LTM-procedural/Reflection/Meta)"
+current = 0
+source = "CoALA arXiv:2309.02427, agent-memory-sota.md §3"
+confidence = 0.80
+status = "BELOW_FLOOR"
+note = "Currently 0 of 8 types wired into agent loop"
+
+# ============================================================================
+# AGENT LOOP THRESHOLDS
+# Ref: harness-engineering-guide.md, effective-harnesses-for-long-running-agents.md
+# ============================================================================
+
+[agent_loop.self_evolution_gain]
+type = "dod-gate"
+floor = 0.0
+unit = "SWE-Bench percentage point improvement vs no-loop baseline"
+current = "unmeasured"
+source = "harness-engineering-guide.md:92-96 (Tsinghua ablation)"
+confidence = 0.85
+status = "UNMEASURED"
+note = "Self-evolution loop must improve score, not harm. Reference: +4.8"
+
+[agent_loop.doom_loop_max_repeats]
+type = "dod-gate"
+floor = 3
+unit = "max identical tool calls before break"
+current = "unmeasured"
+source = "opendev ReactLoop doom-loop detection"
+confidence = 0.80
+status = "UNMEASURED"
+note = "Agent must detect and break out of doom loops"
+
+[agent_loop.premature_completion_rate]
+type = "dod-gate"
+floor = 0.10
+unit = "fraction (max acceptable rate of false 'done' signals)"
+current = "unmeasured"
+source = "effective-harnesses-for-long-running-agents.md"
+confidence = 0.75
+status = "UNMEASURED"
+note = "Premature completion is Anthropic's #2 failure mode"
+
+[agent_loop.session_continuity_recall]
+type = "dod-gate"
+floor = 0.80
+unit = "fraction of previous session work correctly resumed"
+current = "unmeasured"
+source = "effective-harnesses-for-long-running-agents.md:33-38"
+confidence = 0.75
+status = "UNMEASURED"
+note = "Agent must not re-do completed work across sessions"
+
+[agent_loop.planner_generator_evaluator_ref]
+type = "research-benchmark-ref"
+value = 20.0
+unit = "cost multiplier ($200 vs $9)"
+source = "effective-harnesses-for-long-running-agents.md (Anthropic 3-agent)"
+confidence = 0.85
+note = "Planner→Generator→Evaluator costs 20x more but actually works"
+
+# ============================================================================
+# CONTEXT ENGINEERING THRESHOLDS
+# (extends existing retrieval section with system-level gates)
+# ============================================================================
+
+[context.analysis_time_small_project_s]
+type = "dod-gate"
+floor = 3.0
+unit = "seconds for <50 files"
+current = "unmeasured"
+source = "context-engine.md performance specs"
+confidence = 0.75
+status = "UNMEASURED"
+
+[context.analysis_time_medium_project_s]
+type = "dod-gate"
+floor = 8.0
+unit = "seconds for 50-200 files"
+current = "unmeasured"
+source = "context-engine.md performance specs"
+confidence = 0.75
+status = "UNMEASURED"
+
+[context.analysis_time_large_project_s]
+type = "dod-gate"
+floor = 15.0
+unit = "seconds for 200-500 files"
+current = "unmeasured"
+source = "context-engine.md performance specs"
+confidence = 0.75
+status = "UNMEASURED"
+
+[context.framework_detection_accuracy]
+type = "dod-gate"
+floor = 0.90
+unit = "fraction"
+current = "unmeasured"
+source = "context-engine.md accuracy targets"
+confidence = 0.75
+status = "UNMEASURED"
+
+[context.representation_gain_ref]
+type = "research-benchmark-ref"
+value = 16.8
+unit = "SWE-Bench percentage points"
+source = "harness-engineering-guide.md:118 (Tsinghua)"
+confidence = 0.92
+note = "Code-native → structured NL representation gain"
+
+# ============================================================================
+# MODEL ROUTING THRESHOLDS
+# Ref: smart-model-routing.md
+# ============================================================================
+
+[routing.orchestrator_worker_gain_ref]
+type = "research-benchmark-ref"
+value = 0.902
+unit = "improvement fraction over single-agent"
+source = "smart-model-routing.md:21 (Anthropic)"
+confidence = 0.85
+note = "+90.2% Opus lead + Sonnet workers vs single-agent baseline"
+
+[routing.cost_reduction_target]
+type = "dod-gate"
+floor = 0.30
+unit = "fraction cost saved vs single-model"
+current = "unmeasured"
+source = "smart-model-routing.md §1.4 back-of-envelope"
+confidence = 0.75
+status = "UNMEASURED"
+note = "Rule-based routing: 50% simple turns × 5× cheaper ≈ 40% savings"
+
+[routing.advisor_strategy_ref]
+type = "research-benchmark-ref"
+value = -0.11
+unit = "cost reduction fraction with +2% quality"
+source = "smart-model-routing.md:23 (MindStudio Advisor Strategy)"
+confidence = 0.82
+note = "Advisor Strategy routing achieves cost reduction with quality gain"
+
+[routing.frugalgpt_savings_ref]
+type = "research-benchmark-ref"
+value = 0.98
+unit = "max cost reduction fraction at GPT-4 quality"
+source = "FrugalGPT arXiv:2305.05176"
+confidence = 0.80
+note = "LLM cascade. Sequential — adds tail latency for escalation"
+
+[routing.routellm_savings_ref]
+type = "research-benchmark-ref"
+value = 0.85
+unit = "cost reduction on MT-Bench"
+source = "RouteLLM arXiv:2406.18665"
+confidence = 0.80
+note = "Single call, no cascade. Requires training data"
+
+[routing.multi_agent_token_overhead_ref]
+type = "research-benchmark-ref"
+value = 15.0
+unit = "multiplier vs single-agent"
+source = "smart-model-routing.md (multi-agent analysis)"
+confidence = 0.85
+note = "Multi-agent systems consume ~15x more tokens"
+
+# ============================================================================
+# SELF-EVOLUTION / AUTODREAM THRESHOLDS
+# ============================================================================
+
+[self_evolution.tsinghua_self_evolution_ref]
+type = "research-benchmark-ref"
+value = 4.8
+unit = "SWE-Bench percentage points"
+source = "harness-engineering-guide.md:92 (Tsinghua ablation)"
+confidence = 0.90
+note = "Only consistently beneficial module. Keep/discard acceptance gate"
+
+[self_evolution.tsinghua_verifier_harm_ref]
+type = "research-benchmark-ref"
+value = -0.8
+unit = "SWE-Bench percentage points"
+source = "harness-engineering-guide.md:95 (Tsinghua ablation)"
+confidence = 0.88
+note = "NEGATIVE — separate verifiers actively harm performance"
+
+[self_evolution.tsinghua_verifier_harm_osworld_ref]
+type = "research-benchmark-ref"
+value = -8.4
+unit = "OS World percentage points"
+source = "harness-engineering-guide.md:95 (Tsinghua ablation)"
+confidence = 0.88
+note = "NEGATIVE — verifiers cause worse harm on OS World"
+
+[self_evolution.tsinghua_multi_candidate_harm_ref]
+type = "research-benchmark-ref"
+value = -2.4
+unit = "SWE-Bench percentage points"
+source = "harness-engineering-guide.md:96 (Tsinghua ablation)"
+confidence = 0.87
+note = "NEGATIVE — multi-candidate search harms performance"
+
+[self_evolution.stanford_meta_harness_terminal_bench_ref]
+type = "research-benchmark-ref"
+value = 76.4
+unit = "Terminal Bench 2 pass rate"
+source = "harness-engineering-guide.md:137-140 (Stanford Meta-Harness)"
+confidence = 0.85
+note = "Automatically optimized harness. Rank 1 with Haiku, Rank 2 with Opus"
+
+[self_evolution.harness_transfer_models_ref]
+type = "research-benchmark-ref"
+value = 5
+unit = "number of models improved by single harness optimization"
+source = "harness-engineering-guide.md:143-145 (Stanford)"
+confidence = 0.80
+note = "Harness optimized on one model transferred to five others"
+
+# ============================================================================
+# SUB-AGENT ARCHITECTURE THRESHOLDS
+# Ref: sota-subagent-architectures.md
+# ============================================================================
+
+[subagent.compute_delegation_ratio]
+type = "dod-gate"
+floor = 0.70
+unit = "fraction of compute in delegated sub-agents vs orchestrator"
+current = "unmeasured"
+source = "harness-engineering-guide.md:103-104 (Tsinghua)"
+confidence = 0.80
+status = "UNMEASURED"
+note = "~90% of compute should flow through child agents. Floor set at 70% (conservative)"
+
+[subagent.max_depth_default]
+type = "dod-gate"
+floor = 1
+unit = "max nesting depth (default)"
+current = "unmeasured"
+source = "sota-subagent-architectures.md §1.2 (OpenAI Codex)"
+confidence = 0.85
+status = "UNMEASURED"
+note = "Default depth=1 prevents exponential token growth"
+
+[subagent.max_concurrent]
+type = "dod-gate"
+floor = 5
+unit = "max concurrent sub-agents"
+current = "unmeasured"
+source = "sota-subagent-architectures.md (industry consensus)"
+confidence = 0.75
+status = "UNMEASURED"
+note = "16-agent swarms show no benefit beyond 4-5 agents"
+
+[subagent.claude_code_architecture_ref]
+type = "research-benchmark-ref"
+value = 98.4
+unit = "percent of codebase that is deterministic infrastructure"
+source = "arXiv:2604.14228 (Dive into Claude Code)"
+confidence = 0.90
+note = "Only 1.6% is AI decision logic. 7 safety layers, 5 compaction stages"
+
+# ============================================================================
+# OBSERVABILITY THRESHOLDS
+# ============================================================================
+
+[observability.cost_tracking_accuracy]
+type = "dod-gate"
+floor = 0.95
+unit = "fraction (accuracy of reported vs actual API cost)"
+current = "unmeasured"
+source = "opendev CostTracker pattern"
+confidence = 0.80
+status = "UNMEASURED"
+note = "Cost tracking must be accurate for budget enforcement"
+
+[observability.trajectory_completeness]
+type = "dod-gate"
+floor = 0.90
+unit = "fraction of agent actions captured in trajectory"
+current = "unmeasured"
+source = "hermes trajectory saving pattern"
+confidence = 0.75
+status = "UNMEASURED"
+note = "Incomplete trajectories make debugging impossible"
+
+# ============================================================================
+# SECURITY THRESHOLDS
+# ============================================================================
+
+[security.injection_scan_patterns]
+type = "dod-gate"
+floor = 15
+unit = "number of distinct injection patterns scanned"
+current = "unmeasured"
+source = "hermes memory_tool.py:65-103"
+confidence = 0.80
+status = "UNMEASURED"
+note = "Minimum patterns: prompt injection (5+), exfil (3+), shell escape (3+), unicode (2+), persistence (2+)"
+
+[security.sandbox_escape_rate]
+type = "dod-gate"
+floor = 0.0
+unit = "fraction (must be zero)"
+current = "unmeasured"
+source = "theo-isolation bwrap/landlock"
+confidence = 0.90
+status = "UNMEASURED"
+note = "Sandbox must prevent all filesystem escapes"
+
+[security.secrets_leaked]
+type = "dod-gate"
+floor = 0
+unit = "count"
+current = 0
+source = "make check-secrets (gitleaks)"
+confidence = 0.95
+note = "Currently passing. Must remain at 0"
