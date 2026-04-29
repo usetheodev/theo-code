@@ -187,7 +187,7 @@ Print the review directly to the conversation. Format:
 
 ### Deep Review Output
 
-Save to `docs/reviews/{crate-name}/REVIEW.md`. Format:
+Save to `docs/reviews/{crate-name}/REVIEW.md` (create `docs/reviews/{crate-name}/` if it doesn't exist). Format:
 
 ```markdown
 # {crate-name} — Revisao

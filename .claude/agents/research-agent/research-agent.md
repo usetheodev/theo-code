@@ -86,7 +86,7 @@ impact: high
 ## Research Process
 
 1. **Clarify the question** — make sure you understand what's being asked
-2. **Search internal sources first** — wiki/, canonical_docs/, existing outputs/
+2. **Search internal sources first** — docs/pesquisas/, docs/plans/, docs/adr/, .theo/wiki/, existing outputs/
 3. **Search external sources** — web search, papers, docs
 4. **Cross-validate** — verify claims across multiple sources
 5. **Synthesize** — combine findings into a coherent answer

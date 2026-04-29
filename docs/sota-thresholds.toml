@@ -1,0 +1,236 @@
+# SOTA Thresholds — Evidence-Based
+#
+# Each threshold is either a `dod-gate` (enforced in CI) or a
+# `research-benchmark-ref` (informational, cited from papers).
+#
+# Meeting: 20260429-143744 (sota-validation-pipeline)
+# Verified: 2026-04-29
+
+[meta]
+verified_date = "2026-04-29"
+schema_version = "1.0"
+meeting_id = "20260429-143744"
+
+# ============================================================================
+# RETRIEVAL DOD-GATES (D6 from meeting)
+# ============================================================================
+
+[retrieval.mrr]
+type = "dod-gate"
+floor = 0.90
+current = 0.914
+source = "internal benchmark (apps/theo-benchmark/reports/)"
+confidence = 0.95
+measurement = "python run_benchmark.py --metric mrr"
+
+[retrieval.recall_at_5]
+type = "dod-gate"
+floor = 0.92
+current = 0.76
+source = "internal benchmark"
+confidence = 0.85
+measurement = "python run_benchmark.py --metric recall_at_5"
+status = "BELOW_FLOOR"
+
+[retrieval.recall_at_10]
+type = "dod-gate"
+floor = 0.95
+current = 0.86
+source = "internal benchmark"
+confidence = 0.85
+measurement = "python run_benchmark.py --metric recall_at_10"
+status = "BELOW_FLOOR"
+
+[retrieval.depcov]
+type = "dod-gate"
+floor = 0.96
+current = 0.967
+source = "internal benchmark"
+confidence = 0.95
+measurement = "python run_benchmark.py --metric depcov"
+
+[retrieval.ndcg_at_5]
+type = "dod-gate"
+floor = 0.85
+current = "unmeasured"
+source = "graphctx-expert recommendation (meeting 20260429-143744)"
+confidence = 0.80
+measurement = "python run_benchmark.py --metric ndcg_at_5"
+status = "UNMEASURED"
+
+[retrieval.per_language_recall_at_5]
+type = "dod-gate"
+floor = 0.85
+current = "unmeasured"
+source = "graphctx-expert recommendation (meeting 20260429-143744)"
+confidence = 0.80
+measurement = "python run_benchmark.py --metric per_lang_recall_at_5"
+status = "UNMEASURED"
+note = "Applies to each of the 14 supported languages independently"
+
+# ============================================================================
+# SWE-BENCH REFERENCES
+# ============================================================================
+
+[swe_bench.theo_baseline]
+type = "research-benchmark-ref"
+value = 0.50
+unit = "pass rate"
+source = "internal benchmark with Qwen3-30B"
+confidence = 0.95
+note = "Baseline from apps/theo-benchmark/ smoke run"
+
+[swe_bench.industry_sota]
+type = "research-benchmark-ref"
+value = 0.727
+unit = "pass rate (Verified subset)"
+source = "Claude Code public leaderboard (swebench.com)"
+confidence = 0.95
+note = "Claude Code 72.7% SWE-Bench Verified"
+
+[swe_bench.minimum_runs]
+type = "dod-gate"
+floor = 3
+unit = "runs per configuration"
+source = "docs/pesquisas/harness-engineering-guide.md"
+confidence = 0.90
+note = "Wilson CI on 3 runs minimum for publishable results"
+
+# ============================================================================
+# HARNESS ENGINEERING REFERENCES (Tsinghua ablation study)
+# ============================================================================
+
+[harness.self_evolution_gain]
+type = "research-benchmark-ref"
+value = 4.8
+unit = "SWE-Bench percentage points"
+source = "docs/pesquisas/harness-engineering-guide.md:94"
+confidence = 0.90
+note = "Only consistently beneficial module in ablation study"
+
+[harness.representation_gain]
+type = "research-benchmark-ref"
+value = 16.8
+unit = "SWE-Bench percentage points"
+source = "docs/pesquisas/harness-engineering-guide.md:118"
+confidence = 0.92
+note = "Code-native → structured NL representation"
+
+[harness.verifier_harm_swe]
+type = "research-benchmark-ref"
+value = -0.8
+unit = "SWE-Bench percentage points"
+source = "docs/pesquisas/harness-engineering-guide.md:95"
+confidence = 0.88
+note = "NEGATIVE — verifiers actively harm performance"
+
+[harness.verifier_harm_osworld]
+type = "research-benchmark-ref"
+value = -8.4
+unit = "OS World percentage points"
+source = "docs/pesquisas/harness-engineering-guide.md:95"
+confidence = 0.88
+note = "NEGATIVE — verifiers cause worse harm on OS World"
+
+[harness.multi_candidate_harm_swe]
+type = "research-benchmark-ref"
+value = -2.4
+unit = "SWE-Bench percentage points"
+source = "docs/pesquisas/harness-engineering-guide.md:96"
+confidence = 0.87
+note = "NEGATIVE — multi-candidate search harms performance"
+
+[harness.performance_variance]
+type = "research-benchmark-ref"
+value = 6.0
+unit = "multiplier (same model, different harness)"
+source = "docs/pesquisas/harness-engineering-guide.md:9"
+confidence = 0.95
+note = "Harness engineering alone explains 6x performance gap"
+
+# ============================================================================
+# CONTEXT ENGINE TARGETS
+# ============================================================================
+
+[context.relevance_threshold]
+type = "dod-gate"
+floor = 0.3
+source = "docs/pesquisas/context-engine.md:230"
+confidence = 0.75
+note = "Minimum relevance score to include files in context"
+
+[context.max_files]
+type = "dod-gate"
+floor = 8
+unit = "files per search"
+source = "docs/pesquisas/context-engine.md:210"
+confidence = 0.80
+
+[context.cache_hit_rate_target]
+type = "research-benchmark-ref"
+value = 0.70
+unit = "fraction"
+source = "docs/pesquisas/context-engine.md:65"
+confidence = 0.75
+note = "Expected cache hit ratio for typical sessions (60-80% range)"
+
+# ============================================================================
+# MODEL ROUTING REFERENCES
+# ============================================================================
+
+[routing.orchestrator_worker_gain]
+type = "research-benchmark-ref"
+value = 0.902
+unit = "improvement fraction"
+source = "docs/pesquisas/smart-model-routing.md:21"
+confidence = 0.85
+note = "+90.2% Opus lead + Sonnet workers vs single-agent"
+
+[routing.cost_quality_tradeoff]
+type = "research-benchmark-ref"
+value = -0.11
+unit = "cost reduction fraction with +2% quality"
+source = "docs/pesquisas/smart-model-routing.md:23"
+confidence = 0.82
+note = "Advisor Strategy routing"
+
+[routing.multi_agent_token_overhead]
+type = "research-benchmark-ref"
+value = 15.0
+unit = "multiplier"
+source = "docs/pesquisas/smart-model-routing.md (multi-agent analysis)"
+confidence = 0.85
+note = "Multi-agent systems consume ~15x more tokens than single-agent"
+
+# ============================================================================
+# SMOKE TEST GATES
+# ============================================================================
+
+[smoke.pass_rate]
+type = "dod-gate"
+floor = 0.85
+current = 0.90
+source = "internal benchmark (apps/theo-benchmark/reports/)"
+confidence = 0.90
+measurement = "python runner/smoke.py && jq .pass_rate reports/smoke-*.json"
+note = "18/20 scenarios passing currently"
+
+# ============================================================================
+# COST GATES
+# ============================================================================
+
+[cost.max_per_smoke_run_usd]
+type = "dod-gate"
+floor = 5.0
+unit = "USD per full smoke run"
+source = "budget constraint (meeting 20260429-143744)"
+confidence = 0.85
+note = "Hard budget cap for automated validation runs"
+
+[cost.max_per_refinement_iteration_usd]
+type = "dod-gate"
+floor = 10.0
+unit = "USD per refinement cycle iteration"
+source = "budget constraint (meeting 20260429-143744)"
+confidence = 0.85
+note = "Hard budget cap for autoloop iterations"

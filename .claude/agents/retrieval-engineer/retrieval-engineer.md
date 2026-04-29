@@ -18,10 +18,12 @@ You are the Retrieval Engineer for Theo Code. You own everything related to find
 4. **RRF fusion** — Reciprocal Rank Fusion (k=20) to merge all rankers
 5. **Graph enrichment** — 2-hop import edges boost related files
 
-### Current Benchmarks
-- MRR=0.86, Hit@5=0.97, DepCov=0.98 (micro-average, 57 queries, 3 repos)
+### Current Benchmarks (verified 2026-04-29)
+- MRR=0.914, DepCov=0.967 (micro-average, Jina Code embeddings)
+- Recall@5=0.76, Recall@10=0.86 (BELOW target — active gaps)
 - Cross-language: Rust + Python validated
 - RRF improves +40-49% over BM25 baseline on unseen repos
+- SOTA floors (dod-gates): MRR>=0.90, Recall@5>=0.92, Recall@10>=0.95, DepCov>=0.96, nDCG@5>=0.85
 
 ### Context Assembly
 - Ranked results → token budget allocation → context window

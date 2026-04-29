@@ -27,7 +27,7 @@ For each target crate, enumerate domain modules. A "domain" is a top-level modul
 ls -1 crates/{crate}/src/ | grep -v 'lib.rs\|mod.rs\|main.rs' | sed 's/\.rs$//' | sort
 ```
 
-Cross-reference with `docs/reviews/{crate}/REVIEW.md` domain table if it exists (for descriptions).
+Cross-reference with `docs/reviews/{crate}/REVIEW.md` domain table if it exists (create `docs/reviews/{crate}/` dir if needed).
 
 ### Step 2 — Collect Metrics Per Domain
 
@@ -182,7 +182,7 @@ grep -rn '=> {}\|=> ()\|_ => {}' crates/{crate}/src/{domain}*.rs crates/{crate}/
 
 ### Step 4 — Output
 
-Print the report directly to the conversation AND save to `docs/reviews/{crate}/DOMAIN_XRAY.md`.
+Print the report directly to the conversation AND save to `docs/reviews/{crate}/DOMAIN_XRAY.md` (create dirs if needed with `mkdir -p docs/reviews/{crate}`).
 
 ## Output Template
 

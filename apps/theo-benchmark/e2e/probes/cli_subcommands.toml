@@ -1,0 +1,47 @@
+# E2E probes for Theo CLI subcommands.
+# Each probe tests that a subcommand executes without crash and produces expected output shape.
+# Run with: python e2e/probe_runner.py --suite cli
+
+[[probe]]
+id = "cli-help"
+category = "cli-subcommand"
+command = "--help"
+mode = "raw"
+timeout_secs = 10
+success_check = "exit_code == 0 and 'USAGE' in stdout or 'Usage' in stdout"
+
+[[probe]]
+id = "cli-version"
+category = "cli-subcommand"
+command = "--version"
+mode = "raw"
+timeout_secs = 10
+success_check = "exit_code == 0 and 'theo' in stdout.lower()"
+
+[[probe]]
+id = "cli-init"
+category = "cli-subcommand"
+command = "init"
+mode = "headless"
+timeout_secs = 30
+requires_tmpdir = true
+success_check = "exit_code == 0"
+
+[[probe]]
+id = "cli-context"
+category = "cli-subcommand"
+command = "context --task 'find the main function'"
+mode = "headless"
+timeout_secs = 60
+requires_project = true
+success_check = "exit_code == 0 and len(stdout) > 0"
+
+[[probe]]
+id = "cli-pilot-dry"
+category = "cli-subcommand"
+command = "pilot --dry-run 'list files'"
+mode = "headless"
+timeout_secs = 60
+requires_llm = true
+requires_project = true
+success_check = "exit_code == 0"

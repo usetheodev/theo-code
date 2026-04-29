@@ -13,7 +13,7 @@ Build the Theo Code workspace.
 - No args: `cargo build` (full workspace)
 - `check`: `cargo check` (type-check only, faster)
 - `ui`: `cd apps/theo-ui && npm run build`
-- `desktop`: `cd apps/theo-desktop && cargo tauri build`
+- `desktop`: `cargo build -p theo-code-desktop` (requires GTK/Tauri system deps)
 - Crate name: `cargo build -p $ARGUMENTS`
 
 ## Steps

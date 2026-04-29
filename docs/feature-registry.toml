@@ -1,0 +1,1059 @@
+# Feature Registry — Per-Component Validation
+#
+# Maps EVERY feature of Theo Code to a probe + pass/fail threshold.
+# The refinement cycle uses this to identify the weakest component
+# and improve it. Individual improvements cascade to global thresholds.
+#
+# Status: untested | pass | fail | flaky | skip
+# Type: tool | cli-subcommand | provider | language | runtime-phase | wiki
+#
+# Meeting: 20260429-143744
+# Created: 2026-04-29
+
+[meta]
+verified_date = "2026-04-29"
+schema_version = "1.0"
+total_features = 132  # 47 tools + 17 cli + 26 providers + 14 langs + 5 runtime + 11 debug + 3 wiki + 9 experimental
+
+# ============================================================================
+# TOOLS — DEFAULT REGISTRY (47 production tools)
+# ============================================================================
+
+# --- File Operations (7) ---
+
+[tools.apply_patch]
+type = "tool"
+category = "file"
+status = "untested"
+probe_id = "tool-apply-patch"
+threshold = "tool executes without panic AND produces valid diff"
+priority = "high"
+
+[tools.edit]
+type = "tool"
+category = "file"
+status = "untested"
+probe_id = "tool-edit"
+threshold = "tool modifies file correctly AND preserves encoding"
+priority = "high"
+
+[tools.glob]
+type = "tool"
+category = "file"
+status = "untested"
+probe_id = "tool-glob"
+threshold = "tool returns matching files AND respects gitignore"
+priority = "high"
+
+[tools.grep]
+type = "tool"
+category = "file"
+status = "untested"
+probe_id = "tool-grep"
+threshold = "tool returns matching lines with correct line numbers"
+priority = "high"
+
+[tools.read]
+type = "tool"
+category = "file"
+status = "untested"
+probe_id = "tool-file-read"
+threshold = "tool returns file content AND handles binary/missing gracefully"
+priority = "high"
+
+[tools.write]
+type = "tool"
+category = "file"
+status = "untested"
+probe_id = "tool-write"
+threshold = "tool creates/overwrites file AND content matches input"
+priority = "high"
+
+[tools.webfetch]
+type = "tool"
+category = "file"
+status = "untested"
+probe_id = "tool-webfetch"
+threshold = "tool fetches URL content AND handles timeout/404"
+priority = "medium"
+
+# --- Git Operations (4) ---
+
+[tools.git_commit]
+type = "tool"
+category = "git"
+status = "untested"
+probe_id = "tool-git-commit"
+threshold = "tool creates commit AND message matches input"
+priority = "high"
+
+[tools.git_diff]
+type = "tool"
+category = "git"
+status = "untested"
+probe_id = "tool-git-diff"
+threshold = "tool returns valid diff output"
+priority = "high"
+
+[tools.git_log]
+type = "tool"
+category = "git"
+status = "untested"
+probe_id = "tool-git-log"
+threshold = "tool returns commit history in expected format"
+priority = "medium"
+
+[tools.git_status]
+type = "tool"
+category = "git"
+status = "untested"
+probe_id = "tool-git-status"
+threshold = "tool returns working tree status"
+priority = "high"
+
+# --- HTTP Operations (2) ---
+
+[tools.http_get]
+type = "tool"
+category = "http"
+status = "untested"
+probe_id = "tool-http-get"
+threshold = "tool fetches URL AND returns status + body"
+priority = "medium"
+
+[tools.http_post]
+type = "tool"
+category = "http"
+status = "untested"
+probe_id = "tool-http-post"
+threshold = "tool sends POST AND returns response"
+priority = "medium"
+
+# --- LSP (5) ---
+
+[tools.lsp_definition]
+type = "tool"
+category = "lsp"
+status = "untested"
+probe_id = "tool-lsp-definition"
+threshold = "tool returns definition location for known symbol"
+priority = "high"
+note = "Requires rust-analyzer running"
+
+[tools.lsp_hover]
+type = "tool"
+category = "lsp"
+status = "untested"
+probe_id = "tool-lsp-hover"
+threshold = "tool returns hover info with type signature"
+priority = "medium"
+note = "Requires rust-analyzer running"
+
+[tools.lsp_references]
+type = "tool"
+category = "lsp"
+status = "untested"
+probe_id = "tool-lsp-references"
+threshold = "tool returns all references for known symbol"
+priority = "medium"
+
+[tools.lsp_rename]
+type = "tool"
+category = "lsp"
+status = "untested"
+probe_id = "tool-lsp-rename"
+threshold = "tool renames symbol across files consistently"
+priority = "medium"
+
+[tools.lsp_status]
+type = "tool"
+category = "lsp"
+status = "untested"
+probe_id = "tool-lsp-status"
+threshold = "tool returns LSP server status without crash"
+priority = "low"
+
+# --- Browser (8) ---
+
+[tools.browser_click]
+type = "tool"
+category = "browser"
+status = "untested"
+probe_id = "tool-browser-click"
+threshold = "tool clicks element AND page state changes"
+priority = "low"
+note = "Requires Playwright + Chromium"
+
+[tools.browser_close]
+type = "tool"
+category = "browser"
+status = "untested"
+probe_id = "tool-browser-close"
+threshold = "tool closes session cleanly"
+priority = "low"
+
+[tools.browser_eval]
+type = "tool"
+category = "browser"
+status = "untested"
+probe_id = "tool-browser-eval"
+threshold = "tool evaluates JS AND returns result"
+priority = "low"
+
+[tools.browser_open]
+type = "tool"
+category = "browser"
+status = "untested"
+probe_id = "tool-browser-open"
+threshold = "tool opens URL AND returns page info"
+priority = "low"
+
+[tools.browser_screenshot]
+type = "tool"
+category = "browser"
+status = "untested"
+probe_id = "tool-browser-screenshot"
+threshold = "tool captures screenshot as PNG/base64"
+priority = "low"
+
+[tools.browser_status]
+type = "tool"
+category = "browser"
+status = "untested"
+probe_id = "tool-browser-status"
+threshold = "tool returns browser session status"
+priority = "low"
+
+[tools.browser_type]
+type = "tool"
+category = "browser"
+status = "untested"
+probe_id = "tool-browser-type"
+threshold = "tool types text into input field"
+priority = "low"
+
+[tools.browser_wait_for_selector]
+type = "tool"
+category = "browser"
+status = "untested"
+probe_id = "tool-browser-wait"
+threshold = "tool waits until selector appears or times out"
+priority = "low"
+
+# --- Cognitive (5) ---
+
+[tools.memory]
+type = "tool"
+category = "cognitive"
+status = "untested"
+probe_id = "tool-memory"
+threshold = "tool stores AND retrieves memory entries"
+priority = "high"
+
+[tools.reflect]
+type = "tool"
+category = "cognitive"
+status = "untested"
+probe_id = "tool-reflect"
+threshold = "tool produces reflection output"
+priority = "medium"
+
+[tools.task_create]
+type = "tool"
+category = "cognitive"
+status = "untested"
+probe_id = "tool-task-create"
+threshold = "tool creates task with ID returned"
+priority = "medium"
+
+[tools.task_update]
+type = "tool"
+category = "cognitive"
+status = "untested"
+probe_id = "tool-task-update"
+threshold = "tool updates task status"
+priority = "medium"
+
+[tools.think]
+type = "tool"
+category = "cognitive"
+status = "untested"
+probe_id = "tool-think"
+threshold = "tool accepts thinking content without error"
+priority = "low"
+
+# --- Planning (8) ---
+
+[tools.plan_create]
+type = "tool"
+category = "planning"
+status = "untested"
+probe_id = "tool-plan-create"
+threshold = "tool creates plan structure"
+priority = "high"
+
+[tools.plan_advance_phase]
+type = "tool"
+category = "planning"
+status = "untested"
+probe_id = "tool-plan-advance"
+threshold = "tool advances phase AND validates preconditions"
+priority = "medium"
+
+[tools.plan_failure_status]
+type = "tool"
+category = "planning"
+status = "untested"
+probe_id = "tool-plan-failure"
+threshold = "tool returns failure summary"
+priority = "low"
+
+[tools.plan_log]
+type = "tool"
+category = "planning"
+status = "untested"
+probe_id = "tool-plan-log"
+threshold = "tool appends log entry"
+priority = "low"
+
+[tools.plan_next_task]
+type = "tool"
+category = "planning"
+status = "untested"
+probe_id = "tool-plan-next"
+threshold = "tool returns next actionable task"
+priority = "medium"
+
+[tools.plan_replan]
+type = "tool"
+category = "planning"
+status = "untested"
+probe_id = "tool-plan-replan"
+threshold = "tool mutates plan at subtask level"
+priority = "medium"
+
+[tools.plan_summary]
+type = "tool"
+category = "planning"
+status = "untested"
+probe_id = "tool-plan-summary"
+threshold = "tool returns plan summary with progress"
+priority = "low"
+
+[tools.plan_update_task]
+type = "tool"
+category = "planning"
+status = "untested"
+probe_id = "tool-plan-update"
+threshold = "tool updates task status in plan"
+priority = "medium"
+
+# --- Testing (2) ---
+
+[tools.gen_mutation_test]
+type = "tool"
+category = "testing"
+status = "untested"
+probe_id = "tool-gen-mutation"
+threshold = "tool generates mutation test for given function"
+priority = "low"
+
+[tools.gen_property_test]
+type = "tool"
+category = "testing"
+status = "untested"
+probe_id = "tool-gen-property"
+threshold = "tool generates property test for given function"
+priority = "low"
+
+# --- Multimodal (2) ---
+
+[tools.read_image]
+type = "tool"
+category = "multimodal"
+status = "untested"
+probe_id = "tool-read-image"
+threshold = "tool reads image AND returns description/base64"
+priority = "low"
+
+[tools.screenshot]
+type = "tool"
+category = "multimodal"
+status = "untested"
+probe_id = "tool-screenshot"
+threshold = "tool captures screen region"
+priority = "low"
+
+# --- Context & Execution (3) ---
+
+[tools.bash]
+type = "tool"
+category = "execution"
+status = "untested"
+probe_id = "tool-bash"
+threshold = "tool executes command in sandbox AND returns stdout/stderr/exit_code"
+priority = "high"
+
+[tools.codebase_context]
+type = "tool"
+category = "context"
+status = "untested"
+probe_id = "tool-codebase-context"
+threshold = "tool returns GRAPHCTX context with files AND symbols"
+priority = "high"
+
+[tools.docs_search]
+type = "tool"
+category = "context"
+status = "untested"
+probe_id = "tool-docs-search"
+threshold = "tool searches docs AND returns ranked results"
+priority = "medium"
+
+# --- Utilities (1) ---
+
+[tools.env_info]
+type = "tool"
+category = "utility"
+status = "untested"
+probe_id = "tool-env-info"
+threshold = "tool returns OS, shell, git info"
+priority = "low"
+
+# ============================================================================
+# DEBUG TOOLS — DAP (11 tools, E2E untested — Gap 6.1 CRITICAL)
+# ============================================================================
+
+[debug.debug_launch]
+type = "tool"
+category = "debug"
+status = "untested"
+probe_id = "debug-launch"
+threshold = "tool launches debugger session"
+priority = "medium"
+note = "Gap 6.1 CRITICAL in maturity analysis"
+
+[debug.debug_set_breakpoint]
+type = "tool"
+category = "debug"
+status = "untested"
+probe_id = "debug-breakpoint"
+threshold = "tool sets breakpoint at line"
+priority = "medium"
+
+[debug.debug_continue]
+type = "tool"
+category = "debug"
+status = "untested"
+probe_id = "debug-continue"
+threshold = "tool continues execution"
+priority = "medium"
+
+[debug.debug_step]
+type = "tool"
+category = "debug"
+status = "untested"
+probe_id = "debug-step"
+threshold = "tool steps one instruction"
+priority = "medium"
+
+[debug.debug_eval]
+type = "tool"
+category = "debug"
+status = "untested"
+probe_id = "debug-eval"
+threshold = "tool evaluates expression in debug context"
+priority = "medium"
+
+[debug.debug_stack_trace]
+type = "tool"
+category = "debug"
+status = "untested"
+probe_id = "debug-stack"
+threshold = "tool returns stack frames"
+priority = "medium"
+
+[debug.debug_scopes]
+type = "tool"
+category = "debug"
+status = "untested"
+probe_id = "debug-scopes"
+threshold = "tool returns variable scopes"
+priority = "low"
+
+[debug.debug_variables]
+type = "tool"
+category = "debug"
+status = "untested"
+probe_id = "debug-variables"
+threshold = "tool returns variable values"
+priority = "low"
+
+[debug.debug_threads]
+type = "tool"
+category = "debug"
+status = "untested"
+probe_id = "debug-threads"
+threshold = "tool lists active threads"
+priority = "low"
+
+[debug.debug_status]
+type = "tool"
+category = "debug"
+status = "untested"
+probe_id = "debug-status"
+threshold = "tool returns debugger session status"
+priority = "low"
+
+[debug.debug_terminate]
+type = "tool"
+category = "debug"
+status = "untested"
+probe_id = "debug-terminate"
+threshold = "tool terminates debug session cleanly"
+priority = "low"
+
+# ============================================================================
+# WIKI TOOLS (3)
+# ============================================================================
+
+[wiki.wiki_generate]
+type = "tool"
+category = "wiki"
+status = "untested"
+probe_id = "wiki-generate"
+threshold = "tool generates wiki pages from code graph"
+priority = "medium"
+
+[wiki.wiki_query]
+type = "tool"
+category = "wiki"
+status = "untested"
+probe_id = "wiki-query"
+threshold = "tool searches wiki via BM25 AND returns ranked results"
+priority = "medium"
+
+[wiki.wiki_ingest]
+type = "tool"
+category = "wiki"
+status = "untested"
+probe_id = "wiki-ingest"
+threshold = "tool ingests runtime insight into wiki"
+priority = "low"
+
+# ============================================================================
+# CLI SUBCOMMANDS (17)
+# ============================================================================
+
+[cli.init]
+type = "cli-subcommand"
+status = "untested"
+probe_id = "cli-init"
+threshold = "creates .theo/ directory structure"
+priority = "high"
+
+[cli.agent]
+type = "cli-subcommand"
+status = "untested"
+probe_id = "cli-agent"
+threshold = "enters interactive REPL or executes single-shot task"
+priority = "high"
+
+[cli.pilot]
+type = "cli-subcommand"
+status = "untested"
+probe_id = "cli-pilot"
+threshold = "autonomous loop completes or exits with clear status"
+priority = "high"
+
+[cli.context]
+type = "cli-subcommand"
+status = "untested"
+probe_id = "cli-context"
+threshold = "assembles GRAPHCTX context AND outputs file list"
+priority = "high"
+
+[cli.impact]
+type = "cli-subcommand"
+status = "untested"
+probe_id = "cli-impact"
+threshold = "analyzes file impact AND returns affected files"
+priority = "medium"
+
+[cli.stats]
+type = "cli-subcommand"
+status = "untested"
+probe_id = "cli-stats"
+threshold = "shows graph statistics for repository"
+priority = "low"
+
+[cli.memory]
+type = "cli-subcommand"
+status = "untested"
+probe_id = "cli-memory"
+threshold = "memory lint/inspect executes without crash"
+priority = "medium"
+
+[cli.login]
+type = "cli-subcommand"
+status = "untested"
+probe_id = "cli-login"
+threshold = "OAuth flow initiates AND stores credentials"
+priority = "high"
+note = "Requires provider credentials"
+
+[cli.logout]
+type = "cli-subcommand"
+status = "untested"
+probe_id = "cli-logout"
+threshold = "removes saved credentials"
+priority = "low"
+
+[cli.dashboard]
+type = "cli-subcommand"
+status = "untested"
+probe_id = "cli-dashboard"
+threshold = "starts HTTP server AND responds to health check"
+priority = "medium"
+
+[cli.subagent]
+type = "cli-subcommand"
+status = "untested"
+probe_id = "cli-subagent"
+threshold = "manages persisted sub-agent runs"
+priority = "medium"
+
+[cli.checkpoints]
+type = "cli-subcommand"
+status = "untested"
+probe_id = "cli-checkpoints"
+threshold = "manages workdir checkpoints"
+priority = "low"
+
+[cli.agents]
+type = "cli-subcommand"
+status = "untested"
+probe_id = "cli-agents"
+threshold = "manages project agents approval"
+priority = "low"
+
+[cli.mcp]
+type = "cli-subcommand"
+status = "untested"
+probe_id = "cli-mcp"
+threshold = "manages MCP discovery cache"
+priority = "low"
+
+[cli.skill]
+type = "cli-subcommand"
+status = "untested"
+probe_id = "cli-skill"
+threshold = "lists/views/deletes skills"
+priority = "medium"
+
+[cli.trajectory]
+type = "cli-subcommand"
+status = "untested"
+probe_id = "cli-trajectory"
+threshold = "exports trajectory data"
+priority = "low"
+
+[cli.help]
+type = "cli-subcommand"
+status = "untested"
+probe_id = "cli-help"
+threshold = "prints help text with all 17 subcommands listed"
+priority = "high"
+
+# ============================================================================
+# LLM PROVIDERS (26)
+# ============================================================================
+
+# --- Tier 1: OpenAI-Compatible (12) ---
+
+[providers.openai]
+type = "provider"
+tier = 1
+status = "untested"
+probe_id = "provider-openai"
+threshold = "authenticate AND complete minimal chat request"
+priority = "high"
+auth_type = "api_key"
+
+[providers.openrouter]
+type = "provider"
+tier = 1
+status = "untested"
+probe_id = "provider-openrouter"
+threshold = "authenticate AND complete minimal chat request"
+priority = "medium"
+auth_type = "api_key"
+
+[providers.xai]
+type = "provider"
+tier = 1
+status = "untested"
+probe_id = "provider-xai"
+threshold = "authenticate AND complete minimal chat request"
+priority = "medium"
+auth_type = "api_key"
+
+[providers.mistral]
+type = "provider"
+tier = 1
+status = "untested"
+probe_id = "provider-mistral"
+threshold = "authenticate AND complete minimal chat request"
+priority = "medium"
+auth_type = "api_key"
+
+[providers.groq]
+type = "provider"
+tier = 1
+status = "untested"
+probe_id = "provider-groq"
+threshold = "authenticate AND complete minimal chat request"
+priority = "medium"
+auth_type = "api_key"
+
+[providers.deepinfra]
+type = "provider"
+tier = 1
+status = "untested"
+probe_id = "provider-deepinfra"
+threshold = "authenticate AND complete minimal chat request"
+priority = "low"
+auth_type = "api_key"
+
+[providers.cerebras]
+type = "provider"
+tier = 1
+status = "untested"
+probe_id = "provider-cerebras"
+threshold = "authenticate AND complete minimal chat request"
+priority = "low"
+auth_type = "api_key"
+
+[providers.cohere]
+type = "provider"
+tier = 1
+status = "untested"
+probe_id = "provider-cohere"
+threshold = "authenticate AND complete minimal chat request"
+priority = "low"
+auth_type = "api_key"
+
+[providers.togetherai]
+type = "provider"
+tier = 1
+status = "untested"
+probe_id = "provider-togetherai"
+threshold = "authenticate AND complete minimal chat request"
+priority = "low"
+auth_type = "api_key"
+
+[providers.perplexity]
+type = "provider"
+tier = 1
+status = "untested"
+probe_id = "provider-perplexity"
+threshold = "authenticate AND complete minimal chat request"
+priority = "low"
+auth_type = "api_key"
+
+[providers.vercel]
+type = "provider"
+tier = 1
+status = "untested"
+probe_id = "provider-vercel"
+threshold = "authenticate AND complete minimal chat request"
+priority = "low"
+auth_type = "api_key"
+
+[providers.chatgpt_codex]
+type = "provider"
+tier = 1
+status = "untested"
+probe_id = "provider-chatgpt-codex"
+threshold = "OAuth flow completes AND chat request succeeds"
+priority = "high"
+auth_type = "oauth"
+note = "Primary provider for E2E validation"
+
+# --- Tier 2: Non-OpenAI Compatible (1) ---
+
+[providers.anthropic]
+type = "provider"
+tier = 2
+status = "untested"
+probe_id = "provider-anthropic"
+threshold = "authenticate AND complete minimal chat request"
+priority = "high"
+auth_type = "api_key"
+
+# --- Tier 3: Cloud Special Auth (7) ---
+
+[providers.azure]
+type = "provider"
+tier = 3
+status = "untested"
+probe_id = "provider-azure"
+threshold = "authenticate via Azure AD AND complete chat request"
+priority = "medium"
+auth_type = "azure_ad"
+
+[providers.azure_cognitive]
+type = "provider"
+tier = 3
+status = "untested"
+probe_id = "provider-azure-cognitive"
+threshold = "authenticate AND complete chat request"
+priority = "low"
+auth_type = "azure_ad"
+
+[providers.github_copilot]
+type = "provider"
+tier = 3
+status = "untested"
+probe_id = "provider-github-copilot"
+threshold = "authenticate via GitHub AND complete chat request"
+priority = "medium"
+auth_type = "oauth"
+
+[providers.gitlab]
+type = "provider"
+tier = 3
+status = "untested"
+probe_id = "provider-gitlab"
+threshold = "authenticate AND complete chat request"
+priority = "low"
+auth_type = "api_key"
+
+[providers.cloudflare_workers]
+type = "provider"
+tier = 3
+status = "untested"
+probe_id = "provider-cloudflare-workers"
+threshold = "authenticate AND complete chat request"
+priority = "low"
+auth_type = "api_key"
+
+[providers.cloudflare_gateway]
+type = "provider"
+tier = 3
+status = "untested"
+probe_id = "provider-cloudflare-gateway"
+threshold = "authenticate AND complete chat request"
+priority = "low"
+auth_type = "api_key"
+
+[providers.sap_ai_core]
+type = "provider"
+tier = 3
+status = "untested"
+probe_id = "provider-sap-ai-core"
+threshold = "authenticate AND complete chat request"
+priority = "low"
+auth_type = "oauth"
+
+# --- Tier 4: Complex Cloud Auth (3) ---
+
+[providers.amazon_bedrock]
+type = "provider"
+tier = 4
+status = "untested"
+probe_id = "provider-amazon-bedrock"
+threshold = "authenticate via AWS STS AND complete chat request"
+priority = "medium"
+auth_type = "aws_sts"
+
+[providers.google_vertex]
+type = "provider"
+tier = 4
+status = "untested"
+probe_id = "provider-google-vertex"
+threshold = "authenticate via GCP AND complete chat request"
+priority = "medium"
+auth_type = "gcp_service_account"
+
+[providers.google_vertex_anthropic]
+type = "provider"
+tier = 4
+status = "untested"
+probe_id = "provider-google-vertex-anthropic"
+threshold = "authenticate via GCP AND complete Anthropic chat request"
+priority = "medium"
+auth_type = "gcp_service_account"
+
+# --- Tier 5: Local Models (3) ---
+
+[providers.ollama]
+type = "provider"
+tier = 5
+status = "untested"
+probe_id = "provider-ollama"
+threshold = "connect to local server AND complete chat request"
+priority = "high"
+auth_type = "none"
+note = "No auth required — just needs running server"
+
+[providers.vllm]
+type = "provider"
+tier = 5
+status = "untested"
+probe_id = "provider-vllm"
+threshold = "connect to vLLM server AND complete chat request"
+priority = "high"
+auth_type = "none"
+note = "Used for SWE-bench with Qwen3-30B"
+
+[providers.lm_studio]
+type = "provider"
+tier = 5
+status = "untested"
+probe_id = "provider-lm-studio"
+threshold = "connect to LM Studio AND complete chat request"
+priority = "low"
+auth_type = "none"
+
+# ============================================================================
+# TREE-SITTER LANGUAGES (14)
+# ============================================================================
+
+[languages.c]
+type = "language"
+status = "untested"
+probe_id = "lang-c"
+threshold = "parse sample .c file AND extract >= 1 function symbol"
+priority = "medium"
+
+[languages.cpp]
+type = "language"
+status = "untested"
+probe_id = "lang-cpp"
+threshold = "parse sample .cpp file AND extract >= 1 class/function"
+priority = "medium"
+
+[languages.csharp]
+type = "language"
+status = "untested"
+probe_id = "lang-csharp"
+threshold = "parse sample .cs file AND extract >= 1 class/method"
+priority = "medium"
+
+[languages.go]
+type = "language"
+status = "untested"
+probe_id = "lang-go"
+threshold = "parse sample .go file AND extract >= 1 func"
+priority = "high"
+
+[languages.java]
+type = "language"
+status = "untested"
+probe_id = "lang-java"
+threshold = "parse sample .java file AND extract >= 1 class/method"
+priority = "high"
+
+[languages.javascript]
+type = "language"
+status = "untested"
+probe_id = "lang-javascript"
+threshold = "parse sample .js file AND extract >= 1 function"
+priority = "high"
+
+[languages.kotlin]
+type = "language"
+status = "untested"
+probe_id = "lang-kotlin"
+threshold = "parse sample .kt file AND extract >= 1 fun/class"
+priority = "medium"
+
+[languages.php]
+type = "language"
+status = "untested"
+probe_id = "lang-php"
+threshold = "parse sample .php file AND extract >= 1 function/class"
+priority = "low"
+
+[languages.python]
+type = "language"
+status = "untested"
+probe_id = "lang-python"
+threshold = "parse sample .py file AND extract >= 1 def/class"
+priority = "high"
+
+[languages.ruby]
+type = "language"
+status = "untested"
+probe_id = "lang-ruby"
+threshold = "parse sample .rb file AND extract >= 1 def/class"
+priority = "low"
+
+[languages.rust]
+type = "language"
+status = "untested"
+probe_id = "lang-rust"
+threshold = "parse sample .rs file AND extract >= 1 fn/struct/impl"
+priority = "high"
+
+[languages.scala]
+type = "language"
+status = "untested"
+probe_id = "lang-scala"
+threshold = "parse sample .scala file AND extract >= 1 def/class"
+priority = "low"
+
+[languages.swift]
+type = "language"
+status = "untested"
+probe_id = "lang-swift"
+threshold = "parse sample .swift file AND extract >= 1 func/class"
+priority = "low"
+
+[languages.typescript]
+type = "language"
+status = "untested"
+probe_id = "lang-typescript"
+threshold = "parse sample .ts file AND extract >= 1 function/interface"
+priority = "high"
+
+# ============================================================================
+# AGENT RUNTIME PHASES (5)
+# ============================================================================
+
+[runtime.plan_phase]
+type = "runtime-phase"
+status = "untested"
+probe_id = "runtime-plan"
+threshold = "agent enters Plan phase AND produces task decomposition"
+priority = "high"
+
+[runtime.act_phase]
+type = "runtime-phase"
+status = "untested"
+probe_id = "runtime-act"
+threshold = "agent enters Act phase AND executes at least 1 tool call"
+priority = "high"
+
+[runtime.observe_phase]
+type = "runtime-phase"
+status = "untested"
+probe_id = "runtime-observe"
+threshold = "agent enters Observe phase AND processes tool results"
+priority = "high"
+
+[runtime.reflect_phase]
+type = "runtime-phase"
+status = "untested"
+probe_id = "runtime-reflect"
+threshold = "agent enters Reflect phase AND produces self-assessment"
+priority = "high"
+
+[runtime.budget_enforcer]
+type = "runtime-phase"
+status = "untested"
+probe_id = "runtime-budget"
+threshold = "agent stops when token budget exceeded (no infinite loop)"
+priority = "high"
+note = "Critical safety mechanism"
