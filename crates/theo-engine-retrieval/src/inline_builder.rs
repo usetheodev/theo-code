@@ -132,7 +132,6 @@ pub fn build_inline_slices(
     source_provider: &dyn SourceProvider,
     policy: &InliningPolicy,
 ) -> InlineExpansionResult {
-    // Step 1: Find focal symbol via name_index.
     let matching_ids = graph.nodes_by_name(query);
     if matching_ids.is_empty() {
         return InlineExpansionResult {
@@ -141,128 +140,54 @@ pub fn build_inline_slices(
             had_exact_hit: false,
         };
     }
-
     let mut slices = Vec::new();
     let mut total_tokens = 0;
     let mut total_inlined = 0;
-
-    // Process each matching symbol (usually 1, but could be overloaded names).
     for focal_id in matching_ids {
         if total_inlined >= policy.max_inlined_functions {
             break;
         }
-
         let Some((focal_file, focal_start, focal_end)) = graph.symbol_source_range(focal_id)
         else {
             continue;
         };
-
         let mut content = String::new();
         let mut inlined_symbols = Vec::new();
         let mut unresolved = Vec::new();
         let mut visited: HashSet<String> = HashSet::new();
         visited.insert(focal_id.clone());
 
-        // Focal symbol source.
-        let focal_source = source_provider.get_lines(focal_file, focal_start, focal_end);
-        if !focal_source.is_empty() {
-            content.push_str(&format!("// [focal] {focal_file}:{focal_start}-{focal_end}\n"));
-            content.push_str(&focal_source);
-            content.push('\n');
-        } else {
-            // Fallback: use signature from graph.
-            if let Some(node) = graph.get_node(focal_id)
-                && let Some(ref sig) = node.signature {
-                    content.push_str(&format!("// [focal] {}\n", node.name));
-                    content.push_str(sig);
-                    content.push_str(" { ... }\n");
-                }
-        }
-
-        // Step 2: Inline callees (depth-limited BFS).
-        let callees = graph.calls_children(focal_id);
-        let callee_budget = policy.max_tokens_per_chain * 35 / 100; // 35% for callees
-        let mut callee_tokens = 0;
-
-        for callee_id in callees {
-            if total_inlined >= policy.max_inlined_functions {
-                break;
-            }
-            if callee_tokens >= callee_budget {
-                break;
-            }
-            if !visited.insert(callee_id.to_string()) {
-                continue;
-            }
-
-            if let Some((callee_file, callee_start, callee_end)) =
-                graph.symbol_source_range(callee_id)
-            {
-                let callee_source =
-                    source_provider.get_lines(callee_file, callee_start, callee_end);
-                if !callee_source.is_empty() {
-                    let tokens = callee_source.len().div_ceil(4);
-                    content.push_str(&format!(
-                        "\n// [callee] {callee_file}:{callee_start}-{callee_end}\n"
-                    ));
-                    content.push_str(&callee_source);
-                    content.push('\n');
-                    callee_tokens += tokens;
-                    inlined_symbols.push(callee_id.to_string());
-                    total_inlined += 1;
-                } else {
-                    // Degraded: use signature.
-                    if let Some(node) = graph.get_node(callee_id)
-                        && let Some(ref sig) = node.signature {
-                            content
-                                .push_str(&format!("\n// [callee:unresolved] {}\n", node.name));
-                            content.push_str(sig);
-                            content.push_str(" { ... }\n");
-                        }
-                    unresolved.push(callee_id.to_string());
-                }
-            } else {
-                unresolved.push(callee_id.to_string());
-            }
-        }
-
-        // Step 3: Inline callers (reverse).
-        let callers = graph.calls_parents(focal_id);
-        let caller_budget = policy.max_tokens_per_chain * 25 / 100; // 25% for callers
-        let mut caller_tokens = 0;
-
-        for caller_id in callers {
-            if total_inlined >= policy.max_inlined_functions {
-                break;
-            }
-            if caller_tokens >= caller_budget {
-                break;
-            }
-            if !visited.insert(caller_id.to_string()) {
-                continue;
-            }
-
-            if let Some((caller_file, caller_start, caller_end)) =
-                graph.symbol_source_range(caller_id)
-            {
-                let caller_source =
-                    source_provider.get_lines(caller_file, caller_start, caller_end);
-                if !caller_source.is_empty() {
-                    let tokens = caller_source.len().div_ceil(4);
-                    content.push_str(&format!(
-                        "\n// [caller] {caller_file}:{caller_start}-{caller_end}\n"
-                    ));
-                    content.push_str(&caller_source);
-                    content.push('\n');
-                    caller_tokens += tokens;
-                    inlined_symbols.push(caller_id.to_string());
-                    total_inlined += 1;
-                }
-            }
-        }
+        emit_focal(&mut content, graph, source_provider, focal_id, focal_file, focal_start, focal_end);
+        emit_neighbours(
+            &mut content,
+            &mut inlined_symbols,
+            &mut unresolved,
+            &mut visited,
+            &mut total_inlined,
+            graph,
+            source_provider,
+            policy,
+            graph.calls_children(focal_id),
+            "callee",
+            policy.max_tokens_per_chain * 35 / 100,
+            true,
+        );
+        emit_neighbours(
+            &mut content,
+            &mut inlined_symbols,
+            &mut unresolved,
+            &mut visited,
+            &mut total_inlined,
+            graph,
+            source_provider,
+            policy,
+            graph.calls_parents(focal_id),
+            "caller",
+            policy.max_tokens_per_chain * 25 / 100,
+            false,
+        );
 
         let token_count = content.len().div_ceil(4);
-
         slices.push(InlineSlice {
             focal_symbol_id: focal_id.clone(),
             focal_file: focal_file.to_string(),
@@ -273,11 +198,88 @@ pub fn build_inline_slices(
         });
         total_tokens += token_count;
     }
-
     InlineExpansionResult {
         slices,
         total_tokens,
         had_exact_hit: true,
+    }
+}
+
+/// Emit the focal symbol's source (or signature fallback) into `content`.
+fn emit_focal(
+    content: &mut String,
+    graph: &CodeGraph,
+    source_provider: &dyn SourceProvider,
+    focal_id: &str,
+    focal_file: &str,
+    focal_start: usize,
+    focal_end: usize,
+) {
+    let focal_source = source_provider.get_lines(focal_file, focal_start, focal_end);
+    if !focal_source.is_empty() {
+        content.push_str(&format!("// [focal] {focal_file}:{focal_start}-{focal_end}\n"));
+        content.push_str(&focal_source);
+        content.push('\n');
+    } else if let Some(node) = graph.get_node(focal_id)
+        && let Some(ref sig) = node.signature
+    {
+        content.push_str(&format!("// [focal] {}\n", node.name));
+        content.push_str(sig);
+        content.push_str(" { ... }\n");
+    }
+}
+
+/// Emit callees or callers up to a budget. The `kind_label` differentiates
+/// the inline comment marker. `record_unresolved=true` only for callees
+/// (matches original behaviour).
+#[allow(clippy::too_many_arguments)]
+fn emit_neighbours(
+    content: &mut String,
+    inlined_symbols: &mut Vec<String>,
+    unresolved: &mut Vec<String>,
+    visited: &mut HashSet<String>,
+    total_inlined: &mut usize,
+    graph: &CodeGraph,
+    source_provider: &dyn SourceProvider,
+    policy: &InliningPolicy,
+    neighbours: Vec<&str>,
+    kind_label: &str,
+    budget: usize,
+    record_unresolved: bool,
+) {
+    let mut tokens_used = 0usize;
+    for neighbour_id in neighbours {
+        if *total_inlined >= policy.max_inlined_functions || tokens_used >= budget {
+            break;
+        }
+        if !visited.insert(neighbour_id.to_string()) {
+            continue;
+        }
+        let Some((file, start, end)) = graph.symbol_source_range(neighbour_id) else {
+            if record_unresolved {
+                unresolved.push(neighbour_id.to_string());
+            }
+            continue;
+        };
+        let source = source_provider.get_lines(file, start, end);
+        if !source.is_empty() {
+            let tokens = source.len().div_ceil(4);
+            content.push_str(&format!("\n// [{kind_label}] {file}:{start}-{end}\n"));
+            content.push_str(&source);
+            content.push('\n');
+            tokens_used += tokens;
+            inlined_symbols.push(neighbour_id.to_string());
+            *total_inlined += 1;
+        } else if record_unresolved {
+            if let Some(node) = graph.get_node(neighbour_id)
+                && let Some(ref sig) = node.signature
+            {
+                content.push_str(&format!("\n// [{kind_label}:unresolved] {}\n", node.name));
+                content.push_str(sig);
+                content.push_str(" { ... }\n");
+            }
+            unresolved.push(neighbour_id.to_string());
+        }
     }
 }
 
