@@ -80,6 +80,152 @@ impl GraphContextService {
         self.event_sink = sink;
         self
     }
+
+    /// Whether the service is already Ready or Building (idempotency guard).
+    async fn is_already_initialized(&self) -> bool {
+        let current = self.state.read().await;
+        matches!(
+            *current,
+            GraphBuildState::Ready(_) | GraphBuildState::Building { .. }
+        )
+    }
+
+    /// Install a graph loaded from disk cache as the Ready state.
+    async fn install_cached_graph(&self, graph: CodeGraph, dir: std::path::PathBuf) {
+        #[cfg(not(feature = "tantivy-backend"))]
+        let (communities, scorer) = build_index(&graph);
+        #[cfg(feature = "tantivy-backend")]
+        let communities = build_index(&graph);
+        #[cfg(feature = "tantivy-backend")]
+        let tantivy_index = FileTantivyIndex::build(&graph).ok();
+        #[cfg(feature = "dense-retrieval")]
+        let (embedder, embedding_cache) = build_dense_components(&graph, &dir);
+
+        // Generate Code Wiki (deterministic, ~50ms, cached by graph_hash)
+        generate_wiki_if_stale(&graph, &communities, &dir);
+
+        let mut state = self.state.write().await;
+        *state = GraphBuildState::Ready(GraphState {
+            graph,
+            communities,
+            project_dir: dir,
+            #[cfg(not(feature = "tantivy-backend"))]
+            scorer,
+            #[cfg(feature = "tantivy-backend")]
+            tantivy_index,
+            #[cfg(feature = "dense-retrieval")]
+            embedder,
+            #[cfg(feature = "dense-retrieval")]
+            embedding_cache,
+            // T8.1 — reranker is heavy (~200 MB Jina v2). Start as None
+            // unless the operator opted into preload via THEO_RERANKER_PRELOAD=1.
+            #[cfg(feature = "dense-retrieval")]
+            reranker: try_construct_reranker_if_enabled(),
+            #[cfg(feature = "dense-retrieval")]
+            cross_encoder_config: CrossEncoderConfig::default(),
+        });
+    }
+
+    /// Atomic CAS on `build_in_progress`. Returns false if another build
+    /// is already running (and the caller should bail).
+    fn acquire_build_lock(&self) -> bool {
+        self.build_in_progress
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+    }
+
+    /// Move the state machine into `Building`, preserving any prior `Ready`
+    /// graph as `stale` so concurrent queries get continuity.
+    async fn transition_to_building(&self) {
+        let mut state = self.state.write().await;
+        let stale = match std::mem::replace(&mut *state, GraphBuildState::Uninitialized) {
+            GraphBuildState::Ready(gs) => Some(gs),
+            GraphBuildState::Building { stale } => stale,
+            _ => None,
+        };
+        *state = GraphBuildState::Building { stale };
+    }
+
+    /// Fire-and-forget the background build task. Result handling and
+    /// state-machine update happen entirely in the spawned task.
+    fn spawn_background_build(&self, dir: std::path::PathBuf, cache_path: std::path::PathBuf) {
+        let state_ref = self.state.clone();
+        let build_flag = self.build_in_progress.clone();
+        let dir_clone = dir.clone();
+        let dir_for_cache = dir;
+        tokio::spawn(async move {
+            let result = tokio::time::timeout(
+                BUILD_TIMEOUT,
+                tokio::task::spawn_blocking(move || {
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        build_graph_from_project(&dir_clone)
+                    }))
+                }),
+            )
+            .await;
+            let mut state = state_ref.write().await;
+            apply_build_result(&mut state, result, &cache_path, &dir_for_cache);
+            build_flag.store(false, Ordering::SeqCst);
+        });
+    }
+}
+
+/// The four-layer Result returned by the timed `spawn_blocking(catch_unwind(...))`
+/// background-build pipeline. Aliased to keep `apply_build_result`'s signature legible.
+type BuildOutcome = Result<
+    Result<std::thread::Result<(CodeGraph, Vec<Community>)>, tokio::task::JoinError>,
+    tokio::time::error::Elapsed,
+>;
+
+/// Translate the build pipeline's nested-Result into a `GraphBuildState`
+/// mutation. Centralized here so `spawn_background_build` stays small.
+fn apply_build_result(
+    state: &mut GraphBuildState,
+    result: BuildOutcome,
+    cache_path: &Path,
+    dir_for_cache: &Path,
+) {
+    match result {
+        Ok(Ok(Ok((graph, communities)))) => {
+            save_cache_atomic(cache_path, &graph, dir_for_cache);
+            #[cfg(not(feature = "tantivy-backend"))]
+            let scorer = MultiSignalScorer::build(&communities, &graph);
+            #[cfg(feature = "tantivy-backend")]
+            let tantivy_index = FileTantivyIndex::build(&graph).ok();
+            #[cfg(feature = "dense-retrieval")]
+            let (embedder, embedding_cache) = build_dense_components(&graph, dir_for_cache);
+            generate_wiki_if_stale(&graph, &communities, dir_for_cache);
+            *state = GraphBuildState::Ready(GraphState {
+                graph,
+                communities,
+                project_dir: dir_for_cache.to_path_buf(),
+                #[cfg(not(feature = "tantivy-backend"))]
+                scorer,
+                #[cfg(feature = "tantivy-backend")]
+                tantivy_index,
+                #[cfg(feature = "dense-retrieval")]
+                embedder,
+                #[cfg(feature = "dense-retrieval")]
+                embedding_cache,
+                #[cfg(feature = "dense-retrieval")]
+                reranker: try_construct_reranker_if_enabled(),
+                #[cfg(feature = "dense-retrieval")]
+                cross_encoder_config: CrossEncoderConfig::default(),
+            });
+        }
+        Ok(Ok(Err(_panic))) => {
+            *state = GraphBuildState::Failed("panic during graph build".into());
+        }
+        Ok(Err(join_err)) => {
+            *state = GraphBuildState::Failed(format!("spawn_blocking failed: {join_err}"));
+        }
+        Err(_timeout) => {
+            *state = GraphBuildState::Failed(format!(
+                "build timed out after {}s",
+                BUILD_TIMEOUT.as_secs()
+            ));
+        }
+    }
 }
 
 impl Default for GraphContextService {
@@ -95,148 +241,21 @@ impl GraphContextProvider for GraphContextService {
     /// If a build is already in progress, this is a no-op.
     /// If cache exists and is fresh, loads synchronously (fast path).
     async fn initialize(&self, project_dir: &Path) -> Result<(), GraphContextError> {
-        // Fast path: already ready or building.
-        {
-            let current = self.state.read().await;
-            if matches!(
-                *current,
-                GraphBuildState::Ready(_) | GraphBuildState::Building { .. }
-            ) {
-                return Ok(());
-            }
+        if self.is_already_initialized().await {
+            return Ok(());
         }
-
-        // Try cache first (synchronous, fast).
         let dir = project_dir.to_path_buf();
         let cache_path = dir.join(".theo").join("graph.bin");
 
         if let Some(graph) = try_load_cache(&cache_path, &dir) {
-            #[cfg(not(feature = "tantivy-backend"))]
-            let (communities, scorer) = build_index(&graph);
-            #[cfg(feature = "tantivy-backend")]
-            let communities = build_index(&graph);
-            #[cfg(feature = "tantivy-backend")]
-            let tantivy_index = FileTantivyIndex::build(&graph).ok();
-            #[cfg(feature = "dense-retrieval")]
-            let (embedder, embedding_cache) = build_dense_components(&graph, &dir);
-
-            // Generate Code Wiki (deterministic, ~50ms, cached by graph_hash)
-            generate_wiki_if_stale(&graph, &communities, &dir);
-
-            let mut state = self.state.write().await;
-            *state = GraphBuildState::Ready(GraphState {
-                graph,
-                communities,
-                project_dir: dir.clone(),
-                #[cfg(not(feature = "tantivy-backend"))]
-                scorer,
-                #[cfg(feature = "tantivy-backend")]
-                tantivy_index,
-                #[cfg(feature = "dense-retrieval")]
-                embedder,
-                #[cfg(feature = "dense-retrieval")]
-                embedding_cache,
-                // T8.1 — reranker model is heavy (~200 MB Jina v2
-                // download). Start as None unless the operator opted
-                // into preload via THEO_RERANKER_PRELOAD=1; in that
-                // case the helper returns Some on a successful load
-                // and None on any failure (network, missing dep,
-                // panic — all silently downgrade to RRF-only).
-                #[cfg(feature = "dense-retrieval")]
-                reranker: try_construct_reranker_if_enabled(),
-                #[cfg(feature = "dense-retrieval")]
-                cross_encoder_config: CrossEncoderConfig::default(),
-            });
+            self.install_cached_graph(graph, dir).await;
             return Ok(());
         }
-
-        // Prevent concurrent builds.
-        if self
-            .build_in_progress
-            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-            .is_err()
-        {
-            return Ok(()); // Another build already running.
+        if !self.acquire_build_lock() {
+            return Ok(());
         }
-
-        // Transition to Building — preserve previous state as stale cache.
-        {
-            let mut state = self.state.write().await;
-            let stale = match std::mem::replace(&mut *state, GraphBuildState::Uninitialized) {
-                GraphBuildState::Ready(gs) => Some(gs),
-                GraphBuildState::Building { stale } => stale,
-                _ => None,
-            };
-            *state = GraphBuildState::Building { stale };
-        }
-
-        // Spawn background build — fire and forget.
-        let state_ref = self.state.clone();
-        let build_flag = self.build_in_progress.clone();
-        let dir_clone = dir.clone();
-        let dir_for_cache = dir.clone();
-
-        tokio::spawn(async move {
-            let result = tokio::time::timeout(
-                BUILD_TIMEOUT,
-                tokio::task::spawn_blocking(move || {
-                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        build_graph_from_project(&dir_clone)
-                    }))
-                }),
-            )
-            .await;
-
-            let mut state = state_ref.write().await;
-            match result {
-                Ok(Ok(Ok((graph, communities)))) => {
-                    save_cache_atomic(&cache_path, &graph, &dir_for_cache);
-                    #[cfg(not(feature = "tantivy-backend"))]
-                    let scorer = MultiSignalScorer::build(&communities, &graph);
-                    #[cfg(feature = "tantivy-backend")]
-                    let tantivy_index = FileTantivyIndex::build(&graph).ok();
-                    #[cfg(feature = "dense-retrieval")]
-                    let (embedder, embedding_cache) =
-                        build_dense_components(&graph, &dir_for_cache);
-
-                    // Generate Code Wiki (deterministic, cached)
-                    generate_wiki_if_stale(&graph, &communities, &dir_for_cache);
-
-                    *state = GraphBuildState::Ready(GraphState {
-                        graph,
-                        communities,
-                        project_dir: dir_for_cache.clone(),
-                        #[cfg(not(feature = "tantivy-backend"))]
-                        scorer,
-                        #[cfg(feature = "tantivy-backend")]
-                        tantivy_index,
-                        #[cfg(feature = "dense-retrieval")]
-                        embedder,
-                        #[cfg(feature = "dense-retrieval")]
-                        embedding_cache,
-                        // T8.1 — see fast-path branch above for rationale.
-                        #[cfg(feature = "dense-retrieval")]
-                        reranker: try_construct_reranker_if_enabled(),
-                        #[cfg(feature = "dense-retrieval")]
-                        cross_encoder_config: CrossEncoderConfig::default(),
-                    });
-                }
-                Ok(Ok(Err(_panic))) => {
-                    *state = GraphBuildState::Failed("panic during graph build".into());
-                }
-                Ok(Err(join_err)) => {
-                    *state = GraphBuildState::Failed(format!("spawn_blocking failed: {join_err}"));
-                }
-                Err(_timeout) => {
-                    *state = GraphBuildState::Failed(format!(
-                        "build timed out after {}s",
-                        BUILD_TIMEOUT.as_secs()
-                    ));
-                }
-            }
-            build_flag.store(false, Ordering::SeqCst);
-        });
-
+        self.transition_to_building().await;
+        self.spawn_background_build(dir, cache_path);
         Ok(())
     }
 

@@ -99,112 +99,111 @@ pub fn detect_project_language(project_dir: &Path) -> Option<&'static str> {
 ///
 /// Prioritizes the project's primary language: if a Cargo.toml exists,
 /// .rs files are parsed first, then other languages up to MAX_FILES_TO_PARSE.
+/// Walk the project, partition primary vs secondary by language, and sample
+/// up to `MAX_FILES_TO_PARSE` files (breadth + recency).
+fn collect_files_to_parse(
+    project_dir: &Path,
+    primary_ext: Option<&str>,
+) -> Vec<std::path::PathBuf> {
+    let walker = build_project_walker(project_dir);
+    let (primary, secondary) = partition_by_language(walker, primary_ext);
+
+    let mut all_files = primary;
+    all_files.extend(secondary);
+    if all_files.len() <= MAX_FILES_TO_PARSE {
+        return all_files;
+    }
+    sample_files_by_breadth_and_recency(all_files, project_dir)
+}
+
+fn build_project_walker(project_dir: &Path) -> ignore::Walk {
+    let mut wb = ignore::WalkBuilder::new(project_dir);
+    wb.hidden(true).git_ignore(true);
+    let _ = wb.add_ignore(project_dir.join(".gitignore"));
+    wb.add_custom_ignore_filename(".theoignore");
+    wb.filter_entry(|entry| {
+        if entry.file_type().is_some_and(|ft| ft.is_dir()) {
+            let name = entry.file_name().to_str().unwrap_or("");
+            return !theo_domain::graph_context::EXCLUDED_DIRS.contains(&name);
+        }
+        true
+    });
+    wb.build()
+}
+
+fn partition_by_language(
+    walker: ignore::Walk,
+    primary_ext: Option<&str>,
+) -> (Vec<std::path::PathBuf>, Vec<std::path::PathBuf>) {
+    let mut primary = Vec::new();
+    let mut secondary = Vec::new();
+    for entry in walker.flatten() {
+        let path = entry.into_path();
+        if !path.is_file() || ts::detect_language(&path).is_none() {
+            continue;
+        }
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        if primary_ext.is_some_and(|pe| {
+            ext == pe || (pe == "ts" && (ext == "tsx" || ext == "js" || ext == "jsx"))
+        }) {
+            primary.push(path);
+        } else {
+            secondary.push(path);
+        }
+    }
+    (primary, secondary)
+}
+
+fn sample_files_by_breadth_and_recency(
+    mut all_files: Vec<std::path::PathBuf>,
+    project_dir: &Path,
+) -> Vec<std::path::PathBuf> {
+    // Step 1: 1 file per top-level dir (most recently modified).
+    let mut by_dir: std::collections::HashMap<String, Vec<std::path::PathBuf>> =
+        std::collections::HashMap::new();
+    for path in &all_files {
+        let dir = path
+            .strip_prefix(project_dir)
+            .unwrap_or(path)
+            .components()
+            .next()
+            .map(|c| c.as_os_str().to_string_lossy().to_string())
+            .unwrap_or_else(|| "root".to_string());
+        by_dir.entry(dir).or_default().push(path.clone());
+    }
+    let mut selected: Vec<std::path::PathBuf> = Vec::with_capacity(MAX_FILES_TO_PARSE);
+    let mut selected_set: std::collections::HashSet<std::path::PathBuf> =
+        std::collections::HashSet::new();
+    for (_dir, mut files) in by_dir {
+        files.sort_by_key(|p| std::cmp::Reverse(mtime(p)));
+        if let Some(f) = files.first()
+            && selected_set.insert(f.clone())
+        {
+            selected.push(f.clone());
+        }
+    }
+    // Step 2: fill remaining slots by mtime (newest first across all dirs).
+    all_files.sort_by_key(|p| std::cmp::Reverse(mtime(p)));
+    for f in all_files {
+        if selected.len() >= MAX_FILES_TO_PARSE {
+            break;
+        }
+        if selected_set.insert(f.clone()) {
+            selected.push(f);
+        }
+    }
+    selected
+}
+
+fn mtime(p: &std::path::Path) -> std::time::SystemTime {
+    std::fs::metadata(p)
+        .and_then(|m| m.modified())
+        .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
+}
+
 pub fn parse_project_files(project_dir: &Path) -> Vec<FileData> {
     let primary_ext = detect_project_language(project_dir);
-
-    let collect_paths = || {
-        let mut wb = ignore::WalkBuilder::new(project_dir);
-        wb.hidden(true).git_ignore(true);
-        let _ = wb.add_ignore(project_dir.join(".gitignore"));
-        wb.add_custom_ignore_filename(".theoignore");
-        wb.filter_entry(|entry| {
-            if entry.file_type().is_some_and(|ft| ft.is_dir()) {
-                let name = entry.file_name().to_str().unwrap_or("");
-                return !theo_domain::graph_context::EXCLUDED_DIRS.contains(&name);
-            }
-            true
-        });
-        let walker = wb.build();
-
-        let mut primary = Vec::new();
-        let mut secondary = Vec::new();
-
-        for entry in walker.flatten() {
-            let path = entry.into_path();
-            if !path.is_file() {
-                continue;
-            }
-            if ts::detect_language(&path).is_none() {
-                continue;
-            }
-            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-            if primary_ext.is_some_and(|pe| {
-                ext == pe || (pe == "ts" && (ext == "tsx" || ext == "js" || ext == "jsx"))
-            }) {
-                primary.push(path);
-            } else {
-                secondary.push(path);
-            }
-        }
-
-        // Smart sampling: instead of blind truncation by walk order,
-        // ensure directory breadth + prioritize recently modified files.
-        let mut all_files = primary;
-        all_files.extend(secondary);
-
-        if all_files.len() <= MAX_FILES_TO_PARSE {
-            return all_files;
-        }
-
-        // Step 1: Guarantee breadth — at least 1 file per top-level directory.
-        let mut by_dir: std::collections::HashMap<String, Vec<std::path::PathBuf>> =
-            std::collections::HashMap::new();
-        for path in &all_files {
-            let dir = path
-                .strip_prefix(project_dir)
-                .unwrap_or(path)
-                .components()
-                .next()
-                .map(|c| c.as_os_str().to_string_lossy().to_string())
-                .unwrap_or_else(|| "root".to_string());
-            by_dir.entry(dir).or_default().push(path.clone());
-        }
-
-        let mut selected: Vec<std::path::PathBuf> = Vec::with_capacity(MAX_FILES_TO_PARSE);
-        let mut selected_set: std::collections::HashSet<std::path::PathBuf> =
-            std::collections::HashSet::new();
-
-        // Pick 1 file per dir (most recently modified)
-        for (_dir, mut files) in by_dir {
-            files.sort_by(|a, b| {
-                let ma = std::fs::metadata(a)
-                    .and_then(|m| m.modified())
-                    .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-                let mb = std::fs::metadata(b)
-                    .and_then(|m| m.modified())
-                    .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-                mb.cmp(&ma) // newest first
-            });
-            if let Some(f) = files.first()
-                && selected_set.insert(f.clone()) {
-                    selected.push(f.clone());
-                }
-        }
-
-        // Step 2: Fill remaining slots by mtime (newest first, across all dirs).
-        all_files.sort_by(|a, b| {
-            let ma = std::fs::metadata(a)
-                .and_then(|m| m.modified())
-                .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-            let mb = std::fs::metadata(b)
-                .and_then(|m| m.modified())
-                .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-            mb.cmp(&ma)
-        });
-
-        for f in all_files {
-            if selected.len() >= MAX_FILES_TO_PARSE {
-                break;
-            }
-            if selected_set.insert(f.clone()) {
-                selected.push(f);
-            }
-        }
-
-        selected
-    };
-
-    let paths = collect_paths();
+    let paths = collect_files_to_parse(project_dir, primary_ext);
     let mut file_data_list = Vec::with_capacity(paths.len());
 
     for path in &paths {

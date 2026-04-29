@@ -3,6 +3,23 @@
 ## [Unreleased]
 
 ### Changed
+- **code-hygiene-5x5 T4.6 partial — theo-application 9 → 5** (`docs/plans/code-hygiene-5x5-plan.md`).
+  4 of 9 too_many_lines functions refactored:
+  - `cache::compute_project_hash` (102 LOC) → 4 helpers (`load_hash_cache`,
+    `build_project_walker`, `is_hashable_extension`, `read_metadata`)
+  - `building::parse_project_files` (120 LOC) → `collect_files_to_parse`
+    + `build_project_walker` + `partition_by_language` +
+    `sample_files_by_breadth_and_recency` + `mtime` (also fixed clippy
+    `sort_by_key` lint).
+  - `service::GraphContextProvider::initialize` (117 LOC) → 5 method helpers
+    (`is_already_initialized`, `install_cached_graph`, `acquire_build_lock`,
+    `transition_to_building`, `spawn_background_build`) + `apply_build_result`
+    + `BuildOutcome` type alias.
+  - `context_assembler::assemble` (124 LOC) → 3 method helpers
+    (`fill_with_structural_blocks`, `priority_for`, `update_assembly_counts`)
+    + `push_section` / `format_recent_events` free fns.
+  Remaining: `service::query_context` (270 LOC), `observability_ui::*` (107),
+  3 bench-test fns. Complexity total: 64 → 60.
 - **code-hygiene-5x5 T4.7 — theo-tooling complexity → 0** (`docs/plans/code-hygiene-5x5-plan.md`).
   All 7 too_many_lines functions in `theo-tooling` decomposed into helpers:
   - `apply_patch::execute` (191 LOC) → `declare_external_permissions` /

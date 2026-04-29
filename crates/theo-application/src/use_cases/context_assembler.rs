@@ -258,162 +258,175 @@ impl ContextAssembler {
         let mut sections = Vec::new();
         let mut tokens_used: usize = 0;
 
-        // Rule 2: ALWAYS include task objective
-        let objective_section = format!("## Task Objective\n{}", task_objective);
-        let objective_tokens = estimate_tokens(&objective_section);
-        if tokens_used + objective_tokens <= self.token_budget {
-            sections.push(objective_section);
-            tokens_used += objective_tokens;
-        }
-
-        // Rule 3: ALWAYS include current plan step (if present)
+        push_section(
+            &mut sections,
+            &mut tokens_used,
+            self.token_budget,
+            format!("## Task Objective\n{task_objective}"),
+        );
         if let Some(step) = &working_set.current_plan_step {
-            let step_section = format!("## Current Step\n{}", step);
-            let step_tokens = estimate_tokens(&step_section);
-            if tokens_used + step_tokens <= self.token_budget {
-                sections.push(step_section);
-                tokens_used += step_tokens;
-            }
+            push_section(
+                &mut sections,
+                &mut tokens_used,
+                self.token_budget,
+                format!("## Current Step\n{step}"),
+            );
         }
-
-        // Include active hypothesis (if present)
         if let Some(hypothesis) = &working_set.active_hypothesis {
-            let hyp_section = format!("## Active Hypothesis\n{}", hypothesis);
-            let hyp_tokens = estimate_tokens(&hyp_section);
-            if tokens_used + hyp_tokens <= self.token_budget {
-                sections.push(hyp_section);
-                tokens_used += hyp_tokens;
-            }
+            push_section(
+                &mut sections,
+                &mut tokens_used,
+                self.token_budget,
+                format!("## Active Hypothesis\n{hypothesis}"),
+            );
         }
-
-        // Include constraints (if any)
         if !working_set.constraints.is_empty() {
-            let constraints_text = working_set
-                .constraints
-                .iter()
-                .map(|c| format!("- {}", c))
-                .collect::<Vec<_>>()
-                .join("\n");
-            let section = format!("## Constraints\n{}", constraints_text);
-            let tokens = estimate_tokens(&section);
-            if tokens_used + tokens <= self.token_budget {
-                sections.push(section);
-                tokens_used += tokens;
-            }
+            push_section(
+                &mut sections,
+                &mut tokens_used,
+                self.token_budget,
+                format!(
+                    "## Constraints\n{}",
+                    working_set
+                        .constraints
+                        .iter()
+                        .map(|c| format!("- {c}"))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                ),
+            );
         }
-
-        // Rule 4: ALWAYS include recent evidence events (up to 8)
         if !recent_events.is_empty() {
-            let evidence_lines: Vec<String> = recent_events
-                .iter()
-                .rev()
-                .take(8)
-                .map(|e| {
-                    format!(
-                        "- [{}] {}: {}",
-                        e.event_type,
-                        e.entity_id,
-                        summarize_payload(&e.payload)
-                    )
-                })
-                .collect();
-            let evidence_section = format!("## Recent Events\n{}", evidence_lines.join("\n"));
-            let evidence_tokens = estimate_tokens(&evidence_section);
-            if tokens_used + evidence_tokens <= self.token_budget {
-                sections.push(evidence_section);
-                tokens_used += evidence_tokens;
-            }
+            push_section(
+                &mut sections,
+                &mut tokens_used,
+                self.token_budget,
+                format_recent_events(recent_events),
+            );
         }
-
-        // Include hot files list
         if !working_set.hot_files.is_empty() {
-            let files_text = working_set
-                .hot_files
-                .iter()
-                .map(|f| format!("- {}", f))
-                .collect::<Vec<_>>()
-                .join("\n");
-            let section = format!("## Hot Files\n{}", files_text);
-            let tokens = estimate_tokens(&section);
-            if tokens_used + tokens <= self.token_budget {
-                sections.push(section);
-                tokens_used += tokens;
-            }
+            push_section(
+                &mut sections,
+                &mut tokens_used,
+                self.token_budget,
+                format!(
+                    "## Hot Files\n{}",
+                    working_set
+                        .hot_files
+                        .iter()
+                        .map(|f| format!("- {f}"))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                ),
+            );
         }
 
-        // Fill remaining budget with structural code context.
-        // Scoring: feedback boost + stability bonus - repetition penalty.
-        // P0.5: Penalty floor = 0.5 (never zero a score, protect recall).
-        // P1: Stability bonus requires positive signal, decays 0.7/turn.
-        let mut blocks_with_priority: Vec<(usize, f64)> = structural_context
-            .blocks
-            .iter()
-            .enumerate()
-            .map(|(i, block)| {
-                let source = &block.source_id;
+        let assembled_this_turn =
+            self.fill_with_structural_blocks(structural_context, &mut sections, &mut tokens_used);
+        self.update_assembly_counts(&assembled_this_turn);
 
-                // Base: feedback-informed score
-                let feedback_boost = self.feedback_score(source);
-                let base_priority = block.score * (1.0 + feedback_boost);
-
-                // P0.5: Repetition penalty — penalize communities assembled many times
-                // Multiplier ∈ [0.5, 1.0]. Floor prevents recall collapse.
-                let assembly_count = self.assembly_counts.get(source).copied().unwrap_or(0);
-                let penalty_multiplier = (1.0 - 0.1 * assembly_count as f64).max(0.5);
-
-                // P1: Stability bonus — boost if community had positive signal
-                // Decays exponentially: 0.15 * 0.7^turns_without_signal
-                let stability_bonus = if self.positive_signal_sources.contains(source) {
-                    let turns = assembly_count.min(10);
-                    0.15 * 0.7_f64.powi(turns as i32)
-                } else {
-                    0.0 // No signal = no bonus (prevents lock-in)
-                };
-
-                let priority = base_priority * penalty_multiplier + stability_bonus;
-                (i, priority)
-            })
-            .collect();
-        blocks_with_priority
-            .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-
-        // Track which communities are assembled this turn (for next turn's penalties)
-        let mut assembled_this_turn = std::collections::HashSet::new();
-
-        for (idx, _priority) in blocks_with_priority {
-            let block = &structural_context.blocks[idx];
-            if tokens_used + block.token_count > self.token_budget {
-                continue;
-            }
-            sections.push(block.content.clone());
-            tokens_used += block.token_count;
-            assembled_this_turn.insert(block.source_id.clone());
-        }
-
-        // Update assembly counts for next turn
-        for (source, count) in &mut self.assembly_counts {
-            if !assembled_this_turn.contains(source) {
-                *count = 0; // Reset if not assembled this turn
-            }
-        }
-        for source in &assembled_this_turn {
-            *self.assembly_counts.entry(source.clone()).or_insert(0) += 1;
-        }
-
-        // Rule 1: ALWAYS respect token budget (defensive check)
         debug_assert!(
             tokens_used <= self.token_budget,
             "Token budget violated: {} > {}",
             tokens_used,
             self.token_budget
         );
-
         AssembledContext {
             sections,
             total_tokens: tokens_used,
             budget_tokens: self.token_budget,
         }
     }
+
+    /// Score, sort, and pack as many structural blocks as the remaining
+    /// budget allows. Returns the set of community IDs actually assembled.
+    fn fill_with_structural_blocks(
+        &self,
+        structural_context: &GraphContextResult,
+        sections: &mut Vec<String>,
+        tokens_used: &mut usize,
+    ) -> std::collections::HashSet<String> {
+        let mut blocks_with_priority: Vec<(usize, f64)> = structural_context
+            .blocks
+            .iter()
+            .enumerate()
+            .map(|(i, block)| (i, self.priority_for(block)))
+            .collect();
+        blocks_with_priority
+            .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        let mut assembled = std::collections::HashSet::new();
+        for (idx, _priority) in blocks_with_priority {
+            let block = &structural_context.blocks[idx];
+            if *tokens_used + block.token_count > self.token_budget {
+                continue;
+            }
+            sections.push(block.content.clone());
+            *tokens_used += block.token_count;
+            assembled.insert(block.source_id.clone());
+        }
+        assembled
+    }
+
+    /// Priority = (base_score × repetition_penalty) + stability_bonus.
+    /// Floor 0.5 prevents recall collapse; bonus decays 0.7/turn.
+    fn priority_for(&self, block: &theo_domain::graph_context::ContextBlock) -> f64 {
+        let source = &block.source_id;
+        let feedback_boost = self.feedback_score(source);
+        let base_priority = block.score * (1.0 + feedback_boost);
+        let assembly_count = self.assembly_counts.get(source).copied().unwrap_or(0);
+        let penalty_multiplier = (1.0 - 0.1 * assembly_count as f64).max(0.5);
+        let stability_bonus = if self.positive_signal_sources.contains(source) {
+            let turns = assembly_count.min(10);
+            0.15 * 0.7_f64.powi(turns as i32)
+        } else {
+            0.0
+        };
+        base_priority * penalty_multiplier + stability_bonus
+    }
+
+    /// Reset counters for communities NOT assembled this turn; bump those
+    /// that were so the repetition penalty kicks in next turn.
+    fn update_assembly_counts(&mut self, assembled_this_turn: &std::collections::HashSet<String>) {
+        for (source, count) in &mut self.assembly_counts {
+            if !assembled_this_turn.contains(source) {
+                *count = 0;
+            }
+        }
+        for source in assembled_this_turn {
+            *self.assembly_counts.entry(source.clone()).or_insert(0) += 1;
+        }
+    }
+}
+
+/// Append `section` to `sections` if it fits in the remaining budget.
+fn push_section(
+    sections: &mut Vec<String>,
+    tokens_used: &mut usize,
+    budget: usize,
+    section: String,
+) {
+    let tokens = estimate_tokens(&section);
+    if *tokens_used + tokens <= budget {
+        sections.push(section);
+        *tokens_used += tokens;
+    }
+}
+
+fn format_recent_events(recent_events: &[DomainEvent]) -> String {
+    let evidence_lines: Vec<String> = recent_events
+        .iter()
+        .rev()
+        .take(8)
+        .map(|e| {
+            format!(
+                "- [{}] {}: {}",
+                e.event_type,
+                e.entity_id,
+                summarize_payload(&e.payload)
+            )
+        })
+        .collect();
+    format!("## Recent Events\n{}", evidence_lines.join("\n"))
 }
 
 /// Simple token estimation: ~4 chars per token (industry heuristic).

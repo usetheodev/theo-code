@@ -51,12 +51,10 @@ use theo_engine_retrieval::reranker::{CrossEncoderConfig, CrossEncoderReranker};
 /// for users who don't query enough to amortize the download).
 use super::*;
 
-pub fn compute_project_hash(project_dir: &Path) -> String {
-    // Load cached hashes (path → (mtime_secs, size_bytes, content_hash)).
-    // T2.7: bounded deserialization — a corrupted or oversized cache file
-    // falls back to an empty map instead of allocating unbounded memory.
-    let cache_path = project_dir.join(".theo").join("hash_cache.json");
-    let mut cached: BTreeMap<String, (u64, u64, String)> = std::fs::read_to_string(&cache_path)
+/// Load the (path → mtime, size, content_hash) cache from disk.
+/// T2.7: bounded deserialization — corrupt/oversized file falls back to empty.
+fn load_hash_cache(cache_path: &Path) -> BTreeMap<String, (u64, u64, String)> {
+    std::fs::read_to_string(cache_path)
         .ok()
         .and_then(|s| {
             theo_domain::safe_json::from_str_bounded(
@@ -65,11 +63,12 @@ pub fn compute_project_hash(project_dir: &Path) -> String {
             )
             .ok()
         })
-        .unwrap_or_default();
+        .unwrap_or_default()
+}
 
-    let mut entries: BTreeMap<String, String> = BTreeMap::new();
-    let mut cache_dirty = false;
-
+/// Build a walker that respects `.gitignore` / `.theoignore` and skips
+/// known build-artifact directories.
+fn build_project_walker(project_dir: &Path) -> ignore::WalkBuilder {
     let mut hash_wb = ignore::WalkBuilder::new(project_dir);
     hash_wb.hidden(true).git_ignore(true).max_depth(Some(10));
     let _ = hash_wb.add_ignore(project_dir.join(".gitignore"));
@@ -81,58 +80,66 @@ pub fn compute_project_hash(project_dir: &Path) -> String {
         }
         true
     });
-    let walker = hash_wb.build();
+    hash_wb
+}
 
-    for entry in walker.flatten() {
+/// Whether a file's extension is one we hash for project fingerprinting.
+fn is_hashable_extension(path: &Path) -> bool {
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    matches!(
+        ext,
+        "rs" | "py"
+            | "ts"
+            | "tsx"
+            | "js"
+            | "jsx"
+            | "go"
+            | "java"
+            | "rb"
+            | "php"
+            | "c"
+            | "cpp"
+            | "cs"
+            | "sh"
+            | "yaml"
+            | "toml"
+    )
+}
+
+/// Returns `(mtime_secs, size_bytes)` — both default to 0 when stat fails.
+fn read_metadata(path: &Path) -> (u64, u64) {
+    let mtime = std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    (mtime, size)
+}
+
+pub fn compute_project_hash(project_dir: &Path) -> String {
+    let cache_path = project_dir.join(".theo").join("hash_cache.json");
+    let mut cached = load_hash_cache(&cache_path);
+    let mut entries: BTreeMap<String, String> = BTreeMap::new();
+    let mut cache_dirty = false;
+    for entry in build_project_walker(project_dir).build().flatten() {
         let path = entry.path();
-        if !path.is_file() {
+        if !path.is_file() || !is_hashable_extension(path) {
             continue;
         }
-        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-        if !matches!(
-            ext,
-            "rs" | "py"
-                | "ts"
-                | "tsx"
-                | "js"
-                | "jsx"
-                | "go"
-                | "java"
-                | "rb"
-                | "php"
-                | "c"
-                | "cpp"
-                | "cs"
-                | "sh"
-                | "yaml"
-                | "toml"
-        ) {
-            continue;
-        }
-
         let rel = match path.strip_prefix(project_dir) {
             Ok(r) => r.to_string_lossy().to_string(),
             Err(_) => continue,
         };
-
-        // Incremental: use mtime as pre-filter
-        let current_mtime = std::fs::metadata(path)
-            .and_then(|m| m.modified())
-            .ok()
-            .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-
-        let current_size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
-
-        // If BOTH mtime AND size match cache, reuse cached hash (skip file read)
+        let (current_mtime, current_size) = read_metadata(path);
         if let Some((cached_mtime, cached_size, cached_hash)) = cached.get(&rel)
-            && *cached_mtime == current_mtime && *cached_size == current_size {
-                entries.insert(rel, cached_hash.clone());
-                continue;
-            }
-
-        // Mtime or size changed (or not in cache) → read and hash
+            && *cached_mtime == current_mtime
+            && *cached_size == current_size
+        {
+            entries.insert(rel, cached_hash.clone());
+            continue;
+        }
         if let Ok(content) = std::fs::read(path) {
             let file_hash = blake3::hash(&content).to_hex().to_string();
             cached.insert(
