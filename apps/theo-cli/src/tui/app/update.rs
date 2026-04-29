@@ -32,70 +32,14 @@ pub fn update(state: &mut TuiState, msg: Msg) {
                 format!("[{n} events lost — display may be incomplete]"),
             ));
         }
-        Msg::InputChar(c) => {
-            state.input_text.insert(state.input_cursor, c);
-            state.input_cursor += c.len_utf8();
-        }
-        Msg::InputBackspace => {
-            if state.input_cursor > 0 {
-                // Find previous char boundary
-                let prev = state.input_text[..state.input_cursor]
-                    .char_indices()
-                    .last()
-                    .map(|(i, _)| i)
-                    .unwrap_or(0);
-                state.input_text.drain(prev..state.input_cursor);
-                state.input_cursor = prev;
-            }
-        }
-        Msg::InputDelete => {
-            if state.input_cursor < state.input_text.len() {
-                let next = state.input_text[state.input_cursor..]
-                    .char_indices()
-                    .nth(1)
-                    .map(|(i, _)| state.input_cursor + i)
-                    .unwrap_or(state.input_text.len());
-                state.input_text.drain(state.input_cursor..next);
-            }
-        }
-        Msg::InputLeft => {
-            if state.input_cursor > 0 {
-                state.input_cursor = state.input_text[..state.input_cursor]
-                    .char_indices()
-                    .last()
-                    .map(|(i, _)| i)
-                    .unwrap_or(0);
-            }
-        }
-        Msg::InputRight => {
-            if state.input_cursor < state.input_text.len() {
-                state.input_cursor = state.input_text[state.input_cursor..]
-                    .char_indices()
-                    .nth(1)
-                    .map(|(i, _)| state.input_cursor + i)
-                    .unwrap_or(state.input_text.len());
-            }
-        }
-        Msg::InputHome => {
-            state.input_cursor = 0;
-        }
-        Msg::InputEnd => {
-            state.input_cursor = state.input_text.len();
-        }
-        Msg::Submit(text) => {
-            if !text.is_empty() {
-                state.prompt_history.push(text.clone());
-                state.transcript.push(TranscriptEntry::User(text));
-                state.input_text.clear();
-                state.input_cursor = 0;
-                // NOTE: agent_running is set by mod.rs AFTER spawning the agent
-                // Setting it here would prevent the agent from launching
-                state.streaming_assistant = false;
-                if state.scroll_locked_to_bottom {
-                    state.scroll_offset = 0;
-                }
-            }
-        }
+        Msg::InputChar(c) => apply_input_char(state, c),
+        Msg::InputBackspace => apply_input_backspace(state),
+        Msg::InputDelete => apply_input_delete(state),
+        Msg::InputLeft => apply_input_left(state),
+        Msg::InputRight => apply_input_right(state),
+        Msg::InputHome => state.input_cursor = 0,
+        Msg::InputEnd => state.input_cursor = state.input_text.len(),
+        Msg::Submit(text) => apply_submit(state, text),
         Msg::CursorBlink => {
             state.cursor_visible = !state.cursor_visible;
         }
@@ -248,13 +192,7 @@ pub fn update(state: &mut TuiState, msg: Msg) {
                 state.model_picker_selected += 1;
             }
         }
-        Msg::ModelPickerSelect => {
-            if let Some(model) = state.available_models.get(state.model_picker_selected) {
-                state.status.model = model.clone();
-                state.show_model_picker = false;
-                state.transcript.push(TranscriptEntry::SystemMessage(format!("Model: {model}")));
-            }
-        }
+        Msg::ModelPickerSelect => apply_model_picker_select(state),
         Msg::ToggleThemePicker => {
             state.show_theme_picker = !state.show_theme_picker;
             state.theme_picker_selected = 0;
@@ -267,17 +205,8 @@ pub fn update(state: &mut TuiState, msg: Msg) {
         Msg::ThemePickerDown => {
             state.theme_picker_selected += 1;
         }
-        Msg::ThemePickerSelect => {
-            let themes = super::super::theme::Theme::all();
-            if let Some(theme) = themes.get(state.theme_picker_selected) {
-                state.theme = theme.clone();
-                state.show_theme_picker = false;
-                state.transcript.push(TranscriptEntry::SystemMessage(format!("Theme: {}", theme.name)));
-            }
-        }
-        Msg::AutocompleteUpdate => {
-            update_autocomplete(state);
-        }
+        Msg::ThemePickerSelect => apply_theme_picker_select(state),
+        Msg::AutocompleteUpdate => update_autocomplete(state),
         Msg::AutocompleteUp => {
             if state.autocomplete.selected > 0 {
                 state.autocomplete.selected -= 1;
@@ -288,19 +217,7 @@ pub fn update(state: &mut TuiState, msg: Msg) {
                 state.autocomplete.selected += 1;
             }
         }
-        Msg::AutocompleteAccept => {
-            if let Some(text) = state.autocomplete.selected_text().map(|s| s.to_string()) {
-                state.input_text = if state.autocomplete.trigger == super::super::autocomplete::AutocompleteTrigger::Slash {
-                    text
-                } else {
-                    // For @file, insert at cursor position
-                    let before = &state.input_text[..state.input_text.rfind('@').unwrap_or(0)];
-                    format!("{}{} ", before, text)
-                };
-                state.input_cursor = state.input_text.len();
-                state.autocomplete.active = false;
-            }
-        }
+        Msg::AutocompleteAccept => apply_autocomplete_accept(state),
         Msg::AutocompleteClose => {
             state.autocomplete.active = false;
         }
@@ -374,45 +291,18 @@ pub fn update(state: &mut TuiState, msg: Msg) {
             state.pending_approval = None;
         }
         // Auth — actual login/logout happens in mod.rs; these are UI state updates
-        Msg::LoginStart(_provider) => {
-            state.transcript.push(TranscriptEntry::SystemMessage(
-                "🔐 Starting OpenAI device flow...".to_string(),
-            ));
-        }
-        Msg::LoginServer(url) => {
-            state.transcript.push(TranscriptEntry::SystemMessage(
-                format!("🔐 Connecting to {}...", url),
-            ));
-        }
-        Msg::LoginWithKey(key) => {
-            // Store API key directly — works via SSH, no browser needed.
-            // SAFETY: single-threaded render-loop context; no other task
-            // observes env vars during this update frame. Rust 2024 marks
-            // `set_var` unsafe for the general multi-threaded case, which
-            // does not apply here.
-            unsafe { std::env::set_var("OPENAI_API_KEY", &key); }
-            let masked = if key.len() > 8 {
-                format!("{}...{}", &key[..6], &key[key.len()-4..])
-            } else {
-                "***".to_string()
-            };
-            state.status.provider = "OpenAI".to_string();
-            state.transcript.push(TranscriptEntry::SystemMessage(
-                format!("✓ API key set: {masked}"),
-            ));
-            state.transcript.push(TranscriptEntry::SystemMessage(
-                "Provider ready. You can now send tasks to the agent.".to_string(),
-            ));
-        }
+        Msg::LoginStart(_provider) => state.transcript.push(TranscriptEntry::SystemMessage(
+            "🔐 Starting OpenAI device flow...".to_string(),
+        )),
+        Msg::LoginServer(url) => state.transcript.push(TranscriptEntry::SystemMessage(format!(
+            "🔐 Connecting to {}...",
+            url
+        ))),
+        Msg::LoginWithKey(key) => apply_login_with_key(state, key),
         Msg::LoginComplete(msg) => {
             state.transcript.push(TranscriptEntry::SystemMessage(msg));
         }
-        Msg::LoginFailed(err) => {
-            state.transcript.push(TranscriptEntry::SystemMessage(
-                format!("✗ Login failed: {err}"),
-            ));
-            state.transcript.push(TranscriptEntry::SystemMessage(format!("Login failed: {}", if err.len() > 50 { &err[..50] } else { &err })));
-        }
+        Msg::LoginFailed(err) => apply_login_failed(state, err),
         Msg::LogoutRequest => {
             // Clear stored tokens
             let auth_path = std::path::PathBuf::from(
@@ -515,3 +405,146 @@ pub fn update(state: &mut TuiState, msg: Msg) {
     }
 }
 
+
+fn apply_input_char(state: &mut TuiState, c: char) {
+    state.input_text.insert(state.input_cursor, c);
+    state.input_cursor += c.len_utf8();
+}
+
+fn apply_input_backspace(state: &mut TuiState) {
+    if state.input_cursor == 0 {
+        return;
+    }
+    let prev = state.input_text[..state.input_cursor]
+        .char_indices()
+        .last()
+        .map(|(i, _)| i)
+        .unwrap_or(0);
+    state.input_text.drain(prev..state.input_cursor);
+    state.input_cursor = prev;
+}
+
+fn apply_input_delete(state: &mut TuiState) {
+    if state.input_cursor >= state.input_text.len() {
+        return;
+    }
+    let next = state.input_text[state.input_cursor..]
+        .char_indices()
+        .nth(1)
+        .map(|(i, _)| state.input_cursor + i)
+        .unwrap_or(state.input_text.len());
+    state.input_text.drain(state.input_cursor..next);
+}
+
+fn apply_input_left(state: &mut TuiState) {
+    if state.input_cursor == 0 {
+        return;
+    }
+    state.input_cursor = state.input_text[..state.input_cursor]
+        .char_indices()
+        .last()
+        .map(|(i, _)| i)
+        .unwrap_or(0);
+}
+
+fn apply_input_right(state: &mut TuiState) {
+    if state.input_cursor >= state.input_text.len() {
+        return;
+    }
+    state.input_cursor = state.input_text[state.input_cursor..]
+        .char_indices()
+        .nth(1)
+        .map(|(i, _)| state.input_cursor + i)
+        .unwrap_or(state.input_text.len());
+}
+
+fn apply_submit(state: &mut TuiState, text: String) {
+    if text.is_empty() {
+        return;
+    }
+    state.prompt_history.push(text.clone());
+    state.transcript.push(TranscriptEntry::User(text));
+    state.input_text.clear();
+    state.input_cursor = 0;
+    // NOTE: agent_running is set by mod.rs AFTER spawning the agent;
+    // setting it here would prevent the agent from launching.
+    state.streaming_assistant = false;
+    if state.scroll_locked_to_bottom {
+        state.scroll_offset = 0;
+    }
+}
+
+fn apply_model_picker_select(state: &mut TuiState) {
+    if let Some(model) = state.available_models.get(state.model_picker_selected) {
+        state.status.model = model.clone();
+        state.show_model_picker = false;
+        state
+            .transcript
+            .push(TranscriptEntry::SystemMessage(format!("Model: {model}")));
+    }
+}
+
+fn apply_theme_picker_select(state: &mut TuiState) {
+    let themes = super::super::theme::Theme::all();
+    if let Some(theme) = themes.get(state.theme_picker_selected) {
+        state.theme = theme.clone();
+        state.show_theme_picker = false;
+        state
+            .transcript
+            .push(TranscriptEntry::SystemMessage(format!("Theme: {}", theme.name)));
+    }
+}
+
+fn apply_autocomplete_accept(state: &mut TuiState) {
+    let Some(text) = state.autocomplete.selected_text().map(|s| s.to_string()) else {
+        return;
+    };
+    state.input_text = if state.autocomplete.trigger
+        == super::super::autocomplete::AutocompleteTrigger::Slash
+    {
+        text
+    } else {
+        // For @file, insert at cursor position.
+        let before = &state.input_text[..state.input_text.rfind('@').unwrap_or(0)];
+        format!("{}{} ", before, text)
+    };
+    state.input_cursor = state.input_text.len();
+    state.autocomplete.active = false;
+}
+
+fn apply_login_with_key(state: &mut TuiState, key: String) {
+    // SAFETY: ADR-021#rust_2024_test_env_var — single-threaded render-loop
+    // context; no other task observes env vars during this update frame.
+    unsafe {
+        std::env::set_var("OPENAI_API_KEY", &key);
+    }
+    let masked = if key.len() > 8 {
+        format!("{}...{}", &key[..6], &key[key.len() - 4..])
+    } else {
+        "***".to_string()
+    };
+    state.status.provider = "OpenAI".to_string();
+    state
+        .transcript
+        .push(TranscriptEntry::SystemMessage(format!(
+            "✓ API key set: {masked}"
+        )));
+    state.transcript.push(TranscriptEntry::SystemMessage(
+        "Provider ready. You can now send tasks to the agent.".to_string(),
+    ));
+}
+
+fn apply_login_failed(state: &mut TuiState, err: String) {
+    state
+        .transcript
+        .push(TranscriptEntry::SystemMessage(format!(
+            "✗ Login failed: {err}"
+        )));
+    let preview = if err.len() > 50 { &err[..50] } else { &err };
+    state
+        .transcript
+        .push(TranscriptEntry::SystemMessage(format!(
+            "Login failed: {}",
+            preview
+        )));
+}
