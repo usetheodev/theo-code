@@ -29,7 +29,6 @@ impl AgentRunEngine {
         messages: &mut Vec<Message>,
     ) {
         use crate::constants::MAX_BATCH_SIZE as MAX_BATCH;
-
         let args = call.parse_arguments().unwrap_or_default();
         let Some(calls) = args.get("calls").and_then(|v| v.as_array()) else {
             messages.push(Message::tool_result(
@@ -39,12 +38,67 @@ impl AgentRunEngine {
             ));
             return;
         };
-
         let total = calls.len().min(MAX_BATCH);
-        let registry = self.llm.registry.clone();
-        let mut futures = Vec::new();
-        let mut blocked_results: Vec<(usize, String, String)> = Vec::new();
+        let (futures, blocked_results) = self.spawn_batch_subcalls(call, calls, abort_rx);
+        let results = futures::future::join_all(futures).await;
+        let (all_results, vision_followups) = self.combine_batch_results(blocked_results, results);
+        let batch_output = format_batch_output(&all_results, total, calls.len());
+        self.publish_batch_completion(call, total);
+        messages.push(Message::tool_result(&call.id, "batch", &batch_output));
+        // T1.2/T0.1 — image follow-ups are pushed AFTER the combined
+        // tool_result so the LLM sees the textual summary first.
+        for (tool_name, metadata) in &vision_followups {
+            crate::vision_propagation::push_image_followup(messages, metadata, tool_name);
+        }
+    }
 
+    /// Walk the requested sub-calls; return (parallel_futures,
+    /// blocked_synchronously). Every entry preserves its index so the
+    /// final output is deterministic regardless of completion order.
+    #[allow(clippy::type_complexity)]
+    fn spawn_batch_subcalls(
+        &self,
+        call: &ToolCall,
+        calls: &[serde_json::Value],
+        abort_rx: &tokio::sync::watch::Receiver<bool>,
+    ) -> (
+        Vec<
+            std::pin::Pin<
+                Box<
+                    dyn std::future::Future<
+                            Output = (
+                                usize,
+                                String,
+                                serde_json::Value,
+                                Message,
+                                bool,
+                                Option<serde_json::Value>,
+                            ),
+                        > + Send,
+                >,
+            >,
+        >,
+        Vec<(usize, String, String)>,
+    ) {
+        use crate::constants::MAX_BATCH_SIZE as MAX_BATCH;
+        let registry = self.llm.registry.clone();
+        let mut futures: Vec<
+            std::pin::Pin<
+                Box<
+                    dyn std::future::Future<
+                            Output = (
+                                usize,
+                                String,
+                                serde_json::Value,
+                                Message,
+                                bool,
+                                Option<serde_json::Value>,
+                            ),
+                        > + Send,
+                >,
+            >,
+        > = Vec::new();
+        let mut blocked_results: Vec<(usize, String, String)> = Vec::new();
         for (i, batch_call) in calls.iter().take(MAX_BATCH).enumerate() {
             let tool_name = batch_call
                 .get("tool")
@@ -55,7 +109,6 @@ impl AgentRunEngine {
                 .get("args")
                 .cloned()
                 .unwrap_or(serde_json::json!({}));
-
             if BLOCKED_IN_BATCH.contains(&tool_name.as_str()) {
                 blocked_results.push((
                     i,
@@ -64,27 +117,24 @@ impl AgentRunEngine {
                 ));
                 continue;
             }
-
-            // Plan mode guard: block write-class tools inside a batch.
             if self.config.loop_cfg().mode == crate::config::AgentMode::Plan
                 && matches!(tool_name.as_str(), "edit" | "write" | "apply_patch")
             {
                 blocked_results.push((
                     i,
                     tool_name.clone(),
-                    "BLOCKED by Plan mode guard — no source edits in batch during planning".to_string(),
+                    "BLOCKED by Plan mode guard — no source edits in batch during planning"
+                        .to_string(),
                 ));
                 continue;
             }
-
             let reg = registry.clone();
             let batch_tool_call = theo_infra_llm::types::ToolCall::new(
                 format!("batch_{}_{}", call.id, i),
                 &tool_name,
                 tool_args.to_string(),
             );
-            // T14.1 — partial_progress_tx propagates so tools in
-            // the parallel batch path emit to the same TUI consumer.
+            // T14.1 — partial_progress_tx propagates to the parallel path.
             let batch_ctx = ToolContext {
                 session_id: SessionId::new("batch"),
                 message_id: MessageId::new(format!("batch_{}", i)),
@@ -95,11 +145,7 @@ impl AgentRunEngine {
                 graph_context: self.rt.graph_context.clone(),
                 stdout_tx: self.rt.partial_progress_tx.clone(),
             };
-
-            futures.push(async move {
-                // T1.2/T0.1 — collect tool metadata so vision blocks can
-                // be propagated as user followup messages after the batch
-                // tool_result is pushed.
+            futures.push(Box::pin(async move {
                 let (msg, success, metadata) = tool_bridge::execute_tool_call_with_metadata(
                     &reg,
                     &batch_tool_call,
@@ -107,16 +153,31 @@ impl AgentRunEngine {
                 )
                 .await;
                 (i, tool_name, tool_args, msg, success, metadata)
-            });
+            }));
         }
+        (futures, blocked_results)
+    }
 
-        // Execute all non-blocked calls in parallel — join_all preserves order.
-        let results = futures::future::join_all(futures).await;
-
-        // Combine blocked + executed results, sorted by index.
+    /// Merge synchronously-blocked entries with parallel results,
+    /// record budget/metrics, capture vision metadata, and sort by
+    /// original index.
+    #[allow(clippy::type_complexity)]
+    fn combine_batch_results(
+        &mut self,
+        blocked_results: Vec<(usize, String, String)>,
+        results: Vec<(
+            usize,
+            String,
+            serde_json::Value,
+            Message,
+            bool,
+            Option<serde_json::Value>,
+        )>,
+    ) -> (
+        Vec<(usize, String, String, bool)>,
+        Vec<(String, serde_json::Value)>,
+    ) {
         let mut all_results: Vec<(usize, String, String, bool)> = Vec::new();
-        // T1.2/T0.1 — collect (tool_name, metadata) pairs so we can push
-        // image followups AFTER the combined tool_result message.
         let mut vision_followups: Vec<(String, serde_json::Value)> = Vec::new();
         for (i, name, err) in blocked_results {
             all_results.push((i, name, format!("error — {}", err), false));
@@ -140,48 +201,30 @@ impl AgentRunEngine {
                 ),
                 success,
             ));
-
-            // Budget + metrics accounting.
             self.llm.budget_enforcer.record_tool_call();
             self.obs.metrics.record_tool_call(&tool_name, 0, success);
-
-            // Track edits in the context loop state.
-            if success
-                && matches!(tool_name.as_str(), "edit" | "write" | "apply_patch")
-            {
+            if success && matches!(tool_name.as_str(), "edit" | "write" | "apply_patch") {
                 let file = tool_args
                     .get("filePath")
                     .and_then(|p| p.as_str())
                     .unwrap_or("");
                 if !file.is_empty() {
-                    self.rt.context_loop_state
+                    self.rt
+                        .context_loop_state
                         .record_edit_attempt(file, true, None);
                 }
             }
-
-            // T1.2/T0.1 — capture metadata that carries vision blocks
-            // (e.g., `read_image` output). Pushed as user followups
-            // after the combined batch tool_result below.
-            if success && let Some(m) = metadata {
+            if success
+                && let Some(m) = metadata
+            {
                 vision_followups.push((tool_name.clone(), m));
             }
         }
-
-        // Sort by original index for deterministic output.
         all_results.sort_by_key(|(i, _, _, _)| *i);
+        (all_results, vision_followups)
+    }
 
-        let mut batch_output = String::new();
-        for (i, _name, display, _success) in &all_results {
-            batch_output.push_str(&format!("[{}/{}] {}\n", i + 1, total, display));
-        }
-        if calls.len() > MAX_BATCH {
-            batch_output.push_str(&format!(
-                "\n⚠ {} calls exceeded max batch size of {}. Only first {} executed.\n",
-                calls.len(), MAX_BATCH, MAX_BATCH
-            ));
-        }
-
-        // Publish batch completion event with OTel payload.
+    fn publish_batch_completion(&self, call: &ToolCall, total: usize) {
         let mut batch_span = crate::observability::otel::tool_call_span("batch");
         batch_span.set(
             crate::observability::otel::ATTR_THEO_TOOL_CALL_ID,
@@ -201,19 +244,24 @@ impl AgentRunEngine {
                 "otel": batch_span.to_json(),
             }),
         ));
-
-        messages.push(Message::tool_result(&call.id, "batch", &batch_output));
-
-        // T1.2/T0.1 — push image follow-ups (one per tool that emitted
-        // vision content). Order preserved from the parallel join_all
-        // (already sorted by index for `all_results`; vision_followups
-        // is in completion order which is also stable per `join_all`).
-        for (tool_name, metadata) in &vision_followups {
-            crate::vision_propagation::push_image_followup(
-                messages,
-                metadata,
-                tool_name,
-            );
-        }
     }
+}
+
+fn format_batch_output(
+    all_results: &[(usize, String, String, bool)],
+    total: usize,
+    requested: usize,
+) -> String {
+    use crate::constants::MAX_BATCH_SIZE as MAX_BATCH;
+    let mut batch_output = String::new();
+    for (i, _name, display, _success) in all_results {
+        batch_output.push_str(&format!("[{}/{}] {}\n", i + 1, total, display));
+    }
+    if requested > MAX_BATCH {
+        batch_output.push_str(&format!(
+            "\n⚠ {} calls exceeded max batch size of {}. Only first {} executed.\n",
+            requested, MAX_BATCH, MAX_BATCH
+        ));
+    }
+    batch_output
 }
