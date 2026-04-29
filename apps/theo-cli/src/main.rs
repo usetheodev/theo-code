@@ -24,6 +24,8 @@ use std::path::{Path, PathBuf};
 use clap::{Parser, Subcommand};
 
 use crate::cmd::*;
+use crate::mcp_admin::McpCmd;
+use crate::subagent_admin::{AgentsCmd, CheckpointsCmd, SubagentCmd};
 
 // ---------------------------------------------------------------------------
 // CLI definition (Clap derive)
@@ -315,168 +317,172 @@ enum MemoryAction {
 // ---------------------------------------------------------------------------
 
 fn main() {
-    let cli = Cli::parse();
-
-    match cli.command {
+    let mut cli = Cli::parse();
+    match cli.command.take() {
         Some(Commands::Init) => cmd_init(cli.repo),
-        Some(Commands::Agent { prompt }) => {
-            if cli.headless {
-                cmd_headless(prompt, cli.repo, cli.provider, cli.model, cli.max_iter, cli.mode, cli.temperature, cli.seed);
-                return;
-            }
-            // Build injections from CLI flags so subagent integrations are
-            // active even on the explicit `theo agent` subcommand.
-            let features = runtime_features::RuntimeFeatures::from_flags(
-                cli.watch_agents,
-                cli.enable_checkpoints,
-                &cli.repo,
-            );
-            features.print_status();
-            let injections = build_injections(&features, &cli.repo);
-            let _runtime_features = features;
-            cmd_agent(prompt, cli.repo, cli.provider, cli.model, cli.max_iter, injections);
+        Some(Commands::Agent { prompt }) => dispatch_agent(cli, prompt),
+        Some(Commands::Pilot { calls, rate, complete, promise }) => {
+            cmd_pilot(promise, cli.repo, cli.provider, cli.model, calls, rate, complete);
         }
-        Some(Commands::Pilot {
-            calls,
-            rate,
-            complete,
-            promise,
-        }) => {
-            cmd_pilot(
-                promise,
-                cli.repo,
-                cli.provider,
-                cli.model,
-                calls,
-                rate,
-                complete,
-            );
-        }
-        Some(Commands::Context { repo_path, query }) => {
-            cmd_context(&repo_path, &query.join(" "));
-        }
-        Some(Commands::Impact { repo_path, file }) => {
-            cmd_impact(&repo_path, &file);
-        }
-        Some(Commands::Stats { repo_path }) => {
-            cmd_stats(&repo_path);
-        }
+        Some(Commands::Context { repo_path, query }) => cmd_context(&repo_path, &query.join(" ")),
+        Some(Commands::Impact { repo_path, file }) => cmd_impact(&repo_path, &file),
+        Some(Commands::Stats { repo_path }) => cmd_stats(&repo_path),
         Some(Commands::Login { key, server, no_browser }) => {
             std::process::exit(cmd_login(key, server, no_browser));
         }
-        Some(Commands::Logout) => {
-            std::process::exit(cmd_logout());
-        }
+        Some(Commands::Logout) => std::process::exit(cmd_logout()),
         Some(Commands::Dashboard { port, static_dir }) => {
             cmd_dashboard(cli.repo, port, static_dir);
         }
-        Some(Commands::Memory { action }) => match action {
-            MemoryAction::Lint { format } => {
-                let fmt = memory_lint::LintFormat::from_str_opt(format.as_deref());
-                // Stub inputs — real collection belongs to a follow-up
-                // that reads hash manifest, journal timestamps, and
-                // retrieval metrics. The subcommand surface lands here
-                // so downstream plumbing has a stable entry point.
-                let inputs = theo_application::use_cases::memory_lint::LintInputs {
-                    seconds_since_last_compile: 0,
-                    lessons: Vec::new(),
-                    orphan_episode_ids: Vec::new(),
-                    broken_link_pages: Vec::new(),
-                    recall_p50_ms: 0.0,
-                    recall_p95_ms: 0.0,
-                };
-                let code = memory_lint::run(inputs, fmt);
-                std::process::exit(code);
-            }
-        },
-        Some(Commands::Subagent { action }) => {
-            let project = cli.repo.clone();
-            if let Err(e) = subagent_admin::handle_subagent(action, &project) {
-                eprintln!("Error: {}", e);
-                std::process::exit(1);
-            }
-        }
-        Some(Commands::Checkpoints { action }) => {
-            let workdir = cli.repo.clone();
-            if let Err(e) = subagent_admin::handle_checkpoints(action, &workdir) {
-                eprintln!("Error: {}", e);
-                std::process::exit(1);
-            }
-        }
-        Some(Commands::Agents { action }) => {
-            let project = cli.repo.clone();
-            if let Err(e) = subagent_admin::handle_agents(action, &project) {
-                eprintln!("Error: {}", e);
-                std::process::exit(1);
-            }
-        }
-        Some(Commands::Mcp { action }) => {
-            let project = cli.repo.clone();
-            // Process-local cache: every CLI invocation starts fresh.
-            // Operator workflow: run `theo mcp discover` once before the
-            // first `theo agent` to warm the cache for that session.
-            let cache = std::sync::Arc::new(
-                theo_application::facade::mcp::DiscoveryCache::new(),
-            );
-            let rt = match tokio::runtime::Runtime::new() {
-                Ok(r) => r,
-                Err(e) => {
-                    eprintln!("Error: failed to create tokio runtime: {}", e);
-                    std::process::exit(1);
-                }
-            };
-            if let Err(e) =
-                rt.block_on(mcp_admin::handle_mcp(action, &project, cache))
-            {
-                eprintln!("Error: {}", e);
-                std::process::exit(1);
-            }
-        }
-        Some(Commands::Skill { action }) => {
-            let code = match action {
-                SkillCmd::List { format } => {
-                    let fmt = cmd_skill::ListFormat::from_str_opt(format.as_deref());
-                    cmd_skill::handle_list(fmt)
-                }
-                SkillCmd::View { name } => cmd_skill::handle_view(&name),
-                SkillCmd::Delete { name, yes } => {
-                    cmd_skill::handle_delete(&name, yes)
-                }
-            };
-            std::process::exit(code);
-        }
+        Some(Commands::Memory { action }) => dispatch_memory(action),
+        Some(Commands::Subagent { action }) => dispatch_subagent(action, cli.repo),
+        Some(Commands::Checkpoints { action }) => dispatch_checkpoints(action, cli.repo),
+        Some(Commands::Agents { action }) => dispatch_agents(action, cli.repo),
+        Some(Commands::Mcp { action }) => dispatch_mcp(action, cli.repo),
+        Some(Commands::Skill { action }) => std::process::exit(dispatch_skill(action)),
         Some(Commands::Trajectory { action }) => {
-            let code = match action {
-                TrajectoryCmd::ExportRlhf { out, filter } => {
-                    cmd_trajectory_export_rlhf(&cli.repo, &out, &filter)
-                }
-            };
-            std::process::exit(code);
+            std::process::exit(dispatch_trajectory(action, &cli.repo));
         }
-        None => {
-            // Phase 9 + 13: activate runtime features per CLI flags.
-            // Held in scope so watcher / checkpoint live for the session.
-            let features = runtime_features::RuntimeFeatures::from_flags(
-                cli.watch_agents,
-                cli.enable_checkpoints,
-                &cli.repo,
-            );
-            features.print_status();
+        None => dispatch_default(cli),
+    }
+}
 
-            // Build SubagentInjections from active features so the runtime
-            // (AgentLoop → AgentRunEngine → SubAgentManager) sees them.
-            let injections = build_injections(&features, &cli.repo);
-            // Keep watcher alive for the session.
-            let _runtime_features = features;
+fn dispatch_agent(cli: Cli, prompt: Vec<String>) {
+    if cli.headless {
+        cmd_headless(
+            prompt,
+            cli.repo,
+            cli.provider,
+            cli.model,
+            cli.max_iter,
+            cli.mode,
+            cli.temperature,
+            cli.seed,
+        );
+        return;
+    }
+    // Build injections from CLI flags so subagent integrations are
+    // active even on the explicit `theo agent` subcommand.
+    let features = runtime_features::RuntimeFeatures::from_flags(
+        cli.watch_agents,
+        cli.enable_checkpoints,
+        &cli.repo,
+    );
+    features.print_status();
+    let injections = build_injections(&features, &cli.repo);
+    let _runtime_features = features;
+    cmd_agent(prompt, cli.repo, cli.provider, cli.model, cli.max_iter, injections);
+}
 
-            if cli.headless {
-                cmd_headless(cli.prompt, cli.repo, cli.provider, cli.model, cli.max_iter, cli.mode, cli.temperature, cli.seed);
-                return;
-            }
-            // Default: TUI (interactive or one-shot with trailing prompt).
-            cmd_agent(cli.prompt, cli.repo, cli.provider, cli.model, cli.max_iter, injections);
+fn dispatch_memory(action: MemoryAction) {
+    match action {
+        MemoryAction::Lint { format } => {
+            let fmt = memory_lint::LintFormat::from_str_opt(format.as_deref());
+            // Stub inputs — real collection belongs to a follow-up
+            // that reads hash manifest, journal timestamps, and
+            // retrieval metrics. The subcommand surface lands here
+            // so downstream plumbing has a stable entry point.
+            let inputs = theo_application::use_cases::memory_lint::LintInputs {
+                seconds_since_last_compile: 0,
+                lessons: Vec::new(),
+                orphan_episode_ids: Vec::new(),
+                broken_link_pages: Vec::new(),
+                recall_p50_ms: 0.0,
+                recall_p95_ms: 0.0,
+            };
+            let code = memory_lint::run(inputs, fmt);
+            std::process::exit(code);
         }
     }
+}
+
+fn dispatch_subagent(action: SubagentCmd, project: PathBuf) {
+    if let Err(e) = subagent_admin::handle_subagent(action, &project) {
+        eprintln!("Error: {}", e);
+        std::process::exit(1);
+    }
+}
+
+fn dispatch_checkpoints(action: CheckpointsCmd, workdir: PathBuf) {
+    if let Err(e) = subagent_admin::handle_checkpoints(action, &workdir) {
+        eprintln!("Error: {}", e);
+        std::process::exit(1);
+    }
+}
+
+fn dispatch_agents(action: AgentsCmd, project: PathBuf) {
+    if let Err(e) = subagent_admin::handle_agents(action, &project) {
+        eprintln!("Error: {}", e);
+        std::process::exit(1);
+    }
+}
+
+fn dispatch_mcp(action: McpCmd, project: PathBuf) {
+    // Process-local cache: every CLI invocation starts fresh.
+    // Operator workflow: run `theo mcp discover` once before the
+    // first `theo agent` to warm the cache for that session.
+    let cache = std::sync::Arc::new(theo_application::facade::mcp::DiscoveryCache::new());
+    let rt = match tokio::runtime::Runtime::new() {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Error: failed to create tokio runtime: {}", e);
+            std::process::exit(1);
+        }
+    };
+    if let Err(e) = rt.block_on(mcp_admin::handle_mcp(action, &project, cache)) {
+        eprintln!("Error: {}", e);
+        std::process::exit(1);
+    }
+}
+
+fn dispatch_skill(action: SkillCmd) -> i32 {
+    match action {
+        SkillCmd::List { format } => {
+            let fmt = cmd_skill::ListFormat::from_str_opt(format.as_deref());
+            cmd_skill::handle_list(fmt)
+        }
+        SkillCmd::View { name } => cmd_skill::handle_view(&name),
+        SkillCmd::Delete { name, yes } => cmd_skill::handle_delete(&name, yes),
+    }
+}
+
+fn dispatch_trajectory(action: TrajectoryCmd, repo: &Path) -> i32 {
+    match action {
+        TrajectoryCmd::ExportRlhf { out, filter } => {
+            cmd_trajectory_export_rlhf(repo, &out, &filter)
+        }
+    }
+}
+
+fn dispatch_default(cli: Cli) {
+    // Phase 9 + 13: activate runtime features per CLI flags.
+    // Held in scope so watcher / checkpoint live for the session.
+    let features = runtime_features::RuntimeFeatures::from_flags(
+        cli.watch_agents,
+        cli.enable_checkpoints,
+        &cli.repo,
+    );
+    features.print_status();
+    // Build SubagentInjections from active features so the runtime
+    // (AgentLoop → AgentRunEngine → SubAgentManager) sees them.
+    let injections = build_injections(&features, &cli.repo);
+    // Keep watcher alive for the session.
+    let _runtime_features = features;
+    if cli.headless {
+        cmd_headless(
+            cli.prompt,
+            cli.repo,
+            cli.provider,
+            cli.model,
+            cli.max_iter,
+            cli.mode,
+            cli.temperature,
+            cli.seed,
+        );
+        return;
+    }
+    // Default: TUI (interactive or one-shot with trailing prompt).
+    cmd_agent(cli.prompt, cli.repo, cli.provider, cli.model, cli.max_iter, injections);
 }
 
 /// Translate CLI runtime features into `SubagentInjections`. Always

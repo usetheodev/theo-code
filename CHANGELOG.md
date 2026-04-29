@@ -3,6 +3,20 @@
 ## [Unreleased]
 
 ### Changed
+- **code-hygiene-5x5 T4.3 partial — theo (CLI) 3 → 2** (`docs/plans/code-hygiene-5x5-plan.md`).
+  `apps/theo-cli/src/main.rs::main` (144 LOC clap-driven command dispatcher with 14+ arms)
+  decomposed into 9 per-Commands-variant dispatch helpers:
+  - `dispatch_agent` — Agent subcommand (headless vs TUI fork + injections build).
+  - `dispatch_memory` — Memory action (lint with stub inputs).
+  - `dispatch_subagent` / `dispatch_checkpoints` / `dispatch_agents` — admin handlers
+    with consistent error → eprintln + exit(1) pattern.
+  - `dispatch_mcp` — MCP action with tokio runtime + DiscoveryCache wiring.
+  - `dispatch_skill` / `dispatch_trajectory` — return-i32 sub-handlers.
+  - `dispatch_default` — None-arm: TUI vs headless fallback.
+  Body of `main` is now ~22 LOC (parse → match cli.command.take() → 14 thin arms).
+  Behaviour preserved — all 13 e2e_smoke tests + 507 lib/bin unit tests pass.
+  Cumulative metric across workspace: 24 → 23 violations.
+
 - **code-hygiene-5x5 T4.4 RESOLVED — theo-infra-llm 1 → 0** (`docs/plans/code-hygiene-5x5-plan.md`).
   Final remaining violation cleared: `providers/openai_compatible::from_request` (212 LOC
   standard chat-completions JSON → CommonRequest parser) decomposed into 10 helpers:
