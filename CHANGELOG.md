@@ -3,6 +3,46 @@
 ## [Unreleased]
 
 ### Changed
+- **code-hygiene-5x5 plan T6 closeout — six-phase summary** (`docs/plans/code-hygiene-5x5-plan.md`).
+  All 11 T6.1 final-validation gates green. Cumulative six-phase outcome:
+
+  - **Phase 1 — Cat-B unwrap → typed errors** (T1.1): cluster Louvain
+    `subdivide.rs` / `lpa.rs` 7 unwrap sites converted to `ClusterError`
+    variants; ADR-019 (`docs/adr/019-cluster-louvain-typed-errors.md`)
+    written.
+  - **Phase 2 — ADR-021 codifies recognized idioms** (T2.1..T2.3):
+    `.claude/rules/recognized-patterns.toml` (34 patterns) authored;
+    `check-{unwrap,unsafe,panic,secret}.sh` updated to read recognized
+    patterns; ADR-021 (`docs/adr/021-recognized-rust-idioms.md`)
+    written.
+  - **Phase 3 — Sibling test split** (T3.1..T3.7): 9 god-test files
+    (DAP / run_engine / symbols / domain plan / subagent / plan tools /
+    registry / lsp / symbol_table / resume) split into 56 per-feature
+    / per-tool / per-language test files; 5247 tests preserved.
+  - **Phase 4 — Complexity decomposition** (T4.2..T4.9): 74 fns over
+    100 LOC → 18 (-76%, **production-source 0**, all 18 remaining are
+    test-only). Crates RESOLVED: theo CLI (11→0), theo-infra-llm
+    (4→0), theo-tooling (7→0), theo-domain (2→0), theo-engine-graph
+    (1→0), apps/theo-marklive (1→0).
+  - **Phase 5 — ADR-017 v2 inline I/O tests** (T5.1):
+    `docs/adr/017-inline-io-tests.md` v2 with codified pattern
+    requirements; 92 inline I/O tests recognized via pattern (was 86
+    individual entries).
+  - **Phase 6 — Final validation + sunset close** (T6.1 + T6.2): all
+    11 gates exit 0; maturity audit
+    (`docs/audit/maturity-gap-analysis-2026-04-29.md`) updated to
+    reflect Code-hygiene sub-dimension at **5.0/5** (Dívida histórica
+    ativa: 2.5 → 5).
+
+  Audit trail: `cargo test --workspace --exclude theo-code-desktop
+  --no-fail-fast` → **5247 PASS / 0 FAIL / 24 IGNORED** in 69 suites;
+  `cargo clippy --workspace --all-targets -- -D warnings` → 0
+  warnings; `check-arch-contract.sh` → 0 violations; `check-{unwrap,
+  unsafe, panic, secrets, inline-io-tests}.sh` → exit 0; `check-sizes
+  .sh` → 0 NEW / 0 EXPIRED; `check-complexity.sh` → all crates
+  at-or-below ceiling; `check-sota-dod.sh --quick` → 12/12 PASS, 2
+  SKIP (paid LLM, out-of-scope for the autonomous loop).
+
 - **code-hygiene-5x5 size-allowlist regression cleared — `tui/mod.rs` 848 → 654** (`docs/plans/code-hygiene-5x5-plan.md`).
   The Phase 4 TUI run-loop helper extraction pushed `apps/theo-cli/src/tui/mod.rs` from 670 → 848 LOC, tripping the 800 LOC Rust-file limit (`scripts/check-sizes.sh`). Auth helpers split into a sibling submodule:
   - **NEW** `apps/theo-cli/src/tui/auth_inline.rs` (231 LOC) — owns `handle_login_start_inline`, `handle_login_server_inline`, `open_browser_silent`, `SEPARATOR`, plus the `print_*_device_steps` and `spawn_*_poll` sub-helpers extracted from each handler. Imports `theo_application::facade::auth::{openai::DeviceCode, device_flow::DeviceFlowCode}` directly.

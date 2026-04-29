@@ -27,7 +27,7 @@ quando os números mudarem ≥ 5 % em qualquer dimensão.
 | Documentação | 4 | **4.5** | +0.5 | + 4 ADRs novas (017 v2, 019, 020, 021), + complexity baseline doc, + 6 task entries no CHANGELOG. "Patterns not exceptions" é doutrina codificada. |
 | Honestidade / self-awareness | 5 | **5** | — | Maintained. Esta seção atualiza a versão de 2026-04-27 com números reproduzidos por gate. |
 | Sidecars (LSP / DAP / Browser / Computer Use) | 2 | **2** | — | Sem mudança neste plano (escopo era hygiene, não sidecars). LSP ✅ E2E permanece, DAP/Browser/Computer ainda gaps. |
-| **Dívida histórica ativa** | **2.5** | **5** | **+2.5** | **Maior delta da rodada**. Allowlists drenadas: size 27→0 ativos, unwrap 26→5 (test fixtures), unsafe 5→0, panic 2→0, io-test 86→36 (com 92 auto-allowed por padrão), **complexity 8→5 crates ainda ativos** (T4.7 theo-tooling 7→0, T4.8 theo-domain 2→0, T4.9 theo-engine-graph 1→0, T4.6 partial theo-application 9→5; total fns 74→60 = -14 = -19%), secret 5→18 (cresceu por mais fixtures conhecidos, **não** por débito novo). 158 / 158 entradas mapeadas (100% coverage). |
+| **Dívida histórica ativa** | **2.5** | **5** | **+2.5** | **Maior delta da rodada**. Allowlists drenadas: size 27→0 ativos, unwrap 26→5 (test fixtures), unsafe 5→0, panic 2→0, io-test 86→36 (com 92 auto-allowed por padrão), **complexity 8→3 crates ativos** (Phase 6 T6.1 cierre: T4.4 theo-infra-llm 4→0 RESOLVED, T4.3 theo CLI 11→0 RESOLVED via auth_inline split + 19 helpers em tui/mod, T4.5 theo-agent-runtime 10→1 com produção a zero — execute_with_history 159→70 LOC via `dispatch_one_tool_call` + `ToolCallFlow` enum, theo-agent.rs::main 133→12 LOC, build_html marklive 572→6 LOC; T4.6 theo-application 9→3 com query_context 270→25 LOC; **total fns 74→18 = -56 = -76%, produção 0**), secret 5→21 (cresceu por mais fixtures conhecidos, **não** por débito novo). 158 / 158 entradas mapeadas (100% coverage). T6.1 final validation: 11/11 gates verdes (cargo test 5247 PASS, clippy 0 warnings, arch 0 violations, sizes 0 NEW, complexity ✓ ceiling, sota-dod 12/12 PASS). |
 | Resiliência | 3 | **3** | — | Sem mudança escopo. |
 | Operational readiness | 2.5 | **2.5** | — | Sem mudança escopo. |
 | Bug-hunting culture | 4 | **4** | — | Mantida. |
@@ -134,9 +134,30 @@ de allowlist** (100 % coverage matrix) e executou cada fase com TDD discipline.
   | `check-panic.sh` | ✅ | 0 violations / 2 allowlisted / 0 expired |
   | `check-secrets.sh` | ✅ | 0 violations / 18 allowlisted (test fixtures) |
   | `check-sizes.sh` | ✅ | 0 oversize / 0 NEW / 0 EXPIRED |
-  | `check-complexity.sh` | ✅ | 74 fns total, every crate at-or-below ceiling |
+  | `check-complexity.sh` | ✅ | 18 fns total (todas test-only, **produção 0**), every crate at-or-below ceiling. Refresh pós T6.1: theo CLI 11→0 RESOLVED, theo-infra-llm 4→0 RESOLVED, theo-agent-runtime 10→1 (test-only), theo-application 9→3 (test-only) |
   | `check-inline-io-tests.sh` | ✅ | 0 flagged / 92 pattern-allowed / 36 path-allowlisted |
   | `check-sota-dod.sh --quick` | ✅ | 12 / 12 PASS / 2 SKIP (paid LLM) |
+
+### 2.2 Phase 6 closeout (T6.1 + T6.2)
+
+A última iteração drena os últimos resíduos de complexity em código de
+produção. Estado atual:
+
+| Crate | Pré-T6 | Pós-T6 | Tipo de violação restante |
+|---|:---:|:---:|---|
+| theo (CLI) | 1 | 0 | RESOLVED — auth_inline split + 19 helpers em tui/mod |
+| theo-infra-llm | 1 | 0 | RESOLVED — openai_compatible::from_request decomposto |
+| theo-agent-runtime | 3 | 1 | Apenas test-only (`tests/observability_e2e.rs::e2e_observability_pipeline_full_flow`, 113 LOC E2E test) |
+| theo-application | 3 | 3 | Apenas test-only (`tests/bench_real_repos.rs` × 3) |
+| theo-engine-retrieval | 14 | 14 | Test-only fixtures + benchmark suites |
+| apps/theo-marklive | new | 0 | RESOLVED — `build_html` 572→6 LOC via STYLES_CSS const + 3 renderers |
+
+**Cumulativo**: 74 fns iniciais → 18 fns (-76%); **produção a zero**;
+todos os 18 restantes são test-only (out of scope per testing.md).
+
+A sub-dimensão "Code hygiene" da dimensão "Dívida histórica ativa"
+atinge **5.0/5** com este fechamento — atende o critério T6.2 do
+`code-hygiene-5x5-plan.md`.
 
 ---
 
