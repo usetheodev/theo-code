@@ -7,213 +7,253 @@ use serde_json::Value;
 
 pub fn from_request(body: &Value) -> CommonRequest {
     let mut messages = Vec::new();
-
-    let input = body
-        .get("input")
-        .and_then(|i| i.as_array())
-        .or_else(|| body.get("messages").and_then(|m| m.as_array()))
-        .cloned()
-        .unwrap_or_default();
-
+    let input = extract_input_array(body);
     for m in &input {
-        // Responses API items without role (function_call, function_call_output)
-        if m.get("role").is_none()
-            && let Some(item_type) = m.get("type").and_then(|t| t.as_str()) {
-                match item_type {
-                    "function_call" => {
-                        let name = m.get("name").and_then(|n| n.as_str()).unwrap_or_default();
-                        let args = m
-                            .get("arguments")
-                            .map(|a| {
-                                if let Some(s) = a.as_str() {
-                                    s.to_string()
-                                } else {
-                                    a.to_string()
-                                }
-                            })
-                            .unwrap_or_else(|| "{}".to_string());
-                        let id = m.get("id").and_then(|i| i.as_str()).unwrap_or_default();
-                        messages.push(CommonMessage {
-                            role: Role::Assistant,
-                            content: None,
-                            tool_call_id: None,
-                            tool_calls: Some(vec![CommonToolCall {
-                                id: id.to_string(),
-                                call_type: "function".to_string(),
-                                function: CommonFunctionCall {
-                                    name: name.to_string(),
-                                    arguments: args,
-                                },
-                            }]),
-                            name: None,
-                        });
-                    }
-                    "function_call_output" => {
-                        let call_id = m
-                            .get("call_id")
-                            .and_then(|i| i.as_str())
-                            .unwrap_or_default();
-                        let output = m
-                            .get("output")
-                            .map(|o| {
-                                if let Some(s) = o.as_str() {
-                                    s.to_string()
-                                } else {
-                                    o.to_string()
-                                }
-                            })
-                            .unwrap_or_default();
-                        messages.push(CommonMessage {
-                            role: Role::Tool,
-                            content: Some(Content::Text(output)),
-                            tool_call_id: Some(call_id.to_string()),
-                            tool_calls: None,
-                            name: None,
-                        });
-                    }
-                    _ => {}
-                }
-                continue;
-            }
-
+        if try_parse_roleless_item(m, &mut messages) {
+            continue;
+        }
         let Some(role) = m.get("role").and_then(|r| r.as_str()) else {
             continue;
         };
-
         match role {
-            "system" | "developer" => {
-                let content = m.get("content");
-                let text = if let Some(s) = content.and_then(|c| c.as_str()) {
-                    Some(s.to_string())
-                } else if let Some(arr) = content.and_then(|c| c.as_array()) {
-                    arr.iter()
-                        .find_map(|p| p.get("text").and_then(|t| t.as_str()).map(String::from))
-                } else {
-                    None
-                };
-                if let Some(text) = text
-                    && !text.is_empty() {
-                        messages.push(CommonMessage {
-                            role: Role::System,
-                            content: Some(Content::Text(text)),
-                            tool_call_id: None,
-                            tool_calls: None,
-                            name: None,
-                        });
-                    }
-            }
-            "user" => {
-                let content = m.get("content");
-                if let Some(s) = content.and_then(|c| c.as_str()) {
-                    messages.push(CommonMessage {
-                        role: Role::User,
-                        content: Some(Content::Text(s.to_string())),
-                        tool_call_id: None,
-                        tool_calls: None,
-                        name: None,
-                    });
-                } else if let Some(arr) = content.and_then(|c| c.as_array()) {
-                    let parts: Vec<ContentPart> = arr
-                        .iter()
-                        .filter_map(|p| {
-                            let ptype = p.get("type").and_then(|t| t.as_str())?;
-                            match ptype {
-                                "text" | "input_text" => {
-                                    let text = p.get("text").and_then(|t| t.as_str())?;
-                                    Some(ContentPart::Text {
-                                        text: text.to_string(),
-                                    })
-                                }
-                                "image_url" | "input_image" => {
-                                    let url = p
-                                        .get("image_url")
-                                        .and_then(|i| i.get("url"))
-                                        .and_then(|u| u.as_str())?;
-                                    Some(ContentPart::ImageUrl {
-                                        image_url: ImageUrl {
-                                            url: url.to_string(),
-                                        },
-                                    })
-                                }
-                                _ => None,
-                            }
-                        })
-                        .collect();
-
-                    if parts.len() == 1
-                        && let ContentPart::Text { text } = &parts[0] {
-                            messages.push(CommonMessage {
-                                role: Role::User,
-                                content: Some(Content::Text(text.clone())),
-                                tool_call_id: None,
-                                tool_calls: None,
-                                name: None,
-                            });
-                            continue;
-                        }
-                    if !parts.is_empty() {
-                        messages.push(CommonMessage {
-                            role: Role::User,
-                            content: Some(Content::Parts(parts)),
-                            tool_call_id: None,
-                            tool_calls: None,
-                            name: None,
-                        });
-                    }
-                }
-            }
-            "assistant" => {
-                let content = m.get("content").and_then(|c| c.as_str()).map(String::from);
-                let tool_calls = m.get("tool_calls").and_then(|tc| tc.as_array()).map(|arr| {
-                    arr.iter()
-                        .filter_map(|tc| {
-                            let func = tc.get("function")?;
-                            Some(CommonToolCall {
-                                id: tc.get("id").and_then(|i| i.as_str())?.to_string(),
-                                call_type: "function".to_string(),
-                                function: CommonFunctionCall {
-                                    name: func.get("name").and_then(|n| n.as_str())?.to_string(),
-                                    arguments: func
-                                        .get("arguments")
-                                        .and_then(|a| a.as_str())?
-                                        .to_string(),
-                                },
-                            })
-                        })
-                        .collect()
-                });
-                messages.push(CommonMessage {
-                    role: Role::Assistant,
-                    content: content.filter(|s| !s.is_empty()).map(Content::Text),
-                    tool_call_id: None,
-                    tool_calls,
-                    name: None,
-                });
-            }
-            "tool" => {
-                let content = m.get("content").map(|c| {
-                    if let Some(s) = c.as_str() {
-                        s.to_string()
-                    } else {
-                        c.to_string()
-                    }
-                });
-                messages.push(CommonMessage {
-                    role: Role::Tool,
-                    content: content.map(Content::Text),
-                    tool_call_id: m
-                        .get("tool_call_id")
-                        .and_then(|i| i.as_str())
-                        .map(String::from),
-                    tool_calls: None,
-                    name: None,
-                });
-            }
+            "system" | "developer" => parse_system_role(m, &mut messages),
+            "user" => parse_user_role(m, &mut messages),
+            "assistant" => parse_assistant_role(m, &mut messages),
+            "tool" => parse_tool_role(m, &mut messages),
             _ => {}
         }
     }
+    let tool_choice = parse_request_tool_choice(body);
+    let stop = parse_request_stop_sequence(body);
+    let tools = parse_request_tools(body);
+    assemble_common_request(body, messages, tools, tool_choice, stop)
+}
 
-    let tool_choice = body.get("tool_choice").and_then(|tc| {
+fn extract_input_array(body: &Value) -> Vec<Value> {
+    body.get("input")
+        .and_then(|i| i.as_array())
+        .or_else(|| body.get("messages").and_then(|m| m.as_array()))
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// Responses-API roleless items (function_call, function_call_output).
+/// Returns `true` if the item was consumed (caller should skip role
+/// dispatch).
+fn try_parse_roleless_item(m: &Value, messages: &mut Vec<CommonMessage>) -> bool {
+    if m.get("role").is_some() {
+        return false;
+    }
+    let Some(item_type) = m.get("type").and_then(|t| t.as_str()) else {
+        return false;
+    };
+    match item_type {
+        "function_call" => {
+            parse_function_call_item(m, messages);
+            true
+        }
+        "function_call_output" => {
+            parse_function_call_output_item(m, messages);
+            true
+        }
+        _ => true,
+    }
+}
+
+fn parse_function_call_item(m: &Value, messages: &mut Vec<CommonMessage>) {
+    let name = m.get("name").and_then(|n| n.as_str()).unwrap_or_default();
+    let args = m
+        .get("arguments")
+        .map(|a| {
+            if let Some(s) = a.as_str() {
+                s.to_string()
+            } else {
+                a.to_string()
+            }
+        })
+        .unwrap_or_else(|| "{}".to_string());
+    let id = m.get("id").and_then(|i| i.as_str()).unwrap_or_default();
+    messages.push(CommonMessage {
+        role: Role::Assistant,
+        content: None,
+        tool_call_id: None,
+        tool_calls: Some(vec![CommonToolCall {
+            id: id.to_string(),
+            call_type: "function".to_string(),
+            function: CommonFunctionCall {
+                name: name.to_string(),
+                arguments: args,
+            },
+        }]),
+        name: None,
+    });
+}
+
+fn parse_function_call_output_item(m: &Value, messages: &mut Vec<CommonMessage>) {
+    let call_id = m
+        .get("call_id")
+        .and_then(|i| i.as_str())
+        .unwrap_or_default();
+    let output = m
+        .get("output")
+        .map(|o| {
+            if let Some(s) = o.as_str() {
+                s.to_string()
+            } else {
+                o.to_string()
+            }
+        })
+        .unwrap_or_default();
+    messages.push(CommonMessage {
+        role: Role::Tool,
+        content: Some(Content::Text(output)),
+        tool_call_id: Some(call_id.to_string()),
+        tool_calls: None,
+        name: None,
+    });
+}
+
+fn parse_system_role(m: &Value, messages: &mut Vec<CommonMessage>) {
+    let content = m.get("content");
+    let text = if let Some(s) = content.and_then(|c| c.as_str()) {
+        Some(s.to_string())
+    } else if let Some(arr) = content.and_then(|c| c.as_array()) {
+        arr.iter()
+            .find_map(|p| p.get("text").and_then(|t| t.as_str()).map(String::from))
+    } else {
+        None
+    };
+    if let Some(text) = text
+        && !text.is_empty()
+    {
+        messages.push(CommonMessage {
+            role: Role::System,
+            content: Some(Content::Text(text)),
+            tool_call_id: None,
+            tool_calls: None,
+            name: None,
+        });
+    }
+}
+
+fn parse_user_role(m: &Value, messages: &mut Vec<CommonMessage>) {
+    let content = m.get("content");
+    if let Some(s) = content.and_then(|c| c.as_str()) {
+        messages.push(CommonMessage {
+            role: Role::User,
+            content: Some(Content::Text(s.to_string())),
+            tool_call_id: None,
+            tool_calls: None,
+            name: None,
+        });
+        return;
+    }
+    let Some(arr) = content.and_then(|c| c.as_array()) else {
+        return;
+    };
+    let parts = parse_user_parts(arr);
+    if parts.len() == 1
+        && let ContentPart::Text { text } = &parts[0]
+    {
+        messages.push(CommonMessage {
+            role: Role::User,
+            content: Some(Content::Text(text.clone())),
+            tool_call_id: None,
+            tool_calls: None,
+            name: None,
+        });
+        return;
+    }
+    if !parts.is_empty() {
+        messages.push(CommonMessage {
+            role: Role::User,
+            content: Some(Content::Parts(parts)),
+            tool_call_id: None,
+            tool_calls: None,
+            name: None,
+        });
+    }
+}
+
+fn parse_user_parts(arr: &[Value]) -> Vec<ContentPart> {
+    arr.iter()
+        .filter_map(|p| {
+            let ptype = p.get("type").and_then(|t| t.as_str())?;
+            match ptype {
+                "text" | "input_text" => {
+                    let text = p.get("text").and_then(|t| t.as_str())?;
+                    Some(ContentPart::Text {
+                        text: text.to_string(),
+                    })
+                }
+                "image_url" | "input_image" => {
+                    let url = p
+                        .get("image_url")
+                        .and_then(|i| i.get("url"))
+                        .and_then(|u| u.as_str())?;
+                    Some(ContentPart::ImageUrl {
+                        image_url: ImageUrl {
+                            url: url.to_string(),
+                        },
+                    })
+                }
+                _ => None,
+            }
+        })
+        .collect()
+}
+
+fn parse_assistant_role(m: &Value, messages: &mut Vec<CommonMessage>) {
+    let content = m.get("content").and_then(|c| c.as_str()).map(String::from);
+    let tool_calls = m.get("tool_calls").and_then(|tc| tc.as_array()).map(|arr| {
+        arr.iter()
+            .filter_map(|tc| {
+                let func = tc.get("function")?;
+                Some(CommonToolCall {
+                    id: tc.get("id").and_then(|i| i.as_str())?.to_string(),
+                    call_type: "function".to_string(),
+                    function: CommonFunctionCall {
+                        name: func.get("name").and_then(|n| n.as_str())?.to_string(),
+                        arguments: func
+                            .get("arguments")
+                            .and_then(|a| a.as_str())?
+                            .to_string(),
+                    },
+                })
+            })
+            .collect()
+    });
+    messages.push(CommonMessage {
+        role: Role::Assistant,
+        content: content.filter(|s| !s.is_empty()).map(Content::Text),
+        tool_call_id: None,
+        tool_calls,
+        name: None,
+    });
+}
+
+fn parse_tool_role(m: &Value, messages: &mut Vec<CommonMessage>) {
+    let content = m.get("content").map(|c| {
+        if let Some(s) = c.as_str() {
+            s.to_string()
+        } else {
+            c.to_string()
+        }
+    });
+    messages.push(CommonMessage {
+        role: Role::Tool,
+        content: content.map(Content::Text),
+        tool_call_id: m
+            .get("tool_call_id")
+            .and_then(|i| i.as_str())
+            .map(String::from),
+        tool_calls: None,
+        name: None,
+    });
+}
+
+fn parse_request_tool_choice(body: &Value) -> Option<ToolChoice> {
+    body.get("tool_choice").and_then(|tc| {
         if let Some(s) = tc.as_str() {
             return Some(ToolChoice::Mode(s.to_string()));
         }
@@ -231,10 +271,11 @@ pub fn from_request(body: &Value) -> CommonRequest {
             });
         }
         None
-    });
+    })
+}
 
-    let stop = body
-        .get("stop_sequences")
+fn parse_request_stop_sequence(body: &Value) -> Option<StopSequence> {
+    body.get("stop_sequences")
         .or(body.get("stop"))
         .and_then(|v| {
             if let Some(arr) = v.as_array() {
@@ -255,8 +296,47 @@ pub fn from_request(body: &Value) -> CommonRequest {
             } else {
                 v.as_str().map(|s| StopSequence::Single(s.to_string()))
             }
-        });
+        })
+}
 
+fn parse_request_tools(body: &Value) -> Option<Vec<CommonTool>> {
+    body.get("tools").and_then(|t| t.as_array()).map(|arr| {
+        arr.iter()
+            .filter_map(|t| {
+                if t.get("type").and_then(|tt| tt.as_str()) != Some("function") {
+                    return None;
+                }
+                Some(CommonTool {
+                    tool_type: "function".to_string(),
+                    function: CommonFunctionDef {
+                        name: t
+                            .get("name")
+                            .or_else(|| t.get("function").and_then(|f| f.get("name")))
+                            .and_then(|n| n.as_str())?
+                            .to_string(),
+                        description: t
+                            .get("description")
+                            .or_else(|| t.get("function").and_then(|f| f.get("description")))
+                            .and_then(|d| d.as_str())
+                            .map(String::from),
+                        parameters: t
+                            .get("parameters")
+                            .or_else(|| t.get("function").and_then(|f| f.get("parameters")))
+                            .cloned(),
+                    },
+                })
+            })
+            .collect()
+    })
+}
+
+fn assemble_common_request(
+    body: &Value,
+    messages: Vec<CommonMessage>,
+    tools: Option<Vec<CommonTool>>,
+    tool_choice: Option<ToolChoice>,
+    stop: Option<StopSequence>,
+) -> CommonRequest {
     CommonRequest {
         model: body
             .get("model")
@@ -276,37 +356,7 @@ pub fn from_request(body: &Value) -> CommonRequest {
         stop,
         messages,
         stream: body.get("stream").and_then(|s| s.as_bool()),
-        tools: body.get("tools").and_then(|t| t.as_array()).map(|arr| {
-            arr.iter()
-                .filter_map(|t| {
-                    if t.get("type").and_then(|tt| tt.as_str()) == Some("function") {
-                        Some(CommonTool {
-                            tool_type: "function".to_string(),
-                            function: CommonFunctionDef {
-                                name: t
-                                    .get("name")
-                                    .or_else(|| t.get("function").and_then(|f| f.get("name")))
-                                    .and_then(|n| n.as_str())?
-                                    .to_string(),
-                                description: t
-                                    .get("description")
-                                    .or_else(|| {
-                                        t.get("function").and_then(|f| f.get("description"))
-                                    })
-                                    .and_then(|d| d.as_str())
-                                    .map(String::from),
-                                parameters: t
-                                    .get("parameters")
-                                    .or_else(|| t.get("function").and_then(|f| f.get("parameters")))
-                                    .cloned(),
-                            },
-                        })
-                    } else {
-                        None
-                    }
-                })
-                .collect()
-        }),
+        tools,
         tool_choice,
     }
 }

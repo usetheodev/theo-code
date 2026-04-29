@@ -3,6 +3,24 @@
 ## [Unreleased]
 
 ### Changed
+- **code-hygiene-5x5 T4.4 partial — theo-infra-llm 2 → 1** (`docs/plans/code-hygiene-5x5-plan.md`).
+  `providers/openai/request::from_request` (294 LOC `OpenAI Responses API JSON → CommonRequest`
+  parser) decomposed into 13 helpers:
+  - `extract_input_array` — read `input` or `messages` field.
+  - `try_parse_roleless_item` — Responses-API items without role (function_call,
+    function_call_output) dispatch.
+  - `parse_function_call_item` — assistant tool_call from function_call item.
+  - `parse_function_call_output_item` — Tool message from function_call_output item.
+  - `parse_system_role` / `parse_user_role` / `parse_assistant_role` / `parse_tool_role` —
+    per-role item parsers.
+  - `parse_user_parts` — user `content[]` array → ContentPart vec (text + image_url).
+  - `parse_request_tool_choice` — string ("auto"/"none") or {type:function} dispatch.
+  - `parse_request_stop_sequence` — stop_sequences || stop, single vs multiple.
+  - `parse_request_tools` — tool definitions (with nested `function.*` legacy support).
+  - `assemble_common_request` — final CommonRequest struct construction.
+  Body of `from_request` is now ~17 LOC (loop + dispatch + 3 parsers + assemble).
+  Cumulative metric across workspace: 26 → 25 violations.
+
 - **code-hygiene-5x5 T4.4 partial — theo-infra-llm 3 → 2** (`docs/plans/code-hygiene-5x5-plan.md`).
   `providers/anthropic/request::to_request` (211 LOC `CommonRequest → Anthropic Messages JSON` converter)
   decomposed into 12 helpers:
