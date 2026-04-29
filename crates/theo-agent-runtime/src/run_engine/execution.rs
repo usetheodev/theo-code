@@ -13,6 +13,17 @@ use crate::doom_loop::DoomLoopTracker;
 use crate::run_engine::{dispatch, AgentRunEngine};
 use crate::tool_bridge;
 
+/// Per-tool-call control flow returned by `dispatch_one_tool_call`.
+enum ToolCallFlow {
+    /// Continue with the next tool call (the previous `continue` arms).
+    Next,
+    /// Return immediately from the run (doom-loop tripped).
+    AbortRun(crate::agent_loop::AgentResult),
+    /// Stop iterating tool calls; record the result in `should_return`
+    /// and let the outer loop converge after the current iteration.
+    ConvergeAfterLoop(crate::agent_loop::AgentResult),
+}
+
 impl AgentRunEngine {
     /// Execute the full agent run cycle with fresh messages (no session history).
     ///
@@ -66,34 +77,10 @@ impl AgentRunEngine {
                 .inject_context_loop_and_compact(iteration, &mut messages)
                 .await;
 
-            // LLM call
+            // LLM call.
             self.transition_run(RunState::Planning);
-
-            // Routing decision — extracted to main_loop::choose_model.
-            // The router is called exactly once per turn at this single
-            // call site (invariant enforced by structural_hygiene.rs).
-            let (chosen_model, chosen_effort, routing_reason) = self.choose_model(
-                &messages,
-                iteration,
-                estimated_context_tokens as u64,
-                !tool_defs.is_empty(),
-            );
-
-            let mut request = ChatRequest::new(&chosen_model, messages.clone())
-                .with_tools(tool_defs.clone())
-                .with_max_tokens(self.config.llm().max_tokens)
-                .with_temperature(self.config.llm().temperature);
-
-            if let Some(ref effort) = chosen_effort {
-                request = request.with_reasoning_effort(effort);
-            }
-
-            if let Some(forced) = forced_tool_choice(&tool_defs) {
-                request = request.with_tool_choice(forced);
-            }
-
-            // Full LLM call (start event + retry loop + end event)
-            // extracted to main_loop::call_llm_with_retry.
+            let (request, chosen_model, routing_reason) =
+                self.prepare_chat_request(&messages, iteration, &tool_defs, estimated_context_tokens);
             let response = match self
                 .call_llm_with_retry(
                     &request,
@@ -109,9 +96,7 @@ impl AgentRunEngine {
                     self.handle_context_overflow(&e, &mut messages);
                     continue;
                 }
-                Err(e) => {
-                    return self.build_llm_abort_result(&e);
-                }
+                Err(e) => return self.build_llm_abort_result(&e),
             };
 
             let tool_calls = response.tool_calls();
@@ -141,154 +126,31 @@ impl AgentRunEngine {
                 tool_calls.to_vec(),
             ));
 
-            // Persist assistant message to state manager (crash recovery).
-            //
-            // T1.3 / find_p4_002 / INV-002 — failures here used to be
-            // silently discarded via `let _ = ...`, leaving the JSONL
-            // crash-recovery file inconsistent without any operational
-            // signal. Now they fan out to tracing + EventBus so the
-            // failure is observable; the run still continues because
-            // persistence is best-effort.
-            if let Some(ref mut sm) = state_manager {
-                let content = response.content().unwrap_or("");
-                if let Err(e) = sm.append_message("assistant", content) {
-                    self.publish_state_append_failure("assistant", &e);
-                }
-            }
+            self.persist_assistant_message(&mut state_manager, &response);
 
             let mut should_return = None;
-
             for call in tool_calls {
-                let name = &call.function.name;
-
-                // Resume-replay short-circuit — extracted to
-                // main_loop::try_replay_tool_call.
-                if self.try_replay_tool_call(call, &mut messages) {
-                    continue;
-                }
-
-                // Meta-tool routing (T4.3). A single match in
-                // `dispatch/router.rs` replaces the previous 4-way
-                // if-chain. Returns `Some(outcome)` when the call name
-                // matched a registered meta-tool; `None` falls through
-                // to regular-tool dispatch below.
-                if let Some(outcome) = self
-                    .dispatch_meta_tool(dispatch::router::MetaToolContext {
+                match self
+                    .dispatch_one_tool_call(
                         call,
                         iteration,
-                        abort_rx: &abort_rx,
-                        messages: &mut messages,
-                    })
+                        &abort_rx,
+                        &mut state_manager,
+                        hook_runner.as_ref(),
+                        sensor_runner.as_ref(),
+                        doom_tracker.as_mut(),
+                        &mut messages,
+                    )
                     .await
                 {
-                    match outcome {
-                        dispatch::DispatchOutcome::Converged(result) => {
-                            should_return = Some(result);
-                            break;
-                        }
-                        dispatch::DispatchOutcome::Continue => continue,
+                    ToolCallFlow::Next => continue,
+                    ToolCallFlow::AbortRun(result) => return result,
+                    ToolCallFlow::ConvergeAfterLoop(result) => {
+                        should_return = Some(result);
+                        break;
                     }
                 }
-
-                // Plan mode guard — extracted to
-                // main_loop::enforce_plan_mode_guard.
-                if self.enforce_plan_mode_guard(call, &mut messages) {
-                    continue;
-                }
-
-                // Pre-hook — extracted to main_loop::run_pre_tool_hook.
-                if self
-                    .run_pre_tool_hook(hook_runner.as_ref(), call, &mut messages)
-                    .await
-                {
-                    continue;
-                }
-
-                // Pre-mutation checkpoint — extracted to
-                // main_loop::emit_checkpoint_event_for_tool. Idempotent
-                // within an iteration (CAS); no-op when no checkpoint
-                // manager is attached.
-                self.emit_checkpoint_event_for_tool(name, iteration);
-
-                // ── PHASE 8: MCP DISPATCH ──
-                // If the tool name is in the `mcp:<server>:<tool>`
-                // namespace, route to McpDispatcher (transient stdio
-                // client). Otherwise fall through to the normal dispatch.
-                if let Some(mcp_msg) = self.try_dispatch_mcp_tool(call).await {
-                    messages.push(mcp_msg);
-                    continue;
-                }
-
-                // Regular tool dispatch — extracted to
-                // main_loop::execute_regular_tool_call. The 3rd element is
-                // the tool's `ToolOutput.metadata` propagated through
-                // `ToolResultRecord.metadata` (T1.2/T0.1 — vision channel).
-                let Some((success, output, metadata)) = self
-                    .execute_regular_tool_call(call, iteration, &abort_rx, &mut messages)
-                    .await
-                else {
-                    continue;
-                };
-
-                // Doom loop tracker — extracted to main_loop::update_doom_tracker.
-                if let Some(result) =
-                    self.update_doom_tracker(doom_tracker.as_mut(), call, name, &mut messages)
-                {
-                    return result;
-                }
-
-                // T2.1 / FIND-P6-001 / D5 — all untrusted tool output is
-                // fenced before becoming a `Message::tool_result(...)` so
-                // injection tokens (`<|im_start|>`, `[INST]`, `<system>`,
-                // …) embedded in file contents, shell output, fetched
-                // pages, etc. cannot hijack the next LLM turn. The
-                // `tool:{name}` source label flows into the fence tag for
-                // auditability.
-                let fenced_output = theo_domain::prompt_sanitizer::fence_untrusted(
-                    &output,
-                    &format!("tool:{name}"),
-                    crate::constants::MAX_TOOL_OUTPUT_BYTES,
-                );
-                let result_msg = Message::tool_result(&call.id, name, &fenced_output);
-
-                // Working set + context metrics — extracted to
-                // main_loop::update_working_set_post_tool.
-                self.update_working_set_post_tool(call, name, iteration);
-
-                // Context-loop state — extracted to
-                // main_loop::update_context_loop_post_tool.
-                self.update_context_loop_post_tool(call, name, success, &output);
-
-                // Persist tool result to state manager (crash recovery).
-                // T1.3 / find_p4_002 — see assistant-side comment above.
-                if let Some(ref mut sm) = state_manager
-                    && let Err(e) = sm.append_message("tool", &output)
-                {
-                    self.publish_state_append_failure("tool", &e);
-                }
-
-                // Sensor fire — extracted to
-                // main_loop::fire_sensor_for_write_tool.
-                self.fire_sensor_for_write_tool(sensor_runner.as_ref(), call, name, success);
-
-                messages.push(result_msg);
-
-                // T1.2 / T0.1 — Append a vision follow-up user message
-                // when the tool surfaced an image_block in metadata
-                // (e.g., `read_image`). No-op when metadata is absent or
-                // doesn't carry vision content.
-                if let Some(meta) = metadata.as_ref() {
-                    crate::vision_propagation::push_image_followup(
-                        &mut messages,
-                        meta,
-                        name,
-                    );
-                }
-
-                // Post-hook — extracted to main_loop::run_post_tool_hook.
-                self.run_post_tool_hook(hook_runner.as_ref(), call).await;
             }
-
             if let Some(result) = should_return {
                 return result;
             }
@@ -305,6 +167,188 @@ impl AgentRunEngine {
 
             // After executing tools, evaluate and loop back to Planning
             self.transition_run(RunState::Replanning);
+        }
+    }
+
+    /// Build the LLM `ChatRequest` for the current turn: route the
+    /// model, attach tool defs, apply max_tokens / temperature /
+    /// reasoning_effort, and force `tool_choice` when the catalog
+    /// requires it. Returns the request, the chosen model name, and
+    /// the routing reason for downstream telemetry.
+    fn prepare_chat_request(
+        &mut self,
+        messages: &[Message],
+        iteration: usize,
+        tool_defs: &[theo_infra_llm::types::ToolDefinition],
+        estimated_context_tokens: usize,
+    ) -> (ChatRequest, String, &'static str) {
+        // Routing decision — invariant enforced by structural_hygiene.rs:
+        // the router is called exactly once per turn at this single
+        // call site.
+        let (chosen_model, chosen_effort, routing_reason) = self.choose_model(
+            messages,
+            iteration,
+            estimated_context_tokens as u64,
+            !tool_defs.is_empty(),
+        );
+        let mut request = ChatRequest::new(&chosen_model, messages.to_vec())
+            .with_tools(tool_defs.to_vec())
+            .with_max_tokens(self.config.llm().max_tokens)
+            .with_temperature(self.config.llm().temperature);
+        if let Some(ref effort) = chosen_effort {
+            request = request.with_reasoning_effort(effort);
+        }
+        if let Some(forced) = forced_tool_choice(tool_defs) {
+            request = request.with_tool_choice(forced);
+        }
+        (request, chosen_model, routing_reason)
+    }
+
+    /// Persist the assistant message to the crash-recovery state
+    /// manager. Best-effort: failures fan out to tracing + EventBus
+    /// (T1.3 / find_p4_002 / INV-002) so they are observable, but the
+    /// run continues.
+    fn persist_assistant_message(
+        &mut self,
+        state_manager: &mut Option<crate::state_manager::StateManager>,
+        response: &theo_infra_llm::types::ChatResponse,
+    ) {
+        let Some(sm) = state_manager else {
+            return;
+        };
+        let content = response.content().unwrap_or("");
+        if let Err(e) = sm.append_message("assistant", content) {
+            self.publish_state_append_failure("assistant", &e);
+        }
+    }
+
+    /// Dispatch a single tool call through the full pipeline:
+    /// resume-replay → meta-tool routing → plan-mode guard → pre-hook
+    /// → checkpoint → MCP dispatch → regular dispatch → doom-tracker
+    /// → fence + persist + working-set + sensor + vision follow-up
+    /// → post-hook. Returns:
+    /// - `Next` — proceed to the next call (the previous `continue` arms).
+    /// - `AbortRun(result)` — return immediately from the run (doom tracker tripped).
+    /// - `ConvergeAfterLoop(result)` — break out of the for-loop and
+    ///   return after `should_return` is set (meta-tool converged).
+    #[allow(clippy::too_many_arguments)]
+    async fn dispatch_one_tool_call(
+        &mut self,
+        call: &theo_infra_llm::types::ToolCall,
+        iteration: usize,
+        abort_rx: &tokio::sync::watch::Receiver<bool>,
+        state_manager: &mut Option<crate::state_manager::StateManager>,
+        hook_runner: Option<&crate::hooks::HookRunner>,
+        sensor_runner: Option<&crate::sensor::SensorRunner>,
+        doom_tracker: Option<&mut DoomLoopTracker>,
+        messages: &mut Vec<Message>,
+    ) -> ToolCallFlow {
+        let name = &call.function.name;
+        // Resume-replay short-circuit.
+        if self.try_replay_tool_call(call, messages) {
+            return ToolCallFlow::Next;
+        }
+        // Meta-tool routing (T4.3) — single match in dispatch/router.rs.
+        if let Some(outcome) = self
+            .dispatch_meta_tool(dispatch::router::MetaToolContext {
+                call,
+                iteration,
+                abort_rx,
+                messages,
+            })
+            .await
+        {
+            return match outcome {
+                dispatch::DispatchOutcome::Converged(result) => {
+                    ToolCallFlow::ConvergeAfterLoop(result)
+                }
+                dispatch::DispatchOutcome::Continue => ToolCallFlow::Next,
+            };
+        }
+        // Plan-mode guard.
+        if self.enforce_plan_mode_guard(call, messages) {
+            return ToolCallFlow::Next;
+        }
+        // Pre-hook.
+        if self.run_pre_tool_hook(hook_runner, call, messages).await {
+            return ToolCallFlow::Next;
+        }
+        // Pre-mutation checkpoint (CAS-idempotent within iteration).
+        self.emit_checkpoint_event_for_tool(name, iteration);
+        // MCP dispatch (mcp:<server>:<tool> namespace).
+        if let Some(mcp_msg) = self.try_dispatch_mcp_tool(call).await {
+            messages.push(mcp_msg);
+            return ToolCallFlow::Next;
+        }
+        // Regular tool dispatch. The 3rd element is `ToolOutput.metadata`
+        // propagated through `ToolResultRecord.metadata` (T1.2/T0.1
+        // vision channel).
+        let Some((success, output, metadata)) = self
+            .execute_regular_tool_call(call, iteration, abort_rx, messages)
+            .await
+        else {
+            return ToolCallFlow::Next;
+        };
+        // Doom loop tracker.
+        if let Some(result) = self.update_doom_tracker(doom_tracker, call, name, messages) {
+            return ToolCallFlow::AbortRun(result);
+        }
+        self.finalise_tool_call_result(
+            call,
+            name,
+            iteration,
+            success,
+            &output,
+            metadata.as_ref(),
+            state_manager,
+            sensor_runner,
+            messages,
+        );
+        // Post-hook.
+        self.run_post_tool_hook(hook_runner, call).await;
+        ToolCallFlow::Next
+    }
+
+    /// Fence + persist + working-set + sensor + vision follow-up after
+    /// a regular tool call. Extracted from `dispatch_one_tool_call` so
+    /// the per-call helper stays under the size budget.
+    #[allow(clippy::too_many_arguments)]
+    fn finalise_tool_call_result(
+        &mut self,
+        call: &theo_infra_llm::types::ToolCall,
+        name: &str,
+        iteration: usize,
+        success: bool,
+        output: &str,
+        metadata: Option<&serde_json::Value>,
+        state_manager: &mut Option<crate::state_manager::StateManager>,
+        sensor_runner: Option<&crate::sensor::SensorRunner>,
+        messages: &mut Vec<Message>,
+    ) {
+        // T2.1 / FIND-P6-001 / D5 — fence untrusted tool output before
+        // it becomes a tool_result so embedded injection tokens can't
+        // hijack the next LLM turn. The `tool:{name}` source label
+        // flows into the fence tag for auditability.
+        let fenced_output = theo_domain::prompt_sanitizer::fence_untrusted(
+            output,
+            &format!("tool:{name}"),
+            crate::constants::MAX_TOOL_OUTPUT_BYTES,
+        );
+        let result_msg = Message::tool_result(&call.id, name, &fenced_output);
+        self.update_working_set_post_tool(call, name, iteration);
+        self.update_context_loop_post_tool(call, name, success, output);
+        // Persist tool result for crash recovery (T1.3 / find_p4_002).
+        if let Some(sm) = state_manager
+            && let Err(e) = sm.append_message("tool", output)
+        {
+            self.publish_state_append_failure("tool", &e);
+        }
+        self.fire_sensor_for_write_tool(sensor_runner, call, name, success);
+        messages.push(result_msg);
+        // T1.2 / T0.1 — vision follow-up when the tool surfaced an
+        // image_block in metadata (e.g., `read_image`).
+        if let Some(meta) = metadata {
+            crate::vision_propagation::push_image_followup(messages, meta, name);
         }
     }
 

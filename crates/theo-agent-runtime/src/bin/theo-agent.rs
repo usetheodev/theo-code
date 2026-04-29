@@ -36,55 +36,78 @@ fn print_usage() {
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = std::env::args().collect();
-
-    // Handle `auth` subcommand
     if args.get(1).map(|s| s.as_str()) == Some("auth") {
         handle_auth(&args[2..]).await;
         return;
     }
+    let parsed = match parse_cli_args(&args) {
+        Some(p) => p,
+        None => return, // --help / parse error
+    };
+    let (repo, task) = require_repo_and_task(&parsed);
+    let project_dir = validate_repo_path(&repo);
+    let config = build_agent_config(&parsed).await;
+    print_banner(&config, &repo, &task);
+    run_agent_and_exit(config, task, project_dir).await;
+}
 
-    let mut repo: Option<String> = None;
-    let mut task: Option<String> = None;
-    let mut url: Option<String> = None;
-    let mut model: Option<String> = None;
-    let mut api_key: Option<String> = None;
-    let mut max_iter: Option<usize> = None;
-    let mut provider_id: Option<String> = None;
+/// Result of CLI argument parsing — `None` field = flag not supplied.
+struct ParsedArgs {
+    repo: Option<String>,
+    task: Option<String>,
+    url: Option<String>,
+    model: Option<String>,
+    api_key: Option<String>,
+    max_iter: Option<usize>,
+    provider_id: Option<String>,
+}
 
+/// Parse the CLI argv. Returns `None` when --help was passed (caller
+/// should `return`); aborts the process on unknown flags.
+fn parse_cli_args(args: &[String]) -> Option<ParsedArgs> {
+    let mut p = ParsedArgs {
+        repo: None,
+        task: None,
+        url: None,
+        model: None,
+        api_key: None,
+        max_iter: None,
+        provider_id: None,
+    };
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
             "--repo" => {
-                repo = args.get(i + 1).cloned();
+                p.repo = args.get(i + 1).cloned();
                 i += 2;
             }
             "--task" => {
-                task = args.get(i + 1).cloned();
+                p.task = args.get(i + 1).cloned();
                 i += 2;
             }
             "--provider" => {
-                provider_id = args.get(i + 1).cloned();
+                p.provider_id = args.get(i + 1).cloned();
                 i += 2;
             }
             "--url" => {
-                url = args.get(i + 1).cloned();
+                p.url = args.get(i + 1).cloned();
                 i += 2;
             }
             "--model" => {
-                model = args.get(i + 1).cloned();
+                p.model = args.get(i + 1).cloned();
                 i += 2;
             }
             "--api-key" => {
-                api_key = args.get(i + 1).cloned();
+                p.api_key = args.get(i + 1).cloned();
                 i += 2;
             }
             "--max-iter" => {
-                max_iter = args.get(i + 1).and_then(|s| s.parse().ok());
+                p.max_iter = args.get(i + 1).and_then(|s| s.parse().ok());
                 i += 2;
             }
             "--help" | "-h" => {
                 print_usage();
-                return;
+                return None;
             }
             _ => {
                 eprintln!("Unknown argument: {}", args[i]);
@@ -93,71 +116,91 @@ async fn main() {
             }
         }
     }
+    Some(p)
+}
 
-    let Some(repo) = repo else {
+fn require_repo_and_task(p: &ParsedArgs) -> (String, String) {
+    let Some(repo) = p.repo.clone() else {
         eprintln!("Error: --repo is required");
         print_usage();
         std::process::exit(1);
     };
-
-    let Some(task) = task else {
+    let Some(task) = p.task.clone() else {
         eprintln!("Error: --task is required");
         print_usage();
         std::process::exit(1);
     };
+    (repo, task)
+}
 
-    let project_dir = PathBuf::from(&repo);
+fn validate_repo_path(repo: &str) -> PathBuf {
+    let project_dir = PathBuf::from(repo);
     if !project_dir.exists() {
         eprintln!("Error: repo path does not exist: {repo}");
         std::process::exit(1);
     }
+    project_dir
+}
 
-    // ── Provider Resolution ──
-    // Priority: --url (legacy) > --provider (explicit) > auto-detect
+/// Resolve the LLM provider per the same priority as before:
+/// `--url` (legacy raw URL) > `--provider` (explicit) > auto-detect.
+async fn build_agent_config(p: &ParsedArgs) -> AgentConfig {
     let mut config = AgentConfig::default();
-
-    if let Some(ref raw_url) = url {
-        // Legacy mode: raw URL
-        config.llm.base_url = raw_url.clone();
-        config.llm.model = model.unwrap_or_else(|| std::env::var("MODEL_NAME").unwrap_or(config.llm.model));
-        config.llm.api_key = api_key
-            .or_else(|| std::env::var("OPENAI_API_KEY").ok())
-            .or_else(|| std::env::var("ANTHROPIC_API_KEY").ok());
-        eprintln!("[theo] Using legacy URL: {}", config.llm.base_url);
+    if let Some(ref raw_url) = p.url {
+        apply_legacy_url_config(&mut config, raw_url, p.model.clone(), p.api_key.clone());
     } else {
-        // Provider-based resolution
-        let resolved = resolve_provider(provider_id.as_deref(), &api_key).await;
-        let provider_registry = create_provider_registry();
-
-        match provider_registry.get(&resolved.provider_id) {
-            Some(spec) => {
-                config.llm.base_url = spec.base_url.to_string();
-                config.llm.endpoint_override = Some(spec.endpoint_url());
-                config.llm.api_key = resolved.api_key;
-                config.llm.model = model.unwrap_or(resolved.default_model);
-
-                // Dynamic headers (e.g., ChatGPT-Account-Id for Codex)
-                for (k, v) in resolved.extra_headers {
-                    config.llm.extra_headers.insert(k, v);
-                }
-
-                eprintln!("[theo] Provider: {} ({})", spec.display_name, spec.id);
-            }
-            None => {
-                eprintln!("Error: unknown provider '{}'", resolved.provider_id);
-                eprintln!("Available providers:");
-                for pid in provider_registry.list() {
-                    eprintln!("  - {}", pid);
-                }
-                std::process::exit(1);
-            }
-        }
+        apply_provider_config(&mut config, p.provider_id.as_deref(), &p.api_key, p.model.clone())
+            .await;
     }
-
-    if let Some(n) = max_iter {
+    if let Some(n) = p.max_iter {
         config.loop_cfg.max_iterations = n;
     }
+    config
+}
 
+fn apply_legacy_url_config(
+    config: &mut AgentConfig,
+    raw_url: &str,
+    model: Option<String>,
+    api_key: Option<String>,
+) {
+    config.llm.base_url = raw_url.to_string();
+    config.llm.model = model
+        .unwrap_or_else(|| std::env::var("MODEL_NAME").unwrap_or_else(|_| config.llm.model.clone()));
+    config.llm.api_key = api_key
+        .or_else(|| std::env::var("OPENAI_API_KEY").ok())
+        .or_else(|| std::env::var("ANTHROPIC_API_KEY").ok());
+    eprintln!("[theo] Using legacy URL: {}", config.llm.base_url);
+}
+
+async fn apply_provider_config(
+    config: &mut AgentConfig,
+    provider_id: Option<&str>,
+    api_key: &Option<String>,
+    model_override: Option<String>,
+) {
+    let resolved = resolve_provider(provider_id, api_key).await;
+    let provider_registry = create_provider_registry();
+    let Some(spec) = provider_registry.get(&resolved.provider_id) else {
+        eprintln!("Error: unknown provider '{}'", resolved.provider_id);
+        eprintln!("Available providers:");
+        for pid in provider_registry.list() {
+            eprintln!("  - {}", pid);
+        }
+        std::process::exit(1);
+    };
+    config.llm.base_url = spec.base_url.to_string();
+    config.llm.endpoint_override = Some(spec.endpoint_url());
+    config.llm.api_key = resolved.api_key;
+    config.llm.model = model_override.unwrap_or(resolved.default_model);
+    // Dynamic headers (e.g., ChatGPT-Account-Id for Codex).
+    for (k, v) in resolved.extra_headers {
+        config.llm.extra_headers.insert(k, v);
+    }
+    eprintln!("[theo] Provider: {} ({})", spec.display_name, spec.id);
+}
+
+fn print_banner(config: &AgentConfig, repo: &str, task: &str) {
     eprintln!("╔══════════════════════════════════╗");
     eprintln!("║        theo-agent v0.1.0         ║");
     eprintln!("╠══════════════════════════════════╣");
@@ -176,19 +219,19 @@ async fn main() {
     eprintln!();
     eprintln!("Task: {task}");
     eprintln!();
+}
 
+async fn run_agent_and_exit(config: AgentConfig, task: String, project_dir: PathBuf) -> ! {
     let registry = create_default_registry();
     let event_listener = Arc::new(PrintEventListener);
     let agent = AgentLoop::new(config, registry).with_event_listener(event_listener);
     let result = agent.run(&task, &project_dir).await;
-
     eprintln!();
     eprintln!("═══ Result ═══");
     eprintln!("Success: {}", result.success);
     eprintln!("Iterations: {}", result.iterations_used);
     eprintln!("Files edited: {}", result.files_edited.join(", "));
     eprintln!("Summary: {}", result.summary);
-
     std::process::exit(if result.success { 0 } else { 1 });
 }
 

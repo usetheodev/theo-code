@@ -3,6 +3,52 @@
 ## [Unreleased]
 
 ### Changed
+- **code-hygiene-5x5 T4.5 + apps/theo-marklive RESOLVED — production-code zero**
+  (`docs/plans/code-hygiene-5x5-plan.md`). 3 of the 4 remaining production-source
+  too_many_lines violations in the workspace cleared. Only test-only fns remain
+  (out of scope per testing rules).
+
+  **`apps/theo-marklive/src/template.rs::build_html`** (572 LOC HTML/CSS/JS template):
+  - CSS lifted into `STYLES_CSS: &'static str` const (no format! substitution → single
+    braces, ~450 LOC of static stylesheet).
+  - 3 helpers extracted: `render_head_open(title)`, `render_body(title, sidebar, pages)`,
+    `render_scripts(search_index)`.
+  - Body of `build_html` is now 6 LOC (4 push_str calls into a String).
+
+  **`crates/theo-agent-runtime/src/bin/theo-agent.rs::main`** (133 LOC arg parser + run):
+  decomposed into `parse_cli_args` (returns `ParsedArgs` struct) + `require_repo_and_task`
+  + `validate_repo_path` + `build_agent_config` (which dispatches to `apply_legacy_url_config`
+  vs `apply_provider_config`) + `print_banner` + `run_agent_and_exit`. Body now ~12 LOC.
+
+  **`crates/theo-agent-runtime/src/run_engine/execution.rs::execute_with_history`**
+  (159 LOC main agent loop):
+  - Inner for-loop body extracted to `dispatch_one_tool_call` returning a new
+    `ToolCallFlow` enum (`Next` / `AbortRun(result)` / `ConvergeAfterLoop(result)`)
+    — replaces the previous `continue`/`break + should_return = Some(_)` mix with
+    explicit control-flow values.
+  - Post-tool finalisation (fence + persist + working-set + sensor + vision follow-up)
+    extracted to `finalise_tool_call_result`.
+  - LLM-request setup (route → `with_tools` → `with_max_tokens` → `with_temperature`
+    → reasoning_effort → forced tool_choice) extracted to `prepare_chat_request`
+    returning `(ChatRequest, String, &'static str)`.
+  - Assistant-message persistence extracted to `persist_assistant_message`.
+  - Body of `execute_with_history` is now ~70 LOC.
+
+  Allowlist updates: theo-agent-runtime 3 → 1 (only the test-only e2e_observability_
+  pipeline_full_flow at 113 LOC remains). theo-marklive was never in the allowlist —
+  the new lint regression that emerged after recent rebases is now cleared.
+
+  Cumulative metric across workspace: 20 → 18 violations. **All production-source
+  too_many_lines violations across the workspace are now zero** (remaining 18 are
+  test-only fns in: theo-agent-runtime/tests, theo-application/tests, theo-engine-
+  retrieval/{src/*_tests.rs, src/experimental/compress.rs#tests, tests}).
+
+  Validated:
+  - cargo test --workspace --exclude theo-code-desktop --no-fail-fast →
+    5247 PASS / 0 FAIL / 24 IGNORED across 69 suites.
+  - cargo clippy --workspace --all-targets -- -D warnings → 0 warnings.
+  - bash scripts/check-complexity.sh → all crates at-or-below ceiling.
+
 - **code-hygiene-5x5 T4.3 RESOLVED — theo (CLI) 1 → 0** (`docs/plans/code-hygiene-5x5-plan.md`).
   Final remaining theo CLI too_many_lines violation cleared: `apps/theo-cli/src/tui/mod.rs::run`
   (421 LOC TUI event-loop) decomposed into 19+ single-purpose helpers:
