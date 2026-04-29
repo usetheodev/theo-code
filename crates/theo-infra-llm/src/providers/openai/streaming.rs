@@ -12,8 +12,6 @@ pub fn from_chunk(chunk: &str) -> Result<CommonChunk, String> {
         .iter()
         .find(|l| l.starts_with("data: "))
         .ok_or_else(|| chunk.to_string())?;
-
-    // T2.7: bound the SSE chunk to 10 MiB.
     let json: Value = theo_domain::safe_json::from_str_bounded(
         &data_line[6..],
         theo_domain::safe_json::DEFAULT_JSON_LIMIT,
@@ -23,13 +21,30 @@ pub fn from_chunk(chunk: &str) -> Result<CommonChunk, String> {
         .get("response")
         .cloned()
         .unwrap_or_else(|| serde_json::json!({}));
+    let event = event_line.strip_prefix("event: ").unwrap_or_default().trim();
+    let mut out = build_initial_chunk(&json, &resp_obj);
+    match event {
+        "response.output_text.delta" => append_text_delta(&json, &mut out),
+        "response.output_item.added"
+            if json
+                .get("item")
+                .and_then(|i| i.get("type"))
+                .and_then(|t| t.as_str())
+                == Some("function_call") =>
+        {
+            append_function_call_added(&json, &mut out);
+        }
+        "response.function_call_arguments.delta" => {
+            append_function_call_arguments_delta(&json, &mut out);
+        }
+        "response.completed" => append_response_completed(&json, &resp_obj, &mut out),
+        _ => {}
+    }
+    Ok(out)
+}
 
-    let event = event_line
-        .strip_prefix("event: ")
-        .unwrap_or_default()
-        .trim();
-
-    let mut out = CommonChunk {
+fn build_initial_chunk(json: &Value, resp_obj: &Value) -> CommonChunk {
+    CommonChunk {
         id: resp_obj
             .get("id")
             .or_else(|| json.get("id"))
@@ -46,139 +61,141 @@ pub fn from_chunk(chunk: &str) -> Result<CommonChunk, String> {
             .to_string(),
         choices: Vec::new(),
         usage: None,
-    };
-
-    match event {
-        "response.output_text.delta" => {
-            let delta = json
-                .get("delta")
-                .or_else(|| json.get("text"))
-                .and_then(|d| d.as_str());
-            if let Some(d) = delta
-                && !d.is_empty() {
-                    out.choices.push(CommonChunkChoice {
-                        index: 0,
-                        delta: ChunkDelta {
-                            content: Some(d.to_string()),
-                            ..Default::default()
-                        },
-                        finish_reason: None,
-                    });
-                }
-        }
-        "response.output_item.added"
-            if json
-                .get("item")
-                .and_then(|i| i.get("type"))
-                .and_then(|t| t.as_str())
-                == Some("function_call")
-            => {
-                let name = json
-                    .get("item")
-                    .and_then(|i| i.get("name"))
-                    .and_then(|n| n.as_str());
-                let id = json
-                    .get("item")
-                    .and_then(|i| i.get("id"))
-                    .and_then(|i| i.as_str());
-                if let Some(name) = name {
-                    out.choices.push(CommonChunkChoice {
-                        index: 0,
-                        delta: ChunkDelta {
-                            tool_calls: Some(vec![ChunkToolCall {
-                                index: 0,
-                                id: id.map(String::from),
-                                call_type: Some("function".to_string()),
-                                function: Some(ChunkFunction {
-                                    name: Some(name.to_string()),
-                                    arguments: Some(String::new()),
-                                }),
-                            }]),
-                            ..Default::default()
-                        },
-                        finish_reason: None,
-                    });
-                }
-            }
-        "response.function_call_arguments.delta" => {
-            let args = json
-                .get("delta")
-                .or_else(|| json.get("arguments_delta"))
-                .and_then(|a| a.as_str());
-            if let Some(a) = args
-                && !a.is_empty() {
-                    out.choices.push(CommonChunkChoice {
-                        index: 0,
-                        delta: ChunkDelta {
-                            tool_calls: Some(vec![ChunkToolCall {
-                                index: 0,
-                                id: None,
-                                call_type: None,
-                                function: Some(ChunkFunction {
-                                    name: None,
-                                    arguments: Some(a.to_string()),
-                                }),
-                            }]),
-                            ..Default::default()
-                        },
-                        finish_reason: None,
-                    });
-                }
-        }
-        "response.completed" => {
-            let sr = resp_obj
-                .get("stop_reason")
-                .or_else(|| json.get("stop_reason"))
-                .and_then(|r| r.as_str());
-            let finish = sr.map(|r| {
-                match r {
-                    "stop" => "stop",
-                    "tool_call" | "tool_calls" => "tool_calls",
-                    "length" | "max_output_tokens" => "length",
-                    other => other,
-                }
-                .to_string()
-            });
-            out.choices.push(CommonChunkChoice {
-                index: 0,
-                delta: ChunkDelta::default(),
-                finish_reason: finish,
-            });
-
-            let u = resp_obj
-                .get("usage")
-                .or_else(|| json.get("response").and_then(|r| r.get("usage")));
-            if let Some(u) = u {
-                let pt = u
-                    .get("input_tokens")
-                    .and_then(|v| v.as_u64())
-                    .map(|v| v as u32);
-                let ct = u
-                    .get("output_tokens")
-                    .and_then(|v| v.as_u64())
-                    .map(|v| v as u32);
-                let cached = u
-                    .get("input_tokens_details")
-                    .and_then(|d| d.get("cached_tokens"))
-                    .and_then(|c| c.as_u64())
-                    .map(|v| v as u32);
-                out.usage = Some(CommonUsage {
-                    prompt_tokens: pt,
-                    completion_tokens: ct,
-                    total_tokens: match (pt, ct) {
-                        (Some(p), Some(c)) => Some(p + c),
-                        _ => None,
-                    },
-                    prompt_tokens_details: cached.map(|c| PromptTokensDetails {
-                        cached_tokens: Some(c),
-                    }),
-                });
-            }
-        }
-        _ => {}
     }
+}
 
-    Ok(out)
+fn append_text_delta(json: &Value, out: &mut CommonChunk) {
+    let delta = json
+        .get("delta")
+        .or_else(|| json.get("text"))
+        .and_then(|d| d.as_str());
+    let Some(d) = delta else {
+        return;
+    };
+    if d.is_empty() {
+        return;
+    }
+    out.choices.push(CommonChunkChoice {
+        index: 0,
+        delta: ChunkDelta {
+            content: Some(d.to_string()),
+            ..Default::default()
+        },
+        finish_reason: None,
+    });
+}
+
+fn append_function_call_added(json: &Value, out: &mut CommonChunk) {
+    let name = json
+        .get("item")
+        .and_then(|i| i.get("name"))
+        .and_then(|n| n.as_str());
+    let id = json
+        .get("item")
+        .and_then(|i| i.get("id"))
+        .and_then(|i| i.as_str());
+    let Some(name) = name else {
+        return;
+    };
+    out.choices.push(CommonChunkChoice {
+        index: 0,
+        delta: ChunkDelta {
+            tool_calls: Some(vec![ChunkToolCall {
+                index: 0,
+                id: id.map(String::from),
+                call_type: Some("function".to_string()),
+                function: Some(ChunkFunction {
+                    name: Some(name.to_string()),
+                    arguments: Some(String::new()),
+                }),
+            }]),
+            ..Default::default()
+        },
+        finish_reason: None,
+    });
+}
+
+fn append_function_call_arguments_delta(json: &Value, out: &mut CommonChunk) {
+    let args = json
+        .get("delta")
+        .or_else(|| json.get("arguments_delta"))
+        .and_then(|a| a.as_str());
+    let Some(a) = args else {
+        return;
+    };
+    if a.is_empty() {
+        return;
+    }
+    out.choices.push(CommonChunkChoice {
+        index: 0,
+        delta: ChunkDelta {
+            tool_calls: Some(vec![ChunkToolCall {
+                index: 0,
+                id: None,
+                call_type: None,
+                function: Some(ChunkFunction {
+                    name: None,
+                    arguments: Some(a.to_string()),
+                }),
+            }]),
+            ..Default::default()
+        },
+        finish_reason: None,
+    });
+}
+
+fn append_response_completed(json: &Value, resp_obj: &Value, out: &mut CommonChunk) {
+    let sr = resp_obj
+        .get("stop_reason")
+        .or_else(|| json.get("stop_reason"))
+        .and_then(|r| r.as_str());
+    let finish = sr.map(|r| {
+        match r {
+            "stop" => "stop",
+            "tool_call" | "tool_calls" => "tool_calls",
+            "length" | "max_output_tokens" => "length",
+            other => other,
+        }
+        .to_string()
+    });
+    out.choices.push(CommonChunkChoice {
+        index: 0,
+        delta: ChunkDelta::default(),
+        finish_reason: finish,
+    });
+    let u = resp_obj
+        .get("usage")
+        .or_else(|| json.get("response").and_then(|r| r.get("usage")));
+    if let Some(u) = u {
+        out.usage = Some(parse_streaming_usage(u));
+    }
+}
+
+fn parse_streaming_usage(u: &Value) -> CommonUsage {
+    let pt = u
+        .get("input_tokens")
+        .and_then(|v| v.as_u64())
+        .map(|v| v as u32);
+    let ct = u
+        .get("output_tokens")
+        .and_then(|v| v.as_u64())
+        .map(|v| v as u32);
+    let cached = u
+        .get("input_tokens_details")
+        .and_then(|d| d.get("cached_tokens"))
+        .and_then(|c| c.as_u64())
+        .map(|v| v as u32);
+    CommonUsage {
+        prompt_tokens: pt,
+        completion_tokens: ct,
+        total_tokens: match (pt, ct) {
+            (Some(p), Some(c)) => Some(p + c),
+            _ => None,
+        },
+        prompt_tokens_details: cached.map(|c| PromptTokensDetails {
+            cached_tokens: Some(c),
+        }),
+    }
 }
 
 /// Convert a CommonChunk to OpenAI Responses API SSE format.

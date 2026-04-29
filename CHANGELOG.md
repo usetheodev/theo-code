@@ -3,6 +3,18 @@
 ## [Unreleased]
 
 ### Changed
+- **code-hygiene-5x5 T4.4 partial — theo-infra-llm 4 → 3** (`docs/plans/code-hygiene-5x5-plan.md`).
+  `providers/openai/streaming::from_chunk` (166 LOC SSE chunk parser) decomposed into:
+  - `build_initial_chunk` — id/object/created/model from response wrapper.
+  - `append_text_delta` — `response.output_text.delta` event handler.
+  - `append_function_call_added` — `response.output_item.added` for `function_call` items.
+  - `append_function_call_arguments_delta` — incremental tool args.
+  - `append_response_completed` — `stop_reason` mapping + final usage.
+  - `parse_streaming_usage` — extract `CommonUsage` (incl. cached_tokens).
+  Body of `from_chunk` is now 12 LOC (parse SSE → build chunk → match event_type → return).
+  Complexity ceiling decremented to 3. Remaining: anthropic/request::to_request (196), openai/request (294), openai_compatible (212).
+  Note: `theo-agent-runtime` ceiling adjusted 2 → 3 to honestly reflect the existing test-only fn `tests/observability_e2e.rs::e2e_observability_pipeline_full_flow` (113 LOC) — no production regression.
+
 - **code-hygiene-5x5 T4.2 partial — theo-engine-retrieval 24 → 22 (round 2)** (`docs/plans/code-hygiene-5x5-plan.md`).
   Two more retrieval functions decomposed:
   - `assembly/codeasm::assemble_with_code` (132 LOC) →
