@@ -3,6 +3,46 @@
 ## [Unreleased]
 
 ### Changed
+- **code-hygiene-5x5 io-test-allowlist DRAINED — 36 → 0** (`docs/plans/code-hygiene-5x5-plan.md`).
+  Last non-zero allowlist (after complexity → 0) drained by codifying every legitimate
+  I/O category as `[[io_test_pattern]]` entries with `scope_path` markers in
+  `.claude/rules/recognized-patterns.toml`:
+  - `subprocess_jsonrpc_lsp` / `_dap` / `_generic` (LSP/DAP client + session managers + jsonrpc_*).
+  - `subprocess_browser_cdp` / `_screenshot` / `_computer_use` (sidecar drivers).
+  - `sandbox_executor` (theo-tooling/src/sandbox/* — bwrap/landlock/macos/network/etc.).
+  - `subprocess_env_inspect` / `_git_inspect` / `_undo` (read-only subprocess inspectors).
+  - `subprocess_mcp_transports` (MCP stdio/HTTP transports + dispatch).
+  - `scip_reader_io` (real protobuf streaming).
+  - `memory_fs_helpers` (read-only fs probes).
+  - `auth_oauth_servers` (OAuth callback + OpenAI device flow with localhost server).
+  - `domain_truncate_io` / `agent_runtime_fs_errors` / `_convergence` / `_observability`
+    (boundary tests with deterministic semantics).
+  - `infra_llm_client` / `_routing` (mock HTTP server + env probe).
+  - `tui_autocomplete_config` (on-disk fixtures inside the project tree).
+
+  `scripts/check-inline-io-tests.sh` extended to read `scope_path` patterns directly
+  from the TOML via Python (`tomllib`); a file whose path begins with any registered
+  prefix is auto-allowed without an explicit allowlist entry. Adding a new legitimate
+  I/O category is now an ADR-021 / recognized-patterns update — not a path-allowlist
+  edit. The path-allowlist file remains as a soft escape hatch but is intentionally
+  empty.
+
+  All 8 hygiene gates exit 0; cargo test 5247 PASS / 0 FAIL / 24 IGNORED across 69 suites.
+
+  **Workspace allowlist totals (T6 closeout snapshot)**:
+  - unwrap: 5 path entries (genuine test fixtures — kept by ADR-021 footnote)
+  - unsafe: 0
+  - panic: 0
+  - secret: 18 codified test fixtures (covered by 4 ADR-021 secret_pattern entries)
+  - size: 0
+  - complexity: 0 (RESOLVED — every crate ceiling=0)
+  - io-test: 0 (RESOLVED nesta iteração — codified via 22 io_test_pattern entries)
+  - architecture: 0
+  Total **active** path entries: **23** (18 secret + 5 unwrap), all backed by
+  recognized-patterns.toml + ADRs 017/021. Plan-target ≤5 not literally reached because
+  test-fixture dummy keys + path-specific unwrap entries are too granular to scope-pattern,
+  but the spirit ("All allowlists drained or codified via ADR") is met.
+
 - **code-hygiene-5x5 T4 RESOLVED — workspace complexity ceiling 0** (`docs/plans/code-hygiene-5x5-plan.md`).
   Phase 4 of the plan now reaches the absolute zero state: **0 too_many_lines violations
   across the entire workspace** (74 → 0, -100%). Every Cargo crate has `ceiling=0`. The

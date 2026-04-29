@@ -1,67 +1,15 @@
 # Inline I/O test allowlist (ADR-017 v2 — see docs/adr/017-inline-io-tests.md).
 #
-# REVERSED POLARITY (T5.1 of code-hygiene-5x5):
-# Files that use `tempfile::TempDir` / `tempfile::tempdir()` / TestDir wrapper
-# are AUTOMATICALLY allowed by `scripts/check-inline-io-tests.sh` v2.
-# 92 / ~130 candidate files now match the codified pattern and need no entry.
+# DRAINED 2026-04-29 (T6.1 closeout of code-hygiene-5x5):
+# All 36 prior entries are now codified in
+# `.claude/rules/recognized-patterns.toml` under `[[io_test_pattern]]`
+# with `scope_path` markers — covering subprocess JSON-RPC
+# (LSP / DAP / MCP / browser CDP), sandbox executors, OAuth callback
+# servers, read-only fs probes, subprocess inspectors, JSONL writers,
+# and TUI on-disk fixtures.
 #
-# Remaining 36 entries are tests that exercise:
-#   - subprocess JSON-RPC protocols (LSP, DAP, MCP, browser CDP)
-#   - HTTP transports / OAuth callback servers
-#   - Sandbox subprocess execution (echo/false/etc. — no FS writes)
-#   - Git / env-info subprocess inspection
-#   - Read-only fs probes / hash helpers (no FS writes)
-
-# ── Subprocess transport / session managers ──────────────────────────
-crates/theo-infra-mcp/src/transport_http.rs
-crates/theo-infra-mcp/src/transport_stdio.rs
-crates/theo-infra-mcp/src/dispatch.rs
-crates/theo-tooling/src/browser/client.rs
-crates/theo-tooling/src/dap/client.rs
-crates/theo-tooling/src/dap/session_manager.rs
-crates/theo-tooling/src/jsonrpc_session.rs
-crates/theo-tooling/src/jsonrpc_subprocess.rs
-crates/theo-tooling/src/lsp/client.rs
-crates/theo-tooling/src/lsp/session_manager.rs
-
-# ── Native OS-level fs/screenshot drivers ────────────────────────────
-crates/theo-tooling/src/computer/driver.rs
-crates/theo-tooling/src/screenshot/mod.rs
-
-# ── Diagnostic / error-formatting helpers (no real I/O at test time) ─
-crates/theo-agent-runtime/src/fs_errors.rs
-crates/theo-infra-llm/src/client.rs
-
-# ── Sandbox subprocess executors (run echo/false; no FS writes) ──────
-crates/theo-tooling/src/sandbox/executor.rs
-crates/theo-tooling/src/sandbox/macos.rs
-crates/theo-tooling/src/sandbox/network.rs
-crates/theo-tooling/src/sandbox/probe.rs
-crates/theo-tooling/src/sandbox/rlimits.rs
-crates/theo-tooling/src/sandbox/bwrap.rs
-crates/theo-tooling/src/sandbox/env_sanitizer.rs
-
-# ── Git / env-info subprocess inspection (read-only) ─────────────────
-crates/theo-tooling/src/env_info/mod.rs
-crates/theo-tooling/src/git/mod.rs
-
-# ── Read-only fs probes / hash / mempack helpers ─────────────────────
-crates/theo-tooling/src/undo.rs
-crates/theo-engine-graph/src/scip/reader.rs
-crates/theo-infra-memory/src/builtin.rs
-crates/theo-infra-memory/src/fs_util.rs
-crates/theo-infra-memory/src/wiki/hash.rs
-crates/theo-domain/src/truncate.rs
-
-# ── Auth callback HTTP test servers (ephemeral port per-test) ────────
-crates/theo-infra-auth/src/callback.rs
-crates/theo-infra-auth/src/openai.rs
-
-# ── Routing rules / convergence / observability (file-fingerprint only)
-crates/theo-agent-runtime/src/convergence.rs
-crates/theo-agent-runtime/src/observability/mod.rs
-crates/theo-infra-llm/src/routing/rules.rs
-
-# ── TUI config / autocomplete (read user dotfiles for completion test)
-apps/theo-cli/src/tui/autocomplete.rs
-apps/theo-cli/src/tui/config.rs
+# `scripts/check-inline-io-tests.sh` reads those scope_path patterns
+# directly from the TOML — adding a new legitimate I/O category is
+# now an ADR-021 / recognized-patterns update, not a path-allowlist
+# entry. This file remains as a soft escape hatch but is intentionally
+# empty.

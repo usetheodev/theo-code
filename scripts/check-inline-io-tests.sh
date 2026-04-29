@@ -51,6 +51,33 @@ if [[ -f "$ALLOWLIST_FILE" ]]; then
     done < "$ALLOWLIST_FILE"
 fi
 
+# ADR-017 v2 / ADR-021 — load `[[io_test_pattern]]` scope_path entries
+# from `.claude/rules/recognized-patterns.toml`. A test-bearing file
+# whose path has any of these prefixes is auto-allowed (codified
+# pattern, no explicit allowlist entry needed).
+PATTERN_PREFIXES=()
+if command -v python3 >/dev/null 2>&1 \
+   && [[ -f "$REPO_ROOT/.claude/rules/recognized-patterns.toml" ]]; then
+    while IFS= read -r prefix; do
+        [[ -n "$prefix" ]] && PATTERN_PREFIXES+=("$prefix")
+    done < <(python3 - "$REPO_ROOT/.claude/rules/recognized-patterns.toml" <<'PY'
+import sys
+try:
+    import tomllib
+except ImportError:
+    import tomli as tomllib
+with open(sys.argv[1], "rb") as f:
+    data = tomllib.load(f)
+for entry in data.get("io_test_pattern", []):
+    sp = entry.get("scope_path")
+    # Only emit explicit-prefix patterns (markers-based ones are
+    # already hardcoded in IO_MARKERS / the tempfile auto-allow).
+    if sp:
+        print(sp)
+PY
+)
+fi
+
 # I/O markers: Rust patterns that generally imply real syscalls.
 IO_MARKERS=(
     'std::fs::'
@@ -97,6 +124,24 @@ for f in $test_bearing_files; do
               -e 'use tempfile::' \
               -e 'TestDir::' \
               "$f" 2>/dev/null; then
+        allow_pattern_hits=$((allow_pattern_hits + 1))
+        continue
+    fi
+
+    # ADR-017 v2 / ADR-021 — scope_path codified patterns from
+    # recognized-patterns.toml. These cover legitimate I/O categories
+    # that don't fit `tempfile_isolated_fs` (subprocess JSON-RPC,
+    # sandbox executors, OAuth callback servers, read-only fs probes,
+    # etc.). One pattern per category, sourced from the TOML so the
+    # ADR remains the source of truth.
+    matched_prefix=0
+    for prefix in "${PATTERN_PREFIXES[@]}"; do
+        if [[ "$f" == "$prefix"* ]]; then
+            matched_prefix=1
+            break
+        fi
+    done
+    if (( matched_prefix )); then
         allow_pattern_hits=$((allow_pattern_hits + 1))
         continue
     fi

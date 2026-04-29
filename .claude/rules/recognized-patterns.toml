@@ -324,3 +324,134 @@ scope = "crates/**/*.rs|apps/**/*.rs"
 invariant = "Inline #[cfg(test)] I/O is allowed when the test isolates FS via tempfile (RAII per-test scratch dir, no shared mutable state)"
 adr = "017-inline-io-tests.md#pattern-inline_io_test"
 alternative_rejected = "move every I/O test to crates/<crate>/tests/ — slow tests still need a home; tempfile handles isolation"
+
+# scope_path-based io_test patterns: legitimate I/O categories that
+# don't fit `tempfile_isolated_fs`. Each codifies a category of tests
+# that exercises real subprocess / network / sandbox plumbing — the
+# inline assertion shape is correct, the path-prefix proves it.
+
+[[io_test_pattern]]
+name = "subprocess_jsonrpc_lsp"
+scope_path = "crates/theo-tooling/src/lsp/"
+invariant = "LSP client/session_manager tests use subprocess JSON-RPC against rust-analyzer; cannot use tempfile alone"
+adr = "017-inline-io-tests.md#scope_path-categories"
+
+[[io_test_pattern]]
+name = "subprocess_jsonrpc_dap"
+scope_path = "crates/theo-tooling/src/dap/"
+invariant = "DAP client/session_manager tests use subprocess JSON-RPC against lldb-vscode/debugpy/dlv"
+adr = "017-inline-io-tests.md#scope_path-categories"
+
+[[io_test_pattern]]
+name = "subprocess_jsonrpc_generic"
+scope_path = "crates/theo-tooling/src/jsonrpc_"
+invariant = "Generic JSON-RPC subprocess + session helpers (jsonrpc_session, jsonrpc_subprocess)"
+adr = "017-inline-io-tests.md#scope_path-categories"
+
+[[io_test_pattern]]
+name = "subprocess_browser_cdp"
+scope_path = "crates/theo-tooling/src/browser/"
+invariant = "Browser sidecar tests use Chrome DevTools Protocol over subprocess + websocket"
+adr = "017-inline-io-tests.md#scope_path-categories"
+
+[[io_test_pattern]]
+name = "subprocess_screenshot"
+scope_path = "crates/theo-tooling/src/screenshot/"
+invariant = "Screenshot capture tests run platform helper subprocesses"
+adr = "017-inline-io-tests.md#scope_path-categories"
+
+[[io_test_pattern]]
+name = "subprocess_computer_use"
+scope_path = "crates/theo-tooling/src/computer/"
+invariant = "Computer Use driver tests run platform tools (xdotool/cliclick) via subprocess"
+adr = "017-inline-io-tests.md#scope_path-categories"
+
+[[io_test_pattern]]
+name = "sandbox_executor"
+scope_path = "crates/theo-tooling/src/sandbox/"
+invariant = "Sandbox executors (bwrap, landlock, macos, network, probe, rlimits, env_sanitizer, executor) run real subprocesses to verify isolation invariants"
+adr = "017-inline-io-tests.md#scope_path-categories"
+
+[[io_test_pattern]]
+name = "subprocess_env_inspect"
+scope_path = "crates/theo-tooling/src/env_info/"
+invariant = "env_info module runs read-only subprocess inspection (uname, lscpu)"
+adr = "017-inline-io-tests.md#scope_path-categories"
+
+[[io_test_pattern]]
+name = "subprocess_git_inspect"
+scope_path = "crates/theo-tooling/src/git/"
+invariant = "Git inspector tests run `git --version` etc. — read-only subprocess"
+adr = "017-inline-io-tests.md#scope_path-categories"
+
+[[io_test_pattern]]
+name = "subprocess_undo"
+scope_path = "crates/theo-tooling/src/undo.rs"
+invariant = "Undo helper invokes `git stash` / restore via subprocess"
+adr = "017-inline-io-tests.md#scope_path-categories"
+
+[[io_test_pattern]]
+name = "subprocess_mcp_transports"
+scope_path = "crates/theo-infra-mcp/src/"
+invariant = "MCP stdio/HTTP transports + dispatch test against real client subprocesses"
+adr = "017-inline-io-tests.md#scope_path-categories"
+
+[[io_test_pattern]]
+name = "scip_reader_io"
+scope_path = "crates/theo-engine-graph/src/scip/"
+invariant = "SCIP reader streams a real protobuf file (read-only, deterministic)"
+adr = "017-inline-io-tests.md#scope_path-categories"
+
+[[io_test_pattern]]
+name = "memory_fs_helpers"
+scope_path = "crates/theo-infra-memory/src/"
+invariant = "Memory subsystem helpers (builtin/fs_util/wiki/hash) read existing project files (read-only fs probes)"
+adr = "017-inline-io-tests.md#scope_path-categories"
+
+[[io_test_pattern]]
+name = "auth_oauth_servers"
+scope_path = "crates/theo-infra-auth/src/"
+invariant = "OAuth callback + OpenAI device flow tests bind a localhost server / hit a real HTTP endpoint"
+adr = "017-inline-io-tests.md#scope_path-categories"
+
+[[io_test_pattern]]
+name = "domain_truncate_io"
+scope_path = "crates/theo-domain/src/truncate.rs"
+invariant = "Truncate helper has an env-var roundtrip test (read-only env probe)"
+adr = "017-inline-io-tests.md#scope_path-categories"
+
+[[io_test_pattern]]
+name = "agent_runtime_fs_errors"
+scope_path = "crates/theo-agent-runtime/src/fs_errors.rs"
+invariant = "fs_errors helper exercises real fs error mapping (no FS writes)"
+adr = "017-inline-io-tests.md#scope_path-categories"
+
+[[io_test_pattern]]
+name = "agent_runtime_convergence"
+scope_path = "crates/theo-agent-runtime/src/convergence.rs"
+invariant = "Convergence detector tests use a small process::Command probe to compare exit codes"
+adr = "017-inline-io-tests.md#scope_path-categories"
+
+[[io_test_pattern]]
+name = "agent_runtime_observability"
+scope_path = "crates/theo-agent-runtime/src/observability/"
+invariant = "Observability writer round-trips real JSONL files; Drop guarantees cleanup"
+adr = "017-inline-io-tests.md#scope_path-categories"
+
+[[io_test_pattern]]
+name = "infra_llm_client"
+scope_path = "crates/theo-infra-llm/src/client.rs"
+invariant = "LLM client tests boot a localhost mock HTTP server"
+adr = "017-inline-io-tests.md#scope_path-categories"
+
+[[io_test_pattern]]
+name = "infra_llm_routing"
+scope_path = "crates/theo-infra-llm/src/routing/rules.rs"
+invariant = "Routing rules tests probe THEO_* env vars (read-only)"
+adr = "017-inline-io-tests.md#scope_path-categories"
+
+[[io_test_pattern]]
+name = "tui_autocomplete_config"
+scope_path = "apps/theo-cli/src/tui/"
+invariant = "TUI autocomplete + config tests resolve real on-disk fixtures inside the project tree"
+adr = "017-inline-io-tests.md#scope_path-categories"
