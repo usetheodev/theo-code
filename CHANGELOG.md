@@ -3,6 +3,12 @@
 ## [Unreleased]
 
 ### Changed
+- **code-hygiene-5x5 size-allowlist regression cleared — `tui/mod.rs` 848 → 654** (`docs/plans/code-hygiene-5x5-plan.md`).
+  The Phase 4 TUI run-loop helper extraction pushed `apps/theo-cli/src/tui/mod.rs` from 670 → 848 LOC, tripping the 800 LOC Rust-file limit (`scripts/check-sizes.sh`). Auth helpers split into a sibling submodule:
+  - **NEW** `apps/theo-cli/src/tui/auth_inline.rs` (231 LOC) — owns `handle_login_start_inline`, `handle_login_server_inline`, `open_browser_silent`, `SEPARATOR`, plus the `print_*_device_steps` and `spawn_*_poll` sub-helpers extracted from each handler. Imports `theo_application::facade::auth::{openai::DeviceCode, device_flow::DeviceFlowCode}` directly.
+  - `tui/mod.rs` now re-routes through `auth_inline::handle_login_*_inline(...)`.
+  Validated all 11 T6.1 gates: cargo test (5247 PASS / 0 FAIL / 24 IGNORED), cargo clippy (-D warnings, 0 warnings), check-arch-contract (0 violations), check-unwrap, check-unsafe, check-panic, check-secrets, check-sizes (0 violations / 0 NEW / 0 EXPIRED), check-complexity (all crates within ceiling), check-inline-io-tests, check-sota-dod --quick (12/12 PASS, 2 SKIP).
+
 - **code-hygiene-5x5 T4.5 + apps/theo-marklive RESOLVED — production-code zero**
   (`docs/plans/code-hygiene-5x5-plan.md`). 3 of the 4 remaining production-source
   too_many_lines violations in the workspace cleared. Only test-only fns remain

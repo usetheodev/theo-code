@@ -6,6 +6,7 @@
 //! 3. Render task — 30fps tick, drain messages, update state, draw
 
 mod app;
+mod auth_inline;
 mod autocomplete;
 mod bench;
 mod commands;
@@ -272,9 +273,9 @@ async fn run_slash_command_messages(
         } else if matches!(cmd_msg, Msg::LoginStart(_)) {
             // Returns true if the cached-token short-circuit fired; either
             // way we keep iterating the remaining slash-command msgs.
-            let _ = handle_login_start_inline(state, terminal, msg_tx, cmd_msg).await?;
+            let _ = auth_inline::handle_login_start_inline(state, terminal, msg_tx, cmd_msg).await?;
         } else if matches!(cmd_msg, Msg::LoginServer(_)) {
-            handle_login_server_inline(state, terminal, msg_tx, cmd_msg).await?;
+            auth_inline::handle_login_server_inline(state, terminal, msg_tx, cmd_msg).await?;
         } else {
             app::update(state, cmd_msg);
         }
@@ -487,201 +488,6 @@ fn render_skills_list(state: &mut TuiState, project_dir: &Path) {
         Msg::Notify(format!("{} skills:\n{}", skills.len(), list.join("\n"))),
     );
 }
-
-/// Handle the `Msg::LoginStart` slash command inline. Runs the OpenAI
-/// device flow with `terminal.draw` between steps so the user sees the
-/// verification code immediately. Returns `Ok(true)` when the caller
-/// should `continue` (the cached-token short-circuit case), `Ok(false)`
-/// when the slash-command loop should keep iterating.
-async fn handle_login_start_inline(
-    state: &mut TuiState,
-    terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
-    msg_tx: &mpsc::Sender<Msg>,
-    cmd_msg: Msg,
-) -> anyhow::Result<bool> {
-    app::update(state, cmd_msg); // shows "Starting..."
-    let auth = theo_application::facade::auth::OpenAIAuth::with_default_store();
-
-    if let Ok(Some(tokens)) = auth.get_tokens()
-        && !tokens.is_expired()
-    {
-        app::update(
-            state,
-            Msg::LoginComplete("Already logged in (token valid)".into()),
-        );
-        return Ok(true);
-    }
-
-    app::update(state, Msg::Notify("Contacting auth server...".into()));
-    terminal.draw(|frame| view::draw(frame, state))?;
-
-    match auth.start_device_flow().await {
-        Ok(code) => {
-            app::update(state, Msg::Notify(SEPARATOR.into()));
-            app::update(
-                state,
-                Msg::Notify(format!("1. Open: {}", code.verification_uri)),
-            );
-            app::update(
-                state,
-                Msg::Notify("2. Login to your OpenAI account if needed".into()),
-            );
-            app::update(
-                state,
-                Msg::Notify(format!("3. Enter code: {}", code.user_code)),
-            );
-            app::update(state, Msg::Notify("4. Click 'Authorize'".into()));
-            app::update(state, Msg::Notify(SEPARATOR.into()));
-            // Copy code to clipboard via OSC52.
-            eprint!("\x1b]52;c;{}\x07", app::base64_encode(&code.user_code));
-            app::update(
-                state,
-                Msg::Notify("Code copied to clipboard. Waiting...".into()),
-            );
-            terminal.draw(|frame| view::draw(frame, state))?;
-
-            open_browser_silent(&code.verification_uri);
-
-            let poll_tx = msg_tx.clone();
-            tokio::spawn(async move {
-                match auth.poll_device_flow(&code).await {
-                    Ok(_) => {
-                        let _ = poll_tx
-                            .send(Msg::LoginComplete(
-                                "✓ Authenticated with OpenAI!".into(),
-                            ))
-                            .await;
-                    }
-                    Err(e) => {
-                        let _ = poll_tx
-                            .send(Msg::LoginFailed(format!("Auth failed: {e}")))
-                            .await;
-                    }
-                }
-            });
-        }
-        Err(e) => {
-            app::update(
-                state,
-                Msg::LoginFailed(format!("Device flow error: {e}")),
-            );
-        }
-    }
-    Ok(false)
-}
-
-/// Handle the `Msg::LoginServer(url)` slash command — generic
-/// RFC 8628 device flow against an arbitrary server. The polling
-/// future captures the access token into the `OPENAI_API_KEY` env var
-/// so the next agent run picks it up.
-async fn handle_login_server_inline(
-    state: &mut TuiState,
-    terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>,
-    msg_tx: &mpsc::Sender<Msg>,
-    cmd_msg: Msg,
-) -> anyhow::Result<()> {
-    let server_url = if let Msg::LoginServer(ref u) = cmd_msg {
-        u.clone()
-    } else {
-        unreachable!()
-    };
-    app::update(state, cmd_msg);
-    let http = reqwest::Client::new();
-    let config =
-        theo_application::facade::auth::device_flow::DeviceFlowConfig::new(&server_url);
-
-    app::update(state, Msg::Notify("Requesting device code...".into()));
-    terminal.draw(|frame| view::draw(frame, state))?;
-
-    match theo_application::facade::auth::device_flow::start_device_flow(&http, &config)
-        .await
-    {
-        Ok(code) => {
-            app::update(state, Msg::Notify(SEPARATOR.into()));
-            app::update(
-                state,
-                Msg::Notify(format!("1. Open: {}", code.verification_url)),
-            );
-            app::update(
-                state,
-                Msg::Notify(format!("2. Enter code: {}", code.user_code)),
-            );
-            app::update(state, Msg::Notify("3. Authorize Theo".into()));
-            app::update(state, Msg::Notify(SEPARATOR.into()));
-            eprint!("\x1b]52;c;{}\x07", app::base64_encode(&code.user_code));
-            app::update(
-                state,
-                Msg::Notify("Code copied to clipboard. Waiting...".into()),
-            );
-            terminal.draw(|frame| view::draw(frame, state))?;
-
-            open_browser_silent(&code.verification_url);
-
-            let poll_tx = msg_tx.clone();
-            let poll_config = config.clone();
-            let poll_code = code.clone();
-            tokio::spawn(async move {
-                let http = reqwest::Client::new();
-                match theo_application::facade::auth::device_flow::poll_device_flow(
-                    &http,
-                    &poll_config,
-                    &poll_code,
-                )
-                .await
-                {
-                    Ok(tokens) => {
-                        // SAFETY: the TUI runtime owns the process-wide env
-                        // table and this call happens on the single
-                        // render-loop task; no other thread reads/writes env
-                        // vars concurrently.
-                        unsafe {
-                            std::env::set_var("OPENAI_API_KEY", &tokens.access_token);
-                        }
-                        let _ = poll_tx
-                            .send(Msg::LoginComplete(
-                                "✓ Authenticated! Provider ready.".into(),
-                            ))
-                            .await;
-                    }
-                    Err(e) => {
-                        let _ = poll_tx.send(Msg::LoginFailed(format!("{e}"))).await;
-                    }
-                }
-            });
-        }
-        Err(e) => {
-            app::update(state, Msg::LoginFailed(format!("Server error: {e}")));
-        }
-    }
-    Ok(())
-}
-
-/// Open a URL in the default browser, suppressing all stdio so the
-/// TUI display stays clean. No-op on unsupported platforms.
-fn open_browser_silent(url: &str) {
-    #[cfg(target_os = "linux")]
-    {
-        let _ = std::process::Command::new("xdg-open")
-            .arg(url)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn();
-    }
-    #[cfg(target_os = "macos")]
-    {
-        let _ = std::process::Command::new("open")
-            .arg(url)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn();
-    }
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-    {
-        let _ = url;
-    }
-}
-
-const SEPARATOR: &str = "─────────────────────────────────────";
 
 /// Spawn the agent task for a pending prompt. Re-resolves config to
 /// pick up any tokens captured by an inline /login flow, attaches the
