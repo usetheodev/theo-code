@@ -11,21 +11,25 @@ pub fn from_chunk(chunk: &str) -> Result<CommonChunk, String> {
         .lines()
         .find(|l| l.starts_with("data: "))
         .ok_or_else(|| chunk.to_string())?;
-
-    // T2.7: bound the SSE chunk to 10 MiB so a misbehaving Anthropic endpoint
-    // cannot force unbounded allocation in the parser.
     let json: Value = theo_domain::safe_json::from_str_bounded(
         &data_line[6..],
         theo_domain::safe_json::DEFAULT_JSON_LIMIT,
     )
     .map_err(|_| chunk.to_string())?;
+    let event_type = json.get("type").and_then(|t| t.as_str()).unwrap_or_default();
+    let mut out = build_initial_chunk(&json);
+    match event_type {
+        "content_block_start" => append_content_block_start(&json, &mut out),
+        "content_block_delta" => append_content_block_delta(&json, &mut out),
+        "message_delta" => append_message_delta(&json, &mut out),
+        _ => {}
+    }
+    out.usage = parse_chunk_usage(&json);
+    Ok(out)
+}
 
-    let event_type = json
-        .get("type")
-        .and_then(|t| t.as_str())
-        .unwrap_or_default();
-
-    let mut out = CommonChunk {
+fn build_initial_chunk(json: &Value) -> CommonChunk {
+    CommonChunk {
         id: json
             .get("id")
             .or_else(|| json.get("message").and_then(|m| m.get("id")))
@@ -42,152 +46,138 @@ pub fn from_chunk(chunk: &str) -> Result<CommonChunk, String> {
             .to_string(),
         choices: Vec::new(),
         usage: None,
+    }
+}
+
+fn append_content_block_start(json: &Value, out: &mut CommonChunk) {
+    let Some(cb) = json.get("content_block") else {
+        return;
     };
+    let idx = json.get("index").and_then(|i| i.as_u64()).unwrap_or(0) as u32;
+    let cb_type = cb.get("type").and_then(|t| t.as_str()).unwrap_or_default();
+    match cb_type {
+        "text" => out.choices.push(CommonChunkChoice {
+            index: idx,
+            delta: ChunkDelta {
+                role: Some("assistant".to_string()),
+                content: Some(String::new()),
+                tool_calls: None,
+            },
+            finish_reason: None,
+        }),
+        "tool_use" => out.choices.push(CommonChunkChoice {
+            index: idx,
+            delta: ChunkDelta {
+                role: None,
+                content: None,
+                tool_calls: Some(vec![ChunkToolCall {
+                    index: idx,
+                    id: cb.get("id").and_then(|i| i.as_str()).map(String::from),
+                    call_type: Some("function".to_string()),
+                    function: Some(ChunkFunction {
+                        name: cb.get("name").and_then(|n| n.as_str()).map(String::from),
+                        arguments: Some(String::new()),
+                    }),
+                }]),
+            },
+            finish_reason: None,
+        }),
+        _ => {}
+    }
+}
 
-    match event_type {
-        "content_block_start" => {
-            let cb = json.get("content_block");
-            let idx = json.get("index").and_then(|i| i.as_u64()).unwrap_or(0) as u32;
-
-            if let Some(cb) = cb {
-                let cb_type = cb.get("type").and_then(|t| t.as_str()).unwrap_or_default();
-                match cb_type {
-                    "text" => {
-                        out.choices.push(CommonChunkChoice {
-                            index: idx,
-                            delta: ChunkDelta {
-                                role: Some("assistant".to_string()),
-                                content: Some(String::new()),
-                                tool_calls: None,
-                            },
-                            finish_reason: None,
-                        });
-                    }
-                    "tool_use" => {
-                        out.choices.push(CommonChunkChoice {
-                            index: idx,
-                            delta: ChunkDelta {
-                                role: None,
-                                content: None,
-                                tool_calls: Some(vec![ChunkToolCall {
-                                    index: idx,
-                                    id: cb.get("id").and_then(|i| i.as_str()).map(String::from),
-                                    call_type: Some("function".to_string()),
-                                    function: Some(ChunkFunction {
-                                        name: cb
-                                            .get("name")
-                                            .and_then(|n| n.as_str())
-                                            .map(String::from),
-                                        arguments: Some(String::new()),
-                                    }),
-                                }]),
-                            },
-                            finish_reason: None,
-                        });
-                    }
-                    _ => {}
-                }
-            }
-        }
-        "content_block_delta" => {
-            let delta = json.get("delta");
-            let idx = json.get("index").and_then(|i| i.as_u64()).unwrap_or(0) as u32;
-
-            if let Some(d) = delta {
-                let d_type = d.get("type").and_then(|t| t.as_str()).unwrap_or_default();
-                match d_type {
-                    "text_delta" => {
-                        let text = d.get("text").and_then(|t| t.as_str()).unwrap_or_default();
-                        out.choices.push(CommonChunkChoice {
-                            index: idx,
-                            delta: ChunkDelta {
-                                content: Some(text.to_string()),
-                                ..Default::default()
-                            },
-                            finish_reason: None,
-                        });
-                    }
-                    "input_json_delta" => {
-                        let partial = d
-                            .get("partial_json")
-                            .and_then(|p| p.as_str())
-                            .unwrap_or_default();
-                        out.choices.push(CommonChunkChoice {
-                            index: idx,
-                            delta: ChunkDelta {
-                                tool_calls: Some(vec![ChunkToolCall {
-                                    index: idx,
-                                    id: None,
-                                    call_type: None,
-                                    function: Some(ChunkFunction {
-                                        name: None,
-                                        arguments: Some(partial.to_string()),
-                                    }),
-                                }]),
-                                ..Default::default()
-                            },
-                            finish_reason: None,
-                        });
-                    }
-                    _ => {}
-                }
-            }
-        }
-        "message_delta" => {
-            let finish_reason = json
-                .get("delta")
-                .and_then(|d| d.get("stop_reason"))
-                .and_then(|r| r.as_str())
-                .map(|r| {
-                    match r {
-                        "end_turn" => "stop",
-                        "tool_use" => "tool_calls",
-                        "max_tokens" => "length",
-                        other => other,
-                    }
-                    .to_string()
-                });
-
+fn append_content_block_delta(json: &Value, out: &mut CommonChunk) {
+    let Some(d) = json.get("delta") else {
+        return;
+    };
+    let idx = json.get("index").and_then(|i| i.as_u64()).unwrap_or(0) as u32;
+    let d_type = d.get("type").and_then(|t| t.as_str()).unwrap_or_default();
+    match d_type {
+        "text_delta" => {
+            let text = d.get("text").and_then(|t| t.as_str()).unwrap_or_default();
             out.choices.push(CommonChunkChoice {
-                index: 0,
-                delta: ChunkDelta::default(),
-                finish_reason,
+                index: idx,
+                delta: ChunkDelta {
+                    content: Some(text.to_string()),
+                    ..Default::default()
+                },
+                finish_reason: None,
+            });
+        }
+        "input_json_delta" => {
+            let partial = d
+                .get("partial_json")
+                .and_then(|p| p.as_str())
+                .unwrap_or_default();
+            out.choices.push(CommonChunkChoice {
+                index: idx,
+                delta: ChunkDelta {
+                    tool_calls: Some(vec![ChunkToolCall {
+                        index: idx,
+                        id: None,
+                        call_type: None,
+                        function: Some(ChunkFunction {
+                            name: None,
+                            arguments: Some(partial.to_string()),
+                        }),
+                    }]),
+                    ..Default::default()
+                },
+                finish_reason: None,
             });
         }
         _ => {}
     }
+}
 
-    // Usage
+fn append_message_delta(json: &Value, out: &mut CommonChunk) {
+    let finish_reason = json
+        .get("delta")
+        .and_then(|d| d.get("stop_reason"))
+        .and_then(|r| r.as_str())
+        .map(|r| {
+            match r {
+                "end_turn" => "stop",
+                "tool_use" => "tool_calls",
+                "max_tokens" => "length",
+                other => other,
+            }
+            .to_string()
+        });
+    out.choices.push(CommonChunkChoice {
+        index: 0,
+        delta: ChunkDelta::default(),
+        finish_reason,
+    });
+}
+
+fn parse_chunk_usage(json: &Value) -> Option<CommonUsage> {
     let usage_val = json
         .get("usage")
-        .or_else(|| json.get("message").and_then(|m| m.get("usage")));
-    if let Some(u) = usage_val {
-        let pt = u
-            .get("input_tokens")
-            .and_then(|v| v.as_u64())
-            .map(|v| v as u32);
-        let ct = u
-            .get("output_tokens")
-            .and_then(|v| v.as_u64())
-            .map(|v| v as u32);
-        let cached = u
-            .get("cache_read_input_tokens")
-            .and_then(|v| v.as_u64())
-            .map(|v| v as u32);
-        out.usage = Some(CommonUsage {
-            prompt_tokens: pt,
-            completion_tokens: ct,
-            total_tokens: match (pt, ct) {
-                (Some(p), Some(c)) => Some(p + c),
-                _ => None,
-            },
-            prompt_tokens_details: cached.map(|c| PromptTokensDetails {
-                cached_tokens: Some(c),
-            }),
-        });
-    }
-
-    Ok(out)
+        .or_else(|| json.get("message").and_then(|m| m.get("usage")))?;
+    let pt = usage_val
+        .get("input_tokens")
+        .and_then(|v| v.as_u64())
+        .map(|v| v as u32);
+    let ct = usage_val
+        .get("output_tokens")
+        .and_then(|v| v.as_u64())
+        .map(|v| v as u32);
+    let cached = usage_val
+        .get("cache_read_input_tokens")
+        .and_then(|v| v.as_u64())
+        .map(|v| v as u32);
+    Some(CommonUsage {
+        prompt_tokens: pt,
+        completion_tokens: ct,
+        total_tokens: match (pt, ct) {
+            (Some(p), Some(c)) => Some(p + c),
+            _ => None,
+        },
+        prompt_tokens_details: cached.map(|c| PromptTokensDetails {
+            cached_tokens: Some(c),
+        }),
+    })
 }
 
 /// Convert a CommonChunk to Anthropic SSE format string.
