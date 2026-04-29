@@ -98,159 +98,183 @@ impl SandboxExecutor for LandlockExecutor {
         config: &SandboxConfig,
     ) -> Result<SandboxResult, SandboxError> {
         let mut audit_entries = Vec::new();
-
-        // Step 1: Validate command lexically
-        let validator_config = ValidatorConfig::default();
-        match command_validator::validate_command(command, &validator_config) {
-            ValidationResult::Blocked(violation) => {
-                audit_entries.push(AuditEntry {
-                    timestamp: now_iso8601(),
-                    event_type: AuditEventType::ViolationBlocked,
-                    detail: format!("command blocked by validator: {command}"),
-                    metadata: serde_json::json!({"command": command}),
-                });
-                return Ok(SandboxResult::blocked(violation));
-            }
-            ValidationResult::Warning(msg) => {
-                audit_entries.push(AuditEntry {
-                    timestamp: now_iso8601(),
-                    event_type: AuditEventType::ViolationBlocked,
-                    detail: format!("command warning: {msg}"),
-                    metadata: serde_json::json!({"command": command, "warning": msg}),
-                });
-                // Warning = allow but log
-            }
-            ValidationResult::Allowed => {}
+        if let Some(blocked) = validate_command_phase(command, &mut audit_entries) {
+            return Ok(blocked);
         }
+        audit_entries.push(landlock_init_audit(self.capabilities.landlock_abi_version));
+        audit_entries.push(command_start_audit(command, working_dir));
+        let mut cmd = build_landlock_command(command, working_dir, config);
+        audit_entries.push(env_sanitized_audit(config));
+        audit_entries.push(rlimits_audit(config));
+        run_command_and_collect(cmd.output(), audit_entries)
+    }
+}
 
-        audit_entries.push(AuditEntry {
-            timestamp: now_iso8601(),
-            event_type: AuditEventType::SandboxInit,
-            detail: format!(
-                "initializing landlock sandbox (ABI v{})",
-                self.capabilities.landlock_abi_version
-            ),
-            metadata: serde_json::json!({"abi_version": self.capabilities.landlock_abi_version}),
-        });
-
-        // Step 2: Build landlock ruleset for the child process
-        let working_dir_owned = working_dir.to_path_buf();
-        let allowed_read: Vec<String> = config.filesystem.allowed_read.clone();
-        let allowed_write: Vec<String> = config.filesystem.allowed_write.clone();
-        let process_policy = config.process.clone();
-
-        audit_entries.push(AuditEntry {
-            timestamp: now_iso8601(),
-            event_type: AuditEventType::CommandStart,
-            detail: format!("executing: {command}"),
-            metadata: serde_json::json!({"command": command, "workdir": working_dir.display().to_string()}),
-        });
-
-        // Step 3: Build command with env sanitization
-        use std::os::unix::process::CommandExt;
-
-        let mut cmd = std::process::Command::new("sh");
-        cmd.arg("-c")
-            .arg(command)
-            .current_dir(working_dir)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-
-        // Apply env sanitization (whitelist approach)
-        super::env_sanitizer::apply_to_command(&mut cmd, &config.process);
-
-        audit_entries.push(AuditEntry {
-            timestamp: now_iso8601(),
-            event_type: AuditEventType::EnvVarStripped,
-            detail: format!(
-                "env sanitized: {} vars allowed",
-                config.process.allowed_env_vars.len()
-            ),
-            metadata: serde_json::json!({"allowed_count": config.process.allowed_env_vars.len()}),
-        });
-
-        // Step 4: Apply rlimits + network ns + landlock in child via pre_exec
-        // Order: rlimits → unshare(net) → landlock (per governance decision)
-        // SAFETY: All syscalls (setrlimit, unshare, landlock_restrict_self) are
-        // async-signal-safe.
-        let network_policy = config.network.clone();
-        unsafe {
-            cmd.pre_exec(move || {
-                // 1. Apply resource limits
-                super::rlimits::apply_rlimits(&process_policy)?;
-                // 2. Apply network isolation (unshare NEWUSER|NEWNET)
-                super::network::apply_network_isolation(&network_policy)?;
-                // 3. Apply landlock filesystem restrictions
-                apply_landlock_in_child(&working_dir_owned, &allowed_read, &allowed_write)
+/// Step 1: validate the shell command lexically. Returns `Some(blocked)` if
+/// the command is rejected; otherwise pushes warnings to the audit trail
+/// and returns `None`.
+fn validate_command_phase(
+    command: &str,
+    audit_entries: &mut Vec<AuditEntry>,
+) -> Option<SandboxResult> {
+    let validator_config = ValidatorConfig::default();
+    match command_validator::validate_command(command, &validator_config) {
+        ValidationResult::Blocked(violation) => {
+            audit_entries.push(AuditEntry {
+                timestamp: now_iso8601(),
+                event_type: AuditEventType::ViolationBlocked,
+                detail: format!("command blocked by validator: {command}"),
+                metadata: serde_json::json!({"command": command}),
             });
+            Some(SandboxResult::blocked(violation))
         }
+        ValidationResult::Warning(msg) => {
+            audit_entries.push(AuditEntry {
+                timestamp: now_iso8601(),
+                event_type: AuditEventType::ViolationBlocked,
+                detail: format!("command warning: {msg}"),
+                metadata: serde_json::json!({"command": command, "warning": msg}),
+            });
+            None
+        }
+        ValidationResult::Allowed => None,
+    }
+}
 
-        audit_entries.push(AuditEntry {
-            timestamp: now_iso8601(),
-            event_type: AuditEventType::ResourceLimitApplied,
-            detail: format!(
-                "rlimits: cpu={}s mem={}B fsize={}B nproc={}",
-                config.process.max_cpu_seconds,
-                config.process.max_memory_bytes,
-                config.process.max_file_size_bytes,
-                config.process.max_processes,
-            ),
-            metadata: serde_json::json!({
-                "max_cpu_seconds": config.process.max_cpu_seconds,
-                "max_memory_bytes": config.process.max_memory_bytes,
-                "max_file_size_bytes": config.process.max_file_size_bytes,
-                "max_processes": config.process.max_processes,
-            }),
+#[cfg(target_os = "linux")]
+fn landlock_init_audit(abi_version: i32) -> AuditEntry {
+    AuditEntry {
+        timestamp: now_iso8601(),
+        event_type: AuditEventType::SandboxInit,
+        detail: format!("initializing landlock sandbox (ABI v{abi_version})"),
+        metadata: serde_json::json!({"abi_version": abi_version}),
+    }
+}
+
+fn command_start_audit(command: &str, working_dir: &Path) -> AuditEntry {
+    AuditEntry {
+        timestamp: now_iso8601(),
+        event_type: AuditEventType::CommandStart,
+        detail: format!("executing: {command}"),
+        metadata: serde_json::json!({"command": command, "workdir": working_dir.display().to_string()}),
+    }
+}
+
+fn env_sanitized_audit(config: &SandboxConfig) -> AuditEntry {
+    AuditEntry {
+        timestamp: now_iso8601(),
+        event_type: AuditEventType::EnvVarStripped,
+        detail: format!(
+            "env sanitized: {} vars allowed",
+            config.process.allowed_env_vars.len()
+        ),
+        metadata: serde_json::json!({"allowed_count": config.process.allowed_env_vars.len()}),
+    }
+}
+
+fn rlimits_audit(config: &SandboxConfig) -> AuditEntry {
+    AuditEntry {
+        timestamp: now_iso8601(),
+        event_type: AuditEventType::ResourceLimitApplied,
+        detail: format!(
+            "rlimits: cpu={}s mem={}B fsize={}B nproc={}",
+            config.process.max_cpu_seconds,
+            config.process.max_memory_bytes,
+            config.process.max_file_size_bytes,
+            config.process.max_processes,
+        ),
+        metadata: serde_json::json!({
+            "max_cpu_seconds": config.process.max_cpu_seconds,
+            "max_memory_bytes": config.process.max_memory_bytes,
+            "max_file_size_bytes": config.process.max_file_size_bytes,
+            "max_processes": config.process.max_processes,
+        }),
+    }
+}
+
+/// Build the `Command` with env sanitization and the landlock pre_exec
+/// closure (rlimits → unshare(net) → landlock, in that order).
+#[cfg(target_os = "linux")]
+fn build_landlock_command(
+    command: &str,
+    working_dir: &Path,
+    config: &SandboxConfig,
+) -> std::process::Command {
+    use std::os::unix::process::CommandExt;
+    let mut cmd = std::process::Command::new("sh");
+    cmd.arg("-c")
+        .arg(command)
+        .current_dir(working_dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    super::env_sanitizer::apply_to_command(&mut cmd, &config.process);
+
+    let working_dir_owned = working_dir.to_path_buf();
+    let allowed_read: Vec<String> = config.filesystem.allowed_read.clone();
+    let allowed_write: Vec<String> = config.filesystem.allowed_write.clone();
+    let process_policy = config.process.clone();
+    let network_policy = config.network.clone();
+    // SAFETY: ADR-021#unsafe — pre_exec runs in the forked child.
+    // All three syscalls invoked here (setrlimit, unshare(NEWUSER|NEWNET),
+    // landlock_restrict_self) are async-signal-safe per the kernel docs.
+    unsafe {
+        cmd.pre_exec(move || {
+            super::rlimits::apply_rlimits(&process_policy)?;
+            super::network::apply_network_isolation(&network_policy)?;
+            apply_landlock_in_child(&working_dir_owned, &allowed_read, &allowed_write)
         });
+    }
+    cmd
+}
 
-        let output = cmd.output();
-
-        let output = match output {
-            Ok(o) => o,
-            Err(e) => {
-                audit_entries.push(AuditEntry {
-                    timestamp: now_iso8601(),
-                    event_type: AuditEventType::CommandEnd,
-                    detail: format!("spawn failed: {e}"),
-                    metadata: serde_json::json!({"error": e.to_string()}),
-                });
-                return Ok(SandboxResult::failed(
-                    -1,
-                    String::new(),
-                    format!("sandbox spawn failed: {e}"),
-                    vec![],
-                    audit_entries,
-                ));
-            }
-        };
-
-        let exit_code = output.status.code().unwrap_or(-1);
-        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-
-        audit_entries.push(AuditEntry {
-            timestamp: now_iso8601(),
-            event_type: AuditEventType::CommandEnd,
-            detail: format!("command finished with exit code {exit_code}"),
-            metadata: serde_json::json!({"exit_code": exit_code}),
-        });
-
-        if output.status.success() {
-            Ok(SandboxResult::success(
-                exit_code,
-                stdout,
-                stderr,
-                audit_entries,
-            ))
-        } else {
-            Ok(SandboxResult::failed(
-                exit_code,
-                stdout,
-                stderr,
+/// Convert the spawned `Command::output()` result into a `SandboxResult`,
+/// pushing CommandEnd audit entries on both success and failure paths.
+fn run_command_and_collect(
+    output: std::io::Result<std::process::Output>,
+    mut audit_entries: Vec<AuditEntry>,
+) -> Result<SandboxResult, SandboxError> {
+    let output = match output {
+        Ok(o) => o,
+        Err(e) => {
+            audit_entries.push(AuditEntry {
+                timestamp: now_iso8601(),
+                event_type: AuditEventType::CommandEnd,
+                detail: format!("spawn failed: {e}"),
+                metadata: serde_json::json!({"error": e.to_string()}),
+            });
+            return Ok(SandboxResult::failed(
+                -1,
+                String::new(),
+                format!("sandbox spawn failed: {e}"),
                 vec![],
                 audit_entries,
-            ))
+            ));
         }
+    };
+    let exit_code = output.status.code().unwrap_or(-1);
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    audit_entries.push(AuditEntry {
+        timestamp: now_iso8601(),
+        event_type: AuditEventType::CommandEnd,
+        detail: format!("command finished with exit code {exit_code}"),
+        metadata: serde_json::json!({"exit_code": exit_code}),
+    });
+    if output.status.success() {
+        Ok(SandboxResult::success(
+            exit_code,
+            stdout,
+            stderr,
+            audit_entries,
+        ))
+    } else {
+        Ok(SandboxResult::failed(
+            exit_code,
+            stdout,
+            stderr,
+            vec![],
+            audit_entries,
+        ))
     }
 }
 

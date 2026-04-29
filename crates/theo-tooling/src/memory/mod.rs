@@ -235,131 +235,145 @@ impl Tool for MemoryTool {
             .join(".config")
             .join("theo")
             .join("memory");
-
         let store = FileMemoryStore::for_project(&memory_root, &ctx.project_dir);
 
         match action {
-            "save" => {
-                let key = args
-                    .get("key")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| ToolError::InvalidArgs("save requires 'key'".to_string()))?;
-                let value = args
-                    .get("value")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| ToolError::InvalidArgs("save requires 'value'".to_string()))?;
-
-                let entry = AgentMemoryEntry {
-                    key: key.to_string(),
-                    value: value.to_string(),
-                    created_at: now_millis(),
-                    run_id: ctx.call_id.clone(),
-                };
-                store.save(&entry).await?;
-
-                Ok(ToolOutput {
-                    title: format!("Saved memory: {key}"),
-                    output: format!("Memory saved: {} = {}", key, value),
-                    metadata: serde_json::json!({"action": "save", "key": key}),
-                    attachments: None,
-                    llm_suffix: None,
-                })
-            }
-            "recall" => {
-                let key = args
-                    .get("key")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| ToolError::InvalidArgs("recall requires 'key'".to_string()))?;
-
-                match store.recall(key).await? {
-                    Some(entry) => Ok(ToolOutput {
-                        title: format!("Memory: {key}"),
-                        output: entry.value,
-                        metadata: serde_json::json!({"action": "recall", "key": key, "found": true}),
-                        attachments: None,
-                        llm_suffix: None,
-                    }),
-                    None => Ok(ToolOutput {
-                        title: format!("Memory not found: {key}"),
-                        output: format!("No memory found for key '{key}'"),
-                        metadata: serde_json::json!({"action": "recall", "key": key, "found": false}),
-                        attachments: None,
-                        llm_suffix: None,
-                    }),
-                }
-            }
-            "list" => {
-                let entries = store.list().await?;
-                let output = if entries.is_empty() {
-                    "No memories stored for this project.".to_string()
-                } else {
-                    entries
-                        .iter()
-                        .map(|e| format!("- {}: {}", e.key, e.value))
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                };
-
-                Ok(ToolOutput {
-                    title: format!("{} memories", entries.len()),
-                    output,
-                    metadata: serde_json::json!({"action": "list", "count": entries.len()}),
-                    attachments: None,
-                    llm_suffix: None,
-                })
-            }
-            "search" => {
-                let query = args
-                    .get("query")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| ToolError::InvalidArgs("search requires 'query'".to_string()))?;
-
-                let results = store.search(query).await?;
-                let output = if results.is_empty() {
-                    format!("No memories matching '{query}'")
-                } else {
-                    results
-                        .iter()
-                        .map(|e| format!("- {}: {}", e.key, e.value))
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                };
-
-                Ok(ToolOutput {
-                    title: format!("{} results for '{query}'", results.len()),
-                    output,
-                    metadata: serde_json::json!({"action": "search", "query": query, "count": results.len()}),
-                    attachments: None,
-                    llm_suffix: None,
-                })
-            }
-            "delete" => {
-                let key = args
-                    .get("key")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| ToolError::InvalidArgs("delete requires 'key'".to_string()))?;
-
-                let deleted = store.delete(key).await?;
-                let output = if deleted {
-                    format!("Memory '{key}' deleted")
-                } else {
-                    format!("Memory '{key}' not found")
-                };
-
-                Ok(ToolOutput {
-                    title: format!("Delete: {key}"),
-                    output,
-                    metadata: serde_json::json!({"action": "delete", "key": key, "deleted": deleted}),
-                    attachments: None,
-                    llm_suffix: None,
-                })
-            }
+            "save" => save_action(&store, &args, ctx).await,
+            "recall" => recall_action(&store, &args).await,
+            "list" => list_action(&store).await,
+            "search" => search_action(&store, &args).await,
+            "delete" => delete_action(&store, &args).await,
             other => Err(ToolError::InvalidArgs(format!(
                 "Unknown action '{}'. Use: save, recall, list, search, delete",
                 other
             ))),
         }
     }
+}
+
+async fn save_action(
+    store: &FileMemoryStore,
+    args: &serde_json::Value,
+    ctx: &ToolContext,
+) -> Result<ToolOutput, ToolError> {
+    let key = args
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ToolError::InvalidArgs("save requires 'key'".to_string()))?;
+    let value = args
+        .get("value")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ToolError::InvalidArgs("save requires 'value'".to_string()))?;
+    let entry = AgentMemoryEntry {
+        key: key.to_string(),
+        value: value.to_string(),
+        created_at: now_millis(),
+        run_id: ctx.call_id.clone(),
+    };
+    store.save(&entry).await?;
+    Ok(ToolOutput {
+        title: format!("Saved memory: {key}"),
+        output: format!("Memory saved: {} = {}", key, value),
+        metadata: serde_json::json!({"action": "save", "key": key}),
+        attachments: None,
+        llm_suffix: None,
+    })
+}
+
+async fn recall_action(
+    store: &FileMemoryStore,
+    args: &serde_json::Value,
+) -> Result<ToolOutput, ToolError> {
+    let key = args
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ToolError::InvalidArgs("recall requires 'key'".to_string()))?;
+    match store.recall(key).await? {
+        Some(entry) => Ok(ToolOutput {
+            title: format!("Memory: {key}"),
+            output: entry.value,
+            metadata: serde_json::json!({"action": "recall", "key": key, "found": true}),
+            attachments: None,
+            llm_suffix: None,
+        }),
+        None => Ok(ToolOutput {
+            title: format!("Memory not found: {key}"),
+            output: format!("No memory found for key '{key}'"),
+            metadata: serde_json::json!({"action": "recall", "key": key, "found": false}),
+            attachments: None,
+            llm_suffix: None,
+        }),
+    }
+}
+
+async fn list_action(store: &FileMemoryStore) -> Result<ToolOutput, ToolError> {
+    let entries = store.list().await?;
+    let output = if entries.is_empty() {
+        "No memories stored for this project.".to_string()
+    } else {
+        entries
+            .iter()
+            .map(|e| format!("- {}: {}", e.key, e.value))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    Ok(ToolOutput {
+        title: format!("{} memories", entries.len()),
+        output,
+        metadata: serde_json::json!({"action": "list", "count": entries.len()}),
+        attachments: None,
+        llm_suffix: None,
+    })
+}
+
+async fn search_action(
+    store: &FileMemoryStore,
+    args: &serde_json::Value,
+) -> Result<ToolOutput, ToolError> {
+    let query = args
+        .get("query")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ToolError::InvalidArgs("search requires 'query'".to_string()))?;
+    let results = store.search(query).await?;
+    let output = if results.is_empty() {
+        format!("No memories matching '{query}'")
+    } else {
+        results
+            .iter()
+            .map(|e| format!("- {}: {}", e.key, e.value))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    Ok(ToolOutput {
+        title: format!("{} results for '{query}'", results.len()),
+        output,
+        metadata: serde_json::json!({"action": "search", "query": query, "count": results.len()}),
+        attachments: None,
+        llm_suffix: None,
+    })
+}
+
+async fn delete_action(
+    store: &FileMemoryStore,
+    args: &serde_json::Value,
+) -> Result<ToolOutput, ToolError> {
+    let key = args
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ToolError::InvalidArgs("delete requires 'key'".to_string()))?;
+    let deleted = store.delete(key).await?;
+    let output = if deleted {
+        format!("Memory '{key}' deleted")
+    } else {
+        format!("Memory '{key}' not found")
+    };
+    Ok(ToolOutput {
+        title: format!("Delete: {key}"),
+        output,
+        metadata: serde_json::json!({"action": "delete", "key": key, "deleted": deleted}),
+        attachments: None,
+        llm_suffix: None,
+    })
 }
 
 fn now_millis() -> u64 {

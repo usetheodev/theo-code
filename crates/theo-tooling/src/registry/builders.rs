@@ -17,43 +17,27 @@ use theo_domain::tool::Tool;
 ///
 /// Panics if any built-in tool has an invalid schema (programming error).
 pub fn create_default_registry() -> ToolRegistry {
-    use crate::apply_patch::ApplyPatchTool;
-    use crate::bash::BashTool;
-    use crate::browser::{
-        BrowserClickTool, BrowserCloseTool, BrowserEvalTool, BrowserOpenTool,
-        BrowserScreenshotTool, BrowserSessionManager, BrowserStatusTool, BrowserTypeTool,
-        BrowserWaitForSelectorTool,
-    };
-    use crate::edit::EditTool;
-    use crate::glob::GlobTool;
-    use crate::grep::GrepTool;
-    use crate::lsp::{
-        LspDefinitionTool, LspHoverTool, LspReferencesTool, LspRenameTool,
-        LspSessionManager, LspStatusTool,
-    };
-    use crate::memory::MemoryTool;
-    use crate::plan::{
-        AdvancePhaseTool, CreatePlanTool, GetNextTaskTool, GetPlanSummaryTool, LogEntryTool,
-        PlanFailureStatusTool, ReplanTool, UpdateTaskTool,
-    };
-    use crate::docs_search::DocsSearchTool;
-    use crate::read::ReadTool;
-    use crate::read_image::ReadImageTool;
-    use crate::reflect::ReflectTool;
-    use crate::screenshot::ScreenshotTool;
-    use crate::test_gen::{GenMutationTestTool, GenPropertyTestTool};
-    use crate::think::ThinkTool;
-    use crate::todo::{TaskCreateTool, TaskUpdateTool};
-    use crate::webfetch::WebFetchTool;
-    use crate::write::WriteTool;
-
     let mut registry = ToolRegistry::new();
+    let mut tools: Vec<Box<dyn Tool>> = Vec::new();
+    tools.push(build_bash_tool_with_sandbox());
+    tools.extend(file_ops_tools());
+    tools.extend(cognitive_tools());
+    tools.extend(plan_tools());
+    tools.extend(autotest_tools());
+    tools.extend(multimodal_tools());
+    tools.extend(docs_tools());
+    tools.extend(lsp_default_stub_tools());
+    tools.extend(browser_default_stub_tools());
+    tools.extend(plugin_tools());
+    register_all(&mut registry, tools);
+    registry
+}
 
-    // Activate sandbox for BashTool — bwrap > landlock > noop cascade.
-    // Allow build tools (cargo, rustc) inside sandbox via read-only mounts.
+/// Activate sandbox for BashTool — bwrap > landlock > noop cascade.
+/// Falls back to no-sandbox if executor creation fails.
+fn build_bash_tool_with_sandbox() -> Box<dyn Tool> {
+    use crate::bash::BashTool;
     let mut sandbox_config = theo_domain::sandbox::SandboxConfig::default();
-
-    // Mount cargo/rustup toolchains as read-only so build tools work inside sandbox
     if let Ok(home) = std::env::var("HOME") {
         let cargo_dir = format!("{home}/.cargo");
         let rustup_dir = format!("{home}/.rustup");
@@ -64,14 +48,13 @@ pub fn create_default_registry() -> ToolRegistry {
             sandbox_config.filesystem.allowed_read.push(rustup_dir);
         }
     }
-    // Allow build tool env vars through the sanitizer
     sandbox_config.process.allowed_env_vars.extend(vec![
         "CARGO_HOME".to_string(),
         "RUSTUP_HOME".to_string(),
         "RUSTFLAGS".to_string(),
         "CARGO_TARGET_DIR".to_string(),
     ]);
-    let bash_tool = match crate::sandbox::executor::create_executor(&sandbox_config) {
+    match crate::sandbox::executor::create_executor(&sandbox_config) {
         Ok(executor) => Box::new(BashTool::with_sandbox(
             std::sync::Arc::from(executor),
             sandbox_config,
@@ -80,10 +63,18 @@ pub fn create_default_registry() -> ToolRegistry {
             eprintln!("[theo] Warning: sandbox unavailable — BashTool running without isolation");
             Box::new(BashTool::new()) as Box<dyn Tool>
         }
-    };
+    }
+}
 
-    let tools: Vec<Box<dyn Tool>> = vec![
-        bash_tool,
+fn file_ops_tools() -> Vec<Box<dyn Tool>> {
+    use crate::apply_patch::ApplyPatchTool;
+    use crate::edit::EditTool;
+    use crate::glob::GlobTool;
+    use crate::grep::GrepTool;
+    use crate::read::ReadTool;
+    use crate::webfetch::WebFetchTool;
+    use crate::write::WriteTool;
+    vec![
         Box::new(ReadTool::new()),
         Box::new(WriteTool::new()),
         Box::new(EditTool::new()),
@@ -91,13 +82,29 @@ pub fn create_default_registry() -> ToolRegistry {
         Box::new(GlobTool::new()),
         Box::new(ApplyPatchTool::new()),
         Box::new(WebFetchTool::new()),
-        // Cognitive tools
+    ]
+}
+
+fn cognitive_tools() -> Vec<Box<dyn Tool>> {
+    use crate::memory::MemoryTool;
+    use crate::reflect::ReflectTool;
+    use crate::think::ThinkTool;
+    use crate::todo::{TaskCreateTool, TaskUpdateTool};
+    vec![
         Box::new(ThinkTool::new()),
         Box::new(ReflectTool::new()),
         Box::new(MemoryTool::new()),
         Box::new(TaskCreateTool::new()),
         Box::new(TaskUpdateTool::new()),
-        // SOTA Planning System — schema-validated plans
+    ]
+}
+
+fn plan_tools() -> Vec<Box<dyn Tool>> {
+    use crate::plan::{
+        AdvancePhaseTool, CreatePlanTool, GetNextTaskTool, GetPlanSummaryTool, LogEntryTool,
+        PlanFailureStatusTool, ReplanTool, UpdateTaskTool,
+    };
+    vec![
         Box::new(CreatePlanTool::new()),
         Box::new(UpdateTaskTool::new()),
         Box::new(AdvancePhaseTool::new()),
@@ -105,72 +112,83 @@ pub fn create_default_registry() -> ToolRegistry {
         Box::new(GetPlanSummaryTool::new()),
         Box::new(GetNextTaskTool::new()),
         Box::new(ReplanTool::new()),
-        // T6.1 part 4 — agent-callable view of failure_count state
         Box::new(PlanFailureStatusTool::new()),
-        // T5.1 / T5.2 — auto-test-generation
+    ]
+}
+
+fn autotest_tools() -> Vec<Box<dyn Tool>> {
+    use crate::test_gen::{GenMutationTestTool, GenPropertyTestTool};
+    vec![
         Box::new(GenPropertyTestTool::new()),
         Box::new(GenMutationTestTool::new()),
-        // T1.2 — multimodal: load images as vision blocks
+    ]
+}
+
+fn multimodal_tools() -> Vec<Box<dyn Tool>> {
+    use crate::read_image::ReadImageTool;
+    use crate::screenshot::ScreenshotTool;
+    vec![
         Box::new(ReadImageTool::new()),
-        // T1.1 — multimodal: capture local screen via platform CLI
-        // (screencapture / gnome-screenshot / import). Gracefully
-        // degrades to typed `no display` error in headless contexts.
         Box::new(ScreenshotTool::new()),
-        // T15.1 — external docs RAG (empty index by default; populated
-        // by future commits that wire crates.io/MDN/npm sources)
-        Box::new(DocsSearchTool::new()),
-        // T3.1 — LSP tool family. Default registry uses an empty
-        // catalogue (no PATH discovery) so the tools surface the
-        // same actionable error for every call until
-        // `create_default_registry_with_project` swaps in real
-        // session managers. Keeping the tools registered in the
-        // default registry preserves the manifest invariant
-        // (every DefaultRegistry entry is reachable from
-        // create_default_registry).
-        Box::new(LspStatusTool::new(std::sync::Arc::new(
-            LspSessionManager::from_catalogue(std::collections::HashMap::new()),
-        ))),
-        Box::new(LspDefinitionTool::new(std::sync::Arc::new(
-            LspSessionManager::from_catalogue(std::collections::HashMap::new()),
-        ))),
-        Box::new(LspReferencesTool::new(std::sync::Arc::new(
-            LspSessionManager::from_catalogue(std::collections::HashMap::new()),
-        ))),
-        Box::new(LspHoverTool::new(std::sync::Arc::new(
-            LspSessionManager::from_catalogue(std::collections::HashMap::new()),
-        ))),
-        Box::new(LspRenameTool::new(std::sync::Arc::new(
-            LspSessionManager::from_catalogue(std::collections::HashMap::new()),
-        ))),
-        // T2.1 — browser tool family. Default registry uses managers
-        // pointing at a non-existent script path so every call
-        // surfaces the same actionable "missing script" error until
-        // the project-aware constructor swaps in real managers.
-        Box::new(BrowserStatusTool::new(std::sync::Arc::new(
-            BrowserSessionManager::new("node", "/__theo_no_browser__/playwright_sidecar.js"),
-        ))),
-        Box::new(BrowserOpenTool::new(std::sync::Arc::new(
-            BrowserSessionManager::new("node", "/__theo_no_browser__/playwright_sidecar.js"),
-        ))),
-        Box::new(BrowserClickTool::new(std::sync::Arc::new(
-            BrowserSessionManager::new("node", "/__theo_no_browser__/playwright_sidecar.js"),
-        ))),
-        Box::new(BrowserScreenshotTool::new(std::sync::Arc::new(
-            BrowserSessionManager::new("node", "/__theo_no_browser__/playwright_sidecar.js"),
-        ))),
-        Box::new(BrowserTypeTool::new(std::sync::Arc::new(
-            BrowserSessionManager::new("node", "/__theo_no_browser__/playwright_sidecar.js"),
-        ))),
-        Box::new(BrowserEvalTool::new(std::sync::Arc::new(
-            BrowserSessionManager::new("node", "/__theo_no_browser__/playwright_sidecar.js"),
-        ))),
-        Box::new(BrowserWaitForSelectorTool::new(std::sync::Arc::new(
-            BrowserSessionManager::new("node", "/__theo_no_browser__/playwright_sidecar.js"),
-        ))),
-        Box::new(BrowserCloseTool::new(std::sync::Arc::new(
-            BrowserSessionManager::new("node", "/__theo_no_browser__/playwright_sidecar.js"),
-        ))),
-        // Builtin plugins — typed operations
+    ]
+}
+
+fn docs_tools() -> Vec<Box<dyn Tool>> {
+    use crate::docs_search::DocsSearchTool;
+    vec![Box::new(DocsSearchTool::new())]
+}
+
+/// Default LSP stubs — empty catalogue, surfaced as the same actionable
+/// error for every call until `create_default_registry_with_project`
+/// swaps in real session managers.
+fn lsp_default_stub_tools() -> Vec<Box<dyn Tool>> {
+    use crate::lsp::{
+        LspDefinitionTool, LspHoverTool, LspReferencesTool, LspRenameTool, LspSessionManager,
+        LspStatusTool,
+    };
+    let empty = || {
+        std::sync::Arc::new(LspSessionManager::from_catalogue(
+            std::collections::HashMap::new(),
+        ))
+    };
+    vec![
+        Box::new(LspStatusTool::new(empty())),
+        Box::new(LspDefinitionTool::new(empty())),
+        Box::new(LspReferencesTool::new(empty())),
+        Box::new(LspHoverTool::new(empty())),
+        Box::new(LspRenameTool::new(empty())),
+    ]
+}
+
+/// Default browser stubs — pointed at a non-existent script path so every
+/// call surfaces the actionable "missing script" error until the
+/// project-aware constructor swaps in real managers.
+fn browser_default_stub_tools() -> Vec<Box<dyn Tool>> {
+    use crate::browser::{
+        BrowserClickTool, BrowserCloseTool, BrowserEvalTool, BrowserOpenTool,
+        BrowserScreenshotTool, BrowserSessionManager, BrowserStatusTool, BrowserTypeTool,
+        BrowserWaitForSelectorTool,
+    };
+    let stub = || {
+        std::sync::Arc::new(BrowserSessionManager::new(
+            "node",
+            "/__theo_no_browser__/playwright_sidecar.js",
+        ))
+    };
+    vec![
+        Box::new(BrowserStatusTool::new(stub())),
+        Box::new(BrowserOpenTool::new(stub())),
+        Box::new(BrowserClickTool::new(stub())),
+        Box::new(BrowserScreenshotTool::new(stub())),
+        Box::new(BrowserTypeTool::new(stub())),
+        Box::new(BrowserEvalTool::new(stub())),
+        Box::new(BrowserWaitForSelectorTool::new(stub())),
+        Box::new(BrowserCloseTool::new(stub())),
+    ]
+}
+
+fn plugin_tools() -> Vec<Box<dyn Tool>> {
+    vec![
         Box::new(crate::git::GitStatusTool),
         Box::new(crate::git::GitDiffTool),
         Box::new(crate::git::GitLogTool),
@@ -178,18 +196,17 @@ pub fn create_default_registry() -> ToolRegistry {
         Box::new(crate::env_info::EnvInfoTool),
         Box::new(crate::http_client::HttpGetTool),
         Box::new(crate::http_client::HttpPostTool),
-        // Code intelligence — on-demand codebase structure map
         Box::new(crate::codebase_context::CodebaseContextTool::new()),
-    ];
+    ]
+}
 
+fn register_all(registry: &mut ToolRegistry, tools: Vec<Box<dyn Tool>>) {
     for tool in tools {
         let id = tool.id().to_string();
         registry
             .register(tool)
             .unwrap_or_else(|e| panic!("Built-in tool '{id}' has invalid schema: {e}"));
     }
-
-    registry
 }
 
 /// T15.1 + T3.1 — Variant of [`create_default_registry`] that wires

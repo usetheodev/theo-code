@@ -91,112 +91,119 @@ impl Tool for PlanFailureStatusTool {
             .and_then(Value::as_u64)
             .map(|n| n as u32)
             .unwrap_or(DEFAULT_FAILURE_THRESHOLD);
-
         let path = plan_path(&ctx.project_dir);
         if !path.exists() {
-            return Ok(ToolOutput {
-                title: "plan_failure_status: no plan".into(),
-                output: "No plan.json found at .theo/plans/plan.json. Call \
-                         plan_create to author one."
-                    .into(),
-                metadata: json!({
-                    "type": "plan_failure_status",
-                    "threshold": threshold,
-                    "stuck_count": 0,
-                    "stuck_tasks": [],
-                }),
-                attachments: None,
-                llm_suffix: None,
-            });
+            return Ok(no_plan_output(threshold));
         }
-
         let plan = read_plan(&path)?;
-        let offender_ids = plan.tasks_exceeding_failure_threshold(threshold);
-        let by_id: std::collections::HashMap<_, _> = plan
-            .all_tasks()
-            .into_iter()
-            .map(|t| (t.id, t.clone()))
-            .collect();
-
-        let mut entries: Vec<Value> = Vec::with_capacity(offender_ids.len());
-        for id in &offender_ids {
-            if let Some(task) = by_id.get(id) {
-                entries.push(json!({
-                    "task_id": id.as_u32(),
-                    "title": task.title,
-                    "failure_count": task.failure_count,
-                    "status": format!("{:?}", task.status),
-                    "outcome": task.outcome.as_deref().unwrap_or(""),
-                    "depends_on": task.depends_on.iter().map(|d| d.as_u32()).collect::<Vec<_>>(),
-                }));
-            }
-        }
-
+        let entries = collect_stuck_entries(&plan, threshold);
         if entries.is_empty() {
-            return Ok(ToolOutput {
-                title: format!(
-                    "plan_failure_status: 0 task(s) ≥ {threshold} failures"
-                ),
-                output: format!(
-                    "No tasks have reached the failure threshold ({threshold}). \
-                     The plan is healthy. Check `plan_next_task` for the \
-                     next actionable item."
-                ),
-                metadata: json!({
-                    "type": "plan_failure_status",
-                    "threshold": threshold,
-                    "stuck_count": 0,
-                    "stuck_tasks": [],
-                }),
-                attachments: None,
-                llm_suffix: None,
-            });
+            return Ok(no_offenders_output(threshold));
         }
+        Ok(stuck_output(threshold, entries))
+    }
+}
 
-        let mut output = format!(
-            "plan_failure_status: {n} task(s) at or above threshold {threshold}\n\n",
-            n = entries.len(),
-        );
-        for e in &entries {
-            output.push_str(&format!(
-                "  - id={id}  failures={fc}  status={st}\n    title: {title}\n",
-                id = e["task_id"],
-                fc = e["failure_count"],
-                st = e["status"].as_str().unwrap_or("?"),
-                title = e["title"].as_str().unwrap_or(""),
-            ));
-            let outcome = e["outcome"].as_str().unwrap_or("");
-            if !outcome.is_empty() {
-                let preview: String = outcome.chars().take(120).collect();
-                let suffix = if outcome.chars().count() > 120 {
-                    "…"
-                } else {
-                    ""
-                };
-                output.push_str(&format!("    last outcome: {preview}{suffix}\n"));
-            }
+fn no_plan_output(threshold: u32) -> ToolOutput {
+    ToolOutput {
+        title: "plan_failure_status: no plan".into(),
+        output: "No plan.json found at .theo/plans/plan.json. Call \
+                 plan_create to author one."
+            .into(),
+        metadata: json!({
+            "type": "plan_failure_status",
+            "threshold": threshold,
+            "stuck_count": 0,
+            "stuck_tasks": [],
+        }),
+        attachments: None,
+        llm_suffix: None,
+    }
+}
+
+fn no_offenders_output(threshold: u32) -> ToolOutput {
+    ToolOutput {
+        title: format!("plan_failure_status: 0 task(s) ≥ {threshold} failures"),
+        output: format!(
+            "No tasks have reached the failure threshold ({threshold}). \
+             The plan is healthy. Check `plan_next_task` for the \
+             next actionable item."
+        ),
+        metadata: json!({
+            "type": "plan_failure_status",
+            "threshold": threshold,
+            "stuck_count": 0,
+            "stuck_tasks": [],
+        }),
+        attachments: None,
+        llm_suffix: None,
+    }
+}
+
+fn collect_stuck_entries(plan: &theo_domain::plan::Plan, threshold: u32) -> Vec<Value> {
+    let offender_ids = plan.tasks_exceeding_failure_threshold(threshold);
+    let by_id: std::collections::HashMap<_, _> = plan
+        .all_tasks()
+        .into_iter()
+        .map(|t| (t.id, t.clone()))
+        .collect();
+    let mut entries: Vec<Value> = Vec::with_capacity(offender_ids.len());
+    for id in &offender_ids {
+        if let Some(task) = by_id.get(id) {
+            entries.push(json!({
+                "task_id": id.as_u32(),
+                "title": task.title,
+                "failure_count": task.failure_count,
+                "status": format!("{:?}", task.status),
+                "outcome": task.outcome.as_deref().unwrap_or(""),
+                "depends_on": task.depends_on.iter().map(|d| d.as_u32()).collect::<Vec<_>>(),
+            }));
         }
-        output.push_str(
-            "\nNext: call `plan_replan` with a SkipTask (unrecoverable), \
-             EditTask (clarify dod/files), or RemoveTask patch for one of \
-             the offenders.",
-        );
+    }
+    entries
+}
 
-        Ok(ToolOutput {
-            title: format!(
-                "plan_failure_status: {} stuck task(s)",
-                entries.len()
-            ),
-            output,
-            metadata: json!({
-                "type": "plan_failure_status",
-                "threshold": threshold,
-                "stuck_count": entries.len(),
-                "stuck_tasks": entries,
-            }),
-            attachments: None,
-            llm_suffix: None,
-        })
+fn stuck_output(threshold: u32, entries: Vec<Value>) -> ToolOutput {
+    let mut output = format!(
+        "plan_failure_status: {n} task(s) at or above threshold {threshold}\n\n",
+        n = entries.len(),
+    );
+    for e in &entries {
+        output.push_str(&format!(
+            "  - id={id}  failures={fc}  status={st}\n    title: {title}\n",
+            id = e["task_id"],
+            fc = e["failure_count"],
+            st = e["status"].as_str().unwrap_or("?"),
+            title = e["title"].as_str().unwrap_or(""),
+        ));
+        let outcome = e["outcome"].as_str().unwrap_or("");
+        if !outcome.is_empty() {
+            let preview: String = outcome.chars().take(120).collect();
+            let suffix = if outcome.chars().count() > 120 {
+                "…"
+            } else {
+                ""
+            };
+            output.push_str(&format!("    last outcome: {preview}{suffix}\n"));
+        }
+    }
+    output.push_str(
+        "\nNext: call `plan_replan` with a SkipTask (unrecoverable), \
+         EditTask (clarify dod/files), or RemoveTask patch for one of \
+         the offenders.",
+    );
+    let stuck_count = entries.len();
+    ToolOutput {
+        title: format!("plan_failure_status: {stuck_count} stuck task(s)"),
+        output,
+        metadata: json!({
+            "type": "plan_failure_status",
+            "threshold": threshold,
+            "stuck_count": stuck_count,
+            "stuck_tasks": entries,
+        }),
+        attachments: None,
+        llm_suffix: None,
     }
 }
 

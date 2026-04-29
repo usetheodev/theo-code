@@ -111,13 +111,10 @@ impl ApplyPatchTool {
         trimmed
     }
 
-    fn parse(text: &str) -> Result<Vec<PatchOp>, ToolError> {
-        let text = Self::strip_heredoc(text);
-        let lines: Vec<&str> = text.lines().collect();
-        let mut ops = Vec::new();
+    /// Locate the line index just AFTER `*** Begin Patch`. Returns
+    /// `Validation` error if the marker is missing.
+    fn skip_to_begin_patch(lines: &[&str]) -> Result<usize, ToolError> {
         let mut i = 0;
-
-        // Find *** Begin Patch
         while i < lines.len() && !lines[i].starts_with("*** Begin Patch") {
             i += 1;
         }
@@ -126,99 +123,136 @@ impl ApplyPatchTool {
                 "apply_patch verification failed: no Begin Patch marker".to_string(),
             ));
         }
-        i += 1;
+        Ok(i + 1)
+    }
+
+    /// Parse a `*** Add File: <path>` section starting at `start_idx`.
+    /// Returns the resulting `PatchOp::Add` and the index just past the section.
+    fn parse_add_section(path_ref: &str, lines: &[&str], start_idx: usize) -> (PatchOp, usize) {
+        let path = path_ref.to_string();
+        let mut i = start_idx;
+        let mut content_lines = Vec::new();
+        while i < lines.len() && !lines[i].starts_with("***") {
+            if let Some(rest) = lines[i].strip_prefix('+') {
+                content_lines.push(rest.to_string());
+            }
+            i += 1;
+        }
+        let mut content = content_lines.join("\n");
+        if !content.is_empty() {
+            content.push('\n');
+        }
+        (PatchOp::Add { path, content }, i)
+    }
+
+    /// Parse a `*** Update File: <path>` section (optional `*** Move to:`
+    /// header + 1+ hunks). Returns the `PatchOp::Update` and next index.
+    fn parse_update_section(
+        path_ref: &str,
+        lines: &[&str],
+        start_idx: usize,
+    ) -> Result<(PatchOp, usize), ToolError> {
+        let path = path_ref.to_string();
+        let mut i = start_idx;
+        let mut move_to = None;
+        if i < lines.len()
+            && let Some(dest_ref) = lines[i].strip_prefix("*** Move to: ")
+        {
+            move_to = Some(dest_ref.to_string());
+            i += 1;
+        }
+        let mut hunks = Vec::new();
+        while i < lines.len()
+            && (lines[i].starts_with("@@")
+                || lines[i].starts_with(' ')
+                || lines[i].starts_with('+')
+                || lines[i].starts_with('-')
+                || lines[i].starts_with("*** End of File"))
+        {
+            if lines[i].starts_with("@@") {
+                let (hunk, next) = Self::parse_hunk(lines, i);
+                hunks.push(hunk);
+                i = next;
+            } else {
+                i += 1;
+            }
+        }
+        if hunks.is_empty() {
+            return Err(ToolError::Validation(
+                "apply_patch verification failed: empty hunks".to_string(),
+            ));
+        }
+        Ok((
+            PatchOp::Update {
+                path,
+                hunks,
+                move_to,
+            },
+            i,
+        ))
+    }
+
+    /// Parse a single hunk starting at `@@`. Returns the `Hunk` and the
+    /// index just past the hunk's last line (including any `*** End of File`).
+    fn parse_hunk(lines: &[&str], start_idx: usize) -> (Hunk, usize) {
+        let header_line = lines[start_idx];
+        let ctx_header = if header_line.len() > 2 {
+            Some(header_line[2..].trim().to_string())
+        } else {
+            None
+        };
+        let mut i = start_idx + 1;
+        let mut hunk_lines = Vec::new();
+        let mut eof_anchor = false;
+        while i < lines.len() && !lines[i].starts_with("@@") && !lines[i].starts_with("***") {
+            let l = lines[i];
+            if let Some(rest) = l.strip_prefix('+') {
+                hunk_lines.push(HunkLine::Add(rest.to_string()));
+            } else if let Some(rest) = l.strip_prefix('-') {
+                hunk_lines.push(HunkLine::Remove(rest.to_string()));
+            } else if let Some(rest) = l.strip_prefix(' ') {
+                hunk_lines.push(HunkLine::Context(rest.to_string()));
+            }
+            i += 1;
+        }
+        if i < lines.len() && lines[i].starts_with("*** End of File") {
+            eof_anchor = true;
+            i += 1;
+        }
+        (
+            Hunk {
+                context_header: ctx_header.filter(|s| !s.is_empty()),
+                lines: hunk_lines,
+                eof_anchor,
+            },
+            i,
+        )
+    }
+
+    fn parse(text: &str) -> Result<Vec<PatchOp>, ToolError> {
+        let text = Self::strip_heredoc(text);
+        let lines: Vec<&str> = text.lines().collect();
+        let mut ops = Vec::new();
+        let mut i = Self::skip_to_begin_patch(&lines)?;
 
         while i < lines.len() {
             let line = lines[i];
             if line.starts_with("*** End Patch") {
                 break;
             }
-            // Prefer `strip_prefix`'s Option directly to double-checking via
-            // `starts_with` + `unwrap()` (T2.5 cleanup: removed 4 unwraps).
             if let Some(path_ref) = line.strip_prefix("*** Add File: ") {
-                let path = path_ref.to_string();
-                i += 1;
-                let mut content_lines = Vec::new();
-                while i < lines.len() && !lines[i].starts_with("***") {
-                    if let Some(rest) = lines[i].strip_prefix('+') {
-                        content_lines.push(rest.to_string());
-                    }
-                    i += 1;
-                }
-                let mut content = content_lines.join("\n");
-                if !content.is_empty() {
-                    content.push('\n');
-                }
-                ops.push(PatchOp::Add { path, content });
+                let (op, next) = Self::parse_add_section(path_ref, &lines, i + 1);
+                ops.push(op);
+                i = next;
             } else if let Some(path_ref) = line.strip_prefix("*** Delete File: ") {
                 ops.push(PatchOp::Delete {
                     path: path_ref.to_string(),
                 });
                 i += 1;
             } else if let Some(path_ref) = line.strip_prefix("*** Update File: ") {
-                let path = path_ref.to_string();
-                i += 1;
-                let mut move_to = None;
-                if i < lines.len()
-                    && let Some(dest_ref) = lines[i].strip_prefix("*** Move to: ")
-                {
-                    move_to = Some(dest_ref.to_string());
-                    i += 1;
-                }
-                let mut hunks = Vec::new();
-                while i < lines.len()
-                    && (lines[i].starts_with("@@")
-                        || lines[i].starts_with(' ')
-                        || lines[i].starts_with('+')
-                        || lines[i].starts_with('-')
-                        || lines[i].starts_with("*** End of File"))
-                {
-                    if lines[i].starts_with("@@") {
-                        let ctx_header = if lines[i].len() > 2 {
-                            Some(lines[i][2..].trim().to_string())
-                        } else {
-                            None
-                        };
-                        i += 1;
-                        let mut hunk_lines = Vec::new();
-                        let mut eof_anchor = false;
-                        while i < lines.len()
-                            && !lines[i].starts_with("@@")
-                            && !lines[i].starts_with("***")
-                        {
-                            let l = lines[i];
-                            if let Some(rest) = l.strip_prefix('+') {
-                                hunk_lines.push(HunkLine::Add(rest.to_string()));
-                            } else if let Some(rest) = l.strip_prefix('-') {
-                                hunk_lines.push(HunkLine::Remove(rest.to_string()));
-                            } else if let Some(rest) = l.strip_prefix(' ') {
-                                hunk_lines.push(HunkLine::Context(rest.to_string()));
-                            }
-                            i += 1;
-                        }
-                        if i < lines.len() && lines[i].starts_with("*** End of File") {
-                            eof_anchor = true;
-                            i += 1;
-                        }
-                        hunks.push(Hunk {
-                            context_header: ctx_header.filter(|s| !s.is_empty()),
-                            lines: hunk_lines,
-                            eof_anchor,
-                        });
-                    } else {
-                        i += 1;
-                    }
-                }
-                if hunks.is_empty() {
-                    return Err(ToolError::Validation(
-                        "apply_patch verification failed: empty hunks".to_string(),
-                    ));
-                }
-                ops.push(PatchOp::Update {
-                    path,
-                    hunks,
-                    move_to,
-                });
+                let (op, next) = Self::parse_update_section(path_ref, &lines, i + 1)?;
+                ops.push(op);
+                i = next;
             } else {
                 return Err(ToolError::Validation(format!(
                     "apply_patch verification failed: unexpected line: {line}"
@@ -371,6 +405,186 @@ impl ApplyPatchTool {
 
         Ok(candidates[0])
     }
+
+    /// Declare ExternalDirectory permissions for any op whose resolved path
+    /// escapes the project directory (mirrors ReadTool/WriteTool/EditTool T2.3).
+    fn declare_external_permissions(
+        ops: &[PatchOp],
+        project_dir: &std::path::Path,
+        permissions: &mut PermissionCollector,
+    ) {
+        for op in ops {
+            match op {
+                PatchOp::Add { path, .. }
+                | PatchOp::Delete { path }
+                | PatchOp::Update { path, .. } => {
+                    let resolved = Self::resolve_path(path, project_dir);
+                    let _ = Self::record_external_if_escapes(&resolved, project_dir, permissions);
+                }
+            }
+            if let PatchOp::Update {
+                move_to: Some(dest),
+                ..
+            } = op
+            {
+                let resolved = Self::resolve_path(dest, project_dir);
+                let _ = Self::record_external_if_escapes(&resolved, project_dir, permissions);
+            }
+        }
+    }
+
+    /// Fail-fast verification: every Update target must exist; every Delete
+    /// target must exist and be a file; every Update hunk must dry-run apply.
+    async fn verify_operations(
+        ops: &[PatchOp],
+        project_dir: &std::path::Path,
+    ) -> Result<(), ToolError> {
+        for op in ops {
+            match op {
+                PatchOp::Update { path, .. } => {
+                    let full = Self::resolve_path(path, project_dir);
+                    if !full.exists() {
+                        return Err(ToolError::Validation(
+                            "apply_patch verification failed: Failed to read file to update"
+                                .to_string(),
+                        ));
+                    }
+                }
+                PatchOp::Delete { path } => {
+                    let full = Self::resolve_path(path, project_dir);
+                    if !full.exists() {
+                        return Err(ToolError::Validation(format!(
+                            "apply_patch verification failed: File not found for delete: {path}"
+                        )));
+                    }
+                    if full.is_dir() {
+                        return Err(ToolError::Validation(format!(
+                            "apply_patch verification failed: Cannot delete directory: {path}"
+                        )));
+                    }
+                }
+                _ => {}
+            }
+        }
+        for op in ops {
+            if let PatchOp::Update { path, hunks, .. } = op {
+                let full = Self::resolve_path(path, project_dir);
+                let content = tokio::fs::read_to_string(&full)
+                    .await
+                    .map_err(|e| ToolError::Execution(format!("Failed to read file: {e}")))?;
+                Self::apply_hunks(&content, hunks)?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn apply_add(
+        path: &str,
+        content: &str,
+        project_dir: &std::path::Path,
+        summary: &mut Vec<String>,
+        files_info: &mut Vec<serde_json::Value>,
+    ) -> Result<(), ToolError> {
+        let full = Self::resolve_path(path, project_dir);
+        if let Some(parent) = full.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|e| ToolError::Execution(format!("{e}")))?;
+        }
+        let before = if full.exists() {
+            tokio::fs::read_to_string(&full).await.unwrap_or_default()
+        } else {
+            String::new()
+        };
+        tokio::fs::write(&full, content)
+            .await
+            .map_err(|e| ToolError::Execution(format!("{e}")))?;
+        summary.push(format!("A {}", path.replace('\\', "/")));
+        files_info.push(serde_json::json!({
+            "filePath": full.display().to_string(),
+            "relativePath": path.replace('\\', "/"),
+            "type": "add",
+            "before": before,
+            "after": content,
+        }));
+        Ok(())
+    }
+
+    async fn apply_delete(
+        path: &str,
+        project_dir: &std::path::Path,
+        summary: &mut Vec<String>,
+        files_info: &mut Vec<serde_json::Value>,
+    ) -> Result<(), ToolError> {
+        let full = Self::resolve_path(path, project_dir);
+        tokio::fs::remove_file(&full)
+            .await
+            .map_err(|e| ToolError::Execution(format!("{e}")))?;
+        summary.push(format!("D {}", path.replace('\\', "/")));
+        files_info.push(serde_json::json!({
+            "filePath": full.display().to_string(),
+            "relativePath": path.replace('\\', "/"),
+            "type": "delete",
+        }));
+        Ok(())
+    }
+
+    async fn apply_update(
+        path: &str,
+        hunks: &[Hunk],
+        move_to: Option<&str>,
+        project_dir: &std::path::Path,
+        summary: &mut Vec<String>,
+        files_info: &mut Vec<serde_json::Value>,
+    ) -> Result<(), ToolError> {
+        let full = Self::resolve_path(path, project_dir);
+        let content = tokio::fs::read_to_string(&full)
+            .await
+            .map_err(|e| ToolError::Execution(format!("{e}")))?;
+        let before = content.clone();
+        let new_content = Self::apply_hunks(&content, hunks)?;
+
+        if let Some(dest) = move_to {
+            let dest_full = Self::resolve_path(dest, project_dir);
+            if let Some(parent) = dest_full.parent() {
+                tokio::fs::create_dir_all(parent)
+                    .await
+                    .map_err(|e| ToolError::Execution(format!("{e}")))?;
+            }
+            tokio::fs::write(&dest_full, &new_content)
+                .await
+                .map_err(|e| ToolError::Execution(format!("{e}")))?;
+            tokio::fs::remove_file(&full)
+                .await
+                .map_err(|e| ToolError::Execution(format!("{e}")))?;
+            summary.push(format!(
+                "M {} -> {}",
+                path.replace('\\', "/"),
+                dest.replace('\\', "/")
+            ));
+            files_info.push(serde_json::json!({
+                "filePath": full.display().to_string(),
+                "relativePath": dest.replace('\\', "/"),
+                "type": "move",
+                "movePath": dest_full.display().to_string(),
+                "before": before,
+                "after": new_content,
+            }));
+        } else {
+            tokio::fs::write(&full, &new_content)
+                .await
+                .map_err(|e| ToolError::Execution(format!("{e}")))?;
+            summary.push(format!("M {}", path.replace('\\', "/")));
+            files_info.push(serde_json::json!({
+                "filePath": full.display().to_string(),
+                "relativePath": path.replace('\\', "/"),
+                "type": "update",
+                "before": before,
+                "after": new_content,
+            }));
+        }
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -416,177 +630,39 @@ impl Tool for ApplyPatchTool {
         permissions: &mut PermissionCollector,
     ) -> Result<ToolOutput, ToolError> {
         let patch_text = require_string(&args, "patchText")?;
-
         if patch_text.is_empty() {
             return Err(ToolError::Validation("patchText is required".to_string()));
         }
-
         let ops = Self::parse(&patch_text)?;
+        Self::declare_external_permissions(&ops, &ctx.project_dir, permissions);
+        Self::verify_operations(&ops, &ctx.project_dir).await?;
 
-        // Before touching anything, declare ExternalDirectory permissions for
-        // any operation whose resolved path escapes the project directory.
-        // Mirrors the ReadTool / WriteTool / EditTool pattern (T2.3) so
-        // patch-level writes cannot silently drop files outside the workspace.
-        for op in &ops {
-            match op {
-                PatchOp::Add { path, .. }
-                | PatchOp::Delete { path }
-                | PatchOp::Update { path, .. } => {
-                    let resolved = Self::resolve_path(path, &ctx.project_dir);
-                    let _ = Self::record_external_if_escapes(
-                        &resolved,
-                        &ctx.project_dir,
-                        permissions,
-                    );
-                }
-            }
-            if let PatchOp::Update {
-                move_to: Some(dest),
-                ..
-            } = op
-            {
-                let resolved = Self::resolve_path(dest, &ctx.project_dir);
-                let _ = Self::record_external_if_escapes(
-                    &resolved,
-                    &ctx.project_dir,
-                    permissions,
-                );
-            }
-        }
-
-        // Verify all operations first (fail-fast)
-        for op in &ops {
-            match op {
-                PatchOp::Update { path, .. } => {
-                    let full = Self::resolve_path(path, &ctx.project_dir);
-                    if !full.exists() {
-                        return Err(ToolError::Validation(
-                            "apply_patch verification failed: Failed to read file to update"
-                                .to_string(),
-                        ));
-                    }
-                }
-                PatchOp::Delete { path } => {
-                    let full = Self::resolve_path(path, &ctx.project_dir);
-                    if !full.exists() {
-                        return Err(ToolError::Validation(format!(
-                            "apply_patch verification failed: File not found for delete: {path}"
-                        )));
-                    }
-                    if full.is_dir() {
-                        return Err(ToolError::Validation(format!(
-                            "apply_patch verification failed: Cannot delete directory: {path}"
-                        )));
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        // Verify update hunks match before applying anything
-        for op in &ops {
-            if let PatchOp::Update { path, hunks, .. } = op {
-                let full = Self::resolve_path(path, &ctx.project_dir);
-                let content = tokio::fs::read_to_string(&full)
-                    .await
-                    .map_err(|e| ToolError::Execution(format!("Failed to read file: {e}")))?;
-                Self::apply_hunks(&content, hunks)?; // dry run
-            }
-        }
-
-        // Apply all operations
         let mut files_info = Vec::new();
         let mut summary = Vec::new();
-
         for op in &ops {
             match op {
                 PatchOp::Add { path, content } => {
-                    let full = Self::resolve_path(path, &ctx.project_dir);
-                    if let Some(parent) = full.parent() {
-                        tokio::fs::create_dir_all(parent)
-                            .await
-                            .map_err(|e| ToolError::Execution(format!("{e}")))?;
-                    }
-                    let before = if full.exists() {
-                        tokio::fs::read_to_string(&full).await.unwrap_or_default()
-                    } else {
-                        String::new()
-                    };
-                    tokio::fs::write(&full, content)
-                        .await
-                        .map_err(|e| ToolError::Execution(format!("{e}")))?;
-                    summary.push(format!("A {}", path.replace('\\', "/")));
-                    files_info.push(serde_json::json!({
-                        "filePath": full.display().to_string(),
-                        "relativePath": path.replace('\\', "/"),
-                        "type": "add",
-                        "before": before,
-                        "after": content,
-                    }));
+                    Self::apply_add(path, content, &ctx.project_dir, &mut summary, &mut files_info)
+                        .await?;
                 }
                 PatchOp::Delete { path } => {
-                    let full = Self::resolve_path(path, &ctx.project_dir);
-                    tokio::fs::remove_file(&full)
-                        .await
-                        .map_err(|e| ToolError::Execution(format!("{e}")))?;
-                    summary.push(format!("D {}", path.replace('\\', "/")));
-                    files_info.push(serde_json::json!({
-                        "filePath": full.display().to_string(),
-                        "relativePath": path.replace('\\', "/"),
-                        "type": "delete",
-                    }));
+                    Self::apply_delete(path, &ctx.project_dir, &mut summary, &mut files_info)
+                        .await?;
                 }
                 PatchOp::Update {
                     path,
                     hunks,
                     move_to,
                 } => {
-                    let full = Self::resolve_path(path, &ctx.project_dir);
-                    let content = tokio::fs::read_to_string(&full)
-                        .await
-                        .map_err(|e| ToolError::Execution(format!("{e}")))?;
-                    let before = content.clone();
-                    let new_content = Self::apply_hunks(&content, hunks)?;
-
-                    if let Some(dest) = move_to {
-                        let dest_full = Self::resolve_path(dest, &ctx.project_dir);
-                        if let Some(parent) = dest_full.parent() {
-                            tokio::fs::create_dir_all(parent)
-                                .await
-                                .map_err(|e| ToolError::Execution(format!("{e}")))?;
-                        }
-                        tokio::fs::write(&dest_full, &new_content)
-                            .await
-                            .map_err(|e| ToolError::Execution(format!("{e}")))?;
-                        tokio::fs::remove_file(&full)
-                            .await
-                            .map_err(|e| ToolError::Execution(format!("{e}")))?;
-                        summary.push(format!(
-                            "M {} -> {}",
-                            path.replace('\\', "/"),
-                            dest.replace('\\', "/")
-                        ));
-                        files_info.push(serde_json::json!({
-                            "filePath": full.display().to_string(),
-                            "relativePath": dest.replace('\\', "/"),
-                            "type": "move",
-                            "movePath": dest_full.display().to_string(),
-                            "before": before,
-                            "after": new_content,
-                        }));
-                    } else {
-                        tokio::fs::write(&full, &new_content)
-                            .await
-                            .map_err(|e| ToolError::Execution(format!("{e}")))?;
-                        summary.push(format!("M {}", path.replace('\\', "/")));
-                        files_info.push(serde_json::json!({
-                            "filePath": full.display().to_string(),
-                            "relativePath": path.replace('\\', "/"),
-                            "type": "update",
-                            "before": before,
-                            "after": new_content,
-                        }));
-                    }
+                    Self::apply_update(
+                        path,
+                        hunks,
+                        move_to.as_deref(),
+                        &ctx.project_dir,
+                        &mut summary,
+                        &mut files_info,
+                    )
+                    .await?;
                 }
             }
         }

@@ -3,6 +3,32 @@
 ## [Unreleased]
 
 ### Changed
+- **code-hygiene-5x5 T4.7 — theo-tooling complexity → 0** (`docs/plans/code-hygiene-5x5-plan.md`).
+  All 7 too_many_lines functions in `theo-tooling` decomposed into helpers:
+  - `apply_patch::execute` (191 LOC) → `declare_external_permissions` /
+    `verify_operations` / `apply_add` / `apply_delete` / `apply_update`
+  - `apply_patch::parse` (114 LOC) → `skip_to_begin_patch` /
+    `parse_add_section` / `parse_update_section` / `parse_hunk`
+  - `codebase_context::Tool::execute` (138 LOC) → 4 free fns
+    (`unavailable_output` / `building_output` / `error_output` /
+    `timeout_output`) + `run_query` + `format_search_result`
+  - `memory::Tool::execute` (124 LOC) → 5 per-action helpers
+    (`save_action` / `recall_action` / `list_action` / `search_action` /
+    `delete_action`)
+  - `plan::failure_status::Tool::execute` (105 LOC) → `no_plan_output` /
+    `no_offenders_output` / `collect_stuck_entries` / `stuck_output`
+  - `registry::create_default_registry` (139 LOC) → 9 per-family creators
+    (`build_bash_tool_with_sandbox`, `file_ops_tools`, `cognitive_tools`,
+    `plan_tools`, `autotest_tools`, `multimodal_tools`, `docs_tools`,
+    `lsp_default_stub_tools`, `browser_default_stub_tools`,
+    `plugin_tools`, `register_all`)
+  - `sandbox::executor::execute_sandboxed` (127 LOC) →
+    `validate_command_phase` + 4 audit-builders
+    (`landlock_init_audit` / `command_start_audit` /
+    `env_sanitized_audit` / `rlimits_audit`) +
+    `build_landlock_command` + `run_command_and_collect`
+  Complexity total: 71 → 64. theo-tooling ceiling 7 → 0.
+  Validation: cargo test 5247 PASS / 0 FAIL / 24 IGNORED, clippy 0 warnings.
 - **code-hygiene-5x5 T4.8 + T4.9 — complexity decomposition: theo-domain + theo-engine-graph → 0** (`docs/plans/code-hygiene-5x5-plan.md`).
   Two crates fully drained on the complexity-allowlist:
   - `theo-engine-graph::bridge::build_graph` (229 LOC, 4 passes) → decomposed into
