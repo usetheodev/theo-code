@@ -3,6 +3,22 @@
 ## [Unreleased]
 
 ### Changed
+- **code-hygiene-5x5 T4.4 RESOLVED — theo-infra-llm 1 → 0** (`docs/plans/code-hygiene-5x5-plan.md`).
+  Final remaining violation cleared: `providers/openai_compatible::from_request` (212 LOC
+  standard chat-completions JSON → CommonRequest parser) decomposed into 10 helpers:
+  - `parse_messages_array` — top-level loop dispatch by role.
+  - `parse_system_role_compat` / `parse_user_role_compat` / `parse_assistant_role_compat` /
+    `parse_tool_role_compat` — per-role item parsers.
+  - `parse_user_parts_compat` — user `content[]` array → ContentPart vec (text + image_url).
+  - `parse_tools_compat` — tool definitions with nested `function` field.
+  - `parse_tool_choice_compat` — string ("auto"/"none") or {type:function} dispatch.
+  - `parse_stop_compat` — single string OR array → StopSequence.
+  - `assemble_common_request_compat` — final CommonRequest struct construction.
+  Body of `from_request` is now ~7 LOC. Behaviour preserved across all 5 unit tests
+  including roundtrip + tool_calls + image parts.
+  T4.4 now fully clean: theo-infra-llm ceiling 4 → 0 (RESOLVED). Cumulative metric
+  across workspace: 25 → 24 violations.
+
 - **code-hygiene-5x5 T4.4 partial — theo-infra-llm 2 → 1** (`docs/plans/code-hygiene-5x5-plan.md`).
   `providers/openai/request::from_request` (294 LOC `OpenAI Responses API JSON → CommonRequest`
   parser) decomposed into 13 helpers:
