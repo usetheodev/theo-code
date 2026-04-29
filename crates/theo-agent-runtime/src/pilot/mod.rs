@@ -467,68 +467,7 @@ impl PilotLoop {
             update_task_status(&mut plan, task.id, new_status);
             update_task_outcome(&mut plan, task.id, result.summary.clone());
 
-            // T6.1 — auto-replan trigger. Increment failure_count on
-            // failure; reset to 0 on success (so a flaky task that
-            // eventually passes doesn't carry its history forever).
-            //
-            // When the threshold is breached:
-            //   - If a `replan_advisor` is wired (set via builder),
-            //     ask it for a recovery patch (timeout-bounded). On
-            //     success, apply via `Plan::apply_patch`. On any
-            //     failure path (advisor returns None, advisor
-            //     panics, patch validation fails) fall through to
-            //     the log so the operator still sees the breach.
-            //   - When no advisor is wired (default), just log —
-            //     `plan_failure_status` lets the agent self-replan.
-            if result.success {
-                plan.reset_failure_count(task.id);
-            } else if let Some(count) = plan.record_failure(task.id) {
-                let threshold = self.pilot_config.replan_failure_threshold;
-                if threshold > 0 && count >= threshold {
-                    let summary = result.summary.clone();
-                    let mut auto_applied = false;
-                    if let Some(advisor) = self.replan_advisor.clone() {
-                        // 5 s timeout: an unresponsive LLM advisor
-                        // shouldn't pin the pilot loop. If the
-                        // advisor genuinely needs more, the operator
-                        // can switch to manual replan via
-                        // `plan_failure_status` + `plan_replan`.
-                        let proposal = tokio::time::timeout(
-                            std::time::Duration::from_secs(5),
-                            advisor.propose(&plan, task.id, &summary),
-                        )
-                        .await;
-                        if let Ok(Some(patch)) = proposal {
-                            match plan.apply_patch(&patch) {
-                                Ok(()) => {
-                                    tracing::info!(
-                                        task_id = task.id.0,
-                                        failure_count = count,
-                                        threshold = threshold,
-                                        "auto_replan_applied — advisor patch accepted; plan moved forward",
-                                    );
-                                    auto_applied = true;
-                                }
-                                Err(e) => {
-                                    tracing::warn!(
-                                        task_id = task.id.0,
-                                        error = %e,
-                                        "auto_replan_patch_invalid — falling back to manual replan",
-                                    );
-                                }
-                            }
-                        }
-                    }
-                    if !auto_applied {
-                        tracing::warn!(
-                            task_id = task.id.0,
-                            failure_count = count,
-                            threshold = threshold,
-                            "replan_threshold_exceeded — task is stuck; consider plan_replan with SkipTask or EditTask",
-                        );
-                    }
-                }
-            }
+            self.handle_failure_or_success(&mut plan, task.id, &result).await;
 
             plan.updated_at = theo_domain::clock::now_millis();
             if let Err(e) = plan_store::save_plan(plan_path, &plan) {
@@ -537,6 +476,80 @@ impl PilotLoop {
         }
 
         self.build_result(ExitReason::PromiseFulfilled)
+    }
+
+    /// T6.1 — auto-replan trigger. On failure, bump `failure_count` and
+    /// (optionally) call the advisor for a recovery patch. On success,
+    /// reset the counter so flaky-but-eventually-green tasks don't carry
+    /// their history forever.
+    async fn handle_failure_or_success(
+        &self,
+        plan: &mut theo_domain::plan::Plan,
+        task_id: theo_domain::identifiers::PlanTaskId,
+        result: &AgentResult,
+    ) {
+        if result.success {
+            plan.reset_failure_count(task_id);
+            return;
+        }
+        let Some(count) = plan.record_failure(task_id) else {
+            return;
+        };
+        let threshold = self.pilot_config.replan_failure_threshold;
+        if threshold == 0 || count < threshold {
+            return;
+        }
+        let summary = result.summary.clone();
+        let auto_applied = self.try_auto_replan(plan, task_id, count, threshold, summary).await;
+        if !auto_applied {
+            tracing::warn!(
+                task_id = task_id.0,
+                failure_count = count,
+                threshold = threshold,
+                "replan_threshold_exceeded — task is stuck; consider plan_replan with SkipTask or EditTask",
+            );
+        }
+    }
+
+    async fn try_auto_replan(
+        &self,
+        plan: &mut theo_domain::plan::Plan,
+        task_id: theo_domain::identifiers::PlanTaskId,
+        count: u32,
+        threshold: u32,
+        summary: String,
+    ) -> bool {
+        let Some(advisor) = self.replan_advisor.clone() else {
+            return false;
+        };
+        // 5 s timeout: unresponsive advisor shouldn't pin the pilot.
+        let proposal = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            advisor.propose(plan, task_id, &summary),
+        )
+        .await;
+        let Ok(Some(patch)) = proposal else {
+            return false;
+        };
+        match plan.apply_patch(&patch) {
+            Ok(()) => {
+                tracing::info!(
+                    task_id = task_id.0,
+                    failure_count = count,
+                    threshold = threshold,
+                    "auto_replan_applied — advisor patch accepted; plan moved forward",
+                );
+                true
+            }
+            Err(e) => {
+                tracing::warn!(
+                    task_id = task_id.0,
+                    error = %e,
+                    "auto_replan_patch_invalid — falling back to manual replan",
+                );
+                false
+            }
+        }
     }
 
     fn check_rate_limit(&mut self) -> bool {

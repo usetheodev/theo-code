@@ -208,16 +208,36 @@ impl ToolCallManager {
 
         // 7. Publish completion event using the cached snapshot —
         // no re-acquire of `records` (T6.5).
+        self.publish_tool_completed(
+            call_id,
+            &tool_name,
+            &result,
+            success,
+            final_state,
+            duration_ms,
+            raw_input,
+        );
+        Ok(result)
+    }
+
+    /// Returns a clone of the tool call record.
+    fn publish_tool_completed(
+        &self,
+        call_id: &CallId,
+        tool_name: &str,
+        result: &ToolResultRecord,
+        success: bool,
+        final_state: ToolCallState,
+        duration_ms: u64,
+        raw_input: serde_json::Value,
+    ) {
         let input_args = truncate_input_for_event(raw_input);
-        // Truncate output preview for events (avoid huge payloads).
         let output_preview = theo_domain::prompt_sanitizer::char_boundary_truncate(
             &result.output,
             crate::constants::TOOL_PREVIEW_BYTES,
         );
-
-        // payload otel for span end.
         let status_str = format!("{:?}", final_state);
-        let mut end_span = crate::observability::otel::tool_call_span(&tool_name);
+        let mut end_span = crate::observability::otel::tool_call_span(tool_name);
         end_span.set(
             crate::observability::otel::ATTR_THEO_TOOL_CALL_ID,
             call_id.as_str(),
@@ -243,11 +263,8 @@ impl ToolCallManager {
                 "otel": end_span.to_json(),
             }),
         ));
-
-        Ok(result)
     }
 
-    /// Returns a clone of the tool call record.
     pub fn get_record(&self, call_id: &CallId) -> Option<ToolCallRecord> {
         self.records
             .lock()

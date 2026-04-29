@@ -10,11 +10,25 @@ fn subagent(name: &str) -> SkillMode {
 
 pub fn bundled_skills() -> Vec<SkillDefinition> {
     vec![
-        SkillDefinition {
-            name: "commit".into(),
-            trigger: "when the user asks to commit, save changes, create a commit, or push code".into(),
-            mode: SkillMode::InContext,
-            instructions: r#"## Commit Skill
+        commit_skill(),
+        test_skill(),
+        review_skill(),
+        build_skill(),
+        explain_skill(),
+        fix_skill(),
+        refactor_skill(),
+        init_skill(),
+        doc_skill(),
+        deps_skill(),
+    ]
+}
+
+fn commit_skill() -> SkillDefinition {
+    SkillDefinition {
+        name: "commit".into(),
+        trigger: "when the user asks to commit, save changes, create a commit, or push code".into(),
+        mode: SkillMode::InContext,
+        instructions: r#"## Commit Skill
 
 1. Run `git status` and `git diff --stat` to see what changed.
 2. Analyze the changes and classify: feature, fix, refactor, docs, test, chore.
@@ -28,12 +42,15 @@ pub fn bundled_skills() -> Vec<SkillDefinition> {
 - NEVER force push to main/master.
 - NEVER use --no-verify or skip hooks.
 - If there are no changes to commit, tell the user."#.into(),
-        },
-        SkillDefinition {
-            name: "test".into(),
-            trigger: "when the user asks to run tests, check tests, verify tests, or cargo test".into(),
-            mode: subagent("verifier"),
-            instructions: r#"## Test Skill
+    }
+}
+
+fn test_skill() -> SkillDefinition {
+    SkillDefinition {
+        name: "test".into(),
+        trigger: "when the user asks to run tests, check tests, verify tests, or cargo test".into(),
+        mode: subagent("verifier"),
+        instructions: r#"## Test Skill
 
 Run the project's test suite directly. Do NOT create tasks for this — just execute.
 
@@ -42,12 +59,15 @@ Run the project's test suite directly. Do NOT create tasks for this — just exe
 3. Report: passed/failed/skipped counts. If failures, show which tests failed and why (file:line, expected vs actual).
 
 Be direct. Skip task management overhead for this workflow."#.into(),
-        },
-        SkillDefinition {
-            name: "review".into(),
-            trigger: "when the user asks for code review, review changes, or check code quality".into(),
-            mode: subagent("reviewer"),
-            instructions: r#"## Code Review Skill
+    }
+}
+
+fn review_skill() -> SkillDefinition {
+    SkillDefinition {
+        name: "review".into(),
+        trigger: "when the user asks for code review, review changes, or check code quality".into(),
+        mode: subagent("reviewer"),
+        instructions: r#"## Code Review Skill
 
 1. Identify what files changed (git diff or recent edits).
 2. Read each changed file carefully.
@@ -60,12 +80,15 @@ Be direct. Skip task management overhead for this workflow."#.into(),
    - Missing tests
 4. Classify findings by severity: critical, major, minor, suggestion.
 5. Report findings with file:line references."#.into(),
-        },
-        SkillDefinition {
-            name: "build".into(),
-            trigger: "when the user asks to build, compile, check build, cargo build, or cargo check".into(),
-            mode: subagent("verifier"),
-            instructions: r#"## Build Skill
+    }
+}
+
+fn build_skill() -> SkillDefinition {
+    SkillDefinition {
+        name: "build".into(),
+        trigger: "when the user asks to build, compile, check build, cargo build, or cargo check".into(),
+        mode: subagent("verifier"),
+        instructions: r#"## Build Skill
 
 1. Detect the build tool (cargo, npm, make, etc.).
 2. Run the build command.
@@ -75,12 +98,15 @@ Be direct. Skip task management overhead for this workflow."#.into(),
    - What's the likely fix?
 4. If build succeeds, report: compilation time, warnings count.
 5. If there are warnings, list the most important ones."#.into(),
-        },
-        SkillDefinition {
-            name: "explain".into(),
-            trigger: "when the user asks to explain code, what does this do, how does this work, or describe the architecture".into(),
-            mode: SkillMode::InContext,
-            instructions: r#"## Explain Skill
+    }
+}
+
+fn explain_skill() -> SkillDefinition {
+    SkillDefinition {
+        name: "explain".into(),
+        trigger: "when the user asks to explain code, what does this do, how does this work, or describe the architecture".into(),
+        mode: SkillMode::InContext,
+        instructions: r#"## Explain Skill
 
 1. Identify what the user wants explained (file, function, module, architecture).
 2. Read the relevant code carefully.
@@ -94,12 +120,15 @@ Be direct. Skip task management overhead for this workflow."#.into(),
 - Be concise. Don't repeat the code verbatim.
 - Show example usage if non-obvious.
 - If the code has bugs or smells, mention them."#.into(),
-        },
-        SkillDefinition {
-            name: "fix".into(),
-            trigger: "when the user asks to fix a bug, debug an error, or troubleshoot".into(),
-            mode: SkillMode::InContext,
-            instructions: r#"## Fix Skill
+    }
+}
+
+fn fix_skill() -> SkillDefinition {
+    SkillDefinition {
+        name: "fix".into(),
+        trigger: "when the user asks to fix a bug, debug an error, or troubleshoot".into(),
+        mode: SkillMode::InContext,
+        instructions: r#"## Fix Skill
 
 1. Reproduce the bug if possible.
 2. Read the error message carefully — what does it actually say?
@@ -107,12 +136,15 @@ Be direct. Skip task management overhead for this workflow."#.into(),
 4. Make a minimal fix — change only what's necessary.
 5. Add a regression test BEFORE fixing (TDD: red → green → refactor).
 6. Verify the fix doesn't break other tests."#.into(),
-        },
-        SkillDefinition {
-            name: "refactor".into(),
-            trigger: "when the user asks to refactor, clean up, improve code, or simplify".into(),
-            mode: SkillMode::InContext,
-            instructions: r#"## Refactor Skill
+    }
+}
+
+fn refactor_skill() -> SkillDefinition {
+    SkillDefinition {
+        name: "refactor".into(),
+        trigger: "when the user asks to refactor, clean up, improve code, or simplify".into(),
+        mode: SkillMode::InContext,
+        instructions: r#"## Refactor Skill
 
 1. Identify the code to refactor and its current responsibilities.
 2. Define the goal: extract function, simplify logic, remove duplication, improve naming.
@@ -124,12 +156,15 @@ Be direct. Skip task management overhead for this workflow."#.into(),
 - Don't refactor and add features in the same change.
 - If tests don't exist, write them BEFORE refactoring.
 - If a refactor requires multiple commits, do small reviewable steps."#.into(),
-        },
-        SkillDefinition {
-            name: "init".into(),
-            trigger: "when the user asks to initialize, set up, or scaffold a new project/feature".into(),
-            mode: SkillMode::InContext,
-            instructions: r#"## Init Skill
+    }
+}
+
+fn init_skill() -> SkillDefinition {
+    SkillDefinition {
+        name: "init".into(),
+        trigger: "when the user asks to initialize, set up, or scaffold a new project/feature".into(),
+        mode: SkillMode::InContext,
+        instructions: r#"## Init Skill
 
 1. Ask what kind of project/feature (CLI, library, web service, etc.).
 2. Generate a minimal scaffold:
@@ -139,12 +174,15 @@ Be direct. Skip task management overhead for this workflow."#.into(),
    - Test file with one passing test
 3. Add minimal docs: README with how to build/run/test.
 4. Verify the scaffold builds and tests pass before declaring done."#.into(),
-        },
-        SkillDefinition {
-            name: "doc".into(),
-            trigger: "when the user asks to document, write docs, add comments, or write README".into(),
-            mode: SkillMode::InContext,
-            instructions: r#"## Doc Skill
+    }
+}
+
+fn doc_skill() -> SkillDefinition {
+    SkillDefinition {
+        name: "doc".into(),
+        trigger: "when the user asks to document, write docs, add comments, or write README".into(),
+        mode: SkillMode::InContext,
+        instructions: r#"## Doc Skill
 
 1. Identify what needs documentation (function, module, project, API).
 2. For functions: write doc comments that explain WHY (purpose, invariants, examples).
@@ -156,12 +194,15 @@ Be direct. Skip task management overhead for this workflow."#.into(),
 - Write for the reader, not the writer.
 - Don't document the obvious (getters, simple constructors).
 - DO document: why (not just what), edge cases, non-obvious behavior."#.into(),
-        },
-        SkillDefinition {
-            name: "deps".into(),
-            trigger: "when the user asks to check dependencies, audit packages, find vulnerabilities, or review Cargo.toml/package.json".into(),
-            mode: subagent("explorer"),
-            instructions: r#"## Dependencies Skill
+    }
+}
+
+fn deps_skill() -> SkillDefinition {
+    SkillDefinition {
+        name: "deps".into(),
+        trigger: "when the user asks to check dependencies, audit packages, find vulnerabilities, or review Cargo.toml/package.json".into(),
+        mode: subagent("explorer"),
+        instructions: r#"## Dependencies Skill
 
 Analyze project dependencies. Do NOT create tasks — just execute directly.
 
@@ -175,8 +216,7 @@ Analyze project dependencies. Do NOT create tasks — just execute directly.
    - Outdated packages with available updates
    - Unused dependencies (if detectable)
 4. Recommend actions for critical findings."#.into(),
-        },
-    ]
+    }
 }
 
 #[cfg(test)]

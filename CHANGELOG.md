@@ -3,6 +3,19 @@
 ## [Unreleased]
 
 ### Changed
+- **code-hygiene-5x5 T4.5 partial — theo-agent-runtime 10 → 7** (`docs/plans/code-hygiene-5x5-plan.md`).
+  3 of 10 too_many_lines functions decomposed:
+  - `skill::bundled::bundled_skills` (151 LOC) → 10 per-skill builders
+    (`commit_skill`, `test_skill`, `review_skill`, `build_skill`,
+    `explain_skill`, `fix_skill`, `refactor_skill`, `init_skill`,
+    `doc_skill`, `deps_skill`)
+  - `tool_call_manager::dispatch_and_execute` (102 LOC) →
+    `publish_tool_completed` extracted (40-line OTEL/event payload)
+  - `pilot::run_from_plan` (102 LOC) → `handle_failure_or_success`
+    + `try_auto_replan` (auto-replan threshold logic externalized)
+  Remaining: 7 functions in `observability/writer`,
+  `run_engine/{dispatch/batch,execution,lifecycle,llm_call}` plus a
+  trailing `tool_call_manager` site. Complexity total: 57 → 54.
 - **code-hygiene-5x5 T4.4 partial — theo-infra-llm 10 → 7** (`docs/plans/code-hygiene-5x5-plan.md`).
   3 of 10 too_many_lines provider-converter functions decomposed:
   - `anthropic::response::from_response` (102 LOC) → `collect_text_blocks`,
