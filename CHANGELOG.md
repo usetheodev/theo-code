@@ -3,6 +3,24 @@
 ## [Unreleased]
 
 ### Changed
+- **code-hygiene-5x5 T4.6 partial — theo-application 4 → 3** (`docs/plans/code-hygiene-5x5-plan.md`).
+  `graph_context_service/service.rs::GraphContextService::query_context` (270 LOC dense retrieval
+  pipeline) decomposed into 6 helpers:
+  - `early_return_for_query` — state-machine guard (Uninitialized → Err, Building.None → empty,
+    Failed → Err, zero-budget/empty-query → empty).
+  - `try_wiki_direct_return` — LAYER 0 wiki cache lookup w/ Absolute Confidence Calibration
+    (3 gates: BM25 floor, decision-confidence, per-category threshold).
+  - `log_wiki_decision` — eprintln! ranking decision telemetry.
+  - `compute_file_scores` — Tier 2/1/0 cascade (RRF dense → tantivy hybrid → BM25-only) with
+    `#[cfg(feature = ...)]` arms preserved.
+  - `compute_context_blocks` (method, needs `self.event_sink.emit`) — file retriever w/
+    compression + RetrievalExecuted telemetry, falls back to community-level assembly.
+  - `fallback_community_blocks` — legacy community-level assembly.
+  Body of `query_context` is now ~25 LOC (state guard → wiki cache → graph_state → file_scores
+  → blocks → write-back → return). Behaviour preserved across all 11 lib tests + integration
+  suites including bench_real_repos.
+  Cumulative metric across workspace: 23 → 22 violations.
+
 - **code-hygiene-5x5 T4.3 partial — theo (CLI) 3 → 2** (`docs/plans/code-hygiene-5x5-plan.md`).
   `apps/theo-cli/src/main.rs::main` (144 LOC clap-driven command dispatcher with 14+ arms)
   decomposed into 9 per-Commands-variant dispatch helpers:

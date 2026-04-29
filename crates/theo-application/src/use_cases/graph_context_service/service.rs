@@ -265,262 +265,29 @@ impl GraphContextProvider for GraphContextService {
         budget_tokens: usize,
     ) -> Result<GraphContextResult, GraphContextError> {
         let state = self.state.read().await;
-
-        let empty = Ok(GraphContextResult {
-            blocks: vec![],
-            total_tokens: 0,
-            budget_tokens,
-            exploration_hints: String::new(),
-            budget_report: None,
-        });
-
-        match &*state {
-            GraphBuildState::Uninitialized => return Err(GraphContextError::NotInitialized),
-            GraphBuildState::Building { stale: None } => return empty,
-            GraphBuildState::Building { stale: Some(_) } => {} // Serve stale — fall through
-            GraphBuildState::Failed(e) => return Err(GraphContextError::BuildFailed(e.clone())),
-            GraphBuildState::Ready(_) => {} // Fall through to query.
+        if let Some(early) = early_return_for_query(&state, query, budget_tokens)? {
+            return Ok(early);
         }
-
-        if budget_tokens == 0 || query.is_empty() {
-            return empty;
+        // LAYER 0: wiki cache lookup with Absolute Confidence Calibration.
+        if let Some(result) = try_wiki_direct_return(query, budget_tokens) {
+            return Ok(result);
         }
-
-        // LAYER 0: Wiki cache lookup (<5ms) with Absolute Confidence Calibration.
-        // Uses evaluate_direct_return() with 3 gates:
-        // Gate 1: BM25 absolute floor (below = never return)
-        // Gate 2: Decision confidence from raw signals (not normalized)
-        // Gate 3: Per-category threshold
-        {
-            use theo_engine_retrieval::wiki::lookup::{DEFAULT_BM25_FLOOR, evaluate_direct_return};
-
-            let wiki_dir = std::path::PathBuf::from(".theo/wiki");
-            let wiki_results = theo_engine_retrieval::wiki::lookup::lookup(&wiki_dir, query, 3);
-
-            // Ranking decision log
-            if !wiki_results.is_empty() {
-                let (allow, conf, reason) =
-                    evaluate_direct_return(&wiki_results, query, DEFAULT_BM25_FLOOR);
-                let query_class = theo_engine_retrieval::wiki::model::classify_query(query);
-                eprintln!(
-                    "[wiki-decision] query=\"{}\" class={} allow={} conf={:.2} reason={} top=[{}]",
-                    query,
-                    query_class.as_str(),
-                    allow,
-                    conf,
-                    reason,
-                    wiki_results
-                        .iter()
-                        .take(3)
-                        .map(|r| format!(
-                            "{}:T:{}:bm25={:.1}:conf={:.0}%",
-                            r.slug,
-                            r.authority_tier.as_str(),
-                            r.bm25_raw,
-                            r.confidence * 100.0
-                        ))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                );
-            }
-
-            let (allow, _conf, _reason) =
-                evaluate_direct_return(&wiki_results, query, DEFAULT_BM25_FLOOR);
-
-            if allow
-                && let Some(top) = wiki_results.first()
-                    && top.token_count <= budget_tokens {
-                        let blocks: Vec<ContextBlock> = wiki_results
-                            .iter()
-                            .take(3)
-                            .filter(|r| {
-                                r.bm25_raw >= DEFAULT_BM25_FLOOR && r.token_count <= budget_tokens
-                            })
-                            .map(|r| ContextBlock {
-                                block_id: format!("blk-wiki-{}", r.slug),
-                                source_id: format!(
-                                    "wiki:{}[T:{}]",
-                                    r.slug,
-                                    r.authority_tier.as_str()
-                                ),
-                                content: r.content.clone(),
-                                token_count: r.token_count,
-                                score: r.confidence,
-                            })
-                            .collect();
-
-                        if !blocks.is_empty() {
-                            let total_tokens: usize = blocks.iter().map(|b| b.token_count).sum();
-                            let query_class =
-                                theo_engine_retrieval::wiki::model::classify_query(query);
-                            return Ok(GraphContextResult {
-                                total_tokens,
-                                budget_tokens,
-                                exploration_hints: format!(
-                                    "Wiki direct return: {} (T:{}, bm25={:.1}, class={}, {})",
-                                    top.title,
-                                    top.authority_tier.as_str(),
-                                    top.bm25_raw,
-                                    query_class.as_str(),
-                                    top.page_kind
-                                ),
-                                blocks,
-                                budget_report: None,
-                            });
-                        }
-                    }
-        }
-
-        // Safe: we checked Ready or Building(stale) above.
+        // Safe: early_return_for_query enforced Ready or Building(stale) above.
         let graph_state = match &*state {
             GraphBuildState::Ready(gs) => gs,
             GraphBuildState::Building { stale: Some(gs) } => gs,
             _ => unreachable!(),
         };
-
-        // Tiered scoring: use best available pipeline.
-        // Tier 2 (dense-retrieval): BM25 + Tantivy + Dense → RRF 3-ranker (MRR=0.914)
-        // Tier 1 (tantivy-backend): BM25 + Tantivy → hybrid_search (2-ranker)
-        // Tier 0 (always): BM25 only → FileBm25::search
-        //
-        // Fallback cascade: Tier 2 → 1 → 0 (infalível).
-        let file_scores: std::collections::HashMap<String, f64> = {
-            // Try Tier 2 first: full RRF 3-ranker (BM25 + Tantivy + Dense).
-            // T2.5 cleanup: let-chains destructure the Options in place so we
-            // never unwrap after a separate `is_some()` check.
-            #[cfg(feature = "dense-retrieval")]
-            {
-                if let Some(idx) = graph_state.tantivy_index.as_ref()
-                    && let Some(embedder) = graph_state.embedder.as_ref()
-                    && let Some(cache) = graph_state.embedding_cache.as_ref()
-                {
-                    // T8.1 — Run the runtime-gated pipeline. When
-                    // `cross_encoder_config.use_reranker` is true AND
-                    // a reranker model is loaded, this includes Stage
-                    // 2 cross-encoder reranking; otherwise it returns
-                    // the RRF top-K (identical shape to the legacy
-                    // `hybrid_rrf_search` call). The reranker field
-                    // starts as None — first query that needs it can
-                    // construct the model lazily in a future change.
-                    retrieve_with_config(
-                        &graph_state.graph,
-                        idx,
-                        embedder,
-                        cache,
-                        graph_state.reranker.as_deref(),
-                        query,
-                        20.0, // RRF k parameter (empirically optimal)
-                        &graph_state.cross_encoder_config,
-                    )
-                } else if let Some(idx) = graph_state.tantivy_index.as_ref() {
-                    theo_engine_retrieval::tantivy_search::hybrid_search(
-                        &graph_state.graph,
-                        idx,
-                        query,
-                    )
-                } else {
-                    FileBm25::search(&graph_state.graph, query)
-                }
-            }
-            // Without dense-retrieval: try Tier 1, then Tier 0
-            #[cfg(all(feature = "tantivy-backend", not(feature = "dense-retrieval")))]
-            {
-                if let Some(idx) = graph_state.tantivy_index.as_ref() {
-                    theo_engine_retrieval::tantivy_search::hybrid_search(
-                        &graph_state.graph,
-                        idx,
-                        query,
-                    )
-                } else {
-                    FileBm25::search(&graph_state.graph, query)
-                }
-            }
-            // Without any features: Tier 0 only
-            #[cfg(not(any(feature = "tantivy-backend", feature = "dense-retrieval")))]
-            {
-                FileBm25::search(&graph_state.graph, query)
-            }
-        };
-
-        // File Retriever: file-first pipeline with reranking + graph expansion.
-        // Falls back to community-level assembly if file retriever returns empty.
-        let blocks: Vec<ContextBlock> = {
-            let config = theo_engine_retrieval::file_retriever::RerankConfig::default();
-            let seen = std::collections::HashSet::new();
-            // PLAN_CONTEXT_WIRING Phase 3: use the _with_inline variant so
-            // queries that match a symbol name get inline slices (focal +
-            // callees/callers) as high-priority context blocks.
-            let mut retrieval_result =
-                theo_engine_retrieval::file_retriever::retrieve_files_with_inline(
-                    &graph_state.graph,
-                    &graph_state.communities,
-                    query,
-                    &config,
-                    &seen,
-                    &graph_state.project_dir,
-                );
-
-            if !retrieval_result.primary_files.is_empty() {
-                // File-first path with Phase 2 compression. The mutating
-                // sibling populates `compression_savings_tokens` on the
-                // result struct (PLAN_CONTEXT_WIRING Task 2.4) so the
-                // telemetry payload reads from a single source of truth.
-                let ctx_blocks = theo_engine_retrieval::file_retriever::
-                    build_context_blocks_with_compression_mut(
-                        &mut retrieval_result,
-                        &graph_state.graph,
-                        budget_tokens,
-                        Some(&graph_state.project_dir),
-                        query,
-                    );
-                // PLAN_CONTEXT_WIRING Phase 4: publish retrieval telemetry
-                // through the attached EventSink (real EventBus in prod,
-                // NoopEventSink otherwise).
-                self.event_sink.emit(theo_domain::event::DomainEvent::new(
-                    theo_domain::event::EventType::RetrievalExecuted,
-                    "graph-context",
-                    serde_json::json!({
-                        "primary_files": retrieval_result.primary_files.len(),
-                        "harm_removals": retrieval_result.harm_removals,
-                        "compression_savings_tokens": retrieval_result.compression_savings_tokens,
-                        "inline_slices_count": retrieval_result.inline_slices.len(),
-                        "query_len": query.len(),
-                    }),
-                ));
-                ctx_blocks
-            } else {
-                // Fallback: community-level assembly (legacy path)
-                let payload = assembly::assemble_files_direct(
-                    &file_scores,
-                    &graph_state.graph,
-                    &graph_state.communities,
-                    budget_tokens,
-                );
-                payload
-                    .items
-                    .iter()
-                    .map(|item| ContextBlock {
-                        block_id: format!("blk-{}", item.community_id),
-                        source_id: item.community_id.clone(),
-                        content: item.content.clone(),
-                        token_count: item.token_count,
-                        score: item.score,
-                    })
-                    .collect()
-            }
-        };
-
-        // Compute totals from blocks
+        let file_scores = compute_file_scores(graph_state, query);
+        let blocks = self.compute_context_blocks(graph_state, &file_scores, query, budget_tokens);
         let total_tokens: usize = blocks.iter().map(|b| b.token_count).sum();
-
-        // WRITE-BACK: Save RRF result to wiki cache for future queries.
+        // WRITE-BACK: cache the RRF result for future queries.
         if !blocks.is_empty() && total_tokens > 100 {
             let wiki_dir = std::path::PathBuf::from(".theo/wiki/cache");
             if let Err(e) = write_back_to_wiki(&wiki_dir, query, &blocks) {
                 eprintln!("[wiki-cache] Write-back failed: {e}");
             }
         }
-
         Ok(GraphContextResult {
             total_tokens,
             budget_tokens,
@@ -537,4 +304,255 @@ impl GraphContextProvider for GraphContextService {
             .map(|s| matches!(*s, GraphBuildState::Ready(_)))
             .unwrap_or(false)
     }
+}
+
+impl GraphContextService {
+    /// File Retriever: file-first pipeline with reranking + graph
+    /// expansion. Falls back to community-level assembly if the file
+    /// retriever returns empty. Emits a `RetrievalExecuted` telemetry
+    /// event on the file-first happy path.
+    fn compute_context_blocks(
+        &self,
+        graph_state: &GraphState,
+        file_scores: &std::collections::HashMap<String, f64>,
+        query: &str,
+        budget_tokens: usize,
+    ) -> Vec<ContextBlock> {
+        let config = theo_engine_retrieval::file_retriever::RerankConfig::default();
+        let seen = std::collections::HashSet::new();
+        // PLAN_CONTEXT_WIRING Phase 3: use the _with_inline variant so
+        // queries that match a symbol name get inline slices (focal +
+        // callees/callers) as high-priority context blocks.
+        let mut retrieval_result =
+            theo_engine_retrieval::file_retriever::retrieve_files_with_inline(
+                &graph_state.graph,
+                &graph_state.communities,
+                query,
+                &config,
+                &seen,
+                &graph_state.project_dir,
+            );
+        if !retrieval_result.primary_files.is_empty() {
+            let ctx_blocks = theo_engine_retrieval::file_retriever::
+                build_context_blocks_with_compression_mut(
+                    &mut retrieval_result,
+                    &graph_state.graph,
+                    budget_tokens,
+                    Some(&graph_state.project_dir),
+                    query,
+                );
+            // PLAN_CONTEXT_WIRING Phase 4: publish retrieval telemetry
+            // through the attached EventSink (real EventBus in prod,
+            // NoopEventSink otherwise).
+            self.event_sink.emit(theo_domain::event::DomainEvent::new(
+                theo_domain::event::EventType::RetrievalExecuted,
+                "graph-context",
+                serde_json::json!({
+                    "primary_files": retrieval_result.primary_files.len(),
+                    "harm_removals": retrieval_result.harm_removals,
+                    "compression_savings_tokens": retrieval_result.compression_savings_tokens,
+                    "inline_slices_count": retrieval_result.inline_slices.len(),
+                    "query_len": query.len(),
+                }),
+            ));
+            ctx_blocks
+        } else {
+            // Fallback: community-level assembly (legacy path).
+            fallback_community_blocks(file_scores, graph_state, budget_tokens)
+        }
+    }
+}
+
+/// State-machine guard for `query_context`. Returns `Ok(Some(empty))`
+/// when the request must short-circuit (Building w/o stale, zero
+/// budget, empty query) and `Ok(None)` to fall through to the search
+/// path. Errors are propagated when the build is unrecoverable.
+fn early_return_for_query(
+    state: &GraphBuildState,
+    query: &str,
+    budget_tokens: usize,
+) -> Result<Option<GraphContextResult>, GraphContextError> {
+    match state {
+        GraphBuildState::Uninitialized => Err(GraphContextError::NotInitialized),
+        GraphBuildState::Building { stale: None } => Ok(Some(empty_query_result(budget_tokens))),
+        GraphBuildState::Failed(e) => Err(GraphContextError::BuildFailed(e.clone())),
+        GraphBuildState::Ready(_) | GraphBuildState::Building { stale: Some(_) } => {
+            if budget_tokens == 0 || query.is_empty() {
+                Ok(Some(empty_query_result(budget_tokens)))
+            } else {
+                Ok(None)
+            }
+        }
+    }
+}
+
+fn empty_query_result(budget_tokens: usize) -> GraphContextResult {
+    GraphContextResult {
+        blocks: vec![],
+        total_tokens: 0,
+        budget_tokens,
+        exploration_hints: String::new(),
+        budget_report: None,
+    }
+}
+
+/// LAYER 0 — wiki cache lookup with Absolute Confidence Calibration.
+/// 3 gates: BM25 absolute floor, decision-confidence from raw signals,
+/// per-category threshold. Returns Some(result) when the wiki page is
+/// authoritative enough to short-circuit retrieval.
+fn try_wiki_direct_return(query: &str, budget_tokens: usize) -> Option<GraphContextResult> {
+    use theo_engine_retrieval::wiki::lookup::{DEFAULT_BM25_FLOOR, evaluate_direct_return};
+    let wiki_dir = std::path::PathBuf::from(".theo/wiki");
+    let wiki_results = theo_engine_retrieval::wiki::lookup::lookup(&wiki_dir, query, 3);
+    log_wiki_decision(query, &wiki_results);
+    let (allow, _conf, _reason) = evaluate_direct_return(&wiki_results, query, DEFAULT_BM25_FLOOR);
+    if !allow {
+        return None;
+    }
+    let top = wiki_results.first()?;
+    if top.token_count > budget_tokens {
+        return None;
+    }
+    let blocks: Vec<ContextBlock> = wiki_results
+        .iter()
+        .take(3)
+        .filter(|r| r.bm25_raw >= DEFAULT_BM25_FLOOR && r.token_count <= budget_tokens)
+        .map(|r| ContextBlock {
+            block_id: format!("blk-wiki-{}", r.slug),
+            source_id: format!("wiki:{}[T:{}]", r.slug, r.authority_tier.as_str()),
+            content: r.content.clone(),
+            token_count: r.token_count,
+            score: r.confidence,
+        })
+        .collect();
+    if blocks.is_empty() {
+        return None;
+    }
+    let total_tokens: usize = blocks.iter().map(|b| b.token_count).sum();
+    let query_class = theo_engine_retrieval::wiki::model::classify_query(query);
+    Some(GraphContextResult {
+        total_tokens,
+        budget_tokens,
+        exploration_hints: format!(
+            "Wiki direct return: {} (T:{}, bm25={:.1}, class={}, {})",
+            top.title,
+            top.authority_tier.as_str(),
+            top.bm25_raw,
+            query_class.as_str(),
+            top.page_kind
+        ),
+        blocks,
+        budget_report: None,
+    })
+}
+
+fn log_wiki_decision(
+    query: &str,
+    wiki_results: &[theo_engine_retrieval::wiki::lookup::WikiLookupResult],
+) {
+    use theo_engine_retrieval::wiki::lookup::{DEFAULT_BM25_FLOOR, evaluate_direct_return};
+    if wiki_results.is_empty() {
+        return;
+    }
+    let (allow, conf, reason) = evaluate_direct_return(wiki_results, query, DEFAULT_BM25_FLOOR);
+    let query_class = theo_engine_retrieval::wiki::model::classify_query(query);
+    eprintln!(
+        "[wiki-decision] query=\"{}\" class={} allow={} conf={:.2} reason={} top=[{}]",
+        query,
+        query_class.as_str(),
+        allow,
+        conf,
+        reason,
+        wiki_results
+            .iter()
+            .take(3)
+            .map(|r| format!(
+                "{}:T:{}:bm25={:.1}:conf={:.0}%",
+                r.slug,
+                r.authority_tier.as_str(),
+                r.bm25_raw,
+                r.confidence * 100.0
+            ))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+}
+
+/// Tiered scoring cascade: Tier 2 (BM25 + Tantivy + Dense → RRF) →
+/// Tier 1 (BM25 + Tantivy hybrid) → Tier 0 (BM25 only). Each tier
+/// is feature-gated; the function compiles down to the highest tier
+/// available for the current build profile.
+fn compute_file_scores(
+    graph_state: &GraphState,
+    query: &str,
+) -> std::collections::HashMap<String, f64> {
+    #[cfg(feature = "dense-retrieval")]
+    {
+        if let Some(idx) = graph_state.tantivy_index.as_ref()
+            && let Some(embedder) = graph_state.embedder.as_ref()
+            && let Some(cache) = graph_state.embedding_cache.as_ref()
+        {
+            // T8.1 — runtime-gated pipeline. When the cross-encoder is
+            // enabled AND a model is loaded, includes Stage 2 reranking;
+            // otherwise returns the RRF top-K. Reranker construction is
+            // lazy (None at startup) per `try_construct_reranker_if_enabled`.
+            return retrieve_with_config(
+                &graph_state.graph,
+                idx,
+                embedder,
+                cache,
+                graph_state.reranker.as_deref(),
+                query,
+                20.0, // RRF k parameter (empirically optimal)
+                &graph_state.cross_encoder_config,
+            );
+        }
+        if let Some(idx) = graph_state.tantivy_index.as_ref() {
+            return theo_engine_retrieval::tantivy_search::hybrid_search(
+                &graph_state.graph,
+                idx,
+                query,
+            );
+        }
+        FileBm25::search(&graph_state.graph, query)
+    }
+    #[cfg(all(feature = "tantivy-backend", not(feature = "dense-retrieval")))]
+    {
+        if let Some(idx) = graph_state.tantivy_index.as_ref() {
+            return theo_engine_retrieval::tantivy_search::hybrid_search(
+                &graph_state.graph,
+                idx,
+                query,
+            );
+        }
+        FileBm25::search(&graph_state.graph, query)
+    }
+    #[cfg(not(any(feature = "tantivy-backend", feature = "dense-retrieval")))]
+    {
+        FileBm25::search(&graph_state.graph, query)
+    }
+}
+
+fn fallback_community_blocks(
+    file_scores: &std::collections::HashMap<String, f64>,
+    graph_state: &GraphState,
+    budget_tokens: usize,
+) -> Vec<ContextBlock> {
+    let payload = assembly::assemble_files_direct(
+        file_scores,
+        &graph_state.graph,
+        &graph_state.communities,
+        budget_tokens,
+    );
+    payload
+        .items
+        .iter()
+        .map(|item| ContextBlock {
+            block_id: format!("blk-{}", item.community_id),
+            source_id: item.community_id.clone(),
+            content: item.content.clone(),
+            token_count: item.token_count,
+            score: item.score,
+        })
+        .collect()
 }
