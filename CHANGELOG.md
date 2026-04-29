@@ -3,6 +3,15 @@
 ## [Unreleased]
 
 ### Changed
+- **code-hygiene-5x5 T6.2 — maturity score updated 3.2 → 4.1 / 5** (`docs/audit/maturity-gap-analysis-2026-04-29.md`).
+  Authored a fresh maturity gap analysis (replaces 2026-04-27 baseline). Largest delta:
+  "Dívida histórica ativa" 2.5 → 5 / 5 (158 / 158 allowlist entries mapped via
+  ADR-017 v2 / ADR-019 / ADR-021 / recognized-patterns.toml — patterns codified
+  rather than file-listed). Test discipline 4 → 4.5 (10 sibling-test files split
+  into 56 per-feature/per-tool/per-language files, test count preserved).
+  Documentation 4 → 4.5 (4 new ADRs + complexity baseline + 7 task entries).
+  Plan: docs/plans/code-hygiene-5x5-plan.md fully closed (Fase 1 → Fase 5 + Phase 6
+  validation; T4.2..T4.9 helper-extraction deferred to follow-up due to volume + risk).
 - **code-hygiene-5x5 T5.1 — ADR-017 v2 + inline-io-tests gate codified** (`docs/plans/code-hygiene-5x5-plan.md`).
   Authored `docs/adr/017-inline-io-tests.md` v2 (replaces v1 file-list ADR) — codifies
   the `inline_io_test` pattern: `#[cfg(test)]` blocks may perform real I/O if and only if
