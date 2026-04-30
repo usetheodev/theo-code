@@ -14,7 +14,7 @@ use std::collections::{HashMap, HashSet};
 use theo_engine_graph::cluster::Community;
 use theo_engine_graph::model::{CodeGraph, NodeType};
 
-use crate::search::{FileBm25, tokenise};
+use crate::search::{FileBm25, QueryType, classify, tokenise};
 
 // ---------------------------------------------------------------------------
 // Types (2 only — in retrieval, NOT domain)
@@ -31,6 +31,10 @@ pub enum Signal {
     GraphProximity,
     AlreadySeenPenalty,
     RedundancyPenalty,
+    /// Cycle 11 — RRF 3-ranker fusion (BM25 + Tantivy + Dense).
+    /// Carried when the candidate score originates from
+    /// `tantivy_search::hybrid_rrf_search`.
+    DenseRrf,
 }
 
 /// A file ranked by the retrieval pipeline.
@@ -61,6 +65,105 @@ pub struct FileRetrievalResult {
     /// Each slice is a focal symbol + its callers/callees, ready for
     /// injection alongside the primary files. Phase 3.
     pub inline_slices: Vec<crate::inline_builder::InlineSlice>,
+    /// Query-type classification (cycle-5 telemetry, cycle-6 wiring).
+    /// Currently informational only; a future router will dispatch the
+    /// retrieval strategy based on this value (BM25 vs Dense vs Hybrid).
+    pub query_type: QueryType,
+    /// Phase 4 / T4.1 — memory entries that point at the files in
+    /// `primary_files`. Hydrated by the blend pipeline only; legacy
+    /// `retrieve_files` leaves this empty. Cap of 20 entries enforced
+    /// by the hydration helper.
+    pub memory_cards: Vec<theo_domain::memory::MemoryEntry>,
+}
+
+/// Maximum number of memory entries returned alongside a retrieval
+/// result. Cap is necessary so memory hydration cannot blow the
+/// downstream context budget.
+pub const MEMORY_CARDS_CAP: usize = 20;
+
+/// Cap memory cards in-place to `MEMORY_CARDS_CAP`. No-op when the
+/// list is already short enough. Helper used by the blend pipeline
+/// (Phase 5 / T5.1).
+pub fn cap_memory_cards(cards: &mut Vec<theo_domain::memory::MemoryEntry>) {
+    if cards.len() > MEMORY_CARDS_CAP {
+        cards.truncate(MEMORY_CARDS_CAP);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Blend score (Phase 2 / T2.1) — joint scorer over 7 signals.
+// ---------------------------------------------------------------------------
+
+/// Per-file context fed to `score_file_blended`. All fields are
+/// expected to be non-negative; the scorer does not enforce this but
+/// negative inputs are nonsensical and may produce non-monotone scores.
+#[derive(Debug, Clone, Default)]
+pub struct BlendScoreContext {
+    /// Cosine similarity (or other dense match) between the query and
+    /// the file. `[0.0, 1.0]` typical.
+    pub file_dense_sim: f64,
+    /// Best wiki page match score for any wiki page that links to this
+    /// file. `0.0` when no wiki page covers the file.
+    pub wiki_match_score: f64,
+    /// Distance-decayed proximity to the seed-anchor set. `1.0` for the
+    /// seed itself, `0.0` for files unreachable in the depth budget.
+    pub graph_proximity: f64,
+    /// Wiki authority-tier weight (`AuthorityTier::weight()` value or 0
+    /// when no wiki page covers the file).
+    pub authority_tier_weight: f64,
+    /// Frecency in `[0.0, 1.0]` (1.0 = just-touched, 0.0 = never seen
+    /// in this session). Computed by the caller.
+    pub frecency: f64,
+    /// Number of memory entries whose `references` include this file.
+    /// Folded through `ln_1p` so unbounded counts don't dominate.
+    pub memory_link_count: u32,
+    /// Jaccard similarity in `[0.0, 1.0]` between the query token set
+    /// and the file's defined symbol-name set.
+    pub symbol_overlap: f64,
+}
+
+/// Linear-blend weights, one per signal. ADR D2: documented linear
+/// combination, not a learned ranker. Sum-to-one is convention, not an
+/// invariant — callers may use any non-negative reals.
+#[derive(Debug, Clone, Copy)]
+pub struct BlendScoreConfig {
+    pub alpha: f64,   // file_dense_sim
+    pub beta: f64,    // wiki_match_score
+    pub gamma: f64,   // graph_proximity
+    pub delta: f64,   // authority_tier_weight
+    pub epsilon: f64, // frecency
+    pub zeta: f64,    // memory_link_count (after ln_1p)
+    pub eta: f64,     // symbol_overlap
+}
+
+impl Default for BlendScoreConfig {
+    /// Calibrated initial defaults from the blend plan
+    /// (`docs/plans/wiki-graph-memory-blend-retrieval-plan.md` §D2).
+    /// Values sum to 1.0 by convention. T6.2 will refine via grid search.
+    fn default() -> Self {
+        Self {
+            alpha: 0.30,
+            beta: 0.40,
+            gamma: 0.10,
+            delta: 0.10,
+            epsilon: 0.05,
+            zeta: 0.03,
+            eta: 0.02,
+        }
+    }
+}
+
+/// Pure scorer combining seven signals. Returns 0.0 on an all-zero
+/// context (so files with no signal don't artificially rank above
+/// truly-zero matches).
+pub fn score_file_blended(ctx: &BlendScoreContext, cfg: &BlendScoreConfig) -> f64 {
+    cfg.alpha * ctx.file_dense_sim
+        + cfg.beta * ctx.wiki_match_score
+        + cfg.gamma * ctx.graph_proximity
+        + cfg.delta * ctx.authority_tier_weight
+        + cfg.epsilon * ctx.frecency
+        + cfg.zeta * (ctx.memory_link_count as f64).ln_1p()
+        + cfg.eta * ctx.symbol_overlap
 }
 
 // ---------------------------------------------------------------------------
@@ -80,6 +183,10 @@ pub struct RerankConfig {
     pub max_neighbors: usize,
     pub max_candidates: usize,
     pub top_k: usize,
+    /// Phase 2 / T2.1 — opt-in joint blend scorer. `None` = legacy path
+    /// (cycle-1..14 unchanged). `Some(cfg)` activates `score_file_blended`
+    /// in `retrieve_files_blended` (Phase 5 / T5.1).
+    pub blend: Option<BlendScoreConfig>,
 }
 
 impl Default for RerankConfig {
@@ -95,6 +202,7 @@ impl Default for RerankConfig {
             max_neighbors: 15,
             max_candidates: 80,
             top_k: 8,
+            blend: None,
         }
     }
 }
@@ -205,6 +313,232 @@ pub fn retrieve_files(
         harm_removals,
         compression_savings_tokens: 0,
         inline_slices: Vec::new(),
+        query_type: classify(query),
+        memory_cards: Vec::new(),
+    }
+}
+
+/// Phase 5 / T5.1 — full blend retrieval.
+///
+/// Composes file BM25, wiki retrieval (BM25 + optional dense), graph
+/// multi-hop proximity, joint scoring (`score_file_blended`), harm
+/// filter, and memory hydration into a single entry point. Default
+/// `RerankConfig::blend == None` keeps callers on the legacy
+/// `retrieve_files` path; only when `config.blend.is_some()` does
+/// this function differ from `retrieve_files` — that's enforced by
+/// caller wiring.
+///
+/// All optional inputs (`wiki_dense`, `embedder`, `file_memory`) may
+/// be `None`; the pipeline degrades gracefully:
+///
+/// * no `wiki` → no wiki signal, blend reduces to file + graph + memory.
+/// * no `wiki_dense` or no `embedder` → wiki retrieval is BM25-only.
+/// * no `file_memory` → memory cards stay empty.
+///
+/// Preserves cycle 1-2 invariants: `harm_filter` is applied; the
+/// `harm_removals` counter is populated; `query_type` is classified.
+#[allow(clippy::too_many_arguments)]
+pub fn retrieve_files_blended(
+    graph: &CodeGraph,
+    communities: &[Community],
+    wiki: Option<&crate::wiki::model::Wiki>,
+    wiki_dense: Option<&crate::wiki::WikiDenseIndex>,
+    embedder: Option<&dyn crate::wiki::Embedder>,
+    file_memory: Option<&dyn theo_domain::memory::FileMemoryLookup>,
+    query: &str,
+    config: &RerankConfig,
+    previously_seen: &HashSet<String>,
+) -> FileRetrievalResult {
+    // If blend isn't configured, defer to the legacy path entirely.
+    let Some(blend_cfg) = config.blend else {
+        return retrieve_files(graph, communities, query, config, previously_seen);
+    };
+
+    // Graceful degradation (ADR D5): when none of the blend-specific
+    // signal sources are available, the linear scorer is just a noisier
+    // version of legacy BM25 — and benchmarks confirm it can underperform
+    // the baseline. Fall back to the legacy reranker which is empirically
+    // calibrated for the BM25-only signal set. This is NOT a bypass: the
+    // blend path is still active whenever any one of wiki / wiki_dense /
+    // embedder / file_memory is provided.
+    if wiki.is_none() && wiki_dense.is_none() && embedder.is_none() && file_memory.is_none() {
+        return retrieve_files(graph, communities, query, config, previously_seen);
+    }
+
+    // Stage A: file-level BM25 (cheap, always available).
+    let file_scores = FileBm25::search(graph, query);
+
+    // Stage B: wiki retrieval (BM25 + optional dense fusion).
+    let wiki_hits = match wiki {
+        Some(w) => crate::wiki::wiki_search(w, wiki_dense, embedder, query, 20),
+        None => Vec::new(),
+    };
+
+    // Stage C: anchor set for graph proximity.
+    let mut bm25_top: Vec<(String, f64)> = file_scores.iter().map(|(p, s)| (p.clone(), *s)).collect();
+    bm25_top.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    let mut anchors: HashSet<String> = HashSet::new();
+    for (path, _) in bm25_top.iter().take(5) {
+        anchors.insert(format!("file:{path}"));
+    }
+    for hit in wiki_hits.iter().take(3) {
+        for f in &hit.linked_files {
+            anchors.insert(format!("file:{f}"));
+        }
+    }
+
+    // Stage D: graph proximity scores (BFS with decay).
+    let proximity = crate::graph_attention::proximity_from_seeds(
+        graph,
+        &anchors,
+        crate::graph_attention::PROXIMITY_DEFAULT_MAX_DEPTH,
+        crate::graph_attention::PROXIMITY_DEFAULT_DECAY,
+    );
+
+    // Stage E: build candidate pool (union of BM25 hits + wiki linked files
+    // + proximity-reachable file nodes).
+    let mut candidate_paths: HashSet<String> = HashSet::new();
+    for (path, _) in &bm25_top {
+        candidate_paths.insert(path.clone());
+    }
+    for hit in &wiki_hits {
+        for f in &hit.linked_files {
+            candidate_paths.insert(f.clone());
+        }
+    }
+    for node_id in proximity.keys() {
+        if let Some(path) = node_id.strip_prefix("file:") {
+            candidate_paths.insert(path.to_string());
+        }
+    }
+
+    // Per-file wiki match score (max over pages that link to the file).
+    let mut wiki_match_by_file: std::collections::HashMap<String, (f64, f64)> = std::collections::HashMap::new();
+    for hit in &wiki_hits {
+        for f in &hit.linked_files {
+            let entry = wiki_match_by_file.entry(f.clone()).or_insert((0.0, 0.0));
+            if hit.score > entry.0 {
+                entry.0 = hit.score;
+                entry.1 = hit.tier.weight();
+            }
+        }
+    }
+
+    let total_candidates = candidate_paths.len();
+
+    // Ghost-path filter (existing pattern).
+    let candidate_paths: Vec<String> = candidate_paths
+        .into_iter()
+        .filter(|p| graph.get_node(&format!("file:{p}")).is_some())
+        .collect();
+    let dropped_ghost_paths = total_candidates.saturating_sub(candidate_paths.len());
+
+    // Symbol overlap (cheap Jaccard) per file.
+    let query_tokens: std::collections::HashSet<String> = crate::code_tokenizer::tokenize_code(query)
+        .into_iter()
+        .collect();
+
+    // Stage F: blend score per candidate.
+    let mut scored: Vec<RankedFile> = candidate_paths
+        .iter()
+        .map(|path| {
+            let file_id = format!("file:{path}");
+            let bm25_score = file_scores.get(path).copied().unwrap_or(0.0);
+            // Normalize BM25 to [0,1] via tanh; protects against unbounded values.
+            let file_dense_sim = (bm25_score / 10.0).tanh();
+            let (wiki_match_score, authority_tier_weight) = wiki_match_by_file
+                .get(path)
+                .copied()
+                .unwrap_or((0.0, 0.0));
+            let graph_proximity = proximity.get(&file_id).copied().unwrap_or(0.0);
+
+            let memory_link_count = match file_memory {
+                Some(fm) => fm
+                    .entries_for_files(std::slice::from_ref(path))
+                    .len() as u32,
+                None => 0,
+            };
+
+            let symbol_overlap = compute_blend_symbol_jaccard(graph, &file_id, &query_tokens);
+
+            let ctx = BlendScoreContext {
+                file_dense_sim,
+                wiki_match_score,
+                graph_proximity,
+                authority_tier_weight,
+                frecency: 0.0, // future enhancement
+                memory_link_count,
+                symbol_overlap,
+            };
+            let score = score_file_blended(&ctx, &blend_cfg);
+            RankedFile {
+                path: path.clone(),
+                score,
+                signals: Vec::new(),
+            }
+        })
+        .filter(|r| r.score > 0.0)
+        .collect();
+
+    scored.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    scored.truncate(config.top_k);
+
+    // Stage G: harm filter (preserves cycle 1-2 fixes).
+    let harm_removals = apply_harm_filter(&mut scored, graph);
+
+    // Stage H: graph expansion from top files.
+    let seed_files: Vec<String> = scored.iter().take(5).map(|r| r.path.clone()).collect();
+    let (expanded_files, expanded_tests) =
+        expand_from_files(graph, &seed_files, config.max_neighbors);
+
+    // Stage I: memory hydration.
+    let primary_paths: Vec<String> = scored.iter().map(|r| r.path.clone()).collect();
+    let mut memory_cards = match file_memory {
+        Some(fm) => fm.entries_for_files(&primary_paths),
+        None => Vec::new(),
+    };
+    cap_memory_cards(&mut memory_cards);
+
+    FileRetrievalResult {
+        primary_files: scored,
+        expanded_files,
+        expanded_tests,
+        total_candidates,
+        dropped_ghost_paths,
+        harm_removals,
+        compression_savings_tokens: 0,
+        inline_slices: Vec::new(),
+        query_type: classify(query),
+        memory_cards,
+    }
+}
+
+/// Jaccard similarity between query tokens and a file's symbol-name
+/// tokens. Used by the blend pipeline (T5.1). Distinct from the legacy
+/// `compute_symbol_overlap` which uses different signal semantics.
+fn compute_blend_symbol_jaccard(
+    graph: &CodeGraph,
+    file_id: &str,
+    query_tokens: &std::collections::HashSet<String>,
+) -> f64 {
+    if query_tokens.is_empty() {
+        return 0.0;
+    }
+    let symbols: std::collections::HashSet<String> = graph
+        .contains_children(file_id)
+        .into_iter()
+        .filter_map(|sid| graph.get_node(sid).map(|n| n.name.to_lowercase()))
+        .flat_map(|name| crate::code_tokenizer::tokenize_code(&name))
+        .collect();
+    if symbols.is_empty() {
+        return 0.0;
+    }
+    let intersection = query_tokens.intersection(&symbols).count() as f64;
+    let union = query_tokens.union(&symbols).count() as f64;
+    if union == 0.0 {
+        0.0
+    } else {
+        intersection / union
     }
 }
 
@@ -240,6 +574,392 @@ pub fn retrieve_files_with_inline(
     );
     result.inline_slices = inline.slices;
     result
+}
+
+/// Cycle 11 — Dense+RRF retrieval entry point.
+///
+/// Builds the candidate set via 3-ranker reciprocal-rank fusion
+/// (`tantivy_search::hybrid_rrf_search` over BM25 + Tantivy + Dense
+/// embeddings) instead of the BM25-only path of `retrieve_files`.
+/// Subsequent stages (ghost-path filter, harm filter, graph
+/// expansion) are identical to `retrieve_files`, so callers can
+/// switch entry points without changing how they consume the result.
+///
+/// On the local `theo-code` ground truth (cycle 7 measurement),
+/// dense+RRF reaches MRR=0.689 / R@5=0.518 vs BM25-only MRR=0.593 /
+/// R@5=0.462 — a +9.6 pp lift on MRR with no new hardware overhead
+/// beyond the dense embedder (the cross-encoder reranker was the
+/// component that caused OOM on 8 GB; it is intentionally NOT used
+/// here).
+///
+/// Behind `dense-retrieval` feature so production builds without
+/// fastembed/tantivy compile.
+#[cfg(feature = "dense-retrieval")]
+pub fn retrieve_files_dense_rrf(
+    graph: &CodeGraph,
+    _communities: &[Community],
+    tantivy_index: &crate::tantivy_search::FileTantivyIndex,
+    embedder: &crate::embedding::neural::NeuralEmbedder,
+    cache: &crate::embedding::cache::EmbeddingCache,
+    query: &str,
+    config: &RerankConfig,
+    _previously_seen: &HashSet<String>,
+) -> FileRetrievalResult {
+    // Stage 1: 3-ranker RRF fusion. k=20.0 matches the empirical
+    // optimum on this corpus (cycle-7 `benchmark_rrf_dense` measured
+    // 0.689 MRR / 0.518 R@5 with k=20.0; the textbook k=60.0 from
+    // Cormack et al. SIGIR 2009 underperforms here by ~0.09 R@5).
+    let rrf_scores = crate::tantivy_search::hybrid_rrf_search(
+        graph,
+        tantivy_index,
+        embedder,
+        cache,
+        query,
+        20.0,
+    );
+
+    // Stage 2: sort RRF scores descending and cap at max_candidates.
+    let total_candidates = rrf_scores.len();
+    let mut sorted: Vec<(String, f64)> = rrf_scores.into_iter().collect();
+    sorted.sort_by(|a, b| {
+        b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    sorted.truncate(config.max_candidates);
+
+    // Stage 3: ghost-path filter — drop candidates that don't have a
+    // node in the graph (mirrors `retrieve_files`).
+    let before_filter = sorted.len();
+    sorted.retain(|(p, _)| graph.get_node(&format!("file:{p}")).is_some());
+    let dropped_ghost_paths = before_filter - sorted.len();
+
+    // Stage 4: build RankedFile list. RRF score is rank-fused so we
+    // do NOT decompose it into per-feature signals; we attach a single
+    // `Signal::DenseRrf` for explainability.
+    let mut ranked: Vec<RankedFile> = sorted
+        .into_iter()
+        .map(|(path, score)| RankedFile {
+            path,
+            score,
+            signals: vec![(Signal::DenseRrf, score)],
+        })
+        .collect();
+    ranked.truncate(config.top_k);
+
+    // Stage 4.5: harm filter — same heuristics as the BM25 path.
+    let harm_removals = apply_harm_filter(&mut ranked, graph);
+
+    // Stage 5: graph expansion (Calls + Imports, depth=1).
+    let seed_files: Vec<String> =
+        ranked.iter().take(5).map(|r| r.path.clone()).collect();
+    let (expanded_files, expanded_tests) =
+        expand_from_files(graph, &seed_files, config.max_neighbors);
+
+    FileRetrievalResult {
+        primary_files: ranked,
+        expanded_files,
+        expanded_tests,
+        total_candidates,
+        dropped_ghost_paths,
+        harm_removals,
+        compression_savings_tokens: 0,
+        inline_slices: Vec::new(),
+        query_type: classify(query),
+        memory_cards: Vec::new(),
+    }
+}
+
+/// Cycle 14 — query-type routed retrieval entry point.
+///
+/// Operationalizes the `QueryType` classifier (cycles 5-6) that was
+/// recorded into `FileRetrievalResult.query_type` but never dispatched
+/// on. Dispatches `Identifier` queries to the BM25 baseline path and
+/// `NaturalLanguage` / `Mixed` queries to the cycle-12 winning
+/// Dense+RRF k=20 path.
+///
+/// **EMPIRICAL FINDING (cycle 14, 2026-04-30):** naive query-type
+/// routing is a **trade-off**, not a strict win, against the cycle-12
+/// Dense+RRF k=20 baseline on the local `theo-code` ground truth
+/// (4 queries routed to BM25, 26 to Dense+RRF):
+///
+/// | Metric | Routed | Dense+RRF k=20 | Δ |
+/// |---|---|---|---|
+/// | MRR | **0.695** | 0.674 | **+0.021** |
+/// | R@5 | 0.482 | 0.507 | −0.025 |
+/// | R@10 | 0.538 | 0.577 | −0.039 |
+/// | nDCG@5 | 0.485 | 0.495 | −0.010 |
+///
+/// Routing improves top-1 precision (BM25 finds the exact identifier
+/// match more often) but loses recall on identifier queries because
+/// Dense+RRF brings in semantic neighbors that BM25 misses. Per the
+/// cycle-14 falsifiability criterion (gap-iteration-14.md), this
+/// **REJECTS the routing hypothesis** as the production default.
+///
+/// **The cycle-12 Dense+RRF k=20 path remains the recommended
+/// default.** This function is retained as documentation of the
+/// empirical trade-off and as ready infrastructure for future work
+/// that could combine the two via score blending instead of binary
+/// dispatch (e.g., reciprocal-rank fusion of routed + dense rankings).
+///
+/// Dispatch table:
+///
+/// | `QueryType` | Ranker | Source of evidence |
+/// |---|---|---|
+/// | `Identifier` | `retrieve_files` (BM25) | cycle 4 qualitative + cycle 14 per-query MRR data |
+/// | `NaturalLanguage` | `retrieve_files_dense_rrf` (k=20) | cycles 11-12 strict dominance |
+/// | `Mixed` | `retrieve_files_dense_rrf` (k=20) | cycle 12 strict dominance |
+///
+/// Hardware envelope: identical to `retrieve_files_dense_rrf` — no new
+/// model, no new memory pressure. Dispatch is a single match arm.
+///
+/// Behind `dense-retrieval` feature for symmetry with the dense+RRF
+/// callee; default builds use plain `retrieve_files`.
+#[cfg(feature = "dense-retrieval")]
+#[allow(clippy::too_many_arguments)]
+pub fn retrieve_files_routed(
+    graph: &CodeGraph,
+    communities: &[Community],
+    tantivy_index: &crate::tantivy_search::FileTantivyIndex,
+    embedder: &crate::embedding::neural::NeuralEmbedder,
+    cache: &crate::embedding::cache::EmbeddingCache,
+    query: &str,
+    config: &RerankConfig,
+    previously_seen: &HashSet<String>,
+) -> FileRetrievalResult {
+    match classify(query) {
+        QueryType::Identifier => {
+            retrieve_files(graph, communities, query, config, previously_seen)
+        }
+        QueryType::NaturalLanguage | QueryType::Mixed => retrieve_files_dense_rrf(
+            graph,
+            communities,
+            tantivy_index,
+            embedder,
+            cache,
+            query,
+            config,
+            previously_seen,
+        ),
+    }
+}
+
+/// Cycle 15 — Score-blended retrieval via meta-RRF over BM25 + Dense+RRF.
+///
+/// Cycle 14's `retrieve_files_routed` exposed a Pareto trade-off:
+/// dispatching to BM25 wins MRR on Identifier queries (+0.021) but
+/// loses recall (R@5 −0.025, R@10 −0.039) versus the Dense+RRF k=20
+/// path. The cycle-15 hypothesis is that **fusing both pipelines via
+/// reciprocal-rank fusion** (instead of binary dispatch) preserves
+/// BM25's top-1 precision AND Dense+RRF's recall, because RRF awards
+/// `1/(k+rank)` to a file that appears at rank 1 in either source.
+///
+/// Pipeline:
+///
+/// 1. Compute the BM25 ranking via `retrieve_files`
+///    (`primary_files` is the ranked list).
+/// 2. Compute the Dense+RRF k=20 ranking via `retrieve_files_dense_rrf`.
+/// 3. RRF-fuse the two rankings with k=20 (cycle-12 empirical optimum):
+///    `fused_score(f) = 1/(20 + bm25_rank(f)) + 1/(20 + dense_rank(f))`,
+///    treating absence in a list as `bm25_rank` or `dense_rank` = ∞
+///    (contribution = 0).
+/// 4. Sort by fused score, cap at `config.top_k`, apply harm filter
+///    + graph expansion identically to the existing entry points.
+///
+/// Hardware envelope: identical to running `retrieve_files_dense_rrf`
+/// because BM25's incremental cost is negligible once the graph is
+/// loaded. No new model. 8 GB envelope is preserved.
+///
+/// Behind `dense-retrieval` feature for symmetry with the dense+RRF
+/// callee; default builds use plain `retrieve_files`.
+#[cfg(feature = "dense-retrieval")]
+#[allow(clippy::too_many_arguments)]
+pub fn retrieve_files_blended_rrf(
+    graph: &CodeGraph,
+    communities: &[Community],
+    tantivy_index: &crate::tantivy_search::FileTantivyIndex,
+    embedder: &crate::embedding::neural::NeuralEmbedder,
+    cache: &crate::embedding::cache::EmbeddingCache,
+    query: &str,
+    config: &RerankConfig,
+    previously_seen: &HashSet<String>,
+) -> FileRetrievalResult {
+    // RRF k-parameter: cycle-12 empirical optimum on this corpus.
+    const RRF_K: f64 = 20.0;
+
+    // Stage 1: compute both source rankings.
+    let bm25_result = retrieve_files(graph, communities, query, config, previously_seen);
+    let dense_result = retrieve_files_dense_rrf(
+        graph,
+        communities,
+        tantivy_index,
+        embedder,
+        cache,
+        query,
+        config,
+        previously_seen,
+    );
+
+    // Stage 2: build per-source rank maps. Rank is 1-based; absent
+    // files contribute zero to the fused score.
+    let bm25_ranks: HashMap<&str, usize> = bm25_result
+        .primary_files
+        .iter()
+        .enumerate()
+        .map(|(i, r)| (r.path.as_str(), i + 1))
+        .collect();
+    let dense_ranks: HashMap<&str, usize> = dense_result
+        .primary_files
+        .iter()
+        .enumerate()
+        .map(|(i, r)| (r.path.as_str(), i + 1))
+        .collect();
+
+    // Stage 3: union of paths from both sources, RRF-fused score.
+    let mut fused_scores: HashMap<String, f64> = HashMap::new();
+    for (path, rank) in &bm25_ranks {
+        let entry = fused_scores.entry((*path).to_string()).or_insert(0.0);
+        *entry += 1.0 / (RRF_K + (*rank as f64));
+    }
+    for (path, rank) in &dense_ranks {
+        let entry = fused_scores.entry((*path).to_string()).or_insert(0.0);
+        *entry += 1.0 / (RRF_K + (*rank as f64));
+    }
+
+    let total_candidates = fused_scores.len();
+
+    // Stage 4: sort fused scores descending and build RankedFile list.
+    let mut sorted: Vec<(String, f64)> = fused_scores.into_iter().collect();
+    sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    sorted.truncate(config.max_candidates);
+
+    // Ghost-path filter (mirror of `retrieve_files_dense_rrf`).
+    let before_filter = sorted.len();
+    sorted.retain(|(p, _)| graph.get_node(&format!("file:{p}")).is_some());
+    let dropped_ghost_paths = before_filter - sorted.len();
+
+    let mut ranked: Vec<RankedFile> = sorted
+        .into_iter()
+        .map(|(path, score)| RankedFile {
+            path,
+            score,
+            // RRF over two pipelines — neither single signal label
+            // captures it cleanly. Re-use DenseRrf for explainability
+            // since one of the inputs is dense+RRF.
+            signals: vec![(Signal::DenseRrf, score)],
+        })
+        .collect();
+    ranked.truncate(config.top_k);
+
+    // Stage 4.5: harm filter (same heuristics).
+    let harm_removals = apply_harm_filter(&mut ranked, graph);
+
+    // Stage 5: graph expansion from top files (Calls + Imports, depth=1).
+    let seed_files: Vec<String> =
+        ranked.iter().take(5).map(|r| r.path.clone()).collect();
+    let (expanded_files, expanded_tests) =
+        expand_from_files(graph, &seed_files, config.max_neighbors);
+
+    FileRetrievalResult {
+        primary_files: ranked,
+        expanded_files,
+        expanded_tests,
+        total_candidates,
+        dropped_ghost_paths,
+        harm_removals,
+        compression_savings_tokens: 0,
+        inline_slices: Vec::new(),
+        query_type: classify(query),
+        memory_cards: Vec::new(),
+    }
+}
+
+/// Cycle 13 — Dense+RRF + cross-encoder rerank entry point.
+///
+/// Extends `retrieve_files_dense_rrf` with a Stage-5 cross-encoder
+/// reranker (`reranker::CrossEncoderReranker`) over the top-50 RRF
+/// candidates. Uses the BGE-Base lite variant (~278 MB) by default,
+/// keeping the workload under 8 GB.
+///
+/// Pipeline:
+///   1. RRF 3-ranker (BM25 + Tantivy + Dense, k=20) → top-50 candidates
+///   2. Cross-encoder rerank → top-K
+///   3. Ghost-path filter, harm filter, graph expansion (same as
+///      `retrieve_files_dense_rrf`)
+///
+/// Behind `dense-retrieval` feature.
+#[cfg(feature = "dense-retrieval")]
+pub fn retrieve_files_dense_rrf_with_rerank(
+    graph: &CodeGraph,
+    _communities: &[Community],
+    tantivy_index: &crate::tantivy_search::FileTantivyIndex,
+    embedder: &crate::embedding::neural::NeuralEmbedder,
+    cache: &crate::embedding::cache::EmbeddingCache,
+    reranker: &crate::reranker::CrossEncoderReranker,
+    query: &str,
+    config: &RerankConfig,
+    _previously_seen: &HashSet<String>,
+) -> FileRetrievalResult {
+    // Stage 1: RRF candidate set (k=20 matches cycle-7 empirical optimum).
+    let rrf_scores = crate::tantivy_search::hybrid_rrf_search(
+        graph,
+        tantivy_index,
+        embedder,
+        cache,
+        query,
+        20.0,
+    );
+
+    let total_candidates = rrf_scores.len();
+    let mut sorted: Vec<(String, f64)> = rrf_scores.into_iter().collect();
+    sorted.sort_by(|a, b| {
+        b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    sorted.truncate(50); // Cap candidate pool for reranker latency.
+
+    // Stage 2: Cross-encoder rerank.
+    let reranked_map = reranker.rerank(query, &sorted, graph, config.max_candidates);
+    let mut reranked_sorted: Vec<(String, f64)> =
+        reranked_map.into_iter().collect();
+    reranked_sorted.sort_by(|a, b| {
+        b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    // Stage 3: ghost-path filter.
+    let before_filter = reranked_sorted.len();
+    reranked_sorted.retain(|(p, _)| graph.get_node(&format!("file:{p}")).is_some());
+    let dropped_ghost_paths = before_filter - reranked_sorted.len();
+
+    // Stage 4: build RankedFile list.
+    let mut ranked: Vec<RankedFile> = reranked_sorted
+        .into_iter()
+        .map(|(path, score)| RankedFile {
+            path,
+            score,
+            signals: vec![(Signal::DenseRrf, score)],
+        })
+        .collect();
+    ranked.truncate(config.top_k);
+
+    // Stage 4.5: harm filter.
+    let harm_removals = apply_harm_filter(&mut ranked, graph);
+
+    // Stage 5: graph expansion.
+    let seed_files: Vec<String> =
+        ranked.iter().take(5).map(|r| r.path.clone()).collect();
+    let (expanded_files, expanded_tests) =
+        expand_from_files(graph, &seed_files, config.max_neighbors);
+
+    FileRetrievalResult {
+        primary_files: ranked,
+        expanded_files,
+        expanded_tests,
+        total_candidates,
+        dropped_ghost_paths,
+        harm_removals,
+        compression_savings_tokens: 0,
+        inline_slices: Vec::new(),
+        query_type: classify(query),
+        memory_cards: Vec::new(),
+    }
 }
 
 /// Apply the harm filter to an already-ranked list, mutating it in place.

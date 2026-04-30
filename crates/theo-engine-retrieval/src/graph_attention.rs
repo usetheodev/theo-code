@@ -14,10 +14,79 @@
 ///    `a_{k+1}(node) = damping * a_k(node) + (1 - damping) * max(a_k(neighbor) * edge_weight)`
 /// 3. Aggregate per community: `attention(community) = max(a_K(node) for node in community)`.
 /// 4. Normalize scores to [0, 1].
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use theo_engine_graph::cluster::Community;
 use theo_engine_graph::model::CodeGraph;
+
+// ---------------------------------------------------------------------------
+// Phase 3 / T3.1 — graph_proximity_from_seeds
+// ---------------------------------------------------------------------------
+
+/// Default decay factor: each hop multiplies the score by 0.5.
+pub const PROXIMITY_DEFAULT_DECAY: f64 = 0.5;
+/// Default depth cap. Hops beyond this contribute nothing.
+pub const PROXIMITY_DEFAULT_MAX_DEPTH: usize = 3;
+
+/// Compute proximity scores for files reachable from a set of seed
+/// file ids by walking the code graph (BFS) up to `max_depth` hops,
+/// applying `decay^distance` per file.
+///
+/// Inputs:
+/// * `graph` — code graph with file/symbol nodes and Calls/Imports/etc.
+/// * `seeds` — file ids (e.g. "file:src/foo.rs"); duplicates are ok.
+/// * `max_depth` — hop budget. `0` returns just the seeds with score 1.
+/// * `decay` — per-hop multiplier in `(0, 1]`; clamped at `max_depth`
+///   so files never reachable get exactly 0.0.
+///
+/// Output: `HashMap<file_id, score>`. Score 1.0 for seeds, decays
+/// toward 0 with distance.
+///
+/// Edge cases:
+/// * empty seeds → empty map.
+/// * seed not present in graph → it still ends up in the result with
+///   score 1.0 (so callers can rely on `output.contains(seed)`), but
+///   without neighbours.
+pub fn proximity_from_seeds(
+    graph: &CodeGraph,
+    seeds: &HashSet<String>,
+    max_depth: usize,
+    decay: f64,
+) -> HashMap<String, f64> {
+    if seeds.is_empty() {
+        return HashMap::new();
+    }
+    let decay = decay.clamp(0.0, 1.0);
+    let mut scores: HashMap<String, f64> = HashMap::with_capacity(seeds.len() * 8);
+    let mut visited: HashSet<String> = HashSet::with_capacity(seeds.len() * 8);
+    let mut frontier: VecDeque<(String, usize)> = VecDeque::new();
+    for seed in seeds {
+        if visited.insert(seed.clone()) {
+            scores.insert(seed.clone(), 1.0);
+            frontier.push_back((seed.clone(), 0));
+        }
+    }
+    while let Some((node_id, depth)) = frontier.pop_front() {
+        if depth >= max_depth {
+            continue;
+        }
+        let next_depth = depth + 1;
+        let next_score = decay.powi(next_depth as i32);
+        for neighbour in graph.neighbors(&node_id) {
+            if visited.insert(neighbour.to_string()) {
+                scores.insert(neighbour.to_string(), next_score);
+                frontier.push_back((neighbour.to_string(), next_depth));
+            }
+        }
+        for neighbour in graph.reverse_neighbors(&node_id) {
+            if visited.insert(neighbour.to_string()) {
+                scores.insert(neighbour.to_string(), next_score);
+                frontier.push_back((neighbour.to_string(), next_depth));
+            }
+        }
+    }
+    scores
+}
 
 /// Compute attention scores for communities via graph propagation.
 ///
@@ -440,5 +509,93 @@ mod tests {
         let result = propagate_attention(&query_scores, &graph, &communities, 2, 0.5);
 
         assert!(result.is_empty(), "empty input should return empty result");
+    }
+
+    // ----- T3.1: proximity_from_seeds -----
+
+    #[test]
+    fn test_proximity_seed_scores_1() {
+        let (graph, _) = chain_graph();
+        let mut seeds = HashSet::new();
+        seeds.insert("a".to_string());
+        let scores = proximity_from_seeds(&graph, &seeds, 0, 0.5);
+        assert_eq!(scores.get("a"), Some(&1.0));
+    }
+
+    #[test]
+    fn test_proximity_neighbour_scores_decay() {
+        let (graph, _) = chain_graph();
+        let mut seeds = HashSet::new();
+        seeds.insert("a".to_string());
+        let scores = proximity_from_seeds(&graph, &seeds, 1, 0.5);
+        assert_eq!(scores.get("a"), Some(&1.0));
+        assert_eq!(scores.get("b"), Some(&0.5));
+    }
+
+    #[test]
+    fn test_proximity_2hop_scores_decay_squared() {
+        let (graph, _) = chain_graph();
+        let mut seeds = HashSet::new();
+        seeds.insert("a".to_string());
+        let scores = proximity_from_seeds(&graph, &seeds, 2, 0.5);
+        assert_eq!(scores.get("a"), Some(&1.0));
+        assert_eq!(scores.get("b"), Some(&0.5));
+        // 0.5^2 = 0.25
+        let c_score = scores.get("c").copied().unwrap_or(0.0);
+        assert!((c_score - 0.25).abs() < 1e-9, "c={}", c_score);
+    }
+
+    #[test]
+    fn test_proximity_unreachable_scores_zero() {
+        let (mut graph, _) = chain_graph();
+        // Add an isolated node 'z' with no edges.
+        graph.add_node(make_node("z", "func_z"));
+        let mut seeds = HashSet::new();
+        seeds.insert("a".to_string());
+        let scores = proximity_from_seeds(&graph, &seeds, 3, 0.5);
+        assert!(!scores.contains_key("z"));
+    }
+
+    #[test]
+    fn test_proximity_capped_at_max_depth() {
+        let (graph, _) = chain_graph();
+        let mut seeds = HashSet::new();
+        seeds.insert("a".to_string());
+        // depth 1 should NOT reach c (which is 2 hops away).
+        let scores = proximity_from_seeds(&graph, &seeds, 1, 0.5);
+        assert!(!scores.contains_key("c"));
+    }
+
+    #[test]
+    fn test_proximity_multi_seed_uses_minimum_distance() {
+        let (graph, _) = chain_graph();
+        let mut seeds = HashSet::new();
+        seeds.insert("a".to_string());
+        seeds.insert("c".to_string());
+        let scores = proximity_from_seeds(&graph, &seeds, 2, 0.5);
+        // 'b' is 1 hop from both 'a' and 'c'; should pick min distance.
+        // BFS that visits seeds first and assigns 1.0 to them, then
+        // marks 'b' at depth 1 from whichever seed is processed first.
+        // In all cases score is 0.5 (decay^1).
+        assert_eq!(scores.get("b"), Some(&0.5));
+    }
+
+    #[test]
+    fn test_proximity_empty_seeds_returns_empty() {
+        let (graph, _) = chain_graph();
+        let seeds = HashSet::new();
+        let scores = proximity_from_seeds(&graph, &seeds, 3, 0.5);
+        assert!(scores.is_empty());
+    }
+
+    #[test]
+    fn test_proximity_seed_not_in_graph_still_scores_1() {
+        let (graph, _) = chain_graph();
+        let mut seeds = HashSet::new();
+        seeds.insert("nonexistent".to_string());
+        let scores = proximity_from_seeds(&graph, &seeds, 3, 0.5);
+        assert_eq!(scores.get("nonexistent"), Some(&1.0));
+        // Only the seed itself; no neighbours since it's not in graph.
+        assert_eq!(scores.len(), 1);
     }
 }

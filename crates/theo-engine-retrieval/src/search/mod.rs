@@ -4,12 +4,14 @@ mod bm25_index;
 mod document;
 mod file_bm25;
 mod multi;
+mod query_type;
 mod signals;
 mod tokenizing;
 mod types;
 
 pub use document::*;
 pub use file_bm25::*;
+pub use query_type::{QueryType, classify};
 pub use signals::*;
 pub use tokenizing::*;
 pub use types::*;

@@ -12,13 +12,21 @@
       "category": "symbol",
       "difficulty": "easy",
       "expected_files": [
-        "crates/theo-engine-retrieval/src/assembly.rs",
+        "crates/theo-engine-retrieval/src/assembly/mod.rs",
         "crates/theo-application/src/use_cases/pipeline.rs",
-        "crates/theo-application/src/use_cases/graph_context_service.rs"
+        "crates/theo-application/src/use_cases/graph_context_service/mod.rs"
       ],
       "dependencies": [
-        {"source": "crates/theo-engine-retrieval/src/assembly.rs", "target": "crates/theo-engine-graph/src/cluster.rs", "edge_type": "Imports"},
-        {"source": "crates/theo-engine-retrieval/src/assembly.rs", "target": "crates/theo-engine-graph/src/model.rs", "edge_type": "Imports"}
+        {
+          "source": "crates/theo-engine-retrieval/src/assembly/mod.rs",
+          "target": "crates/theo-engine-graph/src/cluster/mod.rs",
+          "edge_type": "Imports"
+        },
+        {
+          "source": "crates/theo-engine-retrieval/src/assembly/mod.rs",
+          "target": "crates/theo-engine-graph/src/model.rs",
+          "edge_type": "Imports"
+        }
       ]
     },
     {
@@ -28,10 +36,14 @@
       "difficulty": "easy",
       "expected_files": [
         "crates/theo-engine-retrieval/src/graph_attention.rs",
-        "crates/theo-engine-retrieval/src/search.rs"
+        "crates/theo-engine-retrieval/src/search/mod.rs"
       ],
       "dependencies": [
-        {"source": "crates/theo-engine-retrieval/src/search.rs", "target": "crates/theo-engine-retrieval/src/graph_attention.rs", "edge_type": "Calls"}
+        {
+          "source": "crates/theo-engine-retrieval/src/search/mod.rs",
+          "target": "crates/theo-engine-retrieval/src/graph_attention.rs",
+          "edge_type": "Calls"
+        }
       ]
     },
     {
@@ -40,7 +52,7 @@
       "category": "symbol",
       "difficulty": "easy",
       "expected_files": [
-        "crates/theo-engine-graph/src/cluster.rs"
+        "crates/theo-engine-graph/src/cluster/mod.rs"
       ],
       "dependencies": []
     },
@@ -50,11 +62,15 @@
       "category": "symbol",
       "difficulty": "medium",
       "expected_files": [
-        "crates/theo-agent-runtime/src/run_engine.rs",
-        "crates/theo-agent-runtime/src/agent_loop.rs"
+        "crates/theo-agent-runtime/src/run_engine/mod.rs",
+        "crates/theo-agent-runtime/src/agent_loop/mod.rs"
       ],
       "dependencies": [
-        {"source": "crates/theo-agent-runtime/src/agent_loop.rs", "target": "crates/theo-agent-runtime/src/run_engine.rs", "edge_type": "Calls"}
+        {
+          "source": "crates/theo-agent-runtime/src/agent_loop/mod.rs",
+          "target": "crates/theo-agent-runtime/src/run_engine/mod.rs",
+          "edge_type": "Calls"
+        }
       ]
     },
     {
@@ -64,10 +80,14 @@
       "difficulty": "easy",
       "expected_files": [
         "crates/theo-engine-retrieval/src/embedding/turboquant.rs",
-        "crates/theo-engine-retrieval/src/search.rs"
+        "crates/theo-engine-retrieval/src/search/mod.rs"
       ],
       "dependencies": [
-        {"source": "crates/theo-engine-retrieval/src/search.rs", "target": "crates/theo-engine-retrieval/src/embedding/turboquant.rs", "edge_type": "Calls"}
+        {
+          "source": "crates/theo-engine-retrieval/src/search/mod.rs",
+          "target": "crates/theo-engine-retrieval/src/embedding/turboquant.rs",
+          "edge_type": "Calls"
+        }
       ]
     },
     {
@@ -81,7 +101,11 @@
         "crates/theo-tooling/src/sandbox/probe.rs"
       ],
       "dependencies": [
-        {"source": "crates/theo-tooling/src/sandbox/executor.rs", "target": "crates/theo-tooling/src/sandbox/bwrap.rs", "edge_type": "Calls"}
+        {
+          "source": "crates/theo-tooling/src/sandbox/executor.rs",
+          "target": "crates/theo-tooling/src/sandbox/bwrap.rs",
+          "edge_type": "Calls"
+        }
       ]
     },
     {
@@ -90,13 +114,17 @@
       "category": "module",
       "difficulty": "medium",
       "expected_files": [
-        "crates/theo-engine-graph/src/cluster.rs",
+        "crates/theo-engine-graph/src/cluster/mod.rs",
         "crates/theo-engine-graph/src/model.rs",
         "crates/theo-engine-graph/src/bridge.rs",
-        "crates/theo-application/src/use_cases/graph_context_service.rs"
+        "crates/theo-application/src/use_cases/graph_context_service/mod.rs"
       ],
       "dependencies": [
-        {"source": "crates/theo-engine-graph/src/cluster.rs", "target": "crates/theo-engine-graph/src/model.rs", "edge_type": "Imports"}
+        {
+          "source": "crates/theo-engine-graph/src/cluster/mod.rs",
+          "target": "crates/theo-engine-graph/src/model.rs",
+          "edge_type": "Imports"
+        }
       ]
     },
     {
@@ -112,7 +140,11 @@
         "crates/theo-infra-llm/src/lib.rs"
       ],
       "dependencies": [
-        {"source": "crates/theo-infra-llm/src/provider/registry.rs", "target": "crates/theo-infra-llm/src/provider/spec.rs", "edge_type": "Imports"}
+        {
+          "source": "crates/theo-infra-llm/src/provider/registry.rs",
+          "target": "crates/theo-infra-llm/src/provider/spec.rs",
+          "edge_type": "Imports"
+        }
       ]
     },
     {
@@ -125,7 +157,11 @@
         "crates/theo-domain/src/tool.rs"
       ],
       "dependencies": [
-        {"source": "crates/theo-tooling/src/registry/mod.rs", "target": "crates/theo-domain/src/tool.rs", "edge_type": "Imports"}
+        {
+          "source": "crates/theo-tooling/src/registry/mod.rs",
+          "target": "crates/theo-domain/src/tool.rs",
+          "edge_type": "Imports"
+        }
       ]
     },
     {
@@ -134,15 +170,23 @@
       "category": "module",
       "difficulty": "medium",
       "expected_files": [
-        "crates/theo-agent-runtime/src/run_engine.rs",
-        "crates/theo-agent-runtime/src/agent_loop.rs",
-        "crates/theo-agent-runtime/src/state.rs",
+        "crates/theo-agent-runtime/src/run_engine/mod.rs",
+        "crates/theo-agent-runtime/src/agent_loop/mod.rs",
+        "crates/theo-agent-runtime/src/state_manager.rs",
         "crates/theo-agent-runtime/src/convergence.rs",
-        "crates/theo-agent-runtime/src/pilot.rs"
+        "crates/theo-agent-runtime/src/pilot/mod.rs"
       ],
       "dependencies": [
-        {"source": "crates/theo-agent-runtime/src/run_engine.rs", "target": "crates/theo-agent-runtime/src/state.rs", "edge_type": "Imports"},
-        {"source": "crates/theo-agent-runtime/src/run_engine.rs", "target": "crates/theo-agent-runtime/src/convergence.rs", "edge_type": "Calls"}
+        {
+          "source": "crates/theo-agent-runtime/src/run_engine/mod.rs",
+          "target": "crates/theo-agent-runtime/src/state_manager.rs",
+          "edge_type": "Imports"
+        },
+        {
+          "source": "crates/theo-agent-runtime/src/run_engine/mod.rs",
+          "target": "crates/theo-agent-runtime/src/convergence.rs",
+          "edge_type": "Calls"
+        }
       ]
     },
     {
@@ -157,7 +201,11 @@
         "crates/theo-domain/src/error.rs"
       ],
       "dependencies": [
-        {"source": "crates/theo-agent-runtime/src/retry.rs", "target": "crates/theo-domain/src/error.rs", "edge_type": "Imports"}
+        {
+          "source": "crates/theo-agent-runtime/src/retry.rs",
+          "target": "crates/theo-domain/src/error.rs",
+          "edge_type": "Imports"
+        }
       ]
     },
     {
@@ -169,10 +217,14 @@
         "crates/theo-agent-runtime/src/budget_enforcer.rs",
         "crates/theo-engine-retrieval/src/budget.rs",
         "crates/theo-domain/src/budget.rs",
-        "crates/theo-engine-retrieval/src/assembly.rs"
+        "crates/theo-engine-retrieval/src/assembly/mod.rs"
       ],
       "dependencies": [
-        {"source": "crates/theo-engine-retrieval/src/assembly.rs", "target": "crates/theo-engine-retrieval/src/budget.rs", "edge_type": "Imports"}
+        {
+          "source": "crates/theo-engine-retrieval/src/assembly/mod.rs",
+          "target": "crates/theo-engine-retrieval/src/budget.rs",
+          "edge_type": "Imports"
+        }
       ]
     },
     {
@@ -188,7 +240,11 @@
         "crates/theo-infra-auth/src/anthropic.rs"
       ],
       "dependencies": [
-        {"source": "crates/theo-infra-auth/src/openai.rs", "target": "crates/theo-infra-auth/src/pkce.rs", "edge_type": "Calls"}
+        {
+          "source": "crates/theo-infra-auth/src/openai.rs",
+          "target": "crates/theo-infra-auth/src/pkce.rs",
+          "edge_type": "Calls"
+        }
       ]
     },
     {
@@ -199,11 +255,19 @@
       "expected_files": [
         "crates/theo-engine-retrieval/src/embedding/tfidf.rs",
         "crates/theo-engine-retrieval/src/embedding/neural.rs",
-        "crates/theo-engine-retrieval/src/search.rs"
+        "crates/theo-engine-retrieval/src/search/mod.rs"
       ],
       "dependencies": [
-        {"source": "crates/theo-engine-retrieval/src/search.rs", "target": "crates/theo-engine-retrieval/src/embedding/tfidf.rs", "edge_type": "Calls"},
-        {"source": "crates/theo-engine-retrieval/src/search.rs", "target": "crates/theo-engine-retrieval/src/embedding/neural.rs", "edge_type": "Calls"}
+        {
+          "source": "crates/theo-engine-retrieval/src/search/mod.rs",
+          "target": "crates/theo-engine-retrieval/src/embedding/tfidf.rs",
+          "edge_type": "Calls"
+        },
+        {
+          "source": "crates/theo-engine-retrieval/src/search/mod.rs",
+          "target": "crates/theo-engine-retrieval/src/embedding/neural.rs",
+          "edge_type": "Calls"
+        }
       ]
     },
     {
@@ -217,7 +281,11 @@
         "crates/theo-governance/src/sandbox_audit.rs"
       ],
       "dependencies": [
-        {"source": "crates/theo-governance/src/sandbox_audit.rs", "target": "crates/theo-governance/src/sandbox_policy.rs", "edge_type": "Imports"}
+        {
+          "source": "crates/theo-governance/src/sandbox_audit.rs",
+          "target": "crates/theo-governance/src/sandbox_policy.rs",
+          "edge_type": "Imports"
+        }
       ]
     },
     {
@@ -242,13 +310,17 @@
       "category": "cross-cutting",
       "difficulty": "medium",
       "expected_files": [
-        "crates/theo-engine-retrieval/src/search.rs",
+        "crates/theo-engine-retrieval/src/search/mod.rs",
         "crates/theo-engine-retrieval/src/embedding/tfidf.rs",
         "crates/theo-engine-retrieval/src/code_tokenizer.rs",
-        "crates/theo-engine-retrieval/src/tantivy_search.rs"
+        "crates/theo-engine-retrieval/src/tantivy_search/mod.rs"
       ],
       "dependencies": [
-        {"source": "crates/theo-engine-retrieval/src/search.rs", "target": "crates/theo-engine-retrieval/src/embedding/tfidf.rs", "edge_type": "Calls"}
+        {
+          "source": "crates/theo-engine-retrieval/src/search/mod.rs",
+          "target": "crates/theo-engine-retrieval/src/embedding/tfidf.rs",
+          "edge_type": "Calls"
+        }
       ]
     },
     {
@@ -275,7 +347,11 @@
         "crates/theo-infra-llm/src/provider/client.rs"
       ],
       "dependencies": [
-        {"source": "crates/theo-infra-llm/src/client.rs", "target": "crates/theo-infra-llm/src/stream.rs", "edge_type": "Calls"}
+        {
+          "source": "crates/theo-infra-llm/src/client.rs",
+          "target": "crates/theo-infra-llm/src/stream.rs",
+          "edge_type": "Calls"
+        }
       ]
     },
     {
@@ -284,12 +360,16 @@
       "category": "cross-cutting",
       "difficulty": "medium",
       "expected_files": [
-        "crates/theo-agent-runtime/src/compaction.rs",
-        "crates/theo-agent-runtime/src/run_engine.rs",
+        "crates/theo-agent-runtime/src/compaction/mod.rs",
+        "crates/theo-agent-runtime/src/run_engine/mod.rs",
         "crates/theo-domain/src/tokens.rs"
       ],
       "dependencies": [
-        {"source": "crates/theo-agent-runtime/src/compaction.rs", "target": "crates/theo-domain/src/tokens.rs", "edge_type": "Imports"}
+        {
+          "source": "crates/theo-agent-runtime/src/compaction/mod.rs",
+          "target": "crates/theo-domain/src/tokens.rs",
+          "edge_type": "Imports"
+        }
       ]
     },
     {
@@ -300,10 +380,14 @@
       "expected_files": [
         "crates/theo-engine-retrieval/src/embedding/neural.rs",
         "crates/theo-engine-retrieval/src/embedding/cache.rs",
-        "crates/theo-engine-retrieval/src/search.rs"
+        "crates/theo-engine-retrieval/src/search/mod.rs"
       ],
       "dependencies": [
-        {"source": "crates/theo-engine-retrieval/src/search.rs", "target": "crates/theo-engine-retrieval/src/embedding/neural.rs", "edge_type": "Calls"}
+        {
+          "source": "crates/theo-engine-retrieval/src/search/mod.rs",
+          "target": "crates/theo-engine-retrieval/src/embedding/neural.rs",
+          "edge_type": "Calls"
+        }
       ]
     },
     {
@@ -312,8 +396,8 @@
       "category": "symbol",
       "difficulty": "easy",
       "expected_files": [
-        "crates/theo-engine-graph/src/cluster.rs",
-        "crates/theo-application/src/use_cases/graph_context_service.rs"
+        "crates/theo-engine-graph/src/cluster/mod.rs",
+        "crates/theo-application/src/use_cases/graph_context_service/mod.rs"
       ],
       "dependencies": []
     },
@@ -328,7 +412,11 @@
         "crates/theo-engine-parser/src/extractors/symbols.rs"
       ],
       "dependencies": [
-        {"source": "crates/theo-engine-parser/src/tree_sitter.rs", "target": "crates/theo-engine-parser/src/extractors/symbols.rs", "edge_type": "Calls"}
+        {
+          "source": "crates/theo-engine-parser/src/tree_sitter.rs",
+          "target": "crates/theo-engine-parser/src/extractors/symbols.rs",
+          "edge_type": "Calls"
+        }
       ]
     },
     {
@@ -352,7 +440,11 @@
         "crates/theo-engine-graph/src/model.rs"
       ],
       "dependencies": [
-        {"source": "crates/theo-engine-graph/src/cochange.rs", "target": "crates/theo-engine-graph/src/model.rs", "edge_type": "Imports"}
+        {
+          "source": "crates/theo-engine-graph/src/cochange.rs",
+          "target": "crates/theo-engine-graph/src/model.rs",
+          "edge_type": "Imports"
+        }
       ]
     },
     {
@@ -389,11 +481,19 @@
         "crates/theo-engine-retrieval/src/embedding/neural.rs",
         "crates/theo-engine-retrieval/src/embedding/turboquant.rs",
         "crates/theo-engine-retrieval/src/dense_search.rs",
-        "crates/theo-engine-retrieval/src/search.rs"
+        "crates/theo-engine-retrieval/src/search/mod.rs"
       ],
       "dependencies": [
-        {"source": "crates/theo-engine-retrieval/src/search.rs", "target": "crates/theo-engine-retrieval/src/embedding/neural.rs", "edge_type": "Calls"},
-        {"source": "crates/theo-engine-retrieval/src/search.rs", "target": "crates/theo-engine-retrieval/src/embedding/turboquant.rs", "edge_type": "Calls"}
+        {
+          "source": "crates/theo-engine-retrieval/src/search/mod.rs",
+          "target": "crates/theo-engine-retrieval/src/embedding/neural.rs",
+          "edge_type": "Calls"
+        },
+        {
+          "source": "crates/theo-engine-retrieval/src/search/mod.rs",
+          "target": "crates/theo-engine-retrieval/src/embedding/turboquant.rs",
+          "edge_type": "Calls"
+        }
       ]
     },
     {
@@ -408,8 +508,16 @@
         "crates/theo-tooling/src/shell_tool.rs"
       ],
       "dependencies": [
-        {"source": "crates/theo-tooling/src/sandbox/executor.rs", "target": "crates/theo-tooling/src/sandbox/bwrap.rs", "edge_type": "Calls"},
-        {"source": "crates/theo-tooling/src/shell_tool.rs", "target": "crates/theo-tooling/src/sandbox/executor.rs", "edge_type": "Calls"}
+        {
+          "source": "crates/theo-tooling/src/sandbox/executor.rs",
+          "target": "crates/theo-tooling/src/sandbox/bwrap.rs",
+          "edge_type": "Calls"
+        },
+        {
+          "source": "crates/theo-tooling/src/shell_tool.rs",
+          "target": "crates/theo-tooling/src/sandbox/executor.rs",
+          "edge_type": "Calls"
+        }
       ]
     },
     {
@@ -418,13 +526,21 @@
       "category": "module",
       "difficulty": "easy",
       "expected_files": [
-        "crates/theo-engine-retrieval/src/tantivy_search.rs",
-        "crates/theo-engine-retrieval/src/search.rs",
+        "crates/theo-engine-retrieval/src/tantivy_search/mod.rs",
+        "crates/theo-engine-retrieval/src/search/mod.rs",
         "crates/theo-engine-retrieval/src/dense_search.rs"
       ],
       "dependencies": [
-        {"source": "crates/theo-engine-retrieval/src/tantivy_search.rs", "target": "crates/theo-engine-retrieval/src/search.rs", "edge_type": "Calls"},
-        {"source": "crates/theo-engine-retrieval/src/tantivy_search.rs", "target": "crates/theo-engine-retrieval/src/dense_search.rs", "edge_type": "Calls"}
+        {
+          "source": "crates/theo-engine-retrieval/src/tantivy_search/mod.rs",
+          "target": "crates/theo-engine-retrieval/src/search/mod.rs",
+          "edge_type": "Calls"
+        },
+        {
+          "source": "crates/theo-engine-retrieval/src/tantivy_search/mod.rs",
+          "target": "crates/theo-engine-retrieval/src/dense_search.rs",
+          "edge_type": "Calls"
+        }
       ]
     }
   ]

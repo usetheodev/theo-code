@@ -143,6 +143,37 @@ pub trait MemoryProvider: Send + Sync {
     }
 }
 
+/// File-pinned memory lookup port (Hexagonal architecture).
+///
+/// Phase 0 / T0.2 of the wiki-graph-memory-blend retrieval plan. Lives
+/// in `theo-domain` so both `theo-engine-retrieval` (consumer in the
+/// blend pipeline) and `theo-infra-memory` (implementor) can reference
+/// the same trait without violating the workspace dependency direction
+/// (`theo-engine-retrieval` cannot depend on `theo-infra-memory`).
+///
+/// The trait is purposefully tiny — sync, object-safe, no async — so
+/// any persistence backend (filesystem insight log, sqlite, in-memory
+/// fake) can implement it.
+///
+/// Distinct from `MemoryProvider::prefetch` (text query → text block)
+/// because:
+/// * input is path-shaped, not text;
+/// * output is unscored — selection is deterministic per path;
+/// * no async / I/O contract.
+pub trait FileMemoryLookup: Send + Sync {
+    /// Stable identifier for this provider, used by callers for
+    /// deduplication across multiple registered backends.
+    fn id(&self) -> &str;
+
+    /// Return entries whose source/affected paths intersect `paths`.
+    ///
+    /// Behaviour:
+    /// * empty `paths` → empty Vec (no provider-side iteration).
+    /// * unknown paths → empty Vec.
+    /// * caller is responsible for capping output count if it cares.
+    fn entries_for_files(&self, paths: &[String]) -> Vec<MemoryEntry>;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
