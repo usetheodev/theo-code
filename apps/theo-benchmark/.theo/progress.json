@@ -1,0 +1,13 @@
+{
+  "updated_at": "1777048632Z",
+  "session_id": "0019dc05a3884_7e48d8cd5824fdd5",
+  "tasks_completed": [
+    {
+      "name": "LLM error: quota exceeded (): {\"error\":{\"type\":\"usage_limit_reached\",\"message\":\"The usage limit has ",
+      "status": "failed",
+      "files_changed": []
+    }
+  ],
+  "next_steps": [],
+  "last_error": "LLM error: quota exceeded (): {\"error\":{\"type\":\"usage_limit_reached\",\"message\":\"The usage limit has been reached\",\"plan_type\":\"plus\",\"resets_at\":1777050353,\"eligible_promo\":null,\"resets_in_seconds\":1721}}"
+}

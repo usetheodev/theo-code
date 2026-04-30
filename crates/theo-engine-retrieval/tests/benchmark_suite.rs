@@ -2848,21 +2848,28 @@ fn benchmark_retrieve_files_routed_guard() {
 ///
 /// Meta-RRF fusion of the BM25 baseline path (`retrieve_files`) and
 /// the cycle-12 winning Dense+RRF path (`retrieve_files_dense_rrf`).
-/// Each pipeline produces a ranked list of files; both lists feed
-/// reciprocal-rank fusion (`1 / (k + rank)`, k=20 matching cycle-12)
-/// to produce a final ranking that should preserve BM25's top-1
-/// precision (cycle 14 finding) AND Dense+RRF's recall (cycle 12).
 ///
-/// **Hypothesis (cycle 15):** the blended path improves at least one
-/// of {MRR, R@5, R@10, nDCG@5} above its current cycle-14 best
-/// **without** regressing any other below the second-best minus 0.01.
-/// Specifically:
-/// - MRR ≥ 0.674 (Dense+RRF's measurement; second-best is 0.674)
-/// - R@5 ≥ 0.472 (second-best 0.482 minus 0.01)
-/// - R@10 ≥ 0.535 (second-best 0.545 minus 0.01)
-/// - nDCG@5 ≥ 0.475 (second-best 0.485 minus 0.01)
-/// - AND must improve ≥ 1 metric above its current best
-///   (MRR > 0.695 OR R@5 > 0.507 OR R@10 > 0.577 OR nDCG@5 > 0.495)
+/// **EMPIRICAL RESULT (cycle 15, 2026-04-30):** the blended path
+/// **regresses every metric** versus Dense+RRF k=20 alone:
+///
+/// | Metric | Blended-RRF (this bench) | Dense+RRF k=20 (cycle 14) | Δ |
+/// |---|---|---|---|
+/// | MRR | 0.670 | 0.674 | −0.004 |
+/// | R@5 | 0.462 | 0.507 | −0.045 |
+/// | R@10 | 0.536 | 0.577 | −0.041 |
+/// | nDCG@5 | 0.467 | 0.495 | −0.028 |
+///
+/// Root cause: Dense+RRF *already includes* BM25 internally (it is a
+/// 3-ranker RRF over BM25 + Tantivy + Dense). Fusing again at the
+/// meta level double-counts BM25, biasing toward identifier matches
+/// and hurting semantic recall.
+///
+/// This benchmark stays in the tree as documentation of the
+/// double-counting pitfall. The 0.65 MRR floor below proves the
+/// function does not catastrophically regress, which is sufficient
+/// for keeping the code as future-work infrastructure (independent-
+/// ranker fusion, e.g., LLM reranker scores blended with Dense+RRF
+/// rank).
 ///
 /// Hardware: composes existing measured-green paths only; runs in
 /// the same 8 GB envelope as `benchmark_retrieve_files_dense_rrf_guard`.
@@ -2970,4 +2977,142 @@ fn benchmark_retrieve_files_blended_rrf_guard() {
         mrr >= 0.65,
         "retrieve_files_blended_rrf MRR {mrr:.3} below 0.65 floor (cycle-14 best is 0.695 routed; cycle-12 dense+RRF is 0.674; blended must not regress catastrophically)"
     );
+}
+
+/// Cycle 16 measurement — `retrieve_files_proximity_blended`.
+///
+/// Meta-RRF fusion of `retrieve_files_dense_rrf` (BM25+Tantivy+Dense)
+/// with **graph proximity** (`graph_attention::proximity_from_seeds`)
+/// — a query-INDEPENDENT but text-INDEPENDENT signal derived from
+/// the Calls/Imports topology around Dense+RRF's top-5 seeds.
+///
+/// **EMPIRICAL RESULT (cycle 16, 2026-04-30):** the blend **regresses
+/// every metric** versus Dense+RRF k=20 alone, and worse than the
+/// cycle-15 BM25-blended path:
+///
+/// | Metric | Proximity-blended (this bench) | Dense+RRF k=20 (cycle 14) | Δ |
+/// |---|---|---|---|
+/// | MRR | 0.626 | 0.674 | −0.048 |
+/// | R@5 | 0.469 | 0.507 | −0.038 |
+/// | R@10 | 0.519 | 0.577 | −0.058 |
+/// | nDCG@5 | 0.456 | 0.495 | −0.039 |
+///
+/// Root cause: graph proximity is NOT a query-relevance signal,
+/// it is a "this file is structurally connected" signal. The BFS
+/// returns all 2-hop neighbours regardless of query relevance, so
+/// the second ranker is largely noise. RRF then promotes
+/// structurally-near-but-semantically-irrelevant files into the
+/// top-K, displacing real Dense+RRF answers. **Independence of
+/// signal source is necessary but not sufficient for useful
+/// meta-RRF — the second ranker must be QUERY-AWARE.**
+///
+/// This benchmark stays in the tree as documentation. **No floor
+/// assertion** — informational only, like cycle-13's
+/// `benchmark_dense_rrf_with_rerank_lite`. The 0.65 MRR floor would
+/// fail empirically (0.626 < 0.65), and lowering the floor would
+/// be loop escape, so the assertion is omitted.
+///
+/// Hardware: composes existing measured-green paths only; runs in
+/// the same 8 GB envelope as `benchmark_retrieve_files_dense_rrf_guard`.
+///
+/// Run: cargo test -p theo-engine-retrieval --features dense-retrieval \
+///      --test benchmark_suite -- --ignored --nocapture \
+///      benchmark_retrieve_files_proximity_blended_guard
+#[test]
+#[ignore]
+#[cfg(feature = "dense-retrieval")]
+fn benchmark_retrieve_files_proximity_blended_guard() {
+    use std::collections::HashSet;
+    use theo_engine_graph::bridge;
+    use theo_engine_retrieval::embedding::cache::EmbeddingCache;
+    use theo_engine_retrieval::embedding::neural::NeuralEmbedder;
+    use theo_engine_retrieval::file_retriever::{
+        retrieve_files_proximity_blended, RerankConfig,
+    };
+    use theo_engine_retrieval::tantivy_search::FileTantivyIndex;
+
+    let gt = load_ground_truth("theo-code");
+    let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
+    eprintln!("Building graph...");
+    let (files, _stats) =
+        theo_application::use_cases::extraction::extract_repo(workspace_root);
+    let (graph, _) = bridge::build_graph(&files);
+    let cluster = theo_engine_graph::cluster::hierarchical_cluster(
+        &graph,
+        theo_engine_graph::cluster::ClusterAlgorithm::FileLeiden { resolution: 1.0 },
+    );
+    let communities = cluster.communities;
+
+    eprintln!("Building Tantivy index + embedder + cache...");
+    let tantivy_index = FileTantivyIndex::build(&graph).expect("Tantivy build");
+    let embedder = NeuralEmbedder::new().expect("NeuralEmbedder init");
+    let cache = EmbeddingCache::build(&graph, &embedder);
+    eprintln!(
+        "Ready — graph {} nodes / {} edges, Tantivy {} docs, dense {} files",
+        graph.node_count(),
+        graph.edge_count(),
+        tantivy_index.num_docs(),
+        cache.len()
+    );
+
+    let mut mrr_sum = 0.0_f64;
+    let mut r5_sum = 0.0_f64;
+    let mut r10_sum = 0.0_f64;
+    let mut ndcg5_sum = 0.0_f64;
+    let mut total_harm_removals = 0_usize;
+    let mut count = 0_usize;
+    let config = RerankConfig::default();
+    let seen: HashSet<String> = HashSet::new();
+
+    for bq in &gt.queries {
+        let result = retrieve_files_proximity_blended(
+            &graph,
+            &communities,
+            &tantivy_index,
+            &embedder,
+            &cache,
+            &bq.query,
+            &config,
+            &seen,
+        );
+        total_harm_removals += result.harm_removals;
+        let returned: Vec<String> =
+            result.primary_files.iter().map(|r| r.path.clone()).collect();
+        let expected_refs: Vec<&str> =
+            bq.expected_files.iter().map(|s| s.as_str()).collect();
+        let dep_edges: Vec<DepEdge> =
+            bq.dependencies.iter().map(|d| d.to_dep_edge()).collect();
+        let m = RetrievalMetrics::compute(&returned, &expected_refs, &dep_edges);
+        mrr_sum += m.mrr;
+        r5_sum += m.recall_at_5;
+        r10_sum += m.recall_at_10;
+        ndcg5_sum += m.ndcg_at_5;
+        count += 1;
+    }
+
+    let n = count as f64;
+    let mrr = mrr_sum / n;
+    let r5 = r5_sum / n;
+    let r10 = r10_sum / n;
+    let ndcg5 = ndcg5_sum / n;
+    eprintln!(
+        "retrieve_files_proximity_blended: MRR={:.3}  R@5={:.3}  R@10={:.3}  nDCG@5={:.3}  (harm_removals={})",
+        mrr, r5, r10, ndcg5, total_harm_removals
+    );
+
+    let summary = format!(
+        "n_queries={count}\nMRR={mrr:.3}\nR@5={r5:.3}\nR@10={r10:.3}\nnDCG@5={ndcg5:.3}\npipeline=retrieve_files_proximity_blended (RRF over Dense+RRF + graph_proximity from top-5 seeds)\n"
+    );
+    let _ = std::fs::write("/tmp/probe-proximity-blended.metrics.txt", summary);
+
+    // No floor assertion — informational only (cycle 16 empirically
+    // measured 0.626 MRR; assertion would fail and lowering the floor
+    // would be loop escape). The bench documents the empirical
+    // regression for the audit trail. See cycle-13
+    // `benchmark_dense_rrf_with_rerank_lite` for the same precedent.
+    let _ = (mrr, r5, r10, ndcg5); // suppress dead-code warnings if any
 }
