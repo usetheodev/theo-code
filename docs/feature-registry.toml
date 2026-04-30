@@ -13,7 +13,7 @@
 [meta]
 verified_date = "2026-04-29"
 schema_version = "1.0"
-total_features = 196  # 47 tools + 17 cli + 26 providers + 14 langs + 5 runtime + 11 debug + 3 wiki + 9 memory + 12 agent-loop + 10 context-eng + 7 model-routing + 6 self-evolution + 8 prompt-eng + 6 observability + 7 security + 8 subagent
+total_features = 205  # 47 tools + 17 cli + 26 providers + 14 langs + 5 runtime + 11 debug + 8 wiki + 9 memory + 12 agent-loop + 14 context-eng + 7 model-routing + 6 self-evolution + 8 prompt-eng + 6 observability + 7 security + 8 subagent
 
 # ============================================================================
 # TOOLS — DEFAULT REGISTRY (47 production tools)
@@ -514,32 +514,85 @@ threshold = "tool terminates debug session cleanly"
 priority = "low"
 
 # ============================================================================
-# WIKI TOOLS (3)
+# WIKI SYSTEM (8 features) — LLM-compiled wiki for HUMANS to understand codebases
+# Objective: Humans read the wiki, not the code. Wiki Agent keeps it alive.
+# Contract: HUMAN=reader, WIKI_AGENT=writer (background sub-agent), MANUAL=optional
+# Architecture: Skeleton (tree-sitter, free) + Enrichment (LLM via Wiki Agent)
+# Ref: docs/pesquisas/wiki/INDEX.md, docs/pesquisas/wiki/wiki-system-sota.md
 # ============================================================================
 
-[wiki.wiki_generate]
+[wiki.wiki_agent]
+type = "wiki"
+category = "core"
+status = "untested"
+probe_id = "wiki-agent"
+threshold = "Wiki Agent exists as background sub-agent in theo-agent-runtime AND is the ONLY writer of wiki content AND activates on triggers (git commit, ADR, tests, session end, cron)"
+priority = "high"
+note = "The wiki is ALIVE — maintained by an autonomous agent, not manual commands. No other tool on the market does this"
+ref = "docs/pesquisas/wiki/INDEX.md"
+
+[wiki.skeleton_generation]
+type = "wiki"
+category = "skeleton"
+status = "untested"
+probe_id = "wiki-skeleton"
+threshold = "Skeleton generated from tree-sitter parse (free, no LLM) with: file inventory, symbol list, public APIs, dependency edges, module groupings"
+priority = "high"
+note = "Skeleton already exists via theo-engine-graph. This is the structural base that enrichment builds on"
+
+[wiki.enrichment_pipeline]
+type = "wiki"
+category = "enrichment"
+status = "untested"
+probe_id = "wiki-enrichment"
+threshold = "LLM enrichment transforms skeleton into human-readable wiki pages with: 'what it does', 'why it exists', 'how it works', 'what breaks if you change it', 'architectural decisions'"
+priority = "high"
+note = "This is what transforms inventory into understanding. Uses cheap model (Haiku/Compact role)"
+
+[wiki.trigger_system]
+type = "wiki"
+category = "triggers"
+status = "untested"
+probe_id = "wiki-triggers"
+threshold = "Wiki Agent triggers on: git commit (re-enrich affected pages), new ADR (decision page), cargo test (coverage update), session end (ingest insights), cron (lint + freshness check)"
+priority = "high"
+note = "Triggers make the wiki ALIVE. Without them it's just another stale doc generator"
+
+[wiki.wiki_generate_tool]
 type = "tool"
 category = "wiki"
 status = "untested"
 probe_id = "wiki-generate"
-threshold = "tool generates wiki pages from code graph"
+threshold = "tool generates/rebuilds wiki pages from code graph skeleton + LLM enrichment AND respects hash-based incremental (unchanged files = no LLM calls)"
 priority = "medium"
+note = "Manual override. The Wiki Agent normally handles this automatically via triggers"
 
-[wiki.wiki_query]
+[wiki.wiki_query_tool]
 type = "tool"
 category = "wiki"
 status = "untested"
 probe_id = "wiki-query"
-threshold = "tool searches wiki via BM25 AND returns ranked results"
+threshold = "tool searches wiki pages AND returns ranked results AND query answers can be filed back as wiki pages (compounding knowledge)"
 priority = "medium"
+note = "Karpathy pattern: query answers become new wiki pages for future queries"
 
-[wiki.wiki_ingest]
+[wiki.wiki_lint_tool]
 type = "tool"
 category = "wiki"
 status = "untested"
-probe_id = "wiki-ingest"
-threshold = "tool ingests runtime insight into wiki"
-priority = "low"
+probe_id = "wiki-lint"
+threshold = "tool lints wiki for: broken wikilinks, orphan pages, stale pages (>48h without update), missing enrichment, contradictions between pages"
+priority = "medium"
+note = "6+ structural lint rules from llm-wiki-compiler + freshness check"
+
+[wiki.freshness_guarantee]
+type = "wiki"
+category = "quality"
+status = "untested"
+probe_id = "wiki-freshness"
+threshold = "Wiki pages for actively modified modules are never more than 48h stale AND freshness tracked per-page AND stale pages flagged by lint"
+priority = "high"
+note = "The fundamental promise: wiki is NEVER stale because Wiki Agent updates automatically"
 
 # ============================================================================
 # CLI SUBCOMMANDS (17)
@@ -1275,93 +1328,150 @@ priority = "medium"
 note = "reflector.rs classify_failure() pattern"
 
 # ============================================================================
-# CONTEXT ENGINEERING (10 features) — GRAPHCTX, RRF, caching
-# Ref: context-engine.md, harness-engineering-guide.md
+# CONTEXT ENGINEERING (14 features) — theo-engine-retrieval
+# Objective: Graph-augmented agentic retrieval — structural intelligence
+# derived FROM code (never from stale docs), exposed as tool backends.
+# Ref: docs/pesquisas/context/code-retrieval-deep-research.md (963 lines, 68 sources)
+# Ref: crates/theo-engine-retrieval/README.md
 # ============================================================================
 
-[context_eng.graphctx_assembly]
+# --- Search layer: "encontrar código" ---
+
+[context_eng.bm25_code_aware]
 type = "context-engineering"
-category = "retrieval"
+category = "search"
 status = "untested"
-probe_id = "ctx-graphctx-assembly"
-threshold = "GRAPHCTX assembles context from Tree-Sitter graph + BM25 + RRF rank fusion AND returns relevant files with symbols for a given task"
+probe_id = "ctx-bm25"
+threshold = "BM25F with code-aware tokenization (camelCase/snake_case split, identifier stemming) AND field boosts (filename 5×, path 3×, symbols 3×) AND PRF expansion when top-1 is 2× more confident than #2"
 priority = "high"
-note = "Core differentiator. 14 languages, tantivy index, RRF 3-ranker"
+note = "file_bm25.rs. Sourcegraph reports +20% with BM25F over plain BM25"
+ref = "code-retrieval-deep-research.md §3"
+
+[context_eng.dense_search_code_model]
+type = "context-engineering"
+category = "search"
+status = "untested"
+probe_id = "ctx-dense-model"
+threshold = "Dense search uses a CODE-SPECIFIC embedding model (Jina Code v2 or Voyage Code 3, NOT AllMiniLM-L6-v2) AND MRR >= 0.90 on internal benchmark"
+priority = "high"
+note = "P0 ACTION: AllMiniLM-L6-v2 is 15-25 points behind code-specific models on CoIR benchmarks. This is the single biggest improvement opportunity"
+ref = "code-retrieval-deep-research.md §4, sota-thresholds.toml retrieval.mrr"
+
+[context_eng.query_type_routing]
+type = "context-engineering"
+category = "search"
+status = "untested"
+probe_id = "ctx-query-routing"
+threshold = "QueryType classifier routes Identifier queries to BM25 AND NaturalLanguage queries to Dense AND Mixed to both via RRF"
+priority = "medium"
+note = "query_type.rs — routes to the right ranker per query type"
 
 [context_eng.rrf_fusion]
 type = "context-engineering"
-category = "retrieval"
+category = "fusion"
 status = "untested"
 probe_id = "ctx-rrf-fusion"
-threshold = "RRF fusion combines BM25 + embedding + graph scores AND produces MRR >= 0.90 on internal benchmark"
+threshold = "RRF fusion combines BM25 + Dense + Tantivy scores AND produces top-50 candidates AND fusion outperforms any single ranker"
 priority = "high"
-note = "theo-engine-retrieval. Current MRR = 0.914"
-ref = "sota-thresholds.toml retrieval.mrr"
+note = "pipeline.rs. RRF is baseline standard; learned fusion outperforms when tuning data exists"
+ref = "code-retrieval-deep-research.md §5"
 
-[context_eng.relevance_threshold]
+# --- Graph layer: "entender relações" (unique competitive advantage) ---
+
+[context_eng.graph_attention]
 type = "context-engineering"
-category = "retrieval"
+category = "graph"
 status = "untested"
-probe_id = "ctx-relevance-threshold"
-threshold = "Files below relevance 0.3 excluded from context AND max 8 files per search respected"
+probe_id = "ctx-graph-attention"
+threshold = "Graph Attention Propagation discovers transitively related files (multi-hop, damping 0.5) AND improves retrieval over text-only search by measurable margin"
+priority = "high"
+note = "graph_attention.rs. UNIQUE — no other coding agent has this. LocAgent (ACL 2025) validates graph-based retrieval: 92.7% file localization via graph"
+ref = "code-retrieval-deep-research.md §6"
+
+[context_eng.pagerank]
+type = "context-engineering"
+category = "graph"
+status = "untested"
+probe_id = "ctx-pagerank"
+threshold = "PageRank on code graph identifies structurally important files AND PageRank-weighted results better than unweighted"
 priority = "medium"
-ref = "context-engine.md:230, sota-thresholds.toml context.*"
+note = "signals.rs. Aider also uses PageRank on code graphs — validated approach"
+ref = "code-retrieval-deep-research.md §6"
+
+[context_eng.community_detection]
+type = "context-engineering"
+category = "graph"
+status = "untested"
+probe_id = "ctx-community-detection"
+threshold = "Community detection groups related files into cohesive modules AND cluster-aware context picks whole communities when relevant"
+priority = "medium"
+note = "UNIQUE — no other coding agent clusters code this way. Enables repo_map tool"
+
+[context_eng.dependency_coverage]
+type = "context-engineering"
+category = "graph"
+status = "untested"
+probe_id = "ctx-depcov"
+threshold = "Dependency Coverage (DepCov) >= 0.96 — context includes both sides of every dependency edge"
+priority = "high"
+note = "UNIQUE metric. Current: 0.767 (BELOW FLOOR). Ensures context has no dependency holes"
+ref = "sota-thresholds.toml retrieval.depcov"
+
+# --- Reranking layer ---
+
+[context_eng.cross_encoder_reranking]
+type = "context-engineering"
+category = "reranking"
+status = "untested"
+probe_id = "ctx-cross-encoder"
+threshold = "Cross-encoder reranker (Jina v2 or BGE) refines top-50 RRF candidates to top-20 AND improves nDCG@5 over RRF-only by measurable margin"
+priority = "medium"
+note = "reranker.rs. Currently OOMs on 8GB RAM. Optional, gated by config"
+ref = "code-retrieval-deep-research.md §5"
+
+# --- Assembly layer: "montar contexto completo" ---
+
+[context_eng.token_budget_assembly]
+type = "context-engineering"
+category = "assembly"
+status = "untested"
+probe_id = "ctx-budget-assembly"
+threshold = "Greedy knapsack packs context within token budget (repo_map 15% + modules 25% + code 40% + history 15% + reserve 5%) AND budget respected AND graceful degradation when tight"
+priority = "high"
+note = "assembly/greedy.rs + budget.rs"
+
+[context_eng.context_miss_detection]
+type = "context-engineering"
+category = "assembly"
+status = "untested"
+probe_id = "ctx-miss-detection"
+threshold = "Context miss detection identifies when a necessary file is excluded AND suggests 1-hop neighbors for expansion"
+priority = "medium"
+note = "escape.rs. Prevents fragile contexts by detecting holes"
+
+# --- Interface layer: "tool backends" ---
+
+[context_eng.agentic_interface]
+type = "context-engineering"
+category = "interface"
+status = "untested"
+probe_id = "ctx-agentic-interface"
+threshold = "Retrieval algorithms exposed as tool backends (search, impact, context, repo_map) that the LLM invokes on demand, NOT as an automatic pipeline that pre-selects context"
+priority = "high"
+note = "CRITICAL ARCHITECTURE CHANGE: Claude Code abandoned RAG for agentic tools. OpenDev uses 4-layer agentic pipeline. The LLM must decide what to search, not the pipeline"
+ref = "code-retrieval-deep-research.md §9, crates/theo-engine-retrieval/README.md"
+
+# --- Metrics ---
 
 [context_eng.per_language_recall]
 type = "context-engineering"
-category = "retrieval"
+category = "metrics"
 status = "untested"
 probe_id = "ctx-per-lang-recall"
 threshold = "Recall@5 >= 0.85 for EACH of the 14 supported languages independently"
 priority = "high"
-note = "Currently unmeasured. Critical for multi-language repos"
+note = "Currently unmeasured. Requires per-language ground-truth corpora"
 ref = "sota-thresholds.toml retrieval.per_language_recall_at_5"
-
-[context_eng.prompt_caching]
-type = "context-engineering"
-category = "efficiency"
-status = "untested"
-probe_id = "ctx-prompt-caching"
-threshold = "System prompt prefix cached across turns AND cache hit rate >= 60% in typical sessions"
-priority = "medium"
-note = "Anthropic cache_control beta. Frozen-snapshot pattern for memory"
-ref = "context-engine.md:65, smart-model-routing.md §1.1"
-
-[context_eng.token_budget_management]
-type = "context-engineering"
-category = "efficiency"
-status = "untested"
-probe_id = "ctx-token-budget"
-threshold = "Context assembly respects token budget AND priorities high-relevance files AND gracefully degrades when budget is tight"
-priority = "high"
-
-[context_eng.dependency_coverage]
-type = "context-engineering"
-category = "retrieval"
-status = "untested"
-probe_id = "ctx-depcov"
-threshold = "Dependency coverage (depcov) >= 0.96 — context includes transitive dependencies of target files"
-priority = "high"
-note = "Current depcov = 0.967"
-ref = "sota-thresholds.toml retrieval.depcov"
-
-[context_eng.graph_clustering]
-type = "context-engineering"
-category = "retrieval"
-status = "untested"
-probe_id = "ctx-graph-clustering"
-threshold = "Code graph clustering groups related files AND cluster-aware context picks whole clusters when relevant"
-priority = "medium"
-note = "theo-engine-graph clustering capability"
-
-[context_eng.incremental_indexing]
-type = "context-engineering"
-category = "performance"
-status = "untested"
-probe_id = "ctx-incremental-index"
-threshold = "Index updates incrementally on file changes AND does not re-index unchanged files (hash-based)"
-priority = "medium"
-note = "Critical for large repos. Similar to wiki hash-based incremental"
 
 [context_eng.representation_format]
 type = "context-engineering"

@@ -1,399 +1,655 @@
-# Wiki System — SOTA Research for AI Coding Agents
+# Theo Wiki — SOTA Research: Code Wiki for Humans
 
-**Date:** 2026-04-29
+**Date:** 2026-04-30 (v3 — objetivo revisado)
 **Domain:** Wiki
-**Target:** Raise score from 0.5 to 4.0
 **Status:** Research complete
+**Objetivo:** Wiki compilada por LLM para **humanos** entenderem codebases.
+Ler código é moroso e complicado. O Theo Wiki resolve esse problema.
+
+**Versões anteriores:**
+- v1 (score real 2.5): media code index, não knowledge base
+- v2 (score real 4.0 para agent): correto como pesquisa, mas objetivo errado — wiki para agente tem ROI duvidoso porque o agente pode ler código diretamente
+- v3 (esta): objetivo correto — wiki para humanos. Resolve o problema real.
 
 ---
 
 ## Executive Summary
 
-Andrej Karpathy's LLM Wiki pattern (April 2026, 16M+ views, 5K+ stars) crystallized a paradigm shift: from stateless RAG retrieval to stateful, compounding knowledge. The core analogy is compilation: raw sources are "source code," the LLM compiles them into a structured wiki "artifact," and queries run against the compiled artifact. Multiple implementations have emerged (llm-wiki-compiler, llm-wiki, second-brain), all converging on a three-layer architecture (raw -> wiki -> query) with SHA-256 incremental compilation and lint-based self-healing. For Theo Code, the wiki system is the bridge between "agent that forgets everything" and "agent that compounds codebase knowledge." The wiki should be compiled from codebase analysis (not chat history -- that is memory), serve as an additional document root for the retrieval pipeline (RRF), and self-heal via lint rules.
+Ler e entender um codebase é uma das atividades mais caras em engenharia de software. Onboarding num projeto de 15 crates leva semanas. Voltar a um módulo após 2 meses requer re-leitura. Entender decisões arquiteturais exige escavar ADRs, git history e conversas.
+
+O Theo Wiki resolve isso: **o LLM compila o codebase inteiro numa wiki navegável que um humano consegue ler em horas, não semanas.** Cada módulo tem uma página que explica o que faz, por que existe, como se conecta com o resto, e o que quebra se mexer. O humano lê a wiki — não o código.
+
+### O Contrato Fundamental
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                                                              │
+│   HUMANO = LEITOR                                            │
+│   Lê, navega, consulta o wiki.                              │
+│   NUNCA escreve no wiki.                                     │
+│                                                              │
+│   WIKI AGENT = ESCRITOR                                      │
+│   Sub-agente built-in no Theo Code.                         │
+│   Roda em BACKGROUND, ativado por TRIGGERS automáticos.     │
+│   Enriquece, atualiza, mantém, corrige o wiki.              │
+│   O humano NUNCA precisa pedir — o wiki se mantém sozinho.  │
+│                                                              │
+│   O humano pode forçar atualização manual se quiser          │
+│   (theo wiki generate), mas isso é OPCIONAL — o Wiki Agent  │
+│   mantém tudo atualizado automaticamente.                    │
+│                                                              │
+└──────────────────────────────────────────────────────────────┘
+```
+
+O wiki é **VIVO** — não é um comando que alguém roda de vez em quando. O Wiki Agent reage a eventos do sistema e mantém o wiki atualizado continuamente, em background, sem intervenção humana.
+
+O padrão vem do LLM Wiki de Karpathy (April 2026): em vez de RAG stateless que re-deriva conhecimento a cada query, o LLM compila conhecimento uma vez num artefato persistente que compõe com o tempo.
+
+**Diferencial:** nenhuma ferramenta de mercado faz isso hoje. Existem doc generators (rustdoc, typedoc) que listam APIs, e existem AI code explorers (DeepWiki, CodeSee) que dão overviews superficiais. Nenhum compila entendimento profundo num wiki navegável, cross-referenciado, com decisões arquiteturais e invariantes — e nenhum mantém esse wiki vivo automaticamente via agente.
 
 ---
 
-## 1. Karpathy LLM Wiki Pattern
+## 1. O Problema que Resolvemos
 
-### 1.1 The Core Insight
+### 1.1 Ler código é caro
 
-> "Stop re-deriving, start compiling. RAG retrieves and forgets. A wiki accumulates and compounds."
+| Atividade | Tempo típico | O que o wiki substitui |
+|---|---|---|
+| Onboarding num projeto de 15 crates | 2-4 semanas | Wiki overview + module pages: **2-4 horas** |
+| Entender um módulo desconhecido | 2-4 horas lendo código | Wiki page do módulo: **10 minutos** |
+| Descobrir por que uma decisão foi tomada | Escavar ADRs + git blame + perguntar no Slack | Decision page no wiki: **2 minutos** |
+| Entender acoplamento entre módulos | Ler Cargo.toml + seguir imports + traçar call graph | Wiki relationship map: **5 minutos** |
+| Voltar a código após 2 meses | Re-ler, re-lembrar, re-contextualizar | Wiki page (atualizada): **10 minutos** |
 
-Most people's experience with LLMs and documents looks like RAG: upload files, retrieve chunks at query time, generate an answer. The LLM rediscovers knowledge from scratch on every question. There is no accumulation.
+### 1.2 Doc generators não resolvem
 
-The compilation analogy: when you write source code, a compiler transforms it into an optimized binary artifact. You compile once, distribute the artifact, run it efficiently on demand. The LLM Wiki does the same: process raw sources once into a structured wiki, then query the wiki.
+| Ferramenta | O que gera | O que falta |
+|---|---|---|
+| `rustdoc` / `typedoc` | API reference (assinaturas, tipos) | **Por que** o módulo existe, **como** se conecta, **o que** quebra |
+| `cargo doc` | Docstrings renderizadas | Apenas o que o dev escreveu — se não escreveu, não tem |
+| README.md | Overview do projeto | Desatualizado em semanas, não cobre módulos internos |
+| DeepWiki (Devin) | AI-generated overview | Superficial, não compõe, não cross-referencia |
 
-### 1.2 Three-Layer Architecture
+### 1.3 O que o humano precisa
 
-```
-sources/          (immutable raw inputs -- never modified by LLM)
-  |
-  v  [ingest: LLM compilation]
-  |
-wiki/             (LLM-generated pages -- one per concept, cross-referenced)
-  |-- index.md    (master index with all page links + tags)
-  |-- concept-a.md
-  |-- concept-b.md
-  |
-  v  [query: LLM navigates index -> reads pages -> synthesizes]
-  |
-answers           (ephemeral or filed as permanent wiki pages)
-```
+Quando um dev abre um módulo desconhecido, precisa de:
 
-### 1.3 Three Operations
+1. **O que é isso?** — 2-3 frases explicando o propósito
+2. **Por que existe?** — qual problema resolve, qual decisão levou a criar
+3. **Como funciona?** — fluxo principal, entry points, padrões usados
+4. **Como se conecta?** — dependências, quem depende dele, acoplamento real
+5. **O que quebra se eu mexer?** — invariantes, armadilhas, fragilidades conhecidas
+6. **Onde começar a ler?** — os 3-5 arquivos mais importantes
 
-| Operation | Purpose | Cost |
-|----------|---------|------|
-| **Ingest** | Process new sources into wiki pages | LLM calls per source chunk |
-| **Query** | Ask questions against compiled wiki | LLM reads index + relevant pages |
-| **Lint** | Health-check: orphans, broken links, contradictions | Structural (free) + LLM-powered (deep) |
-
-### 1.4 Key Design Principles
-
-1. **Sources are immutable:** The LLM reads but never modifies raw sources. They are ground truth. The wiki can always be re-derived from scratch.
-2. **One page per concept:** Each wiki page represents a single concept with cross-references via `[[wikilinks]]`.
-3. **Provenance tracking:** Every claim in the wiki traces back to its source file(s) via frontmatter.
-4. **Knowledge compounds:** Valuable query answers optionally get filed as permanent wiki pages.
-5. **Git as version control:** The wiki is plain markdown in git. Diffs show exactly what the LLM changed.
+**Nenhum doc generator responde todas essas perguntas.** O wiki sim.
 
 ---
 
-## 2. llm-wiki-compiler: Two-Phase Pipeline
+## 2. O Karpathy Pattern Aplicado a Codebases
 
-### 2.1 Architecture
+### 2.1 A Analogia de Compilação
 
-**Source:** github.com/atomicmemory/llm-wiki-compiler
+> "Instead of just retrieving from raw documents at query time, the LLM
+> incrementally builds and maintains a persistent wiki — a structured,
+> interlinked collection of markdown files that sits between you and the
+> raw sources."
 
-The pipeline flows:
+Para um codebase:
+- **Raw sources** = código-fonte, ADRs, git history, CI logs, testes
+- **Wiki** = páginas markdown geradas por LLM, uma por módulo/conceito
+- **Leitor** = desenvolvedor humano navegando em Obsidian, VS Code, ou browser
+
+### 2.2 Four Components
 
 ```
-sources/ -> SHA-256 hash check -> [Phase 1: Extract] -> [Phase 2: Generate] -> wiki/
-                                        |                       |
-                                 Extract concepts         Generate pages
-                                 from each source         with [[wikilinks]]
-                                                          + frontmatter
-                                                               |
-                                                          Resolve wikilinks
-                                                               |
-                                                          Update index.md
+┌─────────────────────────────────────────────────────────┐
+│  HUMANO (leitor)                                         │
+│  Lê e navega o wiki em Obsidian, VS Code, ou browser.   │
+│  NUNCA escreve no wiki.                                  │
+│  Pode forçar atualização manual (opcional, raro).        │
+└──────────────────────────┬──────────────────────────────┘
+                           │ reads
+                           ▼
+┌─────────────────────────────────────────────────────────┐
+│  WIKI (.theo/wiki/)                                      │
+│  Markdown pages. Sempre atualizado.                      │
+│                                                          │
+│  overview.md          — o que é este projeto             │
+│  architecture.md      — como as peças se encaixam        │
+│  getting-started.md   — por onde começar                 │
+│  modules/             — uma página por módulo/crate      │
+│  concepts/            — conceitos cross-cutting          │
+│  decisions/           — decisões arquiteturais (ADRs)    │
+│  index.md             — catálogo navegável               │
+│  log.md               — histórico de operações           │
+└──────────────────────────┬──────────────────────────────┘
+                           ▲ writes (sole writer)
+                           │
+┌─────────────────────────────────────────────────────────┐
+│  WIKI AGENT (sub-agente built-in)                        │
+│  Roda em BACKGROUND dentro do Theo Code.                │
+│  Ativado por TRIGGERS automáticos.                       │
+│  Único escritor do wiki — enriquece, atualiza, corrige. │
+│  Guiado pelo SCHEMA.                                     │
+│                                                          │
+│  Triggers: commit, file Δ, ADR new, tests ran,          │
+│            session end, cron, manual (opcional)           │
+└──────────────────────────┬──────────────────────────────┘
+                           │ reads        │ guided by
+                           ▼              ▼
+┌──────────────────────────┐  ┌───────────────────────────┐
+│  RAW SOURCES (imutáveis) │  │  SCHEMA                    │
+│  - Código-fonte          │  │  Guia o Wiki Agent:        │
+│  - ADRs (docs/adr/)      │  │  tipos de página,          │
+│  - Git history           │  │  convenções, formato,      │
+│  - README, CLAUDE.md     │  │  regras de ingest.         │
+│  - Testes                │  │  Co-evoluído pelo time.    │
+│  - CI/CD configs         │  │                            │
+└──────────────────────────┘  └───────────────────────────┘
 ```
 
-**Phase 1 (Extract):** For each source file, extract all concepts, entities, and claims. Output: structured JSON with concept names, relationships, and source provenance.
+**O contrato é simples:** humano lê, Wiki Agent escreve, sources são
+imutáveis, schema guia o comportamento. O wiki está sempre atualizado
+porque o Wiki Agent reage a eventos automaticamente.
 
-**Phase 2 (Generate):** For each extracted concept, generate a wiki page. Merge information from multiple sources about the same concept. Resolve `[[wikilinks]]` to actual page slugs. Write YAML frontmatter with metadata.
+### 2.3 Three Operations
 
-### 2.2 SHA-256 Incremental Compilation
+#### Ingest (compilar source → wiki)
 
-Each source file is hashed with SHA-256. The hash is stored in the wiki page frontmatter under `source_hash` or `sources[]` with their hashes. On subsequent runs:
+O LLM lê uma source nova e **integra** no wiki existente:
+1. Lê a source (arquivo, ADR, git diff)
+2. Identifica páginas do wiki afetadas
+3. **Atualiza** essas páginas com informação nova
+4. Cria páginas novas se necessário (conceito novo)
+5. Atualiza `index.md` e `log.md`
 
-1. Hash all source files
-2. Compare against stored hashes
-3. Skip unchanged sources (cache hit)
-4. Re-extract and re-generate only for changed/new sources
+**Um source → muitas páginas atualizadas.** Isso é o mecanismo de compounding.
 
-**Target cache hit rate:** >= 80% for typical development sessions (most files unchanged).
+#### Query (humano pergunta → wiki responde)
 
-### 2.3 Frontmatter Format
+O humano (ou o agente em nome do humano) faz uma pergunta:
+1. LLM navega `index.md` para encontrar páginas relevantes
+2. Lê as páginas
+3. Sintetiza resposta com citações
+4. Se a resposta revela insight novo → **oferece filar como página permanente**
+
+#### Lint (saúde do wiki)
+
+Periodicamente o LLM faz health-check:
+- Contradições entre páginas
+- Páginas stale (source mudou, wiki não atualizou)
+- Páginas órfãs (sem links de entrada)
+- Conceitos mencionados sem página própria
+- Gaps ("não temos nada sobre o subsistema de testes")
+
+---
+
+## 3. Arquitetura de Duas Camadas: Skeleton + Enrichment
+
+### 3.1 O Insight Chave
+
+A implementação atual (code graph dump) não é lixo — é a **fundação estrutural**.
+O que falta é a **camada de entendimento**. São duas camadas complementares:
+
+```
+CAMADA 1: SKELETON (determinístico, zero LLM, grátis)
+  Tree-sitter → code graph → cluster → WikiDoc
+  Produz: lista de arquivos, símbolos, entry points, APIs, deps, test coverage
+  Custo: $0.00
+  Valor: estrutura correta, provenance tracking, atualiza automaticamente
+
+CAMADA 2: ENRICHMENT (LLM-driven, custo por página)
+  LLM lê skeleton + código-fonte + ADRs + git history
+  Produz: "O que faz", "Por que existe", "Como funciona",
+          "O que quebra", "Decisões", "Invariantes"
+  Custo: ~$0.02-0.05 por página (Haiku/Flash)
+  Valor: entendimento que um humano consegue ler em 10 minutos
+```
+
+**O skeleton já existe e funciona.** O enrichment é o que transforma inventário em documentação.
+
+### 3.2 Exemplo Concreto
+
+**Skeleton (o que temos hoje):**
+
+```markdown
+# theo-agent-runtime
+
+## Files (12)
+- src/lib.rs, src/agent.rs, src/state_machine.rs, ...
+
+## Entry Points
+- `pub async fn run_agent_loop(config: AgentConfig) -> Result<AgentOutcome>`
+
+## Public API
+- `AgentState`, `AgentConfig`, `AgentPhase`, `run_loop()`
+
+## Dependencies
+- theo-domain, theo-governance, theo-infra-llm, theo-tooling
+
+## Test Coverage
+- 530 tests, 94.2% coverage
+```
+
+Útil como referência, mas um dev novo olha isso e pensa: *"ok... mas o que isso FAZ?"*
+
+**Skeleton + Enrichment (o que queremos):**
+
+```markdown
+# theo-agent-runtime
+
+## What This Module Does
+O agent runtime é o orquestrador central do Theo Code. Ele implementa a
+máquina de estados Plan → Act → Observe → Reflect que transforma um LLM +
+ferramentas num agente autônomo de coding. Pense nele como o "cérebro" —
+ele decide o que fazer, executa via tools, observa o resultado, e reflete
+se deve continuar ou mudar de estratégia.
+
+## Why It Exists
+A v1 do Theo usava um loop livre onde o LLM decidia tudo ad-hoc. Isso
+causava "doom loops" — o agente repetia a mesma ação falhando
+indefinidamente. O ADR-003 introduziu a máquina de estados para forçar
+transições com guard conditions. Resultado: doom loops caíram 90%.
+
+## How It Works
+```mermaid
+stateDiagram-v2
+    [*] --> Plan
+    Plan --> Act : has_plan
+    Act --> Observe : tool_executed
+    Observe --> Reflect : result_received
+    Reflect --> Plan : needs_replanning
+    Reflect --> Act : continue_executing
+    Reflect --> [*] : task_complete
+```
+
+O loop principal vive em `src/agent.rs:run_agent_loop()`. Cada fase tem
+guard conditions em `src/state_machine.rs` que impedem transições inválidas.
+O budget enforcer checa tokens restantes a cada transição — se exceder, o
+loop termina gracefully.
+
+## Key Design Decisions
+- **Budget in-loop, não externo** — watchdog externo causa race conditions
+  entre "budget exceeded" e "tool já executando" (ADR-016)
+- **Sub-agents cooperativos** — compartilham budget e tool registry do
+  parent. Não podem outlive o parent.
+- **Governance no critical path** — todo tool.execute() passa pelo
+  governance layer. Bypassing = sem sandbox checks.
+
+## What Breaks If You Touch This
+- Mudar `AgentPhase` enum → atualizar 4 match arms em arquivos diferentes
+- Mudar budget enforcement → re-rodar todos os testes de sub-agent
+  (budget é compartilhado)
+- Streaming responses DEVEM ter fallback non-streaming — 3 providers
+  dizem que suportam streaming mas dropam silenciosamente sob carga
+
+## Coupling (real, medido do git)
+- `theo-governance` muda junto em 73% dos commits. Cargo.toml diz
+  separados; git diz acoplados.
+- `theo-infra-llm` raramente afeta runtime — a abstração de provider
+  funciona bem.
+
+## Where to Start Reading
+1. `src/agent.rs` — o loop principal (~200 linhas)
+2. `src/state_machine.rs` — transições e guards
+3. `src/budget.rs` — enforcement de token budget
+4. `tests/integration/doom_loop.rs` — entende o problema que motivou tudo
+
+## Files (12)
+(... skeleton data ...)
+
+## Public API
+(... skeleton data ...)
+
+## Dependencies
+(... skeleton data ...)
+
+## Test Coverage
+- 530 tests, 94.2% coverage
+- Untested: `src/telemetry.rs` (logging helpers)
+
+Sources: [[adr-003]], [[adr-016]], git log analysis, code review
+```
+
+**Esse é um doc que um dev novo lê em 10 minutos e entende o módulo.** Nenhum doc generator produz isso. Nenhum `rustdoc` produz isso.
+
+### 3.3 Wiki Agent — Sub-agente Built-in
+
+O Wiki Agent é um sub-agente que vive dentro do Theo Code. Ele é o
+**único escritor** do wiki. O humano nunca precisa pedir — o agente
+reage a eventos automaticamente e mantém o wiki vivo.
+
+#### Princípio: Humano lê, Sistema escreve
+
+```
+┌───────────┐         ┌──────────────────────┐         ┌────────────┐
+│  TRIGGERS │────────▶│     WIKI AGENT       │────────▶│   WIKI     │
+│           │         │  (sub-agente built-in)│         │(.theo/wiki)│
+│ • commit  │         │                      │         │            │
+│ • file Δ  │         │  1. Detecta o que    │         │ Humano lê  │
+│ • ADR new │         │     mudou            │         │ no Obsidian│
+│ • tests   │         │  2. Lê sources       │         │ ou browser │
+│ • session │         │  3. Enriquece pages  │         │            │
+│   end     │         │  4. Cria novas se    │         │ Sempre     │
+│ • cron    │         │     necessário       │         │ atualizado │
+│ • manual  │         │  5. Atualiza index   │         │            │
+│   (opt.)  │         │  6. Append log       │         │            │
+└───────────┘         └──────────────────────┘         └────────────┘
+```
+
+#### Triggers
+
+| Trigger | Quando dispara | O que o Wiki Agent faz |
+|---|---|---|
+| **git commit** | Após commit no repo | Detecta arquivos mudados → re-enrich module pages afetadas |
+| **file change** | Arquivo salvo (watch mode) | Marca page como stale → re-enrich no próximo ciclo |
+| **ADR criado/modificado** | Arquivo em `docs/adr/` muda | Cria/atualiza decision page + atualiza module pages afetadas |
+| **testes rodaram** | Após `cargo test` | Atualiza test coverage nas module pages |
+| **sessão do agente terminou** | Agent loop completa | Ingere insights da sessão (o que descobriu, o que quebrou) |
+| **cron/timer** | Periódico (configurável) | Lint completo + freshness check + concept promotion |
+| **manual (opcional)** | `theo wiki generate` | Força full rebuild — cold start ou re-enrich completo |
+
+#### Modos de operação
+
+| Modo | Custo | Quando |
+|---|---|---|
+| **Background incremental** | ~$0.03/trigger | Default: reage a eventos, atualiza só o afetado |
+| **Background lint** | ~$0.15/ciclo | Periódico: detecta stale, contradições, orphans |
+| **Manual full** | ~$1.15 | Opcional: `theo wiki generate` força tudo do zero |
+
+#### Cold Start
+
+Na primeira vez (wiki não existe):
+1. Wiki Agent detecta ausência de `.theo/wiki/`
+2. Gera skeleton completo (tree-sitter, grátis)
+3. Enriquece todas as module pages (LLM, ~$0.50)
+4. Gera high-level pages: overview, architecture, getting-started (~$0.15)
+5. Ingere ADRs existentes → decision pages (~$0.30)
+6. Gera index.md e log.md
+7. **Total: ~$1.15, uma vez**
+
+Após o cold start, o Wiki Agent opera em modo incremental automaticamente.
+
+### 3.4 O que manter, o que mudar, o que criar
+
+| Componente | Status | Ação |
+|---|---|---|
+| `generator/` (skeleton) | **Manter** | É a fundação — files, symbols, APIs, deps |
+| `renderer.rs` | **Manter** | Rendering markdown funciona |
+| `persistence.rs` | **Manter** | Disk I/O funciona |
+| `lookup.rs` (BM25) | **Manter** | Busca sobre wiki pages funciona |
+| `model.rs` (WikiDoc) | **Estender** | Adicionar campos para enrichment content |
+| `wiki_enrichment.rs` | **Reescrever** | Enrichment atual é superficial — precisa usar ADRs + git + testes como input |
+| `wiki_highlevel.rs` | **Reescrever** | Overview/architecture/getting-started com mais profundidade |
+| `runtime.rs` (JSONL insights) | **Avaliar** | Pode ser útil como source para enrichment, não como feature standalone |
+| `dense_index.rs` | **Remover** | Premature optimization — BM25 + index.md é suficiente |
+| **Wiki Agent** | **Criar** | Sub-agente built-in com trigger system — o coração do wiki vivo |
+| **Trigger system** | **Criar** | Detecção de eventos (commit, file Δ, ADR, tests, session end, cron) |
+| Schema behavioral | **Criar** | `.theo/wiki/schema.md` — guia o LLM enrichment |
+| Ingest de ADRs | **Criar** | Pipeline: ADR → decision pages + module page updates |
+| Ingest de git history | **Criar** | Pipeline: git log → coupling analysis + evolution timeline |
+| Log.md | **Criar** | Cronológico, parseable, histórico de operações |
+
+---
+
+## 4. Page Types
+
+### 4.1 Catálogo de Páginas
+
+| Tipo | Quantidade | Gerado por | Exemplo |
+|---|---|---|---|
+| **Overview** | 1 | LLM | "O que é o Theo Code, como as peças se encaixam" |
+| **Architecture** | 1 | LLM + dep graph | "Bounded contexts, data flow, mermaid diagrams" |
+| **Getting Started** | 1 | LLM | "Por onde começar, como buildar, primeiros arquivos para ler" |
+| **Module page** | 1 per crate | Skeleton + LLM | "O que faz, por que existe, como funciona, o que quebra" |
+| **Concept page** | ~5-10 | LLM | "Streaming", "Budget enforcement", "Doom loops", "RRF fusion" |
+| **Decision page** | 1 per ADR | LLM | "ADR-010: por que apps não importam engine crates" |
+| **Index** | 1 | Auto-generated | Catálogo de todas as páginas com links e resumos |
+| **Log** | 1 | Append-only | Histórico cronológico de operações |
+
+### 4.2 Frontmatter
+
+Toda página tem YAML frontmatter para Obsidian, Dataview, e busca:
 
 ```yaml
 ---
-id: "a1b2c3d4"           # SHA-256 first 8 chars
-title: "Concept Name"
-domain: "architecture"
+title: "theo-agent-runtime"
+type: module                    # module | concept | decision | overview
+crate: theo-agent-runtime       # only for module pages
 sources:
-  - file: "src/main.rs"
-    hash: "e5f6a7b8..."
-    lines: "42-67"
-  - file: "docs/design.md"
-    hash: "c3d4e5f6..."
-confidence: 0.85           # optional epistemic metadata
-status: "current"          # current | outdated | conflict | review-needed
-tags: ["rust", "architecture", "error-handling"]
-created: "2026-04-29"
-updated: "2026-04-29"
+  - file: "crates/theo-agent-runtime/src/agent.rs"
+    hash: "a1b2c3d4"
+  - file: "docs/adr/D3.md"
+status: current                 # current | stale | review-needed
+tags: ["agent", "state-machine", "orchestration"]
+created: "2026-04-30"
+updated: "2026-04-30"
+enriched: true                  # false = skeleton only
 ---
 ```
 
-All fields are optional. Existing pages without them continue to work.
+### 4.3 Wikilinks
+
+Todas as cross-references usam `[[wikilinks]]` (Obsidian-compatible):
+
+- `[[theo-agent-runtime]]` — link para module page
+- `[[adr-003]]` — link para decision page
+- `[[doom-loops]]` — link para concept page
+
+O graph view do Obsidian mostra a estrutura do wiki visualmente.
 
 ---
 
-## 3. Wiki Lint: Self-Healing Rules
+## 5. Wiki vs Outras Documentações
 
-### 3.1 Core Lint Rules (6 Structural)
+### 5.1 Limites Claros
 
-These rules run without LLM calls -- pure structural analysis:
+| Documento | Quem escreve | Quem lê | Propósito |
+|---|---|---|---|
+| **Wiki** | **Wiki Agent** (automaticamente, em background) | **Humanos** (devs, stakeholders) | Entender o codebase sem ler código |
+| **CLAUDE.md** | Humano (co-evolved com LLM) | LLM (instruções para agente) | Guiar o agente coding |
+| **ADRs** | Humano | Humano + Wiki Agent (source) | Registrar decisões → Wiki Agent compila em decision pages |
+| **rustdoc** | Dev (docstrings) | Dev | API reference técnica |
+| **README** | Dev | Externo | First impression do projeto |
+| **Memory** | LLM (agent) | LLM (agent) | Experiência do agente entre sessões |
 
-| # | Rule | Description | Auto-Fix |
-|---|------|------------|----------|
-| 1 | **Broken wikilinks** | `[[links]]` pointing to non-existent pages | Suggest closest match or flag for creation |
-| 2 | **Orphan pages** | Pages with zero inbound links from other pages | Link from related pages or flag for review |
-| 3 | **Duplicate pages** | Pages covering the same concept (fuzzy title match) | Merge into canonical page |
-| 4 | **Empty pages** | Pages with no meaningful content (only frontmatter) | Delete or flag for generation |
-| 5 | **Broken citations** | Frontmatter `sources[]` pointing to non-existent files | Flag as stale |
-| 6 | **Missing frontmatter** | Pages without required YAML frontmatter | Generate frontmatter from content |
+**Regra de ouro:** se é para humano ler → vai no wiki (mantido pelo Wiki Agent).
+Se é para o agente seguir → vai no CLAUDE.md ou memory.
 
-### 3.2 Extended Lint Rules (LLM-Powered)
+### 5.2 Wiki NÃO substitui
 
-These require LLM calls and are run with `--deep`:
-
-| # | Rule | Description | Cost |
-|---|------|------------|------|
-| 7 | **Contradictions** | Two pages make conflicting claims about the same concept | Compare tag-overlapping pairs |
-| 8 | **Stale content** | Source file changed but wiki page not updated | Hash comparison |
-| 9 | **Missing cross-references** | Concept mentioned in text but not linked | NLP entity matching |
-| 10 | **Claim verification** | Claims that cannot be traced to any source | Source provenance check |
-| 11 | **Summary accuracy** | Page summary does not reflect page content | LLM evaluation |
-
-### 3.3 Self-Healing Loop
-
-```
-lint --check   ->  identify issues
-lint --fix     ->  auto-fix structural issues (1-6)
-lint --deep    ->  LLM-powered analysis (7-11)
-lint --deep --fix -> auto-fix + regenerate stale pages
-```
-
-From LLM Wiki v2: "Self-healing is emphasized -- the lint operation should automatically fix what it can. Orphan pages get linked or flagged."
-
-### 3.4 Quality Scoring
-
-Every page gets a quality score:
-- Well-structured? (headers, lists, code blocks)
-- Cites sources? (frontmatter provenance)
-- Consistent with rest of wiki? (no contradictions)
-- Content below threshold -> flagged for review or rewritten
+- **ADRs** — wiki compila ADRs em decision pages, mas o ADR original é source of truth
+- **rustdoc** — wiki explica "o que faz e por quê"; rustdoc explica "como chamar"
+- **CLAUDE.md** — wiki é para humanos; CLAUDE.md é para o agente
+- **Código** — wiki é documentação, não source of truth. O código sempre vence.
 
 ---
 
-## 4. Wiki vs Memory Boundary
+## 6. Lint: Self-Healing
 
-### 4.1 Clear Separation
+### 6.1 Structural Rules (sem LLM)
 
-| Aspect | Wiki | Memory |
-|--------|------|--------|
-| **Content source** | Codebase analysis (files, architecture, patterns) | Agent session experience (decisions, errors, learnings) |
-| **Compilation trigger** | File changes (git diff) | Session end or milestone |
-| **Format** | One page per concept, cross-referenced | Episode records, procedural rules |
-| **Query pattern** | "How does module X work?" | "What did we try last time?" |
-| **Persistence** | Permanent (git-tracked) | Curated (forgetting curve) |
-| **Ownership** | Codebase-scoped | Agent-scoped |
+| # | Rule | Auto-Fix |
+|---|------|----------|
+| 1 | Broken `[[wikilinks]]` | Suggest closest match |
+| 2 | Orphan pages (zero inbound links) | Flag for review |
+| 3 | Duplicate pages (fuzzy title match) | Merge suggestion |
+| 4 | Empty pages (skeleton sem enrichment) | Queue for enrichment |
+| 5 | Missing frontmatter | Generate from content |
+| 6 | Stale source refs (file deleted/moved) | Flag as stale |
 
-### 4.2 Integration Points
+### 6.2 LLM-Powered Rules
 
-```
-                    ┌──────────────┐
-                    │  Agent Query │
-                    └──────┬───────┘
-                           │
-              ┌────────────┼────────────┐
-              │                         │
-    ┌─────────▼─────────┐    ┌─────────▼─────────┐
-    │   Wiki Backend     │    │  Memory Backend    │
-    │  (codebase know.)  │    │  (agent experience)│
-    ├────────────────────┤    ├────────────────────┤
-    │ architecture.md    │    │ episodic: session_42│
-    │ error-handling.md  │    │ procedural: "always │
-    │ api-design.md      │    │  run tests before   │
-    │ module-x.md        │    │  submitting PRs"    │
-    └─────────┬──────────┘    └─────────┬──────────┘
-              │                         │
-              └────────────┬────────────┘
-                           │
-                    ┌──────▼───────┐
-                    │  RRF Merger  │
-                    │ (rank fusion)│
-                    └──────────────┘
-```
-
-The wiki serves as an additional document root for the retrieval pipeline. When the agent queries for context, RRF merges results from: (1) direct file search, (2) wiki pages, (3) memory records.
+| # | Rule | When |
+|---|------|------|
+| 7 | Contradictions between pages | After multi-page update |
+| 8 | Stale content (source changed, page não) | Periodic (hash check) |
+| 9 | Missing cross-references | Periodic |
+| 10 | Concept promotion (appears in 3+ pages) | Periodic |
+| 11 | Gap detection ("no info about X") | On request |
 
 ---
 
-## 5. Compilation Cost Analysis
+## 7. Custos
 
-### 5.1 LLM Calls Per Source
+### 7.1 Geração Inicial
 
-| Phase | Calls | Typical Size | Model |
-|-------|-------|-------------|-------|
-| Extract concepts | 1 per source chunk | ~4K tokens input | Haiku/Flash (cheap) |
-| Generate page | 1 per concept | ~2K tokens input + ~1K output | Haiku/Flash |
-| Resolve wikilinks | 1 batch call | All slugs + context | Haiku/Flash |
-| Deep lint (contradictions) | 1 per page pair | ~4K tokens | Haiku/Flash |
+Para Theo Code (15 crates, ~5.200 testes):
 
-### 5.2 Cost Estimation
+| Etapa | LLM Calls | Tokens (in/out) | Custo (Haiku) |
+|---|---|---|---|
+| Skeleton (tree-sitter) | 0 | 0 | **$0.00** |
+| Enrichment (15 module pages) | 15 | ~120K / ~30K | ~$0.50 |
+| High-level pages (overview, arch, getting-started) | 3 | ~30K / ~10K | ~$0.15 |
+| Concept pages (~5) | 5 | ~40K / ~10K | ~$0.15 |
+| Decision pages (16 ADRs) | 16 | ~80K / ~20K | ~$0.30 |
+| Index generation | 1 | ~10K / ~3K | ~$0.05 |
+| **Total cold start** | **40** | **~280K / ~73K** | **~$1.15** |
 
-For a medium codebase (500 source files, ~100 wiki pages):
+### 7.2 Manutenção Incremental
 
-| Operation | Calls | Input Tokens | Output Tokens | Haiku Cost |
-|----------|-------|-------------|---------------|------------|
-| Full compilation | ~500 extract + ~100 generate = 600 | ~2.4M | ~100K | ~$0.75 |
-| Incremental (20% changed) | ~100 extract + ~20 generate = 120 | ~480K | ~20K | ~$0.15 |
-| Lint (structural) | 0 LLM calls | 0 | 0 | $0.00 |
-| Lint (deep) | ~50 pair comparisons | ~200K | ~25K | ~$0.10 |
+| Trigger | Custo |
+|---|---|
+| Arquivo mudou → re-enrich 1 module page | ~$0.03 |
+| ADR novo → decision page + update modules | ~$0.08 |
+| Lint semanal (structural) | $0.00 |
+| Lint deep (contradictions, 10 pairs) | ~$0.15 |
+| **Mensal (uso normal)** | **~$2-5** |
 
-### 5.3 Chunk-Size Limits
+### 7.3 ROI
 
-Source files must be chunked to fit model context windows:
+| Métrica | Sem wiki | Com wiki |
+|---|---|---|
+| Onboarding num projeto 15 crates | 2-4 semanas | 2-4 horas + wiki |
+| Entender módulo desconhecido | 2-4 horas | 10 minutos |
+| Encontrar decisão arquitetural | 30-60 min (git blame + ADR hunt) | 2 minutos |
+| **Custo mensal** | $0 | ~$2-5 |
+| **Horas economizadas/mês** (est.) | 0 | 5-15 horas |
 
-| Model | Context Window | Recommended Chunk | Chunks per File |
-|-------|---------------|-------------------|-----------------|
-| Haiku 3.5 | 200K | 4K tokens | 1-3 per file |
-| Flash 2.0 | 1M | 8K tokens | 1-2 per file |
-| Sonnet 4 | 200K | 4K tokens | 1-3 per file |
-
-**Optimization:** Use tree-sitter AST-aware chunking (section from language-parsing-sota.md) to split source files at function/class boundaries rather than arbitrary token counts.
-
----
-
-## 6. Compilation Determinism
-
-### 6.1 The Problem
-
-LLM outputs are non-deterministic by default. Two compilations of the same source may produce different wiki pages, causing unnecessary git diffs and confusing developers.
-
-### 6.2 Mitigations
-
-| Strategy | Effect | Trade-off |
-|---------|--------|-----------|
-| `temperature=0` | Minimizes randomness | Slightly less creative extractions |
-| `seed` parameter | Reproducible outputs (when supported) | Not all providers support seeds |
-| Structured output (JSON mode) | Reduces formatting variation | Constrains output format |
-| Hash-based skip | Don't regenerate if source unchanged | Stale pages if prompt changes |
-| Diff-based commit | Only commit meaningful changes | Requires diff filtering |
-
-### 6.3 Practical Approach
-
-1. Use `temperature=0` + `seed=42` for all compilation calls
-2. After generation, normalize whitespace and formatting
-3. Compare against existing page content with fuzzy match
-4. Only write if semantic content changed (not just formatting)
-5. Track compilation prompt version in frontmatter -- re-compile all when prompt changes
+A ~$3/mês, se economiza 1 hora de dev por mês, já paga. Provavelmente economiza 5-15.
 
 ---
 
-## 7. Implementation Landscape
+## 8. Thresholds para SOTA
 
-### 7.1 Reference Implementations
+### 8.1 Level 1 — Wiki Agent + Cold Start (2.0 → 3.0)
 
-| Project | Architecture | Incremental | Lint | Self-Healing |
-|---------|-------------|------------|------|-------------|
-| **atomicmemory/llm-wiki-compiler** | Two-phase extract->generate | SHA-256 | Basic (orphans, stale) | Partial |
-| **Pratiyush/llm-wiki** | Multi-phase with verify | SHA-256 | 16 rules (8 structural + 3 LLM) | Yes (auto-fix) |
-| **nashsu/llm_wiki** | Desktop app, two-step ingest | SHA-256 cache | Basic | No |
-| **NiharShrotri/llm-wiki** | Local Ollama + Qwen3 + QMD | SHA-256 | Broken links + orphans + frontmatter + contradictions | Yes (`--fix`) |
-| **kytmanov/obsidian-llm-wiki-local** | Obsidian integration | Content change detection | `olw lint` (no LLM needed) | Yes (`olw maintain --fix`) |
-| **kenhuangus/llm-wiki** | Entity/claim/relationship extraction | SHA-256 in frontmatter | Basic | No |
-| **Ar9av/obsidian-wiki** | Obsidian framework | Provenance tracking | Audit + lint (orphans, stale, contradictions) | Partial |
+| Threshold | Target | Métrica |
+|---|---|---|
+| Wiki Agent existe como sub-agente built-in | PASS | Code review |
+| Cold start: skeleton + enrichment automático | 15/15 module pages enriched | Count |
+| Overview + Architecture + Getting Started gerados | 3 high-level pages | Count |
+| `[[wikilinks]]` funcionam entre páginas | >= 80% links válidos | Lint check |
+| Wiki navegável em Obsidian ou browser | PASS | Manual test |
+| `theo wiki generate` disponível como override manual | PASS | E2E test |
 
-### 7.2 Karpathy's Evolution of Thinking
+### 8.2 Level 2 — Wiki Vivo (3.0 → 4.0)
 
-| Phase | Date | Concept |
-|-------|------|---------|
-| **Vibe Coding** | Feb 2025 | Let LLMs write code with minimal human direction |
-| **Agentic Engineering** | Jan 2026 | Structured agent workflows with tools and feedback |
-| **LLM Knowledge Bases** | Apr 2026 | Compile knowledge once, query forever |
+| Threshold | Target | Métrica |
+|---|---|---|
+| Wiki Agent reage a git commit (trigger) | PASS — pages afetadas atualizadas em background | E2E test |
+| Wiki Agent ingere ADRs automaticamente | >= 10 decision pages | Count |
+| Wiki Agent roda lint periódico | PASS — structural lint automático | E2E test |
+| Enrichment NÃO derivável de tree-sitter | >= 80% pages com insight LLM | Audit |
+| Cross-reference density | Avg >= 3 `[[wikilinks]]` per page | Count |
+| Incremental (só pages afetadas re-enriched) | PASS | E2E test |
+| Humano nunca precisa intervir para wiki estar atualizado | PASS | Observação |
+| User comprehension: dev lê wiki → responde perguntas sobre codebase | >= 80% correto sem ler código | User study |
 
-Each phase shifts more cognitive labor to the LLM while keeping humans in the loop for judgment.
+### 8.3 Level 3 — Wiki SOTA (4.0 → 5.0)
 
----
-
-## 8. Thresholds for SOTA Level
-
-### 8.1 Basic Wiki (Score 2.0 -> 3.0)
-
-| Threshold | Target | Metric |
-|----------|--------|--------|
-| Compilation pipeline works E2E | PASS (ingest + generate + index) | Binary |
-| SHA-256 incremental compilation | Cache hit rate >= 80% | % of unchanged sources skipped |
-| Frontmatter on all generated pages | 100% | Count |
-| Structural lint (rules 1-6) | All 6 rules implemented | Count |
-| Wiki queryable via agent tools | PASS | E2E test |
-
-### 8.2 Production Wiki (Score 3.0 -> 4.0)
-
-| Threshold | Target | Metric |
-|----------|--------|--------|
-| Compilation determinism | temp=0 + seed, same input -> same output | Reproducibility test |
-| Self-healing lint with auto-fix | >= 4 rules auto-fixable | Count |
-| Wiki integrated into retrieval pipeline (RRF) | PASS | E2E test |
-| Deep lint (contradictions) | PASS | E2E test |
-| Compilation cost per 100-file project | <= $1.00 with Haiku | Cost measurement |
-| Wiki vs memory boundary enforced | No session data in wiki | Audit |
-
-### 8.3 Advanced Wiki (Score 4.0 -> 5.0)
-
-| Threshold | Target | Metric |
-|----------|--------|--------|
-| Knowledge compounding | Query answers filed as wiki pages | E2E flow |
-| Cross-project wiki federation | Shared concepts across repos | Design doc |
-| Wiki diff quality (meaningful changes only) | >= 90% of commits are semantic | Audit |
-| LLM-powered lint rules (7-11) | All 5 implemented | Count |
-| Wiki freshness tracking | Pages updated within 24h of source change | Staleness metric |
+| Threshold | Target | Métrica |
+|---|---|---|
+| Wiki Agent reage a TODOS os triggers (commit, ADR, test, session, cron) | PASS | E2E test |
+| Concept pages auto-promoted (3+ menções → page própria) | PASS | E2E test |
+| Git coupling analysis nas module pages | "Changes together with X" | Audit |
+| Contradiction detection (LLM-powered) | PASS | E2E test |
+| Freshness: pages atualizadas em < 48h após source change | >= 90% | Staleness metric |
+| Compounding: wiki depth cresce ao longo de 10+ sessões | Avg depth grows | Longitudinal |
+| Onboarding: dev novo produtivo em < 1 dia usando wiki | PASS | User study |
+| Wiki é o first stop antes de ler código | >= 70% perguntas respondidas pelo wiki | Usage measurement |
 
 ---
 
-## 9. Relevance for Theo Code
+## 9. Competitive Landscape
 
-### 9.1 Immediate Actions
+### 9.1 Existing Solutions
 
-1. **Implement WikiBackend trait:** Theo Code already has a `WikiBackend` trait. Implement the two-phase pipeline (extract -> generate) using tree-sitter for source chunking and Haiku for compilation.
-2. **SHA-256 incremental cache:** Hash source files, store in frontmatter, skip unchanged.
-3. **6 structural lint rules:** Broken wikilinks, orphans, duplicates, empty pages, broken citations, missing frontmatter. All run without LLM calls.
-4. **Wire wiki into RRF:** Add wiki pages as a document root alongside direct file search and memory.
+| Tool | What it does | Why it's not enough |
+|---|---|---|
+| **rustdoc / typedoc** | API reference from docstrings | No "why", no cross-cutting, no decisions |
+| **DeepWiki (Devin)** | AI-generated codebase overview | Superficial, no compounding, no wikilinks |
+| **CodeSee** | Visual code maps | Structure only, no understanding |
+| **Swimm** | Human-written smart docs | Requires human effort — abandoned when busy |
+| **Mintlify** | AI docs from code | API docs focus, not architectural understanding |
+| **GitHub Copilot Workspace** | Code exploration | Session-scoped, no persistence |
 
-### 9.2 Architecture Decision
+### 9.2 Gap in Market
 
-```
-theo-wiki crate
-  |-- WikiCompiler
-  |     |-- SourceHasher: SHA-256 incremental detection
-  |     |-- ConceptExtractor: Phase 1, LLM extracts concepts from source chunks
-  |     |-- PageGenerator: Phase 2, LLM generates wiki pages with wikilinks
-  |     |-- IndexBuilder: generates/updates index.md
-  |
-  |-- WikiLinter
-  |     |-- StructuralRules: 6 rules, no LLM needed
-  |     |-- DeepRules: LLM-powered contradiction/staleness detection
-  |     |-- AutoFixer: resolves fixable issues automatically
-  |
-  |-- WikiBackend (trait implementation)
-  |     |-- query(): navigate index -> read pages -> synthesize
-  |     |-- search(): fuzzy search over wiki pages for RRF
-  |
-  |-- FrontmatterParser: YAML frontmatter read/write
-```
+Ninguém faz: **LLM-compiled, Obsidian-compatible, compounding wiki de um codebase inteiro com decisões arquiteturais, invariantes, e coupling analysis.**
 
-### 9.3 Wiki vs Memory Boundary (Concrete)
+Isso é o Theo Wiki.
 
-- **Wiki contains:** Module architecture, API contracts, design patterns used, error handling conventions, dependency relationships, build system configuration
-- **Memory contains:** "User prefers explicit error handling over Result propagation," "Last session we refactored module X, tests broke in Y"
-- **Rule:** If the knowledge comes from reading code, it goes in wiki. If it comes from interacting with the user, it goes in memory.
+---
 
-### 9.4 Why This Matters
+## 10. Delivery Strategy
 
-An agent that compiles codebase knowledge into a queryable wiki can:
-- Answer "how does module X interact with module Y?" without re-reading all source files
-- Detect architectural contradictions (module A assumes X, module B assumes not-X)
-- Maintain a living index of the codebase that compounds over sessions
-- Reduce context window usage by querying compiled knowledge instead of raw source
+### 10.1 Phase 1 — Wiki Agent + Enrichment
 
-This is the difference between an agent that starts from zero every session and one that has deep, persistent codebase understanding.
+**Fundação: o wiki vivo.**
+- Wiki Agent como sub-agente built-in no Theo Code
+- Cold start: skeleton (tree-sitter) + enrichment (LLM) automático
+- Trigger: `theo wiki generate` manual para forçar primeira geração
+- 3 high-level pages: overview, architecture, getting-started
+- Output: `.theo/wiki/` directory, navegável em Obsidian
+
+**Entregável:** dev roda `theo wiki generate` uma vez, depois o Wiki Agent
+mantém tudo atualizado automaticamente. Dev abre Obsidian e navega.
+
+### 10.2 Phase 2 — Triggers + Incremental
+
+**O wiki ganha vida.**
+- Trigger em git commit → re-enrich module pages afetadas
+- Trigger em ADR novo → decision page + module pages atualizadas
+- Trigger em `cargo test` → test coverage atualizada nas pages
+- `[[wikilinks]]` resolvidos automaticamente
+- Structural lint (rules 1-6) no trigger periódico
+- `theo wiki generate` continua existindo como override manual (opcional)
+
+**Entregável:** dev faz commit, Wiki Agent atualiza o wiki em background.
+Dev nunca precisa pensar sobre o wiki — ele simplesmente está sempre certo.
+
+### 10.3 Phase 3 — Deep Enrichment + Compounding
+
+**O wiki fica inteligente.**
+- Trigger em session end → ingere insights da sessão
+- Git coupling analysis (módulos que mudam juntos)
+- Concept pages auto-promoted (conceito em 3+ pages → page própria)
+- LLM-powered lint (contradictions, gaps, suggestions)
+- Freshness tracking + stale detection
+- Log.md cronológico
+
+**Entregável:** wiki que compõe — cada sessão, cada commit, cada ADR
+enriquece o conhecimento. Depois de 20 sessões, o wiki sabe mais sobre
+o codebase do que qualquer dev individual.
+
+### 10.4 Phase 4 — Distribution
+
+**O wiki sai do dev local.**
+- Render wiki como site estático (mdBook, Docusaurus, ou similar)
+- CI/CD: Wiki Agent roda em cada PR, diff view mostra o que mudou no wiki
+- Wiki publicado para o time inteiro (não só quem tem Obsidian)
+- Opcional: wiki embed no Theo Desktop app
 
 ---
 
 ## Sources
 
-- [Karpathy LLM Wiki Gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)
-- [LLM Wiki v2 Extension](https://gist.github.com/rohitg00/2067ab416f7bbe447c1977edaaa681e2)
+- [Karpathy LLM Wiki Gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) — primary reference
+- [LLM Wiki v2 Extension](https://gist.github.com/rohitg00/2067ab416f7bbe447c1977edaab681e2)
 - [Beyond RAG: Karpathy's LLM Wiki Pattern](https://levelup.gitconnected.com/beyond-rag-how-andrej-karpathys-llm-wiki-pattern-builds-knowledge-that-actually-compounds-31a08528665e)
-- [LLM Wiki Revolution (Analytics Vidhya)](https://www.analyticsvidhya.com/blog/2026/04/llm-wiki-by-andrej-karpathy/)
 - [atomicmemory/llm-wiki-compiler](https://github.com/atomicmemory/llm-wiki-compiler)
 - [Pratiyush/llm-wiki](https://github.com/Pratiyush/llm-wiki)
-- [NiharShrotri/llm-wiki (Local Ollama)](https://github.com/NiharShrotri/llm-wiki)
-- [nashsu/llm_wiki (Desktop App)](https://github.com/nashsu/llm_wiki)
+- [NiharShrotri/llm-wiki](https://github.com/NiharShrotri/llm-wiki)
 - [kytmanov/obsidian-llm-wiki-local](https://github.com/kytmanov/obsidian-llm-wiki-local)
-- [Ar9av/obsidian-wiki](https://github.com/Ar9av/obsidian-wiki)
-- [NicholasSpisak/second-brain](https://github.com/NicholasSpisak/second-brain)
 - [What Karpathy's LLM Wiki Is Missing](https://dev.to/penfieldlabs/what-karpathys-llm-wiki-is-missing-and-how-to-fix-it-1988)
-- [MindStudio: Karpathy LLM Wiki Guide](https://www.mindstudio.ai/blog/karpathy-llm-wiki-knowledge-base-pattern)

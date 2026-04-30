@@ -13,6 +13,7 @@ members = [
     "crates/theo-infra-auth",
     "crates/theo-infra-memory",
     "crates/theo-test-memory-fixtures",
+    "crates/theo-engine-wiki",
     "crates/theo-api-contracts",
     "crates/theo-application",
     "apps/theo-desktop",
@@ -38,6 +39,7 @@ license = "Apache-2.0"
 theo-domain = { path = "crates/theo-domain" }
 theo-engine-graph = { path = "crates/theo-engine-graph" }
 theo-engine-retrieval = { path = "crates/theo-engine-retrieval" }
+theo-engine-wiki = { path = "crates/theo-engine-wiki" }
 theo-governance = { path = "crates/theo-governance" }
 theo-engine-parser = { path = "crates/theo-engine-parser" }
 theo-isolation = { path = "crates/theo-isolation" }

@@ -7233,6 +7233,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "theo-engine-wiki"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "glob",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "theo-domain",
+ "theo-engine-graph",
+ "theo-engine-parser",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "walkdir",
+]
+
+[[package]]
 name = "theo-governance"
 version = "0.1.0"
 dependencies = [
