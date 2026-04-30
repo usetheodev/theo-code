@@ -1,0 +1,44 @@
+{
+  "summary_id": "ep-235d886b014f0789",
+  "run_id": "0019dc05a3884_7e48d8cd5824fdd5",
+  "task_id": "0019dc05a3879_c402f030084811d4",
+  "window_start_event_id": "0019dc05a3879_7aea00821aa1f315",
+  "window_end_event_id": "0019dc05a3b75_4f9cb1aad290be57",
+  "machine_summary": {
+    "objective": "noop",
+    "key_actions": [],
+    "outcome": "Success",
+    "successful_steps": [],
+    "failed_attempts": [],
+    "learned_constraints": [],
+    "files_touched": []
+  },
+  "human_summary": null,
+  "evidence_event_ids": [
+    "0019dc05a3879_7aea00821aa1f315",
+    "0019dc05a3884_e50107da1c0a704f",
+    "0019dc05a3885_f4ec572f369091c5",
+    "0019dc05a3885_828ddf2ef37b9e69",
+    "0019dc05a3885_4c50a8f423210f44",
+    "0019dc05a388e_c394b8ae55ce3ef9",
+    "0019dc05a3b74_5e977b6c85d4d194",
+    "0019dc05a3b75_4f9cb1aad290be57"
+  ],
+  "affected_files": [],
+  "open_questions": [],
+  "unresolved_hypotheses": [],
+  "referenced_community_ids": [],
+  "schema_version": 1,
+  "created_at": 1777048632182,
+  "ttl_policy": "RunScoped",
+  "lifecycle": "Active",
+  "memory_kind": "Episodic",
+  "token_usage": {
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cache_read_tokens": 0,
+    "cache_write_tokens": 0,
+    "reasoning_tokens": 0,
+    "estimated_cost_usd": 0.0
+  }
+}

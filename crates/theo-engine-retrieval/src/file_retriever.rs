@@ -747,10 +747,38 @@ pub fn retrieve_files_routed(
 /// Cycle 14's `retrieve_files_routed` exposed a Pareto trade-off:
 /// dispatching to BM25 wins MRR on Identifier queries (+0.021) but
 /// loses recall (R@5 −0.025, R@10 −0.039) versus the Dense+RRF k=20
-/// path. The cycle-15 hypothesis is that **fusing both pipelines via
-/// reciprocal-rank fusion** (instead of binary dispatch) preserves
-/// BM25's top-1 precision AND Dense+RRF's recall, because RRF awards
-/// `1/(k+rank)` to a file that appears at rank 1 in either source.
+/// path. The cycle-15 hypothesis was that **fusing both pipelines via
+/// reciprocal-rank fusion** (instead of binary dispatch) would
+/// preserve BM25's top-1 precision AND Dense+RRF's recall.
+///
+/// **EMPIRICAL FINDING (cycle 15, 2026-04-30):** naive equal-weight
+/// RRF over the two pipelines **regresses every metric** versus
+/// Dense+RRF k=20 alone:
+///
+/// | Metric | Blended-RRF (this fn) | Dense+RRF k=20 | Δ |
+/// |---|---|---|---|
+/// | MRR | 0.670 | 0.674 | −0.004 |
+/// | R@5 | 0.462 | 0.507 | −0.045 |
+/// | R@10 | 0.536 | 0.577 | −0.041 |
+/// | nDCG@5 | 0.467 | 0.495 | −0.028 |
+///
+/// **Root cause:** `retrieve_files_dense_rrf` already includes BM25
+/// as one of its three internal RRF rankers (BM25 + Tantivy + Dense
+/// embeddings via `tantivy_search::hybrid_rrf_search`). Fusing
+/// `retrieve_files` (BM25) with `retrieve_files_dense_rrf` again at
+/// the meta level **double-counts the BM25 signal**, biasing the
+/// final ranking toward identifier matches and eroding the semantic
+/// recall that Dense+RRF was contributing. Per the cycle-15
+/// falsifiability criterion (gap-iteration-15.md), this **REJECTS
+/// the meta-RRF hypothesis** as currently formulated.
+///
+/// **The cycle-12 Dense+RRF k=20 path remains the recommended
+/// default for recall; cycle-14 routed remains the best for MRR.**
+/// This function is retained as documentation of the double-counting
+/// pitfall — future fusion work must use independent rankers (e.g.,
+/// LLM reranker score + Dense+RRF rank, or a weighted linear scorer
+/// that subtracts the BM25 contribution from Dense+RRF before
+/// fusion).
 ///
 /// Pipeline:
 ///
@@ -853,6 +881,195 @@ pub fn retrieve_files_blended_rrf(
     let harm_removals = apply_harm_filter(&mut ranked, graph);
 
     // Stage 5: graph expansion from top files (Calls + Imports, depth=1).
+    let seed_files: Vec<String> =
+        ranked.iter().take(5).map(|r| r.path.clone()).collect();
+    let (expanded_files, expanded_tests) =
+        expand_from_files(graph, &seed_files, config.max_neighbors);
+
+    FileRetrievalResult {
+        primary_files: ranked,
+        expanded_files,
+        expanded_tests,
+        total_candidates,
+        dropped_ghost_paths,
+        harm_removals,
+        compression_savings_tokens: 0,
+        inline_slices: Vec::new(),
+        query_type: classify(query),
+        memory_cards: Vec::new(),
+    }
+}
+
+/// Cycle 16 — Score-blended retrieval via meta-RRF over Dense+RRF + graph proximity.
+///
+/// Cycle 15 falsified naive meta-RRF over BM25 + Dense+RRF because
+/// BM25 lives inside both inputs (Dense+RRF is itself a 3-ranker
+/// RRF over BM25 + Tantivy + Dense), so the meta-fusion
+/// double-counted BM25 and regressed all four metrics. Cycle 16
+/// hypothesized that fusing Dense+RRF with a **purely structural**
+/// signal — graph proximity from Dense+RRF's top-K seeds — would
+/// avoid the double-counting because the proximity signal uses
+/// zero shared tokens or embeddings; it is pure Calls/Imports
+/// topology.
+///
+/// **EMPIRICAL FINDING (cycle 16, 2026-04-30):** the proximity
+/// blend **regresses every metric substantially** versus Dense+RRF
+/// k=20 alone — and worse than cycle-15's blended-RRF:
+///
+/// | Metric | Proximity-blended (this fn) | Dense+RRF k=20 | Δ |
+/// |---|---|---|---|
+/// | MRR | 0.626 | 0.674 | −0.048 |
+/// | R@5 | 0.469 | 0.507 | −0.038 |
+/// | R@10 | 0.519 | 0.577 | −0.058 |
+/// | nDCG@5 | 0.456 | 0.495 | −0.039 |
+///
+/// **Root cause:** structural proximity is **not a query-relevance
+/// signal**, it is a "this file is connected" signal. The BFS over
+/// 2 hops from top-5 seeds returns all neighbours regardless of
+/// whether they are answer-relevant for the query, so the proximity
+/// ranking is largely noise. RRF then promotes these
+/// structurally-near-but-semantically-irrelevant files into the
+/// top-K, displacing the real Dense+RRF answers. The independence
+/// hypothesis was right (proximity ⊥ tokens), but RRF requires
+/// **independent QUERY-AWARE rankings**, not just an independent
+/// signal source.
+///
+/// **The cycle-12 Dense+RRF k=20 path remains the recommended
+/// default for recall; cycle-14 routed for MRR.** This function is
+/// retained as documentation that "independent signal" is necessary
+/// but not sufficient for useful meta-RRF — the second ranker must
+/// also be query-aware on its own (e.g., a co-change ranker seeded
+/// by changed-file similarity, or an LLM reranker).
+///
+/// Pipeline:
+///
+/// 1. Compute the Dense+RRF ranking via `retrieve_files_dense_rrf`
+///    (cycle-12 winner, k=20).
+/// 2. Take the top-`PROXIMITY_SEED_COUNT` files as seeds.
+/// 3. Run `proximity_from_seeds(graph, seeds, max_depth=2, decay=0.5)`
+///    to score files within 2 graph hops of the seeds.
+/// 4. Convert proximity scores to a 1-based rank.
+/// 5. RRF-fuse the Dense+RRF rank and proximity rank with k=20:
+///    `fused(f) = 1/(20 + dense_rank(f)) + 1/(20 + proximity_rank(f))`.
+/// 6. Sort by fused score, cap at `config.top_k`, apply harm filter
+///    + graph expansion (Stage 5) identically to other entry points.
+///
+/// Hardware envelope: identical to running `retrieve_files_dense_rrf`
+/// because proximity BFS is graph-only (microseconds per query).
+/// 8 GB envelope is preserved.
+///
+/// Behind `dense-retrieval` feature for symmetry with the dense+RRF
+/// callee; default builds use plain `retrieve_files`.
+#[cfg(feature = "dense-retrieval")]
+#[allow(clippy::too_many_arguments)]
+pub fn retrieve_files_proximity_blended(
+    graph: &CodeGraph,
+    communities: &[Community],
+    tantivy_index: &crate::tantivy_search::FileTantivyIndex,
+    embedder: &crate::embedding::neural::NeuralEmbedder,
+    cache: &crate::embedding::cache::EmbeddingCache,
+    query: &str,
+    config: &RerankConfig,
+    previously_seen: &HashSet<String>,
+) -> FileRetrievalResult {
+    // RRF k-parameter: cycle-12 empirical optimum on this corpus.
+    const RRF_K: f64 = 20.0;
+    // Top-N seeds from Dense+RRF used as starting points for the proximity walk.
+    const PROXIMITY_SEED_COUNT: usize = 5;
+    // BFS depth for proximity walk; depth=2 captures callers and callers-of-callers.
+    const PROXIMITY_MAX_DEPTH: usize = 2;
+    // Decay per hop: depth-1 = 0.5, depth-2 = 0.25, depth-3 = 0.125.
+    const PROXIMITY_DECAY: f64 = 0.5;
+
+    // Stage 1: Dense+RRF ranking (cycle-12 winner).
+    let dense_result = retrieve_files_dense_rrf(
+        graph,
+        communities,
+        tantivy_index,
+        embedder,
+        cache,
+        query,
+        config,
+        previously_seen,
+    );
+
+    // Stage 2: take top-K paths as proximity seeds, transform to graph node IDs.
+    let seeds: HashSet<String> = dense_result
+        .primary_files
+        .iter()
+        .take(PROXIMITY_SEED_COUNT)
+        .map(|r| format!("file:{}", r.path))
+        .collect();
+
+    // Stage 3: compute proximity scores over the call graph.
+    let proximity_scores = crate::graph_attention::proximity_from_seeds(
+        graph,
+        &seeds,
+        PROXIMITY_MAX_DEPTH,
+        PROXIMITY_DECAY,
+    );
+
+    // Stage 4: build per-source rank maps. Dense+RRF rank is 1-based by primary_files
+    // order; proximity rank is 1-based by descending proximity score.
+    let dense_ranks: HashMap<&str, usize> = dense_result
+        .primary_files
+        .iter()
+        .enumerate()
+        .map(|(i, r)| (r.path.as_str(), i + 1))
+        .collect();
+
+    // Convert proximity node IDs (`file:<path>`) back to file paths.
+    let mut proximity_sorted: Vec<(String, f64)> = proximity_scores
+        .into_iter()
+        .filter_map(|(node_id, score)| {
+            node_id.strip_prefix("file:").map(|p| (p.to_string(), score))
+        })
+        .collect();
+    proximity_sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    let proximity_ranks: HashMap<String, usize> = proximity_sorted
+        .iter()
+        .enumerate()
+        .map(|(i, (p, _))| (p.clone(), i + 1))
+        .collect();
+
+    // Stage 5: union of paths from both sources, RRF-fused score.
+    let mut fused_scores: HashMap<String, f64> = HashMap::new();
+    for (path, rank) in &dense_ranks {
+        let entry = fused_scores.entry((*path).to_string()).or_insert(0.0);
+        *entry += 1.0 / (RRF_K + (*rank as f64));
+    }
+    for (path, rank) in &proximity_ranks {
+        let entry = fused_scores.entry(path.clone()).or_insert(0.0);
+        *entry += 1.0 / (RRF_K + (*rank as f64));
+    }
+
+    let total_candidates = fused_scores.len();
+
+    // Stage 6: sort fused scores descending and cap.
+    let mut sorted: Vec<(String, f64)> = fused_scores.into_iter().collect();
+    sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    sorted.truncate(config.max_candidates);
+
+    // Ghost-path filter (mirror of `retrieve_files_dense_rrf`).
+    let before_filter = sorted.len();
+    sorted.retain(|(p, _)| graph.get_node(&format!("file:{p}")).is_some());
+    let dropped_ghost_paths = before_filter - sorted.len();
+
+    let mut ranked: Vec<RankedFile> = sorted
+        .into_iter()
+        .map(|(path, score)| RankedFile {
+            path,
+            score,
+            // Same labelling rationale as `retrieve_files_blended_rrf`.
+            signals: vec![(Signal::DenseRrf, score)],
+        })
+        .collect();
+    ranked.truncate(config.top_k);
+
+    // Stage 6.5: harm filter (same heuristics).
+    let harm_removals = apply_harm_filter(&mut ranked, graph);
+
+    // Stage 7: graph expansion from top files (Calls + Imports, depth=1).
     let seed_files: Vec<String> =
         ranked.iter().take(5).map(|r| r.path.clone()).collect();
     let (expanded_files, expanded_tests) =
