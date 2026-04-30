@@ -29,7 +29,7 @@ referencias
 !crates/theo-engine-retrieval/src/wiki
 research-output
 !crates/theo-infra-memory/src/wiki
-
+!docs/pesquisas/wiki
 # Python
 __pycache__/
 *.pyc
