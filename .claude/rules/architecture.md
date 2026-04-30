@@ -26,31 +26,36 @@ workspace, not an older or idealized architecture.
    - Research basis: `docs/pesquisas/wiki/INDEX.md`
 
 3. **Agent Runtime / Subagents / Self-Evolution**
-   - `theo-agent-runtime` — loop orchestration, subagents, compaction, checkpoints, observability
-   - Research basis: `docs/pesquisas/agent-loop/INDEX.md`, `docs/pesquisas/subagents/INDEX.md`, `docs/pesquisas/self-evolution/INDEX.md`
+   - `theo-agent-runtime` — loop orchestration, subagents, compaction, checkpoints, observability, prompt assembly
+   - Research basis: `docs/pesquisas/agent-loop/INDEX.md`, `docs/pesquisas/subagents/INDEX.md`, `docs/pesquisas/self-evolution/INDEX.md`, `docs/pesquisas/observability/INDEX.md`, `docs/pesquisas/prompt-engineering/INDEX.md`
 
-4. **Governance / Isolation**
+4. **Tooling / Debug / Tool Design**
+   - `theo-tooling` — 72 production tools, tool registry, DAP/LSP/browser sidecars, sandbox integration
+   - Research basis: `docs/pesquisas/tools/tool-design-patterns-sota.md`, `docs/pesquisas/debug/debug-dap-sota.md`
+
+5. **Governance / Isolation**
    - `theo-governance` — policy, permission, and risk decisions
    - `theo-isolation` — worktree/sandbox execution primitives
    - Research basis: `docs/pesquisas/security-governance/INDEX.md`
 
-5. **Provider / Routing / External Infra**
+6. **Provider / Routing / External Infra**
    - `theo-infra-llm` — provider catalog, streaming, retry, routing support
    - `theo-infra-auth` — OAuth/device flow/API-key auth
    - `theo-infra-mcp` — MCP client/discovery/transport
    - `theo-infra-memory` — memory persistence/backends
    - Research basis: `docs/pesquisas/providers/INDEX.md`, `docs/pesquisas/model-routing/INDEX.md`, `docs/pesquisas/memory/INDEX.md`
 
-6. **Application Boundary**
+7. **Application Boundary**
    - `theo-application` coordinates use-cases and is the dependency boundary for `apps/*`
    - `theo-api-contracts` carries serializable DTOs for app/IPC surfaces
 
-7. **Surfaces**
+8. **Surfaces**
    - `apps/theo-cli` — terminal/TUI surface
    - `apps/theo-desktop` — Tauri shell
    - `apps/theo-marklive` — markdown/wiki renderer
    - `apps/theo-ui` — React/Vite UI consumed by desktop/dashboard flows
-   - Research basis: `docs/pesquisas/cli/INDEX.md`
+   - `apps/theo-benchmark` — Python benchmark harness (16 analysis modules, outside Rust workspace)
+   - Research basis: `docs/pesquisas/cli/INDEX.md`, `docs/pesquisas/evals/evals-benchmarks-sota.md`
 
 ## Dependency Direction (INVIOLABLE)
 

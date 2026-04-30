@@ -85,10 +85,26 @@ if [[ -f "$PATTERN_LOADER" ]]; then
 fi
 
 # The nine secret families we scan for.
+# Each entry has a PCRE pattern (for rg --pcre2) and a grep -E compatible
+# fallback. When the fallback is empty, the family is skipped under grep.
 declare -A PATTERNS=(
     [aws_access_key]='AKIA[0-9A-Z]{16}'
     [aws_secret_key]='(?i)aws[_-]?secret[_-]?access[_-]?key["'"'"']?\s*[:=]\s*["'"'"'][A-Za-z0-9/+=]{40}'
     [github_pat]='gh[pousr]_[A-Za-z0-9]{36,255}'
+    [github_fine_grained]='github_pat_[A-Za-z0-9_]{82,}'
+    [slack_token]='xox[baprs]-[A-Za-z0-9-]{10,}'
+    [gcp_private_key]='-----BEGIN PRIVATE KEY-----'
+    [openai_key]='sk-[A-Za-z0-9_-]{20,}'
+    [anthropic_key]='sk-ant-[A-Za-z0-9_-]{20,}'
+    [pem_private_key]='-----BEGIN (RSA|EC|DSA|OPENSSH) PRIVATE KEY-----'
+)
+
+# grep -E compatible patterns (no PCRE lookaheads/(?i) flags).
+# aws_secret_key uses (?i) in PCRE; the grep fallback uses -iE instead.
+declare -A GREP_PATTERNS=(
+    [aws_access_key]='AKIA[0-9A-Z]{16}'
+    [aws_secret_key]='[Aa][Ww][Ss][_-]?[Ss][Ee][Cc][Rr][Ee][Tt][_-]?[Aa][Cc][Cc][Ee][Ss][Ss][_-]?[Kk][Ee][Yy]["'"'"']?[[:space:]]*[:=][[:space:]]*["'"'"'][A-Za-z0-9/+=]{40}'
+    [github_pat]='gh[pousr]_[A-Za-z0-9]{36,}'
     [github_fine_grained]='github_pat_[A-Za-z0-9_]{82,}'
     [slack_token]='xox[baprs]-[A-Za-z0-9-]{10,}'
     [gcp_private_key]='-----BEGIN PRIVATE KEY-----'
@@ -118,35 +134,68 @@ allowed_for() {
     return 1
 }
 
-for family in "${!PATTERNS[@]}"; do
-    pattern="${PATTERNS[$family]}"
-    if command -v rg >/dev/null 2>&1; then
-        while IFS= read -r hit; do
-            [[ -z "$hit" ]] && continue
-            path="${hit%%:*}"
-            rest="${hit#*:}"
-            line_no="${rest%%:*}"
-            content="${rest#*:}"
-            if allowed_for "$path" "$content"; then
-                allow_hits=$((allow_hits + 1))
-                continue
-            fi
-            violations+=("$family $path:$line_no  $(printf '%.100s' "$content")")
-        done < <(
-            rg -n --no-heading --pcre2 \
-                --glob '!target/**' \
-                --glob '!node_modules/**' \
-                --glob '!referencias/**' \
-                --glob '!.git/**' \
-                --glob '!.theo/**' \
-                --glob '!scripts/check-secrets.sh' \
-                --glob '!.claude/rules/secret-allowlist.txt' \
-                -- "$pattern" 2>/dev/null || true
-        )
-    else
-        # grep does not do PCRE alternation reliably; skip when rg absent.
-        echo "warn: ripgrep not available; pattern '$family' skipped" >&2
+HAS_RG=0
+command -v rg >/dev/null 2>&1 && HAS_RG=1
+
+# Verify rg has PCRE2 support; fall back to grep otherwise.
+if (( HAS_RG )); then
+    if ! rg --pcre2-version >/dev/null 2>&1; then
+        HAS_RG=0
     fi
+fi
+
+scan_with_rg() {
+    local pattern="$1"
+    rg -n --no-heading --pcre2 \
+        --glob '!target/**' \
+        --glob '!node_modules/**' \
+        --glob '!referencias/**' \
+        --glob '!.git/**' \
+        --glob '!.theo/**' \
+        --glob '!scripts/check-secrets.sh' \
+        --glob '!.claude/rules/secret-allowlist.txt' \
+        -- "$pattern" 2>/dev/null || true
+}
+
+scan_with_grep() {
+    local pattern="$1"
+    grep -rnE \
+        --exclude-dir=target \
+        --exclude-dir=node_modules \
+        --exclude-dir=referencias \
+        --exclude-dir=.git \
+        --exclude-dir=.theo \
+        --exclude='check-secrets.sh' \
+        --exclude='secret-allowlist.txt' \
+        "$pattern" . 2>/dev/null \
+        | sed 's|^\./||' || true
+}
+
+for family in "${!PATTERNS[@]}"; do
+    if (( HAS_RG )); then
+        pattern="${PATTERNS[$family]}"
+        scan_output="$(scan_with_rg "$pattern")"
+    else
+        pattern="${GREP_PATTERNS[$family]:-}"
+        if [[ -z "$pattern" ]]; then
+            echo "warn: no grep-compatible pattern for '$family'; skipped" >&2
+            continue
+        fi
+        scan_output="$(scan_with_grep "$pattern")"
+    fi
+
+    while IFS= read -r hit; do
+        [[ -z "$hit" ]] && continue
+        path="${hit%%:*}"
+        rest="${hit#*:}"
+        line_no="${rest%%:*}"
+        content="${rest#*:}"
+        if allowed_for "$path" "$content"; then
+            allow_hits=$((allow_hits + 1))
+            continue
+        fi
+        violations+=("$family $path:$line_no  $(printf '%.100s' "$content")")
+    done <<< "$scan_output"
 done
 
 total="${#violations[@]}"

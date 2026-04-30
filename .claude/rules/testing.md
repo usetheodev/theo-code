@@ -27,12 +27,17 @@ paths:
 - Tests must be independent. No shared mutable state between tests.
 
 ## Research-Aligned Focus Areas
-- Retrieval pipeline: query → ranked/contextualized results
-- Code graph and parsing: parse → symbols → edges → clustering/queries
-- Agent runtime: transitions, guard conditions, compaction, subagent/delegation behavior
-- Tool execution: input validation, permission/sandbox boundaries, truncation/error surfaces
-- Memory and wiki flows: persistence, ingestion, query, lint/enrichment boundaries
-- Observability and routing: emitted events, metrics, cost/routing decisions when touched
+- Retrieval pipeline: query → ranked/contextualized results (`docs/pesquisas/context/`)
+- Code graph and parsing: parse → symbols → edges → clustering/queries (`docs/pesquisas/languages/`)
+- Agent runtime: transitions, guard conditions, compaction, subagent/delegation behavior (`docs/pesquisas/agent-loop/`, `docs/pesquisas/subagents/`)
+- Tool execution: input validation, permission/sandbox boundaries, truncation/error surfaces (`docs/pesquisas/tools/`)
+- Memory and wiki flows: persistence, ingestion, query, lint/enrichment boundaries (`docs/pesquisas/memory/`, `docs/pesquisas/wiki/`)
+- Observability and routing: emitted events, metrics, cost/routing decisions when touched (`docs/pesquisas/observability/`, `docs/pesquisas/model-routing/`)
+- Debug/DAP: sidecar lifecycle, protocol compliance, multi-runtime adapter support (`docs/pesquisas/debug/`)
+- CLI/UX: subcommand coverage, error messages, interactive mode ergonomics (`docs/pesquisas/cli/`)
+- Security/governance: sandbox cascade, capability enforcement, secret scrubbing (`docs/pesquisas/security-governance/`)
+- Prompt engineering: system prompt structure, tool schema quality, context fencing (`docs/pesquisas/prompt-engineering/`)
+- Evals/benchmarks: scenario coverage, statistical rigor, regression detection (`docs/pesquisas/evals/`)
 
 ## What NOT to Test
 - Trivial getters/setters

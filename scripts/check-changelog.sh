@@ -66,15 +66,7 @@ fi
 
 changelog_diff="$("${changelog_diff_cmd[@]}" 2>/dev/null || true)"
 
-# Count net-added lines inside [Unreleased]. Very forgiving: any +line that
-# appears in the diff is accepted, as long as CHANGELOG.md was touched.
-added_lines="$(printf '%s\n' "$changelog_diff" \
-    | grep -E '^\+[^+]' \
-    | grep -v '^+++' \
-    | wc -l \
-    | tr -d ' ')"
-
-if [[ -z "$changelog_diff" ]] || (( added_lines == 0 )); then
+if [[ -z "$changelog_diff" ]]; then
     cat <<EOF >&2
 changelog gate FAILED
 
@@ -90,5 +82,47 @@ EOF
     exit 1
 fi
 
-echo "changelog: OK — [Unreleased] grew by $added_lines line(s)"
+# Count added lines that belong to the [Unreleased] section specifically.
+# We track whether we're inside the [Unreleased] diff hunk by watching for
+# the section header in context/added lines, and stop at the next version
+# header (e.g. `## [1.2.0]`).
+added_in_unreleased="$(printf '%s\n' "$changelog_diff" | awk '
+    # Skip diff headers
+    /^(\+\+\+|---)/ { next }
+    # Detect [Unreleased] section (in added or context lines)
+    /^[+ ].*\[Unreleased\]/ { in_section = 1; next }
+    # Detect next versioned section — stop counting
+    in_section && /^[+ ].*## \[[0-9]+\./ { in_section = 0 }
+    # Count added lines inside [Unreleased]
+    in_section && /^\+/ { count++ }
+    END { print count + 0 }
+')"
+
+if (( added_in_unreleased == 0 )); then
+    # Fallback: maybe the diff doesn't show the [Unreleased] header in context.
+    # Accept any added line as a weaker signal.
+    any_added="$(printf '%s\n' "$changelog_diff" \
+        | grep -cE '^\+[^+]' \
+        || true)"
+    if (( any_added == 0 )); then
+        cat <<EOF >&2
+changelog gate FAILED
+
+Code was changed under crates/ or apps/ but CHANGELOG.md [Unreleased] section
+was not updated.
+Required per .claude/CLAUDE.md "Changelogs — Registro Obrigatório de Mudanças":
+
+  A seção [Unreleased] é obrigatória e é onde toda mudança entra primeiro.
+  Use one of: Added | Changed | Deprecated | Removed | Fixed | Security.
+
+Files touched:
+$(printf '  - %s\n' $changed_files | head -20)
+EOF
+        exit 1
+    fi
+    echo "changelog: OK — $any_added line(s) added (could not confirm [Unreleased] section in diff context)"
+    exit 0
+fi
+
+echo "changelog: OK — [Unreleased] grew by $added_in_unreleased line(s)"
 exit 0

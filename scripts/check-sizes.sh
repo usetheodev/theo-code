@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 # check-sizes.sh
 #
-# T4.6 — File and function size gate.
+# T4.6 — File size gate.
 #
-# Enforces limits declared in .claude/rules/code-size.yaml:
+# Enforces file-level LOC limits:
 #
-#   crates  — file max 800 LOC, function max 60 LOC
-#   UI TS   — file max 400 LOC, function max 60 LOC
+#   crates  — file max 800 LOC
+#   UI TS   — file max 400 LOC
+#
+# NOTE: Function-level size (LOC per function) is enforced by
+# `check-complexity.sh` via `clippy::too_many_lines`.
 #
 # Allowlist at .claude/rules/size-allowlist.yaml — each entry carries a
 # sunset date after which the gate will fail even if the file is listed.

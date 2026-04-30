@@ -13,8 +13,10 @@
 # `complexity`.
 #
 # Strategy: use `cargo clippy -W clippy::too_many_lines` (default
-# threshold 100 LOC per function — the canonical Rust complexity
-# heuristic). A baseline allowlist locks the current per-crate
+# threshold 100 LOC per function). This measures function length,
+# not cyclomatic complexity (CCN); it serves as a practical proxy
+# since overly long functions correlate with high CCN.
+# A baseline allowlist locks the current per-crate
 # violation count so:
 #
 #   - existing 75-function debt doesn't block the gate today

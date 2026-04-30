@@ -59,17 +59,25 @@ Run these checks and record PASS/FAIL for each. These are NON-NEGOTIABLE.
 - **Code without tests = REJECT. No exceptions.**
 
 ### 2.2 Architecture Boundary Compliance
-Verify against the dependency rules in CLAUDE.md:
+Verify against the dependency rules in CLAUDE.md (enforced by `make check-arch`):
 ```
-theo-domain         → (nothing)
-theo-engine-*       → theo-domain
-theo-governance     → theo-domain
-theo-infra-*        → theo-domain
-theo-tooling        → theo-domain
-theo-agent-runtime  → theo-domain, theo-governance
-theo-api-contracts  → theo-domain
-theo-application    → all crates above
-apps/*              → theo-application, theo-api-contracts
+theo-domain              → (nothing)
+theo-engine-graph        → theo-domain
+theo-engine-parser       → theo-domain
+theo-engine-retrieval    → theo-domain, theo-engine-graph, theo-engine-parser
+theo-engine-wiki         → theo-domain, theo-engine-graph, theo-engine-parser
+theo-governance          → theo-domain
+theo-isolation           → theo-domain
+theo-infra-llm           → theo-domain
+theo-infra-auth          → theo-domain
+theo-infra-mcp           → theo-domain
+theo-infra-memory        → theo-domain, theo-engine-retrieval
+theo-tooling             → theo-domain
+theo-agent-runtime       → theo-domain, theo-governance, theo-infra-llm,
+                           theo-infra-auth, theo-tooling, theo-isolation, theo-infra-mcp
+theo-api-contracts       → theo-domain
+theo-application         → all crates above
+apps/*                   → theo-application, theo-api-contracts, theo-domain
 ```
 - Check `Cargo.toml` for illegal `path =` or workspace deps
 - Flag any circular dependency
@@ -89,9 +97,8 @@ cargo clippy -p {crate} --lib --tests -- -D warnings 2>&1
 - Any warning = FAIL with details
 
 ### 2.5 Code Quality Metrics
-- No god-files (> 500 LOC per file)
-- No god-functions (> 30 LOC per function)
-- Cyclomatic complexity <= 10 per function
+- No god-files (> 800 LOC per Rust file, > 400 LOC per TS file — enforced by `make check-sizes`)
+- No god-functions (> 100 LOC per function — enforced by `make check-complexity`)
 - No `#[allow(unused)]` or `#[allow(dead_code)]` without comment explaining why
 
 ### 2.6 Security

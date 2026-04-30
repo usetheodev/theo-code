@@ -96,11 +96,19 @@ IO_MARKERS=(
 
 # Step 1: collect files under crates/*/src/ and apps/*/src/ that declare
 # #[test] or #[tokio::test] inside a #[cfg(test)] block.
-test_bearing_files="$(
-    rg -l --glob 'crates/**/src/**/*.rs' --glob 'apps/**/src/**/*.rs' \
-        -e '#\[test\]' -e '#\[tokio::test\]' 2>/dev/null \
-        | sort -u
-)"
+if command -v rg >/dev/null 2>&1; then
+    test_bearing_files="$(
+        rg -l --glob 'crates/**/src/**/*.rs' --glob 'apps/**/src/**/*.rs' \
+            -e '#\[test\]' -e '#\[tokio::test\]' 2>/dev/null \
+            | sort -u
+    )"
+else
+    test_bearing_files="$(
+        grep -rl -E '#\[(tokio::)?test\]' --include='*.rs' \
+            crates/*/src/ apps/*/src/ 2>/dev/null \
+            | sort -u
+    )"
+fi
 
 violations=()
 allow_pattern_hits=0
@@ -117,13 +125,19 @@ for f in $test_bearing_files; do
     # uses tempfile::TempDir / tempdir / NamedTempFile / Builder, or an
     # in-project TestDir wrapper. These markers prove the test isolates
     # I/O via a per-test scratch dir (RAII cleanup, no shared state).
-    if rg -q -e 'tempfile::TempDir' \
-              -e 'tempfile::tempdir' \
-              -e 'tempfile::NamedTempFile' \
-              -e 'tempfile::Builder' \
-              -e 'use tempfile::' \
-              -e 'TestDir::' \
-              "$f" 2>/dev/null; then
+    tempfile_pattern='tempfile::TempDir|tempfile::tempdir|tempfile::NamedTempFile|tempfile::Builder|use tempfile::|TestDir::'
+    if command -v rg >/dev/null 2>&1; then
+        tempfile_match=$(rg -q -e 'tempfile::TempDir' \
+                  -e 'tempfile::tempdir' \
+                  -e 'tempfile::NamedTempFile' \
+                  -e 'tempfile::Builder' \
+                  -e 'use tempfile::' \
+                  -e 'TestDir::' \
+                  "$f" 2>/dev/null && echo 1 || echo 0)
+    else
+        tempfile_match=$(grep -qE "$tempfile_pattern" "$f" 2>/dev/null && echo 1 || echo 0)
+    fi
+    if (( tempfile_match )); then
         allow_pattern_hits=$((allow_pattern_hits + 1))
         continue
     fi
@@ -148,8 +162,14 @@ for f in $test_bearing_files; do
 
     # For each I/O marker, check if the file references it.
     for marker in "${IO_MARKERS[@]}"; do
-        # Use rg so the PCRE marker patterns work.
-        if rg -q -- "$marker" "$f" 2>/dev/null; then
+        # Use rg so the PCRE marker patterns work. Falls back to grep.
+        marker_found=0
+        if command -v rg >/dev/null 2>&1; then
+            rg -q -- "$marker" "$f" 2>/dev/null && marker_found=1
+        else
+            grep -qE -- "$marker" "$f" 2>/dev/null && marker_found=1
+        fi
+        if (( marker_found )); then
             key="$f::$marker"
             if [[ -n "${ALLOW[$f]-}${ALLOW[$key]-}" ]]; then
                 continue

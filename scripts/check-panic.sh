@@ -96,15 +96,16 @@ collect() {
 }
 
 # Same test-block filter used by check-unwrap.sh.
+# Kept in sync: compound #[cfg(all(test, ...))] + comment-line filtering.
 filter_production() {
     awk -F: 'BEGIN{OFS=":"}
         {
           path=$1
           if (!(path in cfg_line)) {
-            # Match both outer (`#[cfg(test)]`) and inner
-            # (`#![cfg(test)]`) attribute forms — the latter scopes
-            # an entire sibling-test file, e.g. dap/tool_tests.rs.
-            cmd = "grep -nE '\''^[[:space:]]*#!?\\[cfg\\(test\\)\\]'\'' " path " | head -1"
+            # Match outer (`#[cfg(test)]`) and inner (`#![cfg(test)]`)
+            # forms PLUS the compound form `#[cfg(all(test, feature = "..."))]`
+            # used by feature-gated test modules (e.g. tantivy-backend).
+            cmd = "grep -nE '\''^[[:space:]]*#!?\\[cfg\\((all\\([^)]*\\b)?test\\b'\'' " path " | head -1"
             got = (cmd | getline first) ; close(cmd)
             if (got > 0) {
               split(first, parts, ":"); cfg_line[path] = parts[1] + 0
@@ -113,7 +114,14 @@ filter_production() {
             }
           }
           if (cfg_line[path] == 0 || ($2 + 0) < cfg_line[path]) {
-            print
+            # Drop comment-only lines: rustdoc (`///`, `//!`) AND plain
+            # line comments (`//`). A macro like `panic!` in a comment is
+            # documentation, not executed code.
+            content=$0
+            sub("^[^:]+:[0-9]+:", "", content)
+            if (content !~ /^[[:space:]]*\/\//) {
+              print
+            }
           }
         }'
 }
