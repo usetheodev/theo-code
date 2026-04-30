@@ -18,55 +18,67 @@ meeting_id = "20260429-143744"
 [retrieval.mrr]
 type = "dod-gate"
 floor = 0.90
-current = 0.914
-source = "internal benchmark (apps/theo-benchmark/reports/)"
+current = 0.695
+source = "Rust bench `benchmark_retrieve_files_routed_guard` (theo-engine-retrieval/tests/benchmark_suite.rs) on the `theo-code` ground truth, query-type routed (Identifier→BM25, NL/Mixed→Dense+RRF k=20)"
 confidence = 0.95
-measurement = "python run_benchmark.py --metric mrr"
+measurement = "cargo test -p theo-engine-retrieval --features dense-retrieval --test benchmark_suite benchmark_retrieve_files_routed_guard -- --ignored --nocapture"
+measured_date = "2026-04-30"
+status = "BELOW_FLOOR"
+note = "Cycle 14 routed measurement on 8 GB hardware: 0.695 MRR (best path for top-1 precision). Cycle 12 dense+RRF k=20 alternative: 0.674 MRR (best for recall). BM25-only baseline: 0.593. Closing the gap to 0.90 requires the cross-encoder reranker which OOMs on 8 GB; cycle 7+13 evidence. Cycle 14 routing trades −0.025 R@5 / −0.039 R@10 for the +0.021 MRR — Pareto trade-off."
 
 [retrieval.recall_at_5]
 type = "dod-gate"
 floor = 0.92
-current = 0.76
-source = "internal benchmark"
-confidence = 0.85
-measurement = "python run_benchmark.py --metric recall_at_5"
+current = 0.507
+source = "Rust bench `benchmark_retrieve_files_dense_rrf_guard` on `theo-code` ground truth, dense+RRF k=20"
+confidence = 0.95
+measurement = "cargo test -p theo-engine-retrieval --features dense-retrieval --test benchmark_suite benchmark_retrieve_files_dense_rrf_guard -- --ignored --nocapture"
+measured_date = "2026-04-30"
 status = "BELOW_FLOOR"
+note = "Cycle 14 re-probe of dense+RRF (k=20): 0.507 R@5 (best path for recall). BM25 baseline 0.462. Routed alternative regresses to 0.482 (cycle 14)."
 
 [retrieval.recall_at_10]
 type = "dod-gate"
 floor = 0.95
-current = 0.86
-source = "internal benchmark"
-confidence = 0.85
-measurement = "python run_benchmark.py --metric recall_at_10"
+current = 0.577
+source = "Rust bench `benchmark_retrieve_files_dense_rrf_guard` on `theo-code` ground truth, dense+RRF k=20"
+confidence = 0.95
+measurement = "cargo test -p theo-engine-retrieval --features dense-retrieval --test benchmark_suite benchmark_retrieve_files_dense_rrf_guard -- --ignored --nocapture"
+measured_date = "2026-04-30"
 status = "BELOW_FLOOR"
+note = "Cycle 14 re-probe of dense+RRF (k=20): 0.577 R@10 (best path for recall). BM25 baseline 0.545. Routed alternative regresses to 0.538 (cycle 14)."
 
 [retrieval.depcov]
 type = "dod-gate"
 floor = 0.96
-current = 0.967
-source = "internal benchmark"
+current = 0.767
+source = "Rust bench `benchmark_bm25_baseline` on `theo-code` ground truth — re-measured cycle 9-10"
 confidence = 0.95
-measurement = "python run_benchmark.py --metric depcov"
+measurement = "cargo test -p theo-engine-retrieval --test benchmark_suite benchmark_bm25_baseline -- --ignored --nocapture"
+measured_date = "2026-04-30"
+status = "BELOW_FLOOR"
+note = "Cycle 9-10 re-measurement: 0.767 (was reported 1.000 in cycle 3 — documentation drift). By category: symbol DepCov=0.429 (worst), module=1.000, semantic=0.875, cross-cutting=0.714. Same root cause as MRR/R@5 gates: BM25 ranker insufficient for multi-file co-retrieval."
 
 [retrieval.ndcg_at_5]
 type = "dod-gate"
 floor = 0.85
-current = "unmeasured"
-source = "graphctx-expert recommendation (meeting 20260429-143744)"
-confidence = 0.80
-measurement = "python run_benchmark.py --metric ndcg_at_5"
-status = "UNMEASURED"
+current = 0.495
+source = "Rust bench `benchmark_retrieve_files_dense_rrf_guard` on `theo-code` ground truth, dense+RRF k=20"
+confidence = 0.95
+measurement = "cargo test -p theo-engine-retrieval --features dense-retrieval --test benchmark_suite benchmark_retrieve_files_dense_rrf_guard -- --ignored --nocapture"
+measured_date = "2026-04-30"
+status = "BELOW_FLOOR"
+note = "Cycle 14 re-probe of dense+RRF (k=20): 0.495 nDCG@5 (+16% vs BM25 baseline 0.427). Routed alternative regresses to 0.485 (cycle 14)."
 
 [retrieval.per_language_recall_at_5]
 type = "dod-gate"
 floor = 0.85
-current = "unmeasured"
-source = "graphctx-expert recommendation (meeting 20260429-143744)"
+current = "unmeasured_per_language"
+source = "Rust bench currently aggregates by query category, not language; per-language breakdown requires ground-truth files for each language"
 confidence = 0.80
-measurement = "python run_benchmark.py --metric per_lang_recall_at_5"
+measurement = "TODO: build per-language ground-truth corpora (currently only Rust theo-code.json exists) + new bench fn"
 status = "UNMEASURED"
-note = "Applies to each of the 14 supported languages independently"
+note = "Applies to each of the 14 supported languages independently. Active engineering target."
 
 # ============================================================================
 # SWE-BENCH REFERENCES
@@ -91,10 +103,13 @@ note = "Claude Code 72.7% SWE-Bench Verified"
 [swe_bench.minimum_runs]
 type = "dod-gate"
 floor = 3
+current = 3
 unit = "runs per configuration"
 source = "docs/pesquisas/harness-engineering-guide.md"
 confidence = 0.90
-note = "Wilson CI on 3 runs minimum for publishable results"
+measurement = "smoke harness `runner/smoke.py` accepts --runs N; SOTA validation requires N>=3 with Wilson CI"
+status = "PASS"
+note = "Methodological constraint, not a runtime metric. Honored when benchmarks are launched with --runs >= 3."
 
 # ============================================================================
 # HARNESS ENGINEERING REFERENCES (Tsinghua ablation study)
@@ -155,16 +170,23 @@ note = "Harness engineering alone explains 6x performance gap"
 [context.relevance_threshold]
 type = "dod-gate"
 floor = 0.3
+current = 0.3
 source = "docs/pesquisas/context-engine.md:230"
 confidence = 0.75
-note = "Minimum relevance score to include files in context"
+measurement = "RerankConfig: `cargo test -p theo-engine-retrieval --lib` validates default thresholds"
+status = "PASS"
+note = "Configuration constraint — minimum relevance score to include files in context. Honored by `RerankConfig::default()`."
 
 [context.max_files]
 type = "dod-gate"
 floor = 8
+current = 8
 unit = "files per search"
 source = "docs/pesquisas/context-engine.md:210"
-confidence = 0.80
+confidence = 0.95
+measurement = "`crates/theo-engine-retrieval/src/file_retriever.rs::RerankConfig::default().top_k` (verified at line 101)"
+status = "PASS"
+note = "Configuration constraint — `top_k: 8` in production default."
 
 [context.cache_hit_rate_target]
 type = "research-benchmark-ref"
@@ -209,11 +231,13 @@ note = "Multi-agent systems consume ~15x more tokens than single-agent"
 [smoke.pass_rate]
 type = "dod-gate"
 floor = 0.85
-current = 0.90
-source = "internal benchmark (apps/theo-benchmark/reports/)"
+current = 1.00
+source = "internal benchmark (apps/theo-benchmark/reports/smoke-1777323535.sota.json — latest)"
 confidence = 0.90
 measurement = "python runner/smoke.py && jq .pass_rate reports/smoke-*.json"
-note = "18/20 scenarios passing currently"
+measured_date = "2026-04-29"
+status = "PASS"
+note = "Latest smoke run: 1.0 pass rate (was 0.90 / 18-of-20 in earlier note). Floor 0.85 met with margin."
 
 # ============================================================================
 # COST GATES
@@ -222,18 +246,24 @@ note = "18/20 scenarios passing currently"
 [cost.max_per_smoke_run_usd]
 type = "dod-gate"
 floor = 5.0
+current = 0.0
 unit = "USD per full smoke run"
 source = "budget constraint (meeting 20260429-143744)"
 confidence = 0.85
-note = "Hard budget cap for automated validation runs"
+measurement = "smoke runs without paid LLM API spend $0; floor is the upper-bound cap, not a target"
+status = "PASS"
+note = "Hard upper-bound budget cap for automated validation runs. Local smoke run cost = $0 < $5.0 ceiling."
 
 [cost.max_per_refinement_iteration_usd]
 type = "dod-gate"
 floor = 10.0
+current = 0.0
 unit = "USD per refinement cycle iteration"
 source = "budget constraint (meeting 20260429-143744)"
 confidence = 0.85
-note = "Hard budget cap for autoloop iterations"
+measurement = "SOTA loop spent_usd=0.0 across 6 cycles; floor is upper-bound cap"
+status = "PASS"
+note = "Hard upper-bound budget cap for autoloop iterations. Loop ran on cargo + python locally only."
 
 # ============================================================================
 # MEMORY SYSTEM THRESHOLDS

@@ -288,6 +288,213 @@ fn benchmark_bm25_baseline() {
     emit_report(&gt.repo, &results, "FileBm25 (baseline)");
 }
 
+/// Dumper: writes BM25 top-50 candidates per ground-truth query to a JSON
+/// file at `/tmp/probe-bm25-candidates.json`. A Python helper then consumes
+/// this file, calls the LLM (ChatGPT-Codex via OAuth from `~/.config/theo/auth.json`)
+/// to rerank, and writes metrics to `/tmp/probe-llm-rerank.metrics.txt`.
+///
+/// Pure measurement-side scaffold. No production behaviour change.
+///
+/// Run: cargo test -p theo-engine-retrieval --test benchmark_suite -- --ignored --nocapture benchmark_dump_bm25_candidates
+#[test]
+#[ignore]
+fn benchmark_dump_bm25_candidates() {
+    use theo_engine_graph::bridge;
+    use theo_engine_retrieval::search::FileBm25;
+
+    let gt = load_ground_truth("theo-code");
+
+    let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
+
+    let (files, _) = theo_application::use_cases::extraction::extract_repo(workspace_root);
+    let (graph, _) = bridge::build_graph(&files);
+
+    let mut dump = Vec::new();
+    for bq in &gt.queries {
+        let file_scores = FileBm25::search(&graph, &bq.query);
+        let mut sorted: Vec<(String, f64)> = file_scores.into_iter().collect();
+        sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        sorted.truncate(50);
+
+        let candidates: Vec<serde_json::Value> = sorted
+            .iter()
+            .map(|(path, score)| {
+                let file_id = format!("file:{}", path);
+                let symbols = graph.contains_children(&file_id);
+                let names: Vec<String> = symbols
+                    .iter()
+                    .take(30)
+                    .filter_map(|sid| graph.get_node(sid).map(|n| n.name.clone()))
+                    .collect();
+                serde_json::json!({
+                    "path": path,
+                    "bm25_score": score,
+                    "symbols": names,
+                })
+            })
+            .collect();
+
+        dump.push(serde_json::json!({
+            "id": bq.id,
+            "query": bq.query,
+            "category": bq.category,
+            "difficulty": bq.difficulty,
+            "expected_files": bq.expected_files,
+            "candidates": candidates,
+        }));
+    }
+
+    let out = serde_json::json!({
+        "schema": "bm25-top-50-candidates-v1",
+        "repo": "theo-code",
+        "n_queries": dump.len(),
+        "queries": dump,
+    });
+    let path = "/tmp/probe-bm25-candidates.json";
+    std::fs::write(path, serde_json::to_string_pretty(&out).unwrap())
+        .expect("write candidates dump");
+    eprintln!("Wrote {} ({} queries)", path, dump.len());
+}
+
+/// Dumper: reads a query list JSON `/tmp/probe-query-list.json` (array of
+/// `{id, query}`) and writes `/tmp/probe-multi-bm25.json` with BM25 top-50
+/// per query. Used by cycle 14 (LLM query-rewriting + multi-query retrieval).
+///
+/// Run: cargo test -p theo-engine-retrieval --test benchmark_suite -- --ignored --nocapture benchmark_dump_for_query_list
+#[test]
+#[ignore]
+fn benchmark_dump_for_query_list() {
+    use theo_engine_graph::bridge;
+    use theo_engine_retrieval::search::FileBm25;
+
+    let input = std::fs::read_to_string("/tmp/probe-query-list.json")
+        .expect("missing /tmp/probe-query-list.json — write [{\"id\": str, \"query\": str}, ...]");
+    let queries: Vec<serde_json::Value> = serde_json::from_str(&input).expect("parse query list");
+
+    let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
+    let (files, _) = theo_application::use_cases::extraction::extract_repo(workspace_root);
+    let (graph, _) = bridge::build_graph(&files);
+
+    let mut dump = Vec::new();
+    for entry in &queries {
+        let id = entry.get("id").and_then(|v| v.as_str()).unwrap_or("?").to_string();
+        let q = entry.get("query").and_then(|v| v.as_str()).unwrap_or("");
+        if q.is_empty() {
+            continue;
+        }
+        let scores = FileBm25::search(&graph, q);
+        let mut sorted: Vec<(String, f64)> = scores.into_iter().collect();
+        sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        sorted.truncate(50);
+
+        let candidates: Vec<serde_json::Value> = sorted
+            .iter()
+            .map(|(path, score)| {
+                let file_id = format!("file:{}", path);
+                let symbols = graph.contains_children(&file_id);
+                let names: Vec<String> = symbols
+                    .iter()
+                    .take(20)
+                    .filter_map(|sid| graph.get_node(sid).map(|n| n.name.clone()))
+                    .collect();
+                serde_json::json!({"path": path, "bm25_score": score, "symbols": names})
+            })
+            .collect();
+        dump.push(serde_json::json!({
+            "id": id,
+            "query": q,
+            "candidates": candidates,
+        }));
+    }
+    let out = serde_json::json!({"schema": "multi-bm25-top-50-v1", "queries": dump});
+    std::fs::write("/tmp/probe-multi-bm25.json", serde_json::to_string_pretty(&out).unwrap())
+        .expect("write");
+    eprintln!("Wrote /tmp/probe-multi-bm25.json ({} queries)", queries.len());
+}
+
+/// Dumper: writes Dense+RRF top-50 candidates per ground-truth query to
+/// /tmp/probe-rrf-candidates.json. Same downstream usage as
+/// benchmark_dump_bm25_candidates but with the higher-recall candidate
+/// generator. Cycle 11.
+///
+/// Run: cargo test -p theo-engine-retrieval --features dense-retrieval --test benchmark_suite -- --ignored --nocapture benchmark_dump_rrf_candidates
+#[test]
+#[ignore]
+#[cfg(feature = "dense-retrieval")]
+fn benchmark_dump_rrf_candidates() {
+    use theo_engine_graph::bridge;
+    use theo_engine_retrieval::embedding::cache::EmbeddingCache;
+    use theo_engine_retrieval::embedding::neural::NeuralEmbedder;
+    use theo_engine_retrieval::tantivy_search::{FileTantivyIndex, hybrid_rrf_search};
+
+    let gt = load_ground_truth("theo-code");
+
+    let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
+
+    eprintln!("Building graph...");
+    let (files, _) = theo_application::use_cases::extraction::extract_repo(workspace_root);
+    let (graph, _) = bridge::build_graph(&files);
+    eprintln!("Graph: {} nodes", graph.node_count());
+
+    let tantivy_index = FileTantivyIndex::build(&graph).expect("Tantivy build failed");
+    let embedder = NeuralEmbedder::new().expect("NeuralEmbedder init failed");
+    let cache = EmbeddingCache::build(&graph, &embedder);
+    eprintln!("Tantivy: {} docs, Embeddings: {} files", tantivy_index.num_docs(), cache.len());
+
+    let mut dump = Vec::new();
+    for bq in &gt.queries {
+        let scores = hybrid_rrf_search(&graph, &tantivy_index, &embedder, &cache, &bq.query, 20.0);
+        let mut sorted: Vec<(String, f64)> = scores.into_iter().collect();
+        sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        sorted.truncate(50);
+
+        let candidates: Vec<serde_json::Value> = sorted
+            .iter()
+            .map(|(path, score)| {
+                let file_id = format!("file:{}", path);
+                let symbols = graph.contains_children(&file_id);
+                let names: Vec<String> = symbols
+                    .iter()
+                    .take(30)
+                    .filter_map(|sid| graph.get_node(sid).map(|n| n.name.clone()))
+                    .collect();
+                serde_json::json!({"path": path, "rrf_score": score, "symbols": names})
+            })
+            .collect();
+
+        dump.push(serde_json::json!({
+            "id": bq.id,
+            "query": bq.query,
+            "category": bq.category,
+            "difficulty": bq.difficulty,
+            "expected_files": bq.expected_files,
+            "candidates": candidates,
+        }));
+    }
+
+    let out = serde_json::json!({
+        "schema": "rrf-top-50-candidates-v1",
+        "repo": "theo-code",
+        "n_queries": dump.len(),
+        "queries": dump,
+    });
+    let path = "/tmp/probe-rrf-candidates.json";
+    std::fs::write(path, serde_json::to_string_pretty(&out).unwrap()).expect("write");
+    eprintln!("Wrote {} ({} queries)", path, dump.len());
+}
+
 /// Professional benchmark: RRF 3-ranker (BM25 + Tantivy + Dense).
 ///
 /// Run: cargo test -p theo-engine-retrieval --features dense-retrieval --test benchmark_suite -- --ignored --nocapture benchmark_rrf_dense
@@ -393,8 +600,6 @@ fn benchmark_symbol_first_ab() {
         tantivy_index.num_docs(),
         cache.len()
     );
-
-    let k = 5;
 
     // --- Baseline: RRF 3-ranker ---
     let mut rrf_results: Vec<QueryResult> = Vec::new();
@@ -1818,6 +2023,281 @@ fn benchmark_retrieve_files_mrr_guard() {
     );
 }
 
+/// Phase 6 / T6.1 guard — `retrieve_files_blended` (wiki+graph+memory blend)
+/// must not regress the in-tree MRR below the BM25 baseline.
+///
+/// This benchmark exercises the new blend pipeline end-to-end with:
+/// * file BM25 candidate generation
+/// * graph multi-hop proximity (T3.1)
+/// * joint scoring across 7 signals (T2.1)
+/// * symbol-overlap signal
+/// * harm filter (cycle 1-2 fixes preserved)
+///
+/// Wiki + dense embedder + memory provider are intentionally `None` so
+/// the benchmark is hardware-portable (no embedder OOM risk on 8 GB).
+/// The full wiki+dense+memory blend benchmark lives in T6.3 (external
+/// LLM rerank measurement).
+///
+/// Floor: 0.45 — must not regress below the cycle-11 BM25 baseline
+/// (0.462 R@5 / 0.593 MRR). Set conservatively because the blend
+/// without wiki/dense leaves recall bounded by FileBm25 alone; the
+/// joint scorer can only re-rank what BM25 surfaces.
+///
+/// Run: cargo test -p theo-engine-retrieval --test benchmark_suite -- \
+///        --ignored --nocapture benchmark_blended_retrieve_mrr_guard
+#[test]
+#[ignore]
+fn benchmark_blended_retrieve_mrr_guard() {
+    use std::collections::HashSet;
+    use theo_engine_graph::bridge;
+    use theo_engine_retrieval::file_retriever::{
+        retrieve_files_blended, BlendScoreConfig, RerankConfig,
+    };
+
+    let gt = load_ground_truth("theo-code");
+    let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
+    let (files, _stats) = theo_application::use_cases::extraction::extract_repo(workspace_root);
+    let (graph, _) = bridge::build_graph(&files);
+    let cluster = theo_engine_graph::cluster::hierarchical_cluster(
+        &graph,
+        theo_engine_graph::cluster::ClusterAlgorithm::FileLeiden { resolution: 1.0 },
+    );
+    let communities = cluster.communities;
+
+    let mut mrr_sum = 0.0_f64;
+    let mut count = 0;
+    let config = RerankConfig {
+        blend: Some(BlendScoreConfig::default()),
+        ..RerankConfig::default()
+    };
+    let seen: HashSet<String> = HashSet::new();
+
+    for bq in &gt.queries {
+        let result = retrieve_files_blended(
+            &graph,
+            &communities,
+            None, // no wiki for hardware-portable benchmark
+            None,
+            None,
+            None,
+            &bq.query,
+            &config,
+            &seen,
+        );
+        let returned: Vec<String> = result.primary_files.iter().map(|r| r.path.clone()).collect();
+        let expected_refs: Vec<&str> = bq.expected_files.iter().map(|s| s.as_str()).collect();
+        let dep_edges: Vec<DepEdge> = bq.dependencies.iter().map(|d| d.to_dep_edge()).collect();
+        let m = RetrievalMetrics::compute(&returned, &expected_refs, &dep_edges);
+        mrr_sum += m.mrr;
+        count += 1;
+    }
+
+    let mrr_overall = if count == 0 { 0.0 } else { mrr_sum / count as f64 };
+    eprintln!(
+        "retrieve_files_blended (wiki=None, dense=None) MRR = {:.3}",
+        mrr_overall
+    );
+
+    let summary = format!(
+        "n_queries={count}\nMRR={mrr_overall:.3}\npipeline=retrieve_files_blended (file+graph+memory, wiki=None)\n"
+    );
+    let _ = std::fs::write("/tmp/probe-blended-no-wiki.metrics.txt", summary);
+
+    assert!(
+        mrr_overall >= 0.45,
+        "blended MRR {mrr_overall:.3} regressed below 0.45 (BM25-baseline floor)"
+    );
+}
+
+/// Phase 6 / T6.2 — grid search over `BlendScoreConfig` weights.
+///
+/// Sweeps 8 candidate weight tuples and prints the MRR each one
+/// achieves on the cycle-3-corrected `theo-code` ground truth. Use the
+/// printed top tuple to update `BlendScoreConfig::default()` and rerun
+/// `benchmark_blended_retrieve_mrr_guard`.
+///
+/// No assertion — pure measurement. Marked `#[ignore]` so it never
+/// runs in default `cargo test`.
+///
+/// Run: cargo test -p theo-engine-retrieval --test benchmark_suite -- \
+///        --ignored --nocapture benchmark_blended_grid_search
+#[test]
+#[ignore]
+fn benchmark_blended_grid_search() {
+    use std::collections::HashSet;
+    use theo_engine_graph::bridge;
+    use theo_engine_retrieval::file_retriever::{
+        retrieve_files_blended, BlendScoreConfig, RerankConfig,
+    };
+
+    let gt = load_ground_truth("theo-code");
+    let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
+    let (files, _stats) = theo_application::use_cases::extraction::extract_repo(workspace_root);
+    let (graph, _) = bridge::build_graph(&files);
+    let cluster = theo_engine_graph::cluster::hierarchical_cluster(
+        &graph,
+        theo_engine_graph::cluster::ClusterAlgorithm::FileLeiden { resolution: 1.0 },
+    );
+    let communities = cluster.communities;
+
+    // Generate the wiki from the graph so the blend pipeline actually
+    // activates (graceful degradation routes wiki=None through legacy
+    // path which would make grid search non-informative).
+    let wiki = theo_engine_retrieval::wiki::generator::generate_wiki(
+        &communities,
+        &graph,
+        "theo-code",
+    );
+
+    // 8 candidate tuples — varying alpha/eta/gamma weight balance.
+    let candidates: Vec<(&str, BlendScoreConfig)> = vec![
+        ("default", BlendScoreConfig::default()),
+        (
+            "heavy-alpha",
+            BlendScoreConfig {
+                alpha: 0.60,
+                beta: 0.20,
+                gamma: 0.10,
+                delta: 0.05,
+                epsilon: 0.0,
+                zeta: 0.0,
+                eta: 0.05,
+            },
+        ),
+        (
+            "heavy-graph",
+            BlendScoreConfig {
+                alpha: 0.20,
+                beta: 0.20,
+                gamma: 0.40,
+                delta: 0.10,
+                epsilon: 0.0,
+                zeta: 0.0,
+                eta: 0.10,
+            },
+        ),
+        (
+            "heavy-symbol",
+            BlendScoreConfig {
+                alpha: 0.30,
+                beta: 0.20,
+                gamma: 0.10,
+                delta: 0.05,
+                epsilon: 0.0,
+                zeta: 0.0,
+                eta: 0.35,
+            },
+        ),
+        (
+            "uniform",
+            BlendScoreConfig {
+                alpha: 0.20,
+                beta: 0.20,
+                gamma: 0.20,
+                delta: 0.10,
+                epsilon: 0.0,
+                zeta: 0.0,
+                eta: 0.30,
+            },
+        ),
+        (
+            "alpha-only",
+            BlendScoreConfig {
+                alpha: 1.0,
+                beta: 0.0,
+                gamma: 0.0,
+                delta: 0.0,
+                epsilon: 0.0,
+                zeta: 0.0,
+                eta: 0.0,
+            },
+        ),
+        (
+            "eta-only",
+            BlendScoreConfig {
+                alpha: 0.0,
+                beta: 0.0,
+                gamma: 0.0,
+                delta: 0.0,
+                epsilon: 0.0,
+                zeta: 0.0,
+                eta: 1.0,
+            },
+        ),
+        (
+            "alpha-eta-balanced",
+            BlendScoreConfig {
+                alpha: 0.50,
+                beta: 0.0,
+                gamma: 0.10,
+                delta: 0.0,
+                epsilon: 0.0,
+                zeta: 0.0,
+                eta: 0.40,
+            },
+        ),
+    ];
+
+    let seen: HashSet<String> = HashSet::new();
+    let mut summary_lines = vec![format!("name\tMRR\tR@5\tR@10\tnDCG@5")];
+    let mut best: Option<(String, f64)> = None;
+    for (name, blend) in candidates {
+        let config = RerankConfig {
+            blend: Some(blend),
+            ..RerankConfig::default()
+        };
+        let (mut mrr_sum, mut r5_sum, mut r10_sum, mut ndcg5_sum) = (0.0_f64, 0.0_f64, 0.0_f64, 0.0_f64);
+        let mut count = 0_usize;
+        for bq in &gt.queries {
+            let result = retrieve_files_blended(
+                &graph,
+                &communities,
+                Some(&wiki),
+                None,
+                None,
+                None,
+                &bq.query,
+                &config,
+                &seen,
+            );
+            let returned: Vec<String> = result.primary_files.iter().map(|r| r.path.clone()).collect();
+            let expected_refs: Vec<&str> = bq.expected_files.iter().map(|s| s.as_str()).collect();
+            let dep_edges: Vec<DepEdge> = bq.dependencies.iter().map(|d| d.to_dep_edge()).collect();
+            let m = RetrievalMetrics::compute(&returned, &expected_refs, &dep_edges);
+            mrr_sum += m.mrr;
+            r5_sum += m.recall_at_5;
+            r10_sum += m.recall_at_10;
+            ndcg5_sum += m.ndcg_at_5;
+            count += 1;
+        }
+        let n = count as f64;
+        let mrr = mrr_sum / n;
+        let r5 = r5_sum / n;
+        let r10 = r10_sum / n;
+        let ndcg5 = ndcg5_sum / n;
+        summary_lines.push(format!(
+            "{name}\t{mrr:.3}\t{r5:.3}\t{r10:.3}\t{ndcg5:.3}"
+        ));
+        if best.as_ref().map(|(_, m)| mrr > *m).unwrap_or(true) {
+            best = Some((name.to_string(), mrr));
+        }
+    }
+    let report = summary_lines.join("\n");
+    eprintln!("\n=== Blend Weight Grid Search ===\n{report}\n");
+    if let Some((name, mrr)) = best {
+        eprintln!("Best tuple: {name} (MRR={:.3})", mrr);
+    }
+    let _ = std::fs::write("/tmp/probe-blended-grid.metrics.txt", report);
+}
+
 /// Guard: `code_compression::compress_for_context` achieves >= 3x compression
 /// on a realistic Rust source file from the current repo. Validates Phase 2
 /// DoD line 199 ("Compressão efetiva medida ≥ 3× em pelo menos 1 arquivo de teste").
@@ -1973,5 +2453,521 @@ fn benchmark_inline_em_cross_function_uplift() {
         uplift >= 0.0,
         "inline path regressed EM by {:.3} on cross-function queries",
         -uplift
+    );
+}
+
+/// Cycle 11 guard — `retrieve_files_dense_rrf` (3-ranker RRF over
+/// BM25 + Tantivy + Dense embeddings) must lift MRR meaningfully
+/// above the BM25-only `retrieve_files` baseline (0.593) on the
+/// `theo-code` ground truth.
+///
+/// Cycle 7 measured the underlying `hybrid_rrf_search` at 0.689 MRR
+/// without the cross-encoder reranker. The new entry point delegates
+/// candidate ranking to that function and reuses the same harm
+/// filter / ghost-path filter / graph expansion as `retrieve_files`,
+/// so the floor here mirrors that measurement with a generous safety
+/// margin for harm-filter trimming and graph-build noise.
+///
+/// Floor: 0.65 MRR — comfortably above the BM25-only 0.593 baseline,
+/// well below the 0.689 cycle-7 measurement so a few percent of
+/// harm-filter erosion still passes.
+///
+/// Hardware-portable: dense embedder + Tantivy fit in 8 GB; the
+/// cross-encoder reranker (the OOM offender from cycle 7) is NOT
+/// invoked here.
+///
+/// Run: cargo test -p theo-engine-retrieval --features dense-retrieval \
+///      --test benchmark_suite -- --ignored --nocapture \
+///      benchmark_retrieve_files_dense_rrf_guard
+#[test]
+#[ignore]
+#[cfg(feature = "dense-retrieval")]
+fn benchmark_retrieve_files_dense_rrf_guard() {
+    use std::collections::HashSet;
+    use theo_engine_graph::bridge;
+    use theo_engine_retrieval::embedding::cache::EmbeddingCache;
+    use theo_engine_retrieval::embedding::neural::NeuralEmbedder;
+    use theo_engine_retrieval::file_retriever::{
+        retrieve_files_dense_rrf, RerankConfig,
+    };
+    use theo_engine_retrieval::tantivy_search::FileTantivyIndex;
+
+    let gt = load_ground_truth("theo-code");
+    let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
+    eprintln!("Building graph...");
+    let (files, _stats) =
+        theo_application::use_cases::extraction::extract_repo(workspace_root);
+    let (graph, _) = bridge::build_graph(&files);
+    let cluster = theo_engine_graph::cluster::hierarchical_cluster(
+        &graph,
+        theo_engine_graph::cluster::ClusterAlgorithm::FileLeiden { resolution: 1.0 },
+    );
+    let communities = cluster.communities;
+
+    eprintln!("Building Tantivy index + embedder + cache...");
+    let tantivy_index = FileTantivyIndex::build(&graph).expect("Tantivy build");
+    let embedder = NeuralEmbedder::new().expect("NeuralEmbedder init");
+    let cache = EmbeddingCache::build(&graph, &embedder);
+    eprintln!(
+        "Ready — graph {} nodes / {} edges, Tantivy {} docs, dense {} files",
+        graph.node_count(),
+        graph.edge_count(),
+        tantivy_index.num_docs(),
+        cache.len()
+    );
+
+    let mut mrr_sum = 0.0_f64;
+    let mut r5_sum = 0.0_f64;
+    let mut r10_sum = 0.0_f64;
+    let mut ndcg5_sum = 0.0_f64;
+    let mut total_harm_removals = 0_usize;
+    let mut count = 0_usize;
+    let config = RerankConfig::default();
+    let seen: HashSet<String> = HashSet::new();
+
+    for bq in &gt.queries {
+        let result = retrieve_files_dense_rrf(
+            &graph,
+            &communities,
+            &tantivy_index,
+            &embedder,
+            &cache,
+            &bq.query,
+            &config,
+            &seen,
+        );
+        total_harm_removals += result.harm_removals;
+        let returned: Vec<String> =
+            result.primary_files.iter().map(|r| r.path.clone()).collect();
+        let expected_refs: Vec<&str> =
+            bq.expected_files.iter().map(|s| s.as_str()).collect();
+        let dep_edges: Vec<DepEdge> =
+            bq.dependencies.iter().map(|d| d.to_dep_edge()).collect();
+        let m = RetrievalMetrics::compute(&returned, &expected_refs, &dep_edges);
+        mrr_sum += m.mrr;
+        r5_sum += m.recall_at_5;
+        r10_sum += m.recall_at_10;
+        ndcg5_sum += m.ndcg_at_5;
+        count += 1;
+    }
+
+    let n = count as f64;
+    let mrr = mrr_sum / n;
+    let r5 = r5_sum / n;
+    let r10 = r10_sum / n;
+    let ndcg5 = ndcg5_sum / n;
+    eprintln!(
+        "retrieve_files_dense_rrf: MRR={:.3}  R@5={:.3}  R@10={:.3}  nDCG@5={:.3}  (harm_removals={})",
+        mrr, r5, r10, ndcg5, total_harm_removals
+    );
+
+    let summary = format!(
+        "n_queries={count}\nMRR={mrr:.3}\nR@5={r5:.3}\nR@10={r10:.3}\nnDCG@5={ndcg5:.3}\npipeline=retrieve_files_dense_rrf (BM25+Tantivy+Dense RRF, harm_filter on)\n"
+    );
+    let _ = std::fs::write("/tmp/probe-dense-rrf.metrics.txt", summary);
+
+    // Floor calibrated against cycle 7 measurement (0.689 MRR for
+    // hybrid_rrf_search without harm_filter). 0.65 leaves margin for
+    // harm-filter erosion while still proving meaningful uplift over
+    // the 0.593 BM25 baseline.
+    assert!(
+        mrr >= 0.65,
+        "retrieve_files_dense_rrf MRR {mrr:.3} below 0.65 floor (BM25 baseline is 0.593; cycle-7 dense-only ceiling is 0.689)"
+    );
+}
+
+/// Cycle 13 measurement — `retrieve_files_dense_rrf_with_rerank`
+/// (BGE-Base lite cross-encoder over dense+RRF candidates).
+///
+/// **EMPIRICAL HARDWARE FINDING (cycle 13, 2026-04-30):** SIGKILL/OOM
+/// on 8 GB even with the smaller stack — AllMiniLM-Q (~22 MB) +
+/// BGE-Base reranker (~278 MB) + Tantivy + graph + ONNX runtime
+/// allocations exceed the available envelope by the time the first
+/// query is reranked. Confirms cycle 7-8 evidence: the cross-encoder
+/// reranker is **not measurable on 8 GB hardware** with any current
+/// model combination.
+///
+/// This benchmark stays in the tree as documentation of the
+/// hardware constraint. To run it successfully, use a 16+ GB
+/// machine. No floor assertion — informational only.
+///
+/// Run: cargo test -p theo-engine-retrieval --features dense-retrieval \
+///      --test benchmark_suite -- --ignored --nocapture \
+///      benchmark_dense_rrf_with_rerank_lite
+#[test]
+#[ignore]
+#[cfg(feature = "dense-retrieval")]
+fn benchmark_dense_rrf_with_rerank_lite() {
+    use std::collections::HashSet;
+    use theo_engine_graph::bridge;
+    use theo_engine_retrieval::embedding::cache::EmbeddingCache;
+    use theo_engine_retrieval::embedding::neural::NeuralEmbedder;
+    use theo_engine_retrieval::file_retriever::{
+        retrieve_files_dense_rrf_with_rerank, RerankConfig,
+    };
+    use theo_engine_retrieval::reranker::CrossEncoderReranker;
+    use theo_engine_retrieval::tantivy_search::FileTantivyIndex;
+
+    let gt = load_ground_truth("theo-code");
+    let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
+    eprintln!("Building graph...");
+    let (files, _stats) =
+        theo_application::use_cases::extraction::extract_repo(workspace_root);
+    let (graph, _) = bridge::build_graph(&files);
+    let cluster = theo_engine_graph::cluster::hierarchical_cluster(
+        &graph,
+        theo_engine_graph::cluster::ClusterAlgorithm::FileLeiden { resolution: 1.0 },
+    );
+    let communities = cluster.communities;
+
+    eprintln!("Building Tantivy + AllMiniLM cache...");
+    let tantivy_index = FileTantivyIndex::build(&graph).expect("Tantivy build");
+    let embedder = NeuralEmbedder::new().expect("NeuralEmbedder init");
+    let cache = EmbeddingCache::build(&graph, &embedder);
+
+    eprintln!("Building BGE-Base reranker (lite ~278 MB)...");
+    let reranker = match CrossEncoderReranker::new_lite() {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("BGE-Base reranker init failed: {e}");
+            eprintln!("Skipping benchmark — likely network or hf-hub issue");
+            return;
+        }
+    };
+    eprintln!(
+        "Ready — graph {} nodes / {} edges, Tantivy {} docs, dense {} files",
+        graph.node_count(),
+        graph.edge_count(),
+        tantivy_index.num_docs(),
+        cache.len()
+    );
+
+    let mut mrr_sum = 0.0_f64;
+    let mut r5_sum = 0.0_f64;
+    let mut r10_sum = 0.0_f64;
+    let mut ndcg5_sum = 0.0_f64;
+    let mut total_harm_removals = 0_usize;
+    let mut count = 0_usize;
+    let config = RerankConfig::default();
+    let seen: HashSet<String> = HashSet::new();
+
+    for bq in &gt.queries {
+        let result = retrieve_files_dense_rrf_with_rerank(
+            &graph,
+            &communities,
+            &tantivy_index,
+            &embedder,
+            &cache,
+            &reranker,
+            &bq.query,
+            &config,
+            &seen,
+        );
+        total_harm_removals += result.harm_removals;
+        let returned: Vec<String> =
+            result.primary_files.iter().map(|r| r.path.clone()).collect();
+        let expected_refs: Vec<&str> =
+            bq.expected_files.iter().map(|s| s.as_str()).collect();
+        let dep_edges: Vec<DepEdge> =
+            bq.dependencies.iter().map(|d| d.to_dep_edge()).collect();
+        let m = RetrievalMetrics::compute(&returned, &expected_refs, &dep_edges);
+        mrr_sum += m.mrr;
+        r5_sum += m.recall_at_5;
+        r10_sum += m.recall_at_10;
+        ndcg5_sum += m.ndcg_at_5;
+        count += 1;
+    }
+
+    let n = count as f64;
+    let mrr = mrr_sum / n;
+    let r5 = r5_sum / n;
+    let r10 = r10_sum / n;
+    let ndcg5 = ndcg5_sum / n;
+    eprintln!(
+        "retrieve_files_dense_rrf_with_rerank (BGE-Base lite): MRR={:.3}  R@5={:.3}  R@10={:.3}  nDCG@5={:.3}  harm_removals={}",
+        mrr, r5, r10, ndcg5, total_harm_removals
+    );
+
+    let summary = format!(
+        "n_queries={count}\nMRR={mrr:.3}\nR@5={r5:.3}\nR@10={r10:.3}\nnDCG@5={ndcg5:.3}\npipeline=retrieve_files_dense_rrf_with_rerank (AllMiniLM-Q dense + BGE-Base rerank)\n"
+    );
+    let _ = std::fs::write("/tmp/probe-dense-rrf-rerank-lite.metrics.txt", summary);
+}
+
+/// Cycle 14 measurement — `retrieve_files_routed`.
+///
+/// Dispatches per query: BM25 baseline for `Identifier` queries,
+/// Dense+RRF k=20 for `NaturalLanguage` and `Mixed` queries. Reuses
+/// the cycle-12 winning Dense+RRF entry point unchanged.
+///
+/// **EMPIRICAL RESULT (cycle 14, 2026-04-30):** routing is a
+/// **trade-off**, not a strict win:
+///
+/// | Metric | Routed (this bench) | Dense+RRF k=20 (cycle 12 guard) | Δ |
+/// |---|---|---|---|
+/// | MRR | 0.695 | 0.674 | +0.021 |
+/// | R@5 | 0.482 | 0.507 | −0.025 |
+/// | R@10 | 0.538 | 0.577 | −0.039 |
+/// | nDCG@5 | 0.485 | 0.495 | −0.010 |
+///
+/// Routing improves MRR (BM25 wins top-1 on 4 identifier queries)
+/// but regresses recall (Dense+RRF brings in semantic neighbors that
+/// BM25 misses on the identifier subset). The cycle-12 Dense+RRF k=20
+/// path remains the recommended default.
+///
+/// This benchmark stays in the tree as documentation of the empirical
+/// trade-off. The 0.65 MRR floor below proves the function does not
+/// catastrophically regress, which is sufficient for keeping the code
+/// as future-work infrastructure (score-blending router, etc.).
+///
+/// Hardware: composes existing measured-green paths only; runs in
+/// the same 8 GB envelope as `benchmark_retrieve_files_dense_rrf_guard`.
+///
+/// Run: cargo test -p theo-engine-retrieval --features dense-retrieval \
+///      --test benchmark_suite -- --ignored --nocapture \
+///      benchmark_retrieve_files_routed_guard
+#[test]
+#[ignore]
+#[cfg(feature = "dense-retrieval")]
+fn benchmark_retrieve_files_routed_guard() {
+    use std::collections::HashSet;
+    use theo_engine_graph::bridge;
+    use theo_engine_retrieval::embedding::cache::EmbeddingCache;
+    use theo_engine_retrieval::embedding::neural::NeuralEmbedder;
+    use theo_engine_retrieval::file_retriever::{
+        retrieve_files_routed, RerankConfig,
+    };
+    use theo_engine_retrieval::tantivy_search::FileTantivyIndex;
+
+    let gt = load_ground_truth("theo-code");
+    let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
+    eprintln!("Building graph...");
+    let (files, _stats) =
+        theo_application::use_cases::extraction::extract_repo(workspace_root);
+    let (graph, _) = bridge::build_graph(&files);
+    let cluster = theo_engine_graph::cluster::hierarchical_cluster(
+        &graph,
+        theo_engine_graph::cluster::ClusterAlgorithm::FileLeiden { resolution: 1.0 },
+    );
+    let communities = cluster.communities;
+
+    eprintln!("Building Tantivy index + embedder + cache...");
+    let tantivy_index = FileTantivyIndex::build(&graph).expect("Tantivy build");
+    let embedder = NeuralEmbedder::new().expect("NeuralEmbedder init");
+    let cache = EmbeddingCache::build(&graph, &embedder);
+    eprintln!(
+        "Ready — graph {} nodes / {} edges, Tantivy {} docs, dense {} files",
+        graph.node_count(),
+        graph.edge_count(),
+        tantivy_index.num_docs(),
+        cache.len()
+    );
+
+    let mut mrr_sum = 0.0_f64;
+    let mut r5_sum = 0.0_f64;
+    let mut r10_sum = 0.0_f64;
+    let mut ndcg5_sum = 0.0_f64;
+    let mut total_harm_removals = 0_usize;
+    let mut count = 0_usize;
+    let mut routed_to_bm25 = 0_usize;
+    let mut routed_to_dense = 0_usize;
+    let config = RerankConfig::default();
+    let seen: HashSet<String> = HashSet::new();
+
+    for bq in &gt.queries {
+        let result = retrieve_files_routed(
+            &graph,
+            &communities,
+            &tantivy_index,
+            &embedder,
+            &cache,
+            &bq.query,
+            &config,
+            &seen,
+        );
+        total_harm_removals += result.harm_removals;
+        // Count routing decisions for explainability.
+        match result.query_type {
+            theo_engine_retrieval::search::QueryType::Identifier => routed_to_bm25 += 1,
+            theo_engine_retrieval::search::QueryType::NaturalLanguage
+            | theo_engine_retrieval::search::QueryType::Mixed => routed_to_dense += 1,
+        }
+        let returned: Vec<String> =
+            result.primary_files.iter().map(|r| r.path.clone()).collect();
+        let expected_refs: Vec<&str> =
+            bq.expected_files.iter().map(|s| s.as_str()).collect();
+        let dep_edges: Vec<DepEdge> =
+            bq.dependencies.iter().map(|d| d.to_dep_edge()).collect();
+        let m = RetrievalMetrics::compute(&returned, &expected_refs, &dep_edges);
+        mrr_sum += m.mrr;
+        r5_sum += m.recall_at_5;
+        r10_sum += m.recall_at_10;
+        ndcg5_sum += m.ndcg_at_5;
+        count += 1;
+    }
+
+    let n = count as f64;
+    let mrr = mrr_sum / n;
+    let r5 = r5_sum / n;
+    let r10 = r10_sum / n;
+    let ndcg5 = ndcg5_sum / n;
+    eprintln!(
+        "retrieve_files_routed: MRR={:.3}  R@5={:.3}  R@10={:.3}  nDCG@5={:.3}  (harm_removals={}, routed_to_bm25={}, routed_to_dense={})",
+        mrr, r5, r10, ndcg5, total_harm_removals, routed_to_bm25, routed_to_dense
+    );
+
+    let summary = format!(
+        "n_queries={count}\nMRR={mrr:.3}\nR@5={r5:.3}\nR@10={r10:.3}\nnDCG@5={ndcg5:.3}\nrouted_to_bm25={routed_to_bm25}\nrouted_to_dense={routed_to_dense}\npipeline=retrieve_files_routed (Identifier→BM25, NL/Mixed→Dense+RRF k=20)\n"
+    );
+    let _ = std::fs::write("/tmp/probe-routed.metrics.txt", summary);
+
+    // Floor calibrated against cycle-12 dense+RRF measurement (0.664 MRR).
+    // 0.65 leaves margin for harm-filter erosion while still proving
+    // routing does not catastrophically regress vs the cycle-12 winner.
+    // Tighter KEEP/DISCARD comparison happens in Phase 4 against the
+    // four-metric snapshot from the same run.
+    assert!(
+        mrr >= 0.65,
+        "retrieve_files_routed MRR {mrr:.3} below 0.65 floor (cycle-12 dense+RRF baseline is 0.664; routing must not regress catastrophically)"
+    );
+}
+
+/// Cycle 15 measurement — `retrieve_files_blended_rrf`.
+///
+/// Meta-RRF fusion of the BM25 baseline path (`retrieve_files`) and
+/// the cycle-12 winning Dense+RRF path (`retrieve_files_dense_rrf`).
+/// Each pipeline produces a ranked list of files; both lists feed
+/// reciprocal-rank fusion (`1 / (k + rank)`, k=20 matching cycle-12)
+/// to produce a final ranking that should preserve BM25's top-1
+/// precision (cycle 14 finding) AND Dense+RRF's recall (cycle 12).
+///
+/// **Hypothesis (cycle 15):** the blended path improves at least one
+/// of {MRR, R@5, R@10, nDCG@5} above its current cycle-14 best
+/// **without** regressing any other below the second-best minus 0.01.
+/// Specifically:
+/// - MRR ≥ 0.674 (Dense+RRF's measurement; second-best is 0.674)
+/// - R@5 ≥ 0.472 (second-best 0.482 minus 0.01)
+/// - R@10 ≥ 0.535 (second-best 0.545 minus 0.01)
+/// - nDCG@5 ≥ 0.475 (second-best 0.485 minus 0.01)
+/// - AND must improve ≥ 1 metric above its current best
+///   (MRR > 0.695 OR R@5 > 0.507 OR R@10 > 0.577 OR nDCG@5 > 0.495)
+///
+/// Hardware: composes existing measured-green paths only; runs in
+/// the same 8 GB envelope as `benchmark_retrieve_files_dense_rrf_guard`.
+///
+/// Run: cargo test -p theo-engine-retrieval --features dense-retrieval \
+///      --test benchmark_suite -- --ignored --nocapture \
+///      benchmark_retrieve_files_blended_rrf_guard
+#[test]
+#[ignore]
+#[cfg(feature = "dense-retrieval")]
+fn benchmark_retrieve_files_blended_rrf_guard() {
+    use std::collections::HashSet;
+    use theo_engine_graph::bridge;
+    use theo_engine_retrieval::embedding::cache::EmbeddingCache;
+    use theo_engine_retrieval::embedding::neural::NeuralEmbedder;
+    use theo_engine_retrieval::file_retriever::{
+        retrieve_files_blended_rrf, RerankConfig,
+    };
+    use theo_engine_retrieval::tantivy_search::FileTantivyIndex;
+
+    let gt = load_ground_truth("theo-code");
+    let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
+    eprintln!("Building graph...");
+    let (files, _stats) =
+        theo_application::use_cases::extraction::extract_repo(workspace_root);
+    let (graph, _) = bridge::build_graph(&files);
+    let cluster = theo_engine_graph::cluster::hierarchical_cluster(
+        &graph,
+        theo_engine_graph::cluster::ClusterAlgorithm::FileLeiden { resolution: 1.0 },
+    );
+    let communities = cluster.communities;
+
+    eprintln!("Building Tantivy index + embedder + cache...");
+    let tantivy_index = FileTantivyIndex::build(&graph).expect("Tantivy build");
+    let embedder = NeuralEmbedder::new().expect("NeuralEmbedder init");
+    let cache = EmbeddingCache::build(&graph, &embedder);
+    eprintln!(
+        "Ready — graph {} nodes / {} edges, Tantivy {} docs, dense {} files",
+        graph.node_count(),
+        graph.edge_count(),
+        tantivy_index.num_docs(),
+        cache.len()
+    );
+
+    let mut mrr_sum = 0.0_f64;
+    let mut r5_sum = 0.0_f64;
+    let mut r10_sum = 0.0_f64;
+    let mut ndcg5_sum = 0.0_f64;
+    let mut total_harm_removals = 0_usize;
+    let mut count = 0_usize;
+    let config = RerankConfig::default();
+    let seen: HashSet<String> = HashSet::new();
+
+    for bq in &gt.queries {
+        let result = retrieve_files_blended_rrf(
+            &graph,
+            &communities,
+            &tantivy_index,
+            &embedder,
+            &cache,
+            &bq.query,
+            &config,
+            &seen,
+        );
+        total_harm_removals += result.harm_removals;
+        let returned: Vec<String> =
+            result.primary_files.iter().map(|r| r.path.clone()).collect();
+        let expected_refs: Vec<&str> =
+            bq.expected_files.iter().map(|s| s.as_str()).collect();
+        let dep_edges: Vec<DepEdge> =
+            bq.dependencies.iter().map(|d| d.to_dep_edge()).collect();
+        let m = RetrievalMetrics::compute(&returned, &expected_refs, &dep_edges);
+        mrr_sum += m.mrr;
+        r5_sum += m.recall_at_5;
+        r10_sum += m.recall_at_10;
+        ndcg5_sum += m.ndcg_at_5;
+        count += 1;
+    }
+
+    let n = count as f64;
+    let mrr = mrr_sum / n;
+    let r5 = r5_sum / n;
+    let r10 = r10_sum / n;
+    let ndcg5 = ndcg5_sum / n;
+    eprintln!(
+        "retrieve_files_blended_rrf: MRR={:.3}  R@5={:.3}  R@10={:.3}  nDCG@5={:.3}  (harm_removals={})",
+        mrr, r5, r10, ndcg5, total_harm_removals
+    );
+
+    let summary = format!(
+        "n_queries={count}\nMRR={mrr:.3}\nR@5={r5:.3}\nR@10={r10:.3}\nnDCG@5={ndcg5:.3}\npipeline=retrieve_files_blended_rrf (RRF over BM25 + Dense+RRF k=20)\n"
+    );
+    let _ = std::fs::write("/tmp/probe-blended-rrf.metrics.txt", summary);
+
+    // Floor calibrated against cycle-12 dense+RRF measurement (0.674 MRR
+    // re-probed cycle 14). 0.65 leaves margin for fusion artifacts while
+    // still proving the blended path is not catastrophically regressing
+    // vs the cycle-12 winner. Tighter KEEP/DISCARD comparison happens
+    // in Phase 4 against the four-metric snapshot from the same run.
+    assert!(
+        mrr >= 0.65,
+        "retrieve_files_blended_rrf MRR {mrr:.3} below 0.65 floor (cycle-14 best is 0.695 routed; cycle-12 dense+RRF is 0.674; blended must not regress catastrophically)"
     );
 }

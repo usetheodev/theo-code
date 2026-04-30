@@ -18,12 +18,12 @@ thiserror.workspace = true
 # hf-hub already enables downloads over HTTPS without pulling openssl-sys.
 fastembed = { version = "4", default-features = false, features = ["hf-hub-rustls-tls", "ort-download-binaries"] }
 tantivy = { workspace = true, optional = true }
-bincode = { workspace = true, optional = true }
+bincode = { workspace = true }
 
 [features]
 scip = ["theo-engine-graph/scip"]
 tantivy-backend = ["tantivy"]
-dense-retrieval = ["tantivy-backend", "bincode"]
+dense-retrieval = ["tantivy-backend"]
 # T8.1 — `reranker` is always compiled (fastembed is non-optional);
 # whether to USE it at runtime is gated by config (RetrievalConfig.use_reranker),
 # not by build features. The legacy `reranker` feature is retained as an

@@ -31,8 +31,24 @@ mod inner {
         ///
         /// Uses Jina Reranker v2 Base Multilingual — supports EN, PT, ZH, ES, etc.
         /// Model is downloaded to ~/.cache/fastembed/ on first run.
+        /// ~568 MB RAM — see `new_lite` for smaller variant.
         pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
             let options = RerankInitOptions::new(RerankerModel::JINARerankerV2BaseMultiligual);
+            let model = TextRerank::try_new(options)?;
+            Ok(CrossEncoderReranker { model })
+        }
+
+        /// Cycle 13 — initialize the lightweight BGE-Base reranker.
+        ///
+        /// `BAAI/bge-reranker-base` (~278 MB RAM, EN+ZH only) replaces
+        /// the 568 MB JINARerankerV2 default. Use this on memory-
+        /// constrained hardware (≤ 8 GB) where the default reranker
+        /// causes OOM (cycle 7 evidence).
+        ///
+        /// Quality is comparable to Jina v2 on monolingual English code
+        /// search. Multilingual queries should still use `new()`.
+        pub fn new_lite() -> Result<Self, Box<dyn std::error::Error>> {
+            let options = RerankInitOptions::new(RerankerModel::BGERerankerBase);
             let model = TextRerank::try_new(options)?;
             Ok(CrossEncoderReranker { model })
         }
