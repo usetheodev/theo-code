@@ -7,9 +7,16 @@ paths:
 
 # Testing Rules
 
-## Every logic change needs a test
+# Core Rule
+
+- Every non-trivial logic change needs a test or an explicit reason why a meaningful automated test is not feasible.
+- Bug fixes should add a regression test before or alongside the fix; write the failing test first when practical.
+- Keep the repo's workflow grounded in narrow, fast feedback, not blanket workspace runs by default.
+
+## What Kind of Test
 - Business logic: unit test required.
-- Bug fix: regression test BEFORE the fix (write the failing test first).
+- Parser/graph/retrieval changes: add coverage near the affected engine crate.
+- Runtime/tooling changes: test the behavior at the narrowest boundary that proves the invariant.
 - Integration boundary (DB, API, LLM): integration test.
 
 ## Test Quality
@@ -19,12 +26,13 @@ paths:
 - Tests must be deterministic. Flaky test = P0 bug.
 - Tests must be independent. No shared mutable state between tests.
 
-## What to Test
-- Retrieval pipeline: query → ranked results (ground truth validated)
-- Code graph: parse → symbols → edges → queries
-- Agent state machine: transitions, guard conditions, error states
-- Tool execution: input validation, sandbox boundaries
-- Wiki generation: code → markdown pages → links
+## Research-Aligned Focus Areas
+- Retrieval pipeline: query → ranked/contextualized results
+- Code graph and parsing: parse → symbols → edges → clustering/queries
+- Agent runtime: transitions, guard conditions, compaction, subagent/delegation behavior
+- Tool execution: input validation, permission/sandbox boundaries, truncation/error surfaces
+- Memory and wiki flows: persistence, ingestion, query, lint/enrichment boundaries
+- Observability and routing: emitted events, metrics, cost/routing decisions when touched
 
 ## What NOT to Test
 - Trivial getters/setters
@@ -34,7 +42,13 @@ paths:
 
 ## Running Tests
 ```bash
-cargo test                        # All workspace tests
-cargo test -p theo-engine-graph   # Specific crate
-cd apps/theo-ui && npm test       # Frontend tests
+cargo test -p <crate>
+cargo test -p <crate> <test_name>
+cargo clippy -p <crate> --all-targets -- -D warnings
+cd apps/theo-ui && npm test
 ```
+
+## Completion
+
+- Before finishing, run the narrowest relevant tests plus the affected crate's clippy target.
+- Run `make check-arch` whenever a change can affect crate boundaries.

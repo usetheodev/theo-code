@@ -4,17 +4,27 @@
 # T1.5 — Architectural boundary gate.
 #
 # Validates that every crate/app respects the dependency contract
-# declared in .claude/rules/architecture.md:
+# declared in `.claude/rules/architecture.md` /
+# `.claude/rules/architecture-contract.yaml`:
 #
 #   theo-domain         → (nothing)
-#   theo-engine-*       → theo-domain only
+#   theo-engine-graph   → theo-domain
+#   theo-engine-parser  → theo-domain
+#   theo-engine-retrieval → theo-domain, theo-engine-graph, theo-engine-parser
+#   theo-engine-wiki    → theo-domain, theo-engine-graph, theo-engine-parser
 #   theo-governance     → theo-domain only
-#   theo-infra-*        → theo-domain only
+#   theo-isolation      → theo-domain only
+#   theo-infra-llm      → theo-domain only
+#   theo-infra-auth     → theo-domain only
+#   theo-infra-mcp      → theo-domain only
+#   theo-infra-memory   → theo-domain, theo-engine-retrieval
 #   theo-tooling        → theo-domain only
-#   theo-agent-runtime  → theo-domain, theo-governance
+#   theo-agent-runtime  → theo-domain, theo-governance,
+#                         theo-infra-llm, theo-infra-auth,
+#                         theo-tooling, theo-isolation, theo-infra-mcp
 #   theo-api-contracts  → theo-domain only
 #   theo-application    → all crates above
-#   apps/*              → theo-application, theo-api-contracts
+#   apps/*              → theo-application, theo-api-contracts, theo-domain
 #
 # The contract is embedded below as bash associative arrays so the
 # script has zero runtime dependencies.
@@ -55,9 +65,12 @@ declare -A ALLOWED_DEPS=(
     ["crates/theo-engine-graph"]="theo-domain"
     ["crates/theo-engine-parser"]="theo-domain"
     ["crates/theo-engine-retrieval"]="theo-domain theo-engine-graph theo-engine-parser"
+    ["crates/theo-engine-wiki"]="theo-domain theo-engine-graph theo-engine-parser"
     ["crates/theo-governance"]="theo-domain"
+    ["crates/theo-isolation"]="theo-domain"
     ["crates/theo-infra-llm"]="theo-domain"
     ["crates/theo-infra-auth"]="theo-domain"
+    ["crates/theo-infra-mcp"]="theo-domain"
     ["crates/theo-infra-memory"]="theo-domain theo-engine-retrieval"
     ["crates/theo-tooling"]="theo-domain"
     # ADR-021 (theo-isolation) + ADR-022 (theo-infra-mcp) authorize these deps.
@@ -65,7 +78,7 @@ declare -A ALLOWED_DEPS=(
     ["crates/theo-api-contracts"]="theo-domain"
     # `theo-application` aggregates all runtime + engine crates; ADR-021/ADR-022
     # propagate transitively to it.
-    ["crates/theo-application"]="theo-domain theo-engine-graph theo-engine-parser theo-engine-retrieval theo-governance theo-infra-llm theo-infra-auth theo-infra-memory theo-tooling theo-agent-runtime theo-api-contracts theo-isolation theo-infra-mcp"
+    ["crates/theo-application"]="theo-domain theo-engine-graph theo-engine-parser theo-engine-retrieval theo-engine-wiki theo-governance theo-infra-llm theo-infra-auth theo-infra-memory theo-tooling theo-agent-runtime theo-api-contracts theo-isolation theo-infra-mcp"
     ["crates/theo-test-memory-fixtures"]="theo-domain theo-infra-memory"
     # ADR-023 SUNSET (T3.3 done) — `apps/theo-cli` no longer imports
     # `theo-agent-runtime` directly; the `cli_runtime` re-export module
@@ -79,7 +92,7 @@ declare -A ALLOWED_DEPS=(
 # a forbidden crate vs unrelated code).
 ALL_WORKSPACE_CRATES=(
     theo-domain theo-engine-graph theo-engine-parser theo-engine-retrieval
-    theo-governance theo-infra-llm theo-infra-auth theo-infra-memory
+    theo-engine-wiki theo-governance theo-infra-llm theo-infra-auth theo-infra-memory
     theo-tooling theo-agent-runtime theo-api-contracts theo-application
     theo-test-memory-fixtures theo-isolation theo-infra-mcp
 )
