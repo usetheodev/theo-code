@@ -173,3 +173,13 @@ These rules are NON-NEGOTIABLE for every plan produced by this skill:
 9. **No file paths in ADRs** — ADRs describe architectural decisions, not implementation details. File paths go in tasks.
 
 10. **Coverage matrix is complete** — every original requirement/gap maps to at least one task. 100% coverage is the target.
+
+## Post-Plan: Edge Case Review
+
+After saving the plan to `docs/plans/`, ALWAYS run the edge case review automatically:
+
+```
+/edge-case-plan {slug}
+```
+
+This invokes the `edge-case-plan` skill which analyzes the plan for unplanned edge cases — pragmatically, without over-engineering. If MUST FIX items are found, incorporate them into the plan before presenting the final version to the user.
