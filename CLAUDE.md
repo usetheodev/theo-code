@@ -38,6 +38,19 @@ See @crates/theo-agent-runtime/README.md for runtime invariants and guarded beha
 - For broad or risky changes, run `make check-sota-dod-quick` or `make check-sota-dod`.
 - Frontend work lives in `apps/theo-ui`: use `npm test`, `npm run build`, and `npm run audit:circ` there.
 
+## Integration Workflow (MANDATORY)
+
+Features are NOT done until integrated and tested. Before finishing any task:
+
+1. Run `cargo test -p <affected-crate>` for **every** crate you modified.
+2. Run `cargo test -p theo-application` if you changed any crate below it — this is the integration boundary that catches unwired features.
+3. Verify new public APIs are actually called from at least one higher-level module. Orphaned `pub fn`/`pub struct` is a defect.
+4. If you added a new tool, confirm it's registered in `DefaultRegistry` (`build_registry` test).
+5. If you added a new domain type, confirm it's used in a use-case in `theo-application`.
+6. When touching the LLM pipeline (providers, agent loop, tool dispatch), a real end-to-end test with OAuth Codex is the gold standard. If not feasible, explicitly state the limitation.
+
+A Stop hook (`stop-validation.sh`) enforces items 1-4 automatically — if tests fail or APIs are orphaned, you will be asked to fix them before finishing.
+
 ## Code Style
 
 - Rust edition is 2024. Match existing crate/module structure instead of inventing parallel abstractions.

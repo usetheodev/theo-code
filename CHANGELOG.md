@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Added
+- **Integration-first enforcement system** — 4-layer protection against features built but not integrated:
+  - `Stop` hook (`stop-validation.sh`) — validates tests pass and public APIs are wired before Claude finishes
+  - `integration-first.md` rule — scoped to all Rust/TS files, enforces wiring checklist by feature type
+  - `CLAUDE.md` Integration Workflow section — mandatory steps including `theo-application` boundary test
+  - `settings.json` Stop hook wiring with 300s timeout for test execution
+
 ### Changed
 - **code-hygiene-5x5 unwrap-allowlist DRAINED — 5 → 0; total active path-allowlist 158 → 0** (`docs/plans/code-hygiene-5x5-plan.md`).
   Final residual drain. The 5 remaining unwrap-allowlist path-fixtures (kept by ADR-021
