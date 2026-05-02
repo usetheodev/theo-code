@@ -4,6 +4,9 @@
 //! and transform input. Backward compatible with existing `.theo/hooks/`.
 //!
 //! Pi-mono ref: `packages/coding-agent/src/core/extensions/index.ts`
+//!
+//! Reserved-for-future-use extension framework; not yet wired into the runtime.
+#![allow(dead_code)]
 
 use serde::{Deserialize, Serialize};
 
@@ -167,7 +170,7 @@ mod tests {
     async fn test_check_tool_call_allows_by_default() {
         let registry = ExtensionRegistry::new();
         let ctx = ExtensionContext {
-            tool_name: "read_file".to_string(),
+            tool_name: "read".to_string(),
             tool_args: serde_json::Value::Null,
         };
         let decision = registry.check_tool_call(&ctx).await;
@@ -222,7 +225,7 @@ mod tests {
         registry.register(Box::new(UpperCaseExtension));
 
         let result = registry
-            .transform_tool_result("read_file", "hello world".to_string())
+            .transform_tool_result("read", "hello world".to_string())
             .await;
         assert_eq!(result, "HELLO WORLD");
     }

@@ -20,13 +20,35 @@ impl WriteTool {
         Self
     }
 
+    /// Canonicalize the user-supplied path against `project_dir`.
+    ///
+    /// Mirrors `ReadTool::resolve_path`: uses `crate::path::absolutize` so
+    /// `..` traversal, symlinks, and redundant separators cannot bypass
+    /// the `is_inside_project` check downstream (T2.3).
+    ///
+    /// Falls back to the raw join when canonicalization fails (e.g. the
+    /// target path does not exist yet AND its parent directory also does
+    /// not exist). The subsequent `tokio::fs::create_dir_all` + `write`
+    /// will still fail loudly with a clearer error in that edge case.
     fn resolve_path(file_path: &str, project_dir: &Path) -> PathBuf {
-        let path = PathBuf::from(file_path);
-        if path.is_absolute() {
-            path
-        } else {
-            project_dir.join(path)
+        match crate::path::absolutize(project_dir, file_path) {
+            Ok(canonical) => canonical,
+            Err(_) => {
+                let path = PathBuf::from(file_path);
+                if path.is_absolute() {
+                    path
+                } else {
+                    project_dir.join(path)
+                }
+            }
         }
+    }
+
+    /// Canonical-root comparison via [`crate::path::is_contained`]. Falls
+    /// back to `starts_with` if either side cannot be canonicalized.
+    fn is_inside_project(path: &Path, project_dir: &Path) -> bool {
+        crate::path::is_contained(path, project_dir)
+            .unwrap_or_else(|_| path.starts_with(project_dir))
     }
 
     fn relative_path(absolute: &Path, project_dir: &Path) -> String {
@@ -82,6 +104,21 @@ impl Tool for WriteTool {
 
         let resolved = Self::resolve_path(&file_path_str, &ctx.project_dir);
         let exists = resolved.exists();
+
+        // Ask for an ExternalDirectory permission BEFORE creating dirs if
+        // the target is outside the workspace. Mirrors ReadTool's guard and
+        // closes a hole where `write("../outside.txt", …)` would silently
+        // create a file next to the project root (T2.3).
+        if !Self::is_inside_project(&resolved, &ctx.project_dir) {
+            let dir = resolved.parent().unwrap_or(&resolved);
+            let pattern = format!("{}/*", dir.display()).replace('\\', "/");
+            permissions.record(PermissionRequest {
+                permission: PermissionType::ExternalDirectory,
+                patterns: vec![pattern.clone()],
+                always: vec![pattern],
+                metadata: serde_json::json!({}),
+            });
+        }
 
         // Create parent directories if needed
         if let Some(parent) = resolved.parent() {
@@ -425,5 +462,95 @@ mod tests {
             .unwrap();
 
         assert!(result.title.ends_with("src/components/Button.tsx"));
+    }
+
+    // --- Path traversal / external directory permission (T2.3) ---
+
+    #[tokio::test]
+    async fn rejects_silent_escape_via_parent_dir_traversal() {
+        // `workspace/sub/../../outside.txt` resolves to a file next to
+        // the workspace root. Before T2.3 this wrote without any
+        // permission prompt; now it must record an ExternalDirectory
+        // permission request.
+        let tmp = TestDir::new();
+        std::fs::create_dir(tmp.path().join("sub")).unwrap();
+        let ctx = test_context(tmp.path());
+        let mut perms = PermissionCollector::new();
+
+        let _ = write_tool()
+            .execute(
+                serde_json::json!({
+                    "filePath": "sub/../../outside_via_traversal.txt",
+                    "content": "payload",
+                }),
+                &ctx,
+                &mut perms,
+            )
+            .await;
+
+        let ext = find_permission(&perms, &PermissionType::ExternalDirectory);
+        assert!(
+            ext.is_some(),
+            "write MUST request ExternalDirectory when resolved path escapes the workspace via ../",
+        );
+    }
+
+    #[tokio::test]
+    async fn does_not_record_external_permission_for_in_project_paths() {
+        let tmp = TestDir::new();
+        let filepath = tmp.path().join("inside.txt");
+        let ctx = test_context(tmp.path());
+        let mut perms = PermissionCollector::new();
+
+        write_tool()
+            .execute(
+                serde_json::json!({
+                    "filePath": filepath.to_string_lossy().to_string(),
+                    "content": "hi",
+                }),
+                &ctx,
+                &mut perms,
+            )
+            .await
+            .unwrap();
+
+        assert!(
+            find_permission(&perms, &PermissionType::ExternalDirectory).is_none(),
+            "in-project write MUST NOT record ExternalDirectory permission"
+        );
+    }
+
+    #[tokio::test]
+    async fn absolutize_makes_is_inside_project_honest_under_symlink_escape() {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            let tmp = TestDir::new();
+            let outside = TestDir::new();
+            let ctx = test_context(tmp.path());
+            let mut perms = PermissionCollector::new();
+
+            // Create a symlink inside the project that points outside.
+            let link = tmp.path().join("back_door");
+            symlink(outside.path(), &link).unwrap();
+
+            let _ = write_tool()
+                .execute(
+                    serde_json::json!({
+                        "filePath": "back_door/captured.txt",
+                        "content": "secret",
+                    }),
+                    &ctx,
+                    &mut perms,
+                )
+                .await;
+
+            // Canonical comparison resolves the symlink and correctly
+            // classifies the target as external — permission is required.
+            assert!(
+                find_permission(&perms, &PermissionType::ExternalDirectory).is_some(),
+                "symlink-to-outside MUST require ExternalDirectory permission"
+            );
+        }
     }
 }

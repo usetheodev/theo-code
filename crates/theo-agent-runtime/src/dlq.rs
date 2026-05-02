@@ -17,6 +17,13 @@ pub struct DeadLetter {
 ///
 /// Operations that exhaust their retry policy are pushed here for
 /// later inspection or manual retry.
+///
+/// **Thread safety (T8.3):** `DeadLetterQueue` is intentionally
+/// single-threaded — all mutating methods take `&mut self`, so sharing
+/// requires the caller to wrap it in `Arc<Mutex<_>>` (or
+/// `Arc<parking_lot::Mutex<_>>`). The struct is `Send`/`Sync` by
+/// construction (contains only `Send` + `Sync` data), which the
+/// `dead_letter_queue_is_send_sync_under_mutex` test locks in.
 pub struct DeadLetterQueue {
     letters: Vec<DeadLetter>,
 }
@@ -102,6 +109,18 @@ mod tests {
 
         assert_eq!(dlq.peek().len(), 1);
         assert_eq!(dlq.len(), 1); // still there
+    }
+
+    // T8.3 — document thread-safety contract via a compile-time check:
+    // the queue itself is Send + Sync (contains only Send + Sync data),
+    // and composes cleanly with a Mutex for concurrent use.
+    #[test]
+    fn dead_letter_queue_is_send_sync_under_mutex() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<std::sync::Arc<parking_lot::Mutex<DeadLetterQueue>>>();
+        // A bare DeadLetterQueue is also Send + Sync — callers that
+        // accept &mut self don't need the Mutex. But shared owners do.
+        assert_send_sync::<DeadLetterQueue>();
     }
 
     #[test]

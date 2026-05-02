@@ -11,6 +11,12 @@
 //!
 //! Frontmatter is a minimal `key: value` parser — avoiding a new dep
 //! (serde_yaml) per the workspace convention.
+//!
+//! T9.1 — Public CRUD API exposed for `theo skill list/view/install/delete`
+//! CLI subcommand and the use-case layer in `theo-application`. The
+//! module-level `#![allow(dead_code)]` previously applied to the whole
+//! module is lifted; symbols that remain genuinely unused inside the crate
+//! carry per-symbol allows with a documented rationale.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -162,7 +168,7 @@ fn collect_linked_files(skill_dir: &Path) -> Vec<PathBuf> {
 }
 
 // ---------------------------------------------------------------------------
-// Phase 3 (PLAN_AUTO_EVOLUTION_SOTA) — CRUD operations + origin tracking.
+// — CRUD operations + origin tracking.
 // ---------------------------------------------------------------------------
 
 /// Constants lifted from Hermes's skill_manager_tool.py:83-104.
@@ -212,7 +218,13 @@ fn validate_skill_name(name: &str) -> Result<(), SkillCatalogError> {
         });
     }
     let mut chars = name.chars();
-    let first = chars.next().unwrap();
+    // T4.10o / find_p2_001 — `expect` with the explicit invariant
+    // (the `name.is_empty()` check on line 205 above guarantees at
+    // least one char). Replaces the bare `unwrap` that the unwrap-gate
+    // would otherwise have to keep on its allowlist.
+    let first = chars
+        .next()
+        .expect("invariant: name is non-empty (checked above)");
     let first_ok = first.is_ascii_lowercase() || first.is_ascii_digit();
     if !first_ok {
         return Err(SkillCatalogError::InvalidName {
@@ -487,7 +499,7 @@ mod tests {
         assert_eq!(skills[0].category, "general");
     }
 
-    // ── Phase 3: CRUD operations ────────────────────────────────────
+    // ── CRUD operations ────────────────────────────────────
 
     fn fm(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
         pairs

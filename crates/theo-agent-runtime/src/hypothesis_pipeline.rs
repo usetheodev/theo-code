@@ -1,4 +1,4 @@
-//! Hypothesis persistence + feedback loop (Phase 2 T2.3, G6).
+//! Hypothesis persistence + feedback loop .
 //!
 //! Plan: `docs/plans/PLAN_MEMORY_SUPERIORITY.md` §Task 2.3.
 //! Absorbed reference: CodeTracer (arxiv:2604.11641).
@@ -9,6 +9,9 @@
 //! context (caller's responsibility). Auto-prunes the file when
 //! `evidence_against > evidence_for * 2` and total evidence >= 3
 //! (delegated to `Hypothesis::should_auto_prune()` in theo-domain).
+//!
+//! Reserved-for-future-use hypothesis loop; not yet wired into runs.
+#![allow(dead_code)]
 
 use std::path::Path;
 
@@ -31,7 +34,9 @@ pub fn persist_unresolved(project_dir: &Path, summary: &EpisodeSummary) -> usize
         return 0;
     }
     let dir = project_dir.join(".theo/memory/hypotheses");
-    let _ = std::fs::create_dir_all(&dir);
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        crate::fs_errors::warn_fs_error("hypothesis_pipeline/mkdir", &dir, &e);
+    }
     let mut written = 0usize;
     for desc in &summary.unresolved_hypotheses {
         // The domain type `unresolved_hypotheses: Vec<String>` stores
@@ -78,8 +83,14 @@ pub fn load_active(project_dir: &Path) -> Vec<Hypothesis> {
             if env.hypothesis.status == HypothesisStatus::Superseded
                 || env.hypothesis.should_auto_prune()
             {
-                // Auto-prune: delete the file. Best-effort.
-                let _ = std::fs::remove_file(&path);
+                // Auto-prune: delete the file. Best-effort; log on failure.
+                if let Err(e) = std::fs::remove_file(&path) {
+                    crate::fs_errors::warn_fs_error(
+                        "hypothesis_pipeline/prune",
+                        &path,
+                        &e,
+                    );
+                }
                 continue;
             }
             if env.hypothesis.status == HypothesisStatus::Active {

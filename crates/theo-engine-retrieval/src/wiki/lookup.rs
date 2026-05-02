@@ -161,41 +161,45 @@ pub fn lookup(wiki_dir: &Path, query: &str, max_results: usize) -> Vec<WikiLooku
     if query.is_empty() || !wiki_dir.exists() {
         return Vec::new();
     }
-
     let query_tokens = tokenize_code(query);
     if query_tokens.is_empty() {
         return Vec::new();
     }
-
-    // Load manifest hash for staleness check
     let manifest_hash = wiki_dir
         .parent()
         .and_then(|p| p.parent())
         .and_then(super::persistence::load_manifest)
         .map(|m| m.graph_hash);
+    let pages = collect_wiki_pages(wiki_dir, manifest_hash);
+    if pages.is_empty() {
+        return Vec::new();
+    }
+    let scores = compute_bm25_scores(&pages, &query_tokens);
+    let final_scores = apply_tier_aware_composite_scoring(&pages, &scores, &query_tokens);
+    rank_and_truncate(&pages, &scores, &final_scores, max_results)
+}
 
-    // Collect all wiki pages with metadata
+struct PageEntry {
+    slug: String,
+    title: String,
+    content: String,
+    tier: AuthorityTier,
+    is_stale: bool,
+    page_kind: String,
+}
+
+/// Walk `modules/` and `cache/`, parse markdown, and classify each page
+/// by frontmatter (tier, page_kind, staleness vs current graph hash).
+fn collect_wiki_pages(wiki_dir: &Path, manifest_hash: Option<u64>) -> Vec<PageEntry> {
     let modules_dir = wiki_dir.join("modules");
     let cache_dir = wiki_dir.join("cache");
-
-    struct PageEntry {
-        slug: String,
-        title: String,
-        content: String,
-        tier: AuthorityTier,
-        is_stale: bool,
-        page_kind: String,
-    }
-
     let mut pages: Vec<PageEntry> = Vec::new();
-
     for (dir, dir_name) in [(&modules_dir, "modules"), (&cache_dir, "cache")] {
         if !dir.exists() {
             continue;
         }
-        let entries = match std::fs::read_dir(dir) {
-            Ok(e) => e,
-            Err(_) => continue,
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            continue;
         };
         for entry in entries.flatten() {
             let path = entry.path();
@@ -218,16 +222,13 @@ pub fn lookup(wiki_dir: &Path, query: &str, max_results: usize) -> Vec<WikiLooku
                 .find(|l| l.starts_with("# "))
                 .map(|l| l.trim_start_matches("# ").trim().to_string())
                 .unwrap_or_else(|| slug.clone());
-
-            // Classify from frontmatter metadata
             let fm = parse_frontmatter(&content);
             let tier = fm.tier(dir_name);
             let page_kind = fm.page_kind.unwrap_or_else(|| dir_name.to_string());
             let is_stale = match (fm.graph_hash, manifest_hash) {
                 (Some(page_hash), Some(current_hash)) => page_hash != current_hash,
-                _ => false, // No hash info → assume fresh
+                _ => false,
             };
-
             pages.push(PageEntry {
                 slug,
                 title,
@@ -238,47 +239,35 @@ pub fn lookup(wiki_dir: &Path, query: &str, max_results: usize) -> Vec<WikiLooku
             });
         }
     }
+    pages
+}
 
-    if pages.is_empty() {
-        return Vec::new();
-    }
-
-    // Build BM25 index
+/// Build a BM25 inverted index over `(title × 3) + (content[..3000] × 1)`
+/// and score every page against `query_tokens`.
+fn compute_bm25_scores(pages: &[PageEntry], query_tokens: &[String]) -> Vec<f64> {
     let doc_count = pages.len();
     let mut postings: HashMap<String, Vec<(usize, f64)>> = HashMap::new();
     let mut doc_lengths: Vec<f64> = Vec::with_capacity(doc_count);
-
     for (idx, page) in pages.iter().enumerate() {
-        let title = &page.title;
-        let content = &page.content;
         let mut tf: HashMap<String, f64> = HashMap::new();
-
-        // Title tokens: 3x boost
-        for token in tokenize_code(title) {
+        for token in tokenize_code(&page.title) {
             *tf.entry(token).or_default() += 3.0;
         }
-
-        // Content tokens: 1x (first 3000 chars for speed)
-        let preview = &content[..content.len().min(3000)];
+        let preview = &page.content[..page.content.len().min(3000)];
         for token in tokenize_code(preview) {
             *tf.entry(token).or_default() += 1.0;
         }
-
         let len: f64 = tf.values().sum();
         doc_lengths.push(len);
-
         for (term, freq) in tf {
             postings.entry(term).or_default().push((idx, freq));
         }
     }
-
     let avg_dl = doc_lengths.iter().sum::<f64>() / doc_count as f64;
     let (k1, b) = (1.2f64, 0.75f64);
     let n = doc_count as f64;
-
-    // BM25 scoring
     let mut scores = vec![0.0f64; doc_count];
-    for token in &query_tokens {
+    for token in query_tokens {
         let Some(posts) = postings.get(token.as_str()) else {
             continue;
         };
@@ -290,32 +279,40 @@ pub fn lookup(wiki_dir: &Path, query: &str, max_results: usize) -> Vec<WikiLooku
             scores[doc_idx] += idf * norm;
         }
     }
+    scores
+}
 
-    // Apply tier-aware composite scoring
-    let mut final_scores: Vec<f64> = Vec::with_capacity(doc_count);
-    for (idx, &raw_score) in scores.iter().enumerate() {
-        let page = &pages[idx];
-        // Check if any query token matches the title
-        let title_tokens: HashSet<String> = tokenize_code(&page.title).into_iter().collect();
-        let title_match = query_tokens
-            .iter()
-            .any(|qt| title_tokens.contains(qt.as_str()));
-        let normalized = if scores.iter().cloned().fold(0.0f64, f64::max) > 0.0 {
-            raw_score / scores.iter().cloned().fold(0.0f64, f64::max)
-        } else {
-            0.0
-        };
-        final_scores.push(compute_final_score(
-            normalized,
-            page.tier,
-            title_match,
-            page.is_stale,
-        ));
-    }
+fn apply_tier_aware_composite_scoring(
+    pages: &[PageEntry],
+    scores: &[f64],
+    query_tokens: &[String],
+) -> Vec<f64> {
+    let max_score = scores.iter().cloned().fold(0.0f64, f64::max);
+    pages
+        .iter()
+        .enumerate()
+        .map(|(idx, page)| {
+            let title_tokens: HashSet<String> = tokenize_code(&page.title).into_iter().collect();
+            let title_match = query_tokens
+                .iter()
+                .any(|qt| title_tokens.contains(qt.as_str()));
+            let normalized = if max_score > 0.0 {
+                scores[idx] / max_score
+            } else {
+                0.0
+            };
+            compute_final_score(normalized, page.tier, title_match, page.is_stale)
+        })
+        .collect()
+}
 
-    // Normalize final scores to 0-1
+fn rank_and_truncate(
+    pages: &[PageEntry],
+    scores: &[f64],
+    final_scores: &[f64],
+    max_results: usize,
+) -> Vec<WikiLookupResult> {
     let max_final = final_scores.iter().cloned().fold(0.0f64, f64::max);
-
     let mut results: Vec<WikiLookupResult> = Vec::new();
     for (idx, &fscore) in final_scores.iter().enumerate() {
         if fscore <= 0.0 {
@@ -329,7 +326,6 @@ pub fn lookup(wiki_dir: &Path, query: &str, max_results: usize) -> Vec<WikiLooku
         if confidence < MIN_CONFIDENCE {
             continue;
         }
-
         let page = &pages[idx];
         results.push(WikiLookupResult {
             content: page.content.clone(),
@@ -343,14 +339,12 @@ pub fn lookup(wiki_dir: &Path, query: &str, max_results: usize) -> Vec<WikiLooku
             page_kind: page.page_kind.clone(),
         });
     }
-
     results.sort_by(|a, b| {
         b.confidence
             .partial_cmp(&a.confidence)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
     results.truncate(max_results);
-
     results
 }
 

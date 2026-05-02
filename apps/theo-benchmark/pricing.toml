@@ -1,0 +1,79 @@
+# Phase 46 (benchmark-validation-plan) — model price table.
+#
+# Prices in USD per million tokens (input, output). Source: provider docs
+# as of 2026-04-24. Update when prices change. Used by analysis/post_run.py
+# to compute cost_usd per task.
+#
+# Schema:
+#   [models."<model_id>"]
+#   input_per_mtok  = float USD per 1_000_000 input tokens
+#   output_per_mtok = float USD per 1_000_000 output tokens
+#   provider        = string (informational; for grouping)
+#   notes           = string (when this entry was last verified)
+
+[models."gpt-5.4"]
+input_per_mtok = 5.00
+output_per_mtok = 15.00
+provider = "openai"
+notes = "Verified 2026-04-24 via openai.com/api/pricing"
+
+[models."gpt-5.4-mini"]
+input_per_mtok = 0.30
+output_per_mtok = 1.20
+provider = "openai"
+notes = "Verified 2026-04-24"
+
+[models."gpt-5.3-codex"]
+input_per_mtok = 3.00
+output_per_mtok = 9.00
+provider = "openai"
+notes = "Verified 2026-04-24"
+
+[models."gpt-5.2-codex"]
+input_per_mtok = 2.50
+output_per_mtok = 7.50
+provider = "openai"
+notes = "Verified 2026-04-24"
+
+[models."gpt-5.2"]
+input_per_mtok = 2.00
+output_per_mtok = 8.00
+provider = "openai"
+notes = "Verified 2026-04-24"
+
+[models."claude-opus-4-7"]
+input_per_mtok = 15.00
+output_per_mtok = 75.00
+provider = "anthropic"
+notes = "Verified 2026-04-24"
+
+[models."claude-opus-4-6"]
+input_per_mtok = 15.00
+output_per_mtok = 75.00
+provider = "anthropic"
+notes = "Verified 2026-04-24"
+
+[models."claude-sonnet-4-6"]
+input_per_mtok = 3.00
+output_per_mtok = 15.00
+provider = "anthropic"
+notes = "Verified 2026-04-24"
+
+[models."claude-haiku-4-5"]
+input_per_mtok = 0.80
+output_per_mtok = 4.00
+provider = "anthropic"
+notes = "Verified 2026-04-24"
+
+[models."gemini-3.1-pro"]
+input_per_mtok = 1.25
+output_per_mtok = 5.00
+provider = "google"
+notes = "Verified 2026-04-24, prompts <= 200K tokens"
+
+# Fallback for unknown models — applied if no exact match.
+[models."__fallback__"]
+input_per_mtok = 0.0
+output_per_mtok = 0.0
+provider = "unknown"
+notes = "Cost reported as 0 when model not in this table"

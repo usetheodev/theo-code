@@ -2,6 +2,7 @@
 name = "theo-code-desktop"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [lib]
 name = "theo_code_desktop"
@@ -11,11 +12,10 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-theo-agent-runtime = { path = "../../crates/theo-agent-runtime" }
+# T1.3: apps depend only on theo-application + theo-api-contracts + theo-domain
+# per the architecture contract (ADR-010). Lower-layer crates reach the
+# desktop via `theo_application::facade`.
 theo-domain = { path = "../../crates/theo-domain" }
-theo-infra-auth = { path = "../../crates/theo-infra-auth" }
-theo-infra-llm = { path = "../../crates/theo-infra-llm" }
-theo-tooling = { path = "../../crates/theo-tooling" }
 theo-api-contracts = { path = "../../crates/theo-api-contracts" }
 theo-application = { path = "../../crates/theo-application" }
 tauri = { version = "2", features = ["tray-icon"] }

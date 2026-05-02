@@ -2,6 +2,7 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 macro_rules! define_identifier {
     ($name:ident, $doc:expr) => {
@@ -67,25 +68,87 @@ define_identifier!(
     "Unique identifier for an observability trajectory (derived projection of a run)."
 );
 
-/// Simple random u64 using system entropy without external crates.
-fn random_u64() -> u64 {
-    use std::collections::hash_map::DefaultHasher;
+// ---------------------------------------------------------------------------
+// Planning IDs (sequential u32, scoped within a single Plan)
+// ---------------------------------------------------------------------------
+//
+// Unlike `TaskId`/`RunId` (string-based, globally unique via timestamp+random),
+// planning IDs are *small sequential integers* assigned by the LLM when it
+// drafts a plan. They are scoped to a single `Plan` document — uniqueness is
+// enforced by `Plan::validate()`, not by the type itself.
+//
+// We deliberately keep them as transparent newtypes (no `generate()`,
+// no entropy) because plans are authored, not minted. See SOTA Planning
+// System plan, Fase 1.1.
 
-    let seed = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("system clock before UNIX epoch")
-        .as_nanos();
+/// Sequential identifier for a `PlanTask` within a single `Plan`.
+///
+/// Display format: `T{n}` (e.g., `T1`, `T42`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, PartialOrd, Ord)]
+pub struct PlanTaskId(pub u32);
 
-    let thread_id = format!("{:?}", std::thread::current().id());
+impl PlanTaskId {
+    /// Returns the underlying `u32`.
+    pub fn as_u32(self) -> u32 {
+        self.0
+    }
+}
 
-    let mut hasher = DefaultHasher::new();
-    seed.hash(&mut hasher);
-    thread_id.hash(&mut hasher);
-    // Mix in the address of a stack variable for extra entropy
-    let stack_var: u8 = 0;
-    let addr = std::ptr::addr_of!(stack_var) as u64;
-    addr.hash(&mut hasher);
-    hasher.finish()
+impl fmt::Display for PlanTaskId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "T{}", self.0)
+    }
+}
+
+impl From<u32> for PlanTaskId {
+    fn from(value: u32) -> Self {
+        Self(value)
+    }
+}
+
+/// Sequential identifier for a `Phase` within a single `Plan`.
+///
+/// Display format: `P{n}` (e.g., `P1`, `P3`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, PartialOrd, Ord)]
+pub struct PhaseId(pub u32);
+
+impl PhaseId {
+    /// Returns the underlying `u32`.
+    pub fn as_u32(self) -> u32 {
+        self.0
+    }
+}
+
+impl fmt::Display for PhaseId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "P{}", self.0)
+    }
+}
+
+impl From<u32> for PhaseId {
+    fn from(value: u32) -> Self {
+        Self(value)
+    }
+}
+
+/// Collision-safe random `u64` derived from a fresh UUID v4.
+///
+/// T4.6 / find_p4_010 / find_p5_008 — the original implementation mixed
+/// wall-clock nanos + thread id + stack address through `DefaultHasher`,
+/// which is not a CSPRNG and shows measurable collision pressure on
+/// fast hardware. The plan AC mandates `uuid::Uuid::new_v4()`, which
+/// uses the OS CSPRNG (`getrandom` on Linux). We extract 64 bits from
+/// the v4 UUID — that is plenty of entropy for the `*Id` chronological
+/// suffix and remains a drop-in for every existing caller.
+///
+/// Exposed as `pub` so other crates (notably `theo-agent-runtime`'s
+/// `subagent::generate_run_id` and `session_tree::EntryId::generate`)
+/// can reuse the same entropy source.
+pub fn random_u64() -> u64 {
+    // Take the low 64 bits of a fresh v4 UUID. The high 64 bits encode
+    // the version + variant nibbles and a few zero bits; the low 64
+    // bits are full random entropy from `getrandom`.
+    Uuid::new_v4().as_u64_pair().1
 }
 
 #[cfg(test)]
@@ -270,5 +333,125 @@ mod tests {
     fn as_str_returns_inner() {
         let id = RunId::new("inner-value");
         assert_eq!(id.as_str(), "inner-value");
+    }
+
+    // ------------------------------------------------------------------
+    // T4.6 AC literal — "Property test passa" against UUID v4-backed
+    // `random_u64`. The plan mandates 10_000 concurrent generates with
+    // 0 collisions; the previous DefaultHasher mix could (and did)
+    // collide under the same load. We test both the raw helper AND
+    // both downstream `*Id::generate()` consumers so a future
+    // regression in any of the three surfaces is caught.
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn t46_random_u64_is_collision_free_under_concurrent_generate() {
+        use std::sync::Mutex;
+        use std::thread;
+
+        let collected: Mutex<HashSet<u64>> = Mutex::new(HashSet::new());
+        thread::scope(|s| {
+            for _ in 0..16 {
+                s.spawn(|| {
+                    let mut local: Vec<u64> =
+                        (0..625).map(|_| random_u64()).collect();
+                    let mut guard = collected.lock().unwrap();
+                    for v in local.drain(..) {
+                        guard.insert(v);
+                    }
+                });
+            }
+        });
+        let total = collected.into_inner().unwrap();
+        assert_eq!(
+            total.len(),
+            10_000,
+            "UUID v4-backed random_u64 must produce 10_000 unique values \
+             under concurrent generation; got {} (collision detected)",
+            total.len()
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // Planning IDs — sequential u32 newtypes
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn plan_task_id_display_uses_t_prefix() {
+        assert_eq!(format!("{}", PlanTaskId(42)), "T42");
+        assert_eq!(format!("{}", PlanTaskId(1)), "T1");
+    }
+
+    #[test]
+    fn phase_id_display_uses_p_prefix() {
+        assert_eq!(format!("{}", PhaseId(3)), "P3");
+        assert_eq!(format!("{}", PhaseId(0)), "P0");
+    }
+
+    #[test]
+    fn plan_task_id_serde_roundtrip() {
+        let id = PlanTaskId(42);
+        let json = serde_json::to_string(&id).unwrap();
+        // Transparent newtype → serializes as the raw u32.
+        assert_eq!(json, "42");
+        let back: PlanTaskId = serde_json::from_str(&json).unwrap();
+        assert_eq!(id, back);
+    }
+
+    #[test]
+    fn phase_id_serde_roundtrip() {
+        let id = PhaseId(7);
+        let json = serde_json::to_string(&id).unwrap();
+        assert_eq!(json, "7");
+        let back: PhaseId = serde_json::from_str(&json).unwrap();
+        assert_eq!(id, back);
+    }
+
+    #[test]
+    fn plan_task_id_hashable_and_comparable() {
+        let mut set = HashSet::new();
+        set.insert(PlanTaskId(1));
+        set.insert(PlanTaskId(2));
+        set.insert(PlanTaskId(1));
+        assert_eq!(set.len(), 2);
+        assert!(PlanTaskId(1) < PlanTaskId(2));
+    }
+
+    #[test]
+    fn plan_task_id_from_u32() {
+        let id: PlanTaskId = 99u32.into();
+        assert_eq!(id.as_u32(), 99);
+    }
+
+    #[test]
+    fn phase_id_from_u32() {
+        let id: PhaseId = 5u32.into();
+        assert_eq!(id.as_u32(), 5);
+    }
+
+    #[test]
+    fn t46_run_id_uniqueness_under_concurrent_generate() {
+        use std::sync::Mutex;
+        use std::thread;
+
+        let collected: Mutex<HashSet<String>> = Mutex::new(HashSet::new());
+        thread::scope(|s| {
+            for _ in 0..16 {
+                s.spawn(|| {
+                    let mut local: Vec<String> = (0..625)
+                        .map(|_| RunId::generate().as_str().to_string())
+                        .collect();
+                    let mut guard = collected.lock().unwrap();
+                    for v in local.drain(..) {
+                        guard.insert(v);
+                    }
+                });
+            }
+        });
+        assert_eq!(
+            collected.into_inner().unwrap().len(),
+            10_000,
+            "RunId::generate must be collision-free under concurrent load"
+        );
     }
 }

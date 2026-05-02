@@ -336,12 +336,28 @@ fn render_status_line(frame: &mut Frame, area: Rect, state: &TuiState) {
     let ctrl_c_hint = if state.agent_running { "Ctrl+C interrupt" } else { "Ctrl+C sair" };
     let copy_indicator = if state.copy_mode { " │ 📋 SELECT" } else { "" };
 
+    // T14.1 — render the latest debounced partial-progress as a
+    // dim suffix to the status line. Empty `partial_progress` =
+    // no in-flight tool emitting → no suffix (so the line shape
+    // is unchanged when streaming is off / quiet).
+    let progress_suffix = if state.partial_progress.is_empty() {
+        String::new()
+    } else {
+        // Truncate aggressively — the status line is one row.
+        // Show first tool's line; multi-tool concurrent emissions
+        // are rare enough that joining with " · " covers them.
+        let joined = state.partial_progress.join(" · ");
+        let truncated: String = joined.chars().take(80).collect();
+        format!(" │ ⏳ {truncated}")
+    };
+
     let status_line = Line::from(vec![
         Span::styled(format!(" {} ", state.status.mode), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
         Span::styled("│ ", Style::default().fg(Color::DarkGray)),
         Span::styled(phase.as_str(), Style::default().fg(phase_color)),
         Span::styled(format!(" │ {}/{} iter", state.status.iteration, state.status.max_iterations), Style::default().fg(Color::DarkGray)),
         Span::styled(&tools_str, Style::default().fg(Color::Yellow)),
+        Span::styled(progress_suffix, Style::default().fg(Color::Magenta)),
         Span::styled(format!("{copy_indicator} │ Esc ajuda  {ctrl_c_hint}"), Style::default().fg(Color::DarkGray)),
     ]);
 

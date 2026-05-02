@@ -20,9 +20,9 @@ use theo_infra_memory::engine::MemoryEngine;
 
 /// Build a memory provider for the active session.
 ///
-/// - When `config.memory_enabled=false`: returns `None` — runtime short-
+/// - When `config.memory.enabled=false`: returns `None` — runtime short-
 ///   circuits every hook and no file I/O happens.
-/// - When `config.memory_enabled=true`: returns a `MemoryEngine` with
+/// - When `config.memory.enabled=true`: returns a `MemoryEngine` with
 ///   `BuiltinMemoryProvider` registered, writing to
 ///   `<project_dir>/.theo/memory/<user_hash>.md`. `user_hash` is derived
 ///   from the username so that two users sharing a checkout get isolated
@@ -34,7 +34,7 @@ pub fn build_memory_engine(
     config: &AgentConfig,
     project_dir: &Path,
 ) -> Option<Arc<dyn MemoryProvider>> {
-    if !config.memory_enabled {
+    if !config.memory().enabled {
         return None;
     }
 
@@ -57,10 +57,10 @@ pub fn build_memory_engine(
 
 /// Convenience wrapper that attaches the built provider to the config.
 /// Calls `build_memory_engine` internally and, when a provider is
-/// produced, stores it in `config.memory_provider` as a `MemoryHandle`.
+/// produced, stores it in `config.memory.provider` as a `MemoryHandle`.
 pub fn attach_memory_to_config(config: &mut AgentConfig, project_dir: &Path) {
     if let Some(provider) = build_memory_engine(config, project_dir) {
-        config.memory_provider = Some(MemoryHandle::new(provider));
+        config.memory.provider = Some(MemoryHandle::new(provider));
     }
 
     // PLAN_AUTO_EVOLUTION_SOTA Phase 4 — wire the concrete Tantivy
@@ -68,11 +68,11 @@ pub fn attach_memory_to_config(config: &mut AgentConfig, project_dir: &Path) {
     // `autodream_enabled == false` / `memory_enabled == false` setups
     // by leaving the handle empty.
     #[cfg(feature = "tantivy-backend")]
-    if config.memory_enabled && config.transcript_indexer.is_none() {
+    if config.memory().enabled && config.memory().transcript_indexer.is_none() {
         use std::sync::Arc;
         use theo_agent_runtime::transcript_indexer::TranscriptIndexerHandle;
         let indexer = Arc::new(crate::use_cases::transcript_indexer_impl::TantivyTranscriptIndexer::new());
-        config.transcript_indexer = Some(TranscriptIndexerHandle::new(indexer));
+        config.memory.transcript_indexer = Some(TranscriptIndexerHandle::new(indexer));
     }
 }
 
@@ -84,7 +84,7 @@ mod tests {
     #[test]
     fn test_t0_2_ac_1_builtin_registered_when_enabled() {
         let mut cfg = AgentConfig::default();
-        cfg.memory_enabled = true;
+        cfg.memory.enabled = true;
         let dir = tempfile::tempdir().expect("t");
 
         let engine = build_memory_engine(&cfg, dir.path());
@@ -98,7 +98,7 @@ mod tests {
     #[test]
     fn test_t0_2_ac_2_none_when_disabled() {
         let cfg = AgentConfig::default();
-        assert!(!cfg.memory_enabled);
+        assert!(!cfg.memory.enabled);
         let dir = tempfile::tempdir().expect("t");
 
         let engine = build_memory_engine(&cfg, dir.path());
@@ -112,7 +112,7 @@ mod tests {
     #[tokio::test]
     async fn test_t0_2_ac_3_md_file_created_after_first_sync() {
         let mut cfg = AgentConfig::default();
-        cfg.memory_enabled = true;
+        cfg.memory.enabled = true;
         let dir = tempfile::tempdir().expect("t");
 
         let engine = build_memory_engine(&cfg, dir.path()).expect("engine built");
@@ -133,7 +133,7 @@ mod tests {
     #[tokio::test]
     async fn test_t0_2_ac_4_injection_still_blocked_through_engine() {
         let mut cfg = AgentConfig::default();
-        cfg.memory_enabled = true;
+        cfg.memory.enabled = true;
         let dir = tempfile::tempdir().expect("t");
         let engine = build_memory_engine(&cfg, dir.path()).expect("engine built");
 
@@ -159,7 +159,7 @@ mod tests {
     #[tokio::test]
     async fn test_t0_2_ac_6_builtin_md_starts_empty_on_corruption() {
         let mut cfg = AgentConfig::default();
-        cfg.memory_enabled = true;
+        cfg.memory.enabled = true;
         let dir = tempfile::tempdir().expect("t");
         let engine = build_memory_engine(&cfg, dir.path()).expect("engine built");
         // Fresh provider, no prior state: prefetch returns empty.
@@ -170,13 +170,13 @@ mod tests {
     #[test]
     fn test_t0_2_attach_sets_memory_handle() {
         let mut cfg = AgentConfig::default();
-        cfg.memory_enabled = true;
-        assert!(cfg.memory_provider.is_none());
+        cfg.memory.enabled = true;
+        assert!(cfg.memory.provider.is_none());
         let dir = tempfile::tempdir().expect("t");
 
         attach_memory_to_config(&mut cfg, dir.path());
         assert!(
-            cfg.memory_provider.is_some(),
+            cfg.memory.provider.is_some(),
             "attach must mount a MemoryHandle on the config"
         );
     }
@@ -184,10 +184,10 @@ mod tests {
     #[test]
     fn test_t0_2_attach_is_noop_when_disabled() {
         let mut cfg = AgentConfig::default();
-        assert!(!cfg.memory_enabled);
+        assert!(!cfg.memory.enabled);
         let dir = tempfile::tempdir().expect("t");
 
         attach_memory_to_config(&mut cfg, dir.path());
-        assert!(cfg.memory_provider.is_none());
+        assert!(cfg.memory.provider.is_none());
     }
 }

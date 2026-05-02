@@ -1,0 +1,1917 @@
+# Feature Registry — Per-Component Validation
+#
+# Maps EVERY feature of Theo Code to a probe + pass/fail threshold.
+# The refinement cycle uses this to identify the weakest component
+# and improve it. Individual improvements cascade to global thresholds.
+#
+# Status: untested | pass | fail | flaky | skip
+# Type: tool | cli-subcommand | provider | language | runtime-phase | wiki
+#
+# Meeting: 20260429-143744
+# Created: 2026-04-29
+
+[meta]
+verified_date = "2026-04-29"
+schema_version = "1.0"
+total_features = 205  # 47 tools + 17 cli + 26 providers + 14 langs + 5 runtime + 11 debug + 8 wiki + 9 memory + 12 agent-loop + 14 context-eng + 7 model-routing + 6 self-evolution + 8 prompt-eng + 6 observability + 7 security + 8 subagent
+
+# ============================================================================
+# TOOLS — DEFAULT REGISTRY (47 production tools)
+# ============================================================================
+
+# --- File Operations (7) ---
+
+[tools.apply_patch]
+type = "tool"
+category = "file"
+status = "untested"
+probe_id = "tool-apply-patch"
+threshold = "tool executes without panic AND produces valid diff"
+priority = "high"
+
+[tools.edit]
+type = "tool"
+category = "file"
+status = "untested"
+probe_id = "tool-edit"
+threshold = "tool modifies file correctly AND preserves encoding"
+priority = "high"
+
+[tools.glob]
+type = "tool"
+category = "file"
+status = "untested"
+probe_id = "tool-glob"
+threshold = "tool returns matching files AND respects gitignore"
+priority = "high"
+
+[tools.grep]
+type = "tool"
+category = "file"
+status = "untested"
+probe_id = "tool-grep"
+threshold = "tool returns matching lines with correct line numbers"
+priority = "high"
+
+[tools.read]
+type = "tool"
+category = "file"
+status = "untested"
+probe_id = "tool-file-read"
+threshold = "tool returns file content AND handles binary/missing gracefully"
+priority = "high"
+
+[tools.write]
+type = "tool"
+category = "file"
+status = "untested"
+probe_id = "tool-write"
+threshold = "tool creates/overwrites file AND content matches input"
+priority = "high"
+
+[tools.webfetch]
+type = "tool"
+category = "file"
+status = "untested"
+probe_id = "tool-webfetch"
+threshold = "tool fetches URL content AND handles timeout/404"
+priority = "medium"
+
+# --- Git Operations (4) ---
+
+[tools.git_commit]
+type = "tool"
+category = "git"
+status = "untested"
+probe_id = "tool-git-commit"
+threshold = "tool creates commit AND message matches input"
+priority = "high"
+
+[tools.git_diff]
+type = "tool"
+category = "git"
+status = "untested"
+probe_id = "tool-git-diff"
+threshold = "tool returns valid diff output"
+priority = "high"
+
+[tools.git_log]
+type = "tool"
+category = "git"
+status = "untested"
+probe_id = "tool-git-log"
+threshold = "tool returns commit history in expected format"
+priority = "medium"
+
+[tools.git_status]
+type = "tool"
+category = "git"
+status = "untested"
+probe_id = "tool-git-status"
+threshold = "tool returns working tree status"
+priority = "high"
+
+# --- HTTP Operations (2) ---
+
+[tools.http_get]
+type = "tool"
+category = "http"
+status = "untested"
+probe_id = "tool-http-get"
+threshold = "tool fetches URL AND returns status + body"
+priority = "medium"
+
+[tools.http_post]
+type = "tool"
+category = "http"
+status = "untested"
+probe_id = "tool-http-post"
+threshold = "tool sends POST AND returns response"
+priority = "medium"
+
+# --- LSP (5) ---
+
+[tools.lsp_definition]
+type = "tool"
+category = "lsp"
+status = "untested"
+probe_id = "tool-lsp-definition"
+threshold = "tool returns definition location for known symbol"
+priority = "high"
+note = "Requires rust-analyzer running"
+
+[tools.lsp_hover]
+type = "tool"
+category = "lsp"
+status = "untested"
+probe_id = "tool-lsp-hover"
+threshold = "tool returns hover info with type signature"
+priority = "medium"
+note = "Requires rust-analyzer running"
+
+[tools.lsp_references]
+type = "tool"
+category = "lsp"
+status = "untested"
+probe_id = "tool-lsp-references"
+threshold = "tool returns all references for known symbol"
+priority = "medium"
+
+[tools.lsp_rename]
+type = "tool"
+category = "lsp"
+status = "untested"
+probe_id = "tool-lsp-rename"
+threshold = "tool renames symbol across files consistently"
+priority = "medium"
+
+[tools.lsp_status]
+type = "tool"
+category = "lsp"
+status = "untested"
+probe_id = "tool-lsp-status"
+threshold = "tool returns LSP server status without crash"
+priority = "low"
+
+# --- Browser (8) ---
+
+[tools.browser_click]
+type = "tool"
+category = "browser"
+status = "untested"
+probe_id = "tool-browser-click"
+threshold = "tool clicks element AND page state changes"
+priority = "low"
+note = "Requires Playwright + Chromium"
+
+[tools.browser_close]
+type = "tool"
+category = "browser"
+status = "untested"
+probe_id = "tool-browser-close"
+threshold = "tool closes session cleanly"
+priority = "low"
+
+[tools.browser_eval]
+type = "tool"
+category = "browser"
+status = "untested"
+probe_id = "tool-browser-eval"
+threshold = "tool evaluates JS AND returns result"
+priority = "low"
+
+[tools.browser_open]
+type = "tool"
+category = "browser"
+status = "untested"
+probe_id = "tool-browser-open"
+threshold = "tool opens URL AND returns page info"
+priority = "low"
+
+[tools.browser_screenshot]
+type = "tool"
+category = "browser"
+status = "untested"
+probe_id = "tool-browser-screenshot"
+threshold = "tool captures screenshot as PNG/base64"
+priority = "low"
+
+[tools.browser_status]
+type = "tool"
+category = "browser"
+status = "untested"
+probe_id = "tool-browser-status"
+threshold = "tool returns browser session status"
+priority = "low"
+
+[tools.browser_type]
+type = "tool"
+category = "browser"
+status = "untested"
+probe_id = "tool-browser-type"
+threshold = "tool types text into input field"
+priority = "low"
+
+[tools.browser_wait_for_selector]
+type = "tool"
+category = "browser"
+status = "untested"
+probe_id = "tool-browser-wait"
+threshold = "tool waits until selector appears or times out"
+priority = "low"
+
+# --- Cognitive (5) ---
+
+[tools.memory]
+type = "tool"
+category = "cognitive"
+status = "untested"
+probe_id = "tool-memory"
+threshold = "tool stores AND retrieves memory entries"
+priority = "high"
+
+[tools.reflect]
+type = "tool"
+category = "cognitive"
+status = "untested"
+probe_id = "tool-reflect"
+threshold = "tool produces reflection output"
+priority = "medium"
+
+[tools.task_create]
+type = "tool"
+category = "cognitive"
+status = "untested"
+probe_id = "tool-task-create"
+threshold = "tool creates task with ID returned"
+priority = "medium"
+
+[tools.task_update]
+type = "tool"
+category = "cognitive"
+status = "untested"
+probe_id = "tool-task-update"
+threshold = "tool updates task status"
+priority = "medium"
+
+[tools.think]
+type = "tool"
+category = "cognitive"
+status = "untested"
+probe_id = "tool-think"
+threshold = "tool accepts thinking content without error"
+priority = "low"
+
+# --- Planning (8) ---
+
+[tools.plan_create]
+type = "tool"
+category = "planning"
+status = "untested"
+probe_id = "tool-plan-create"
+threshold = "tool creates plan structure"
+priority = "high"
+
+[tools.plan_advance_phase]
+type = "tool"
+category = "planning"
+status = "untested"
+probe_id = "tool-plan-advance"
+threshold = "tool advances phase AND validates preconditions"
+priority = "medium"
+
+[tools.plan_failure_status]
+type = "tool"
+category = "planning"
+status = "untested"
+probe_id = "tool-plan-failure"
+threshold = "tool returns failure summary"
+priority = "low"
+
+[tools.plan_log]
+type = "tool"
+category = "planning"
+status = "untested"
+probe_id = "tool-plan-log"
+threshold = "tool appends log entry"
+priority = "low"
+
+[tools.plan_next_task]
+type = "tool"
+category = "planning"
+status = "untested"
+probe_id = "tool-plan-next"
+threshold = "tool returns next actionable task"
+priority = "medium"
+
+[tools.plan_replan]
+type = "tool"
+category = "planning"
+status = "untested"
+probe_id = "tool-plan-replan"
+threshold = "tool mutates plan at subtask level"
+priority = "medium"
+
+[tools.plan_summary]
+type = "tool"
+category = "planning"
+status = "untested"
+probe_id = "tool-plan-summary"
+threshold = "tool returns plan summary with progress"
+priority = "low"
+
+[tools.plan_update_task]
+type = "tool"
+category = "planning"
+status = "untested"
+probe_id = "tool-plan-update"
+threshold = "tool updates task status in plan"
+priority = "medium"
+
+# --- Testing (2) ---
+
+[tools.gen_mutation_test]
+type = "tool"
+category = "testing"
+status = "untested"
+probe_id = "tool-gen-mutation"
+threshold = "tool generates mutation test for given function"
+priority = "low"
+
+[tools.gen_property_test]
+type = "tool"
+category = "testing"
+status = "untested"
+probe_id = "tool-gen-property"
+threshold = "tool generates property test for given function"
+priority = "low"
+
+# --- Multimodal (2) ---
+
+[tools.read_image]
+type = "tool"
+category = "multimodal"
+status = "untested"
+probe_id = "tool-read-image"
+threshold = "tool reads image AND returns description/base64"
+priority = "low"
+
+[tools.screenshot]
+type = "tool"
+category = "multimodal"
+status = "untested"
+probe_id = "tool-screenshot"
+threshold = "tool captures screen region"
+priority = "low"
+
+# --- Context & Execution (3) ---
+
+[tools.bash]
+type = "tool"
+category = "execution"
+status = "untested"
+probe_id = "tool-bash"
+threshold = "tool executes command in sandbox AND returns stdout/stderr/exit_code"
+priority = "high"
+
+[tools.codebase_context]
+type = "tool"
+category = "context"
+status = "untested"
+probe_id = "tool-codebase-context"
+threshold = "tool returns GRAPHCTX context with files AND symbols"
+priority = "high"
+
+[tools.docs_search]
+type = "tool"
+category = "context"
+status = "untested"
+probe_id = "tool-docs-search"
+threshold = "tool searches docs AND returns ranked results"
+priority = "medium"
+
+# --- Utilities (1) ---
+
+[tools.env_info]
+type = "tool"
+category = "utility"
+status = "untested"
+probe_id = "tool-env-info"
+threshold = "tool returns OS, shell, git info"
+priority = "low"
+
+# ============================================================================
+# DEBUG TOOLS — DAP (11 tools, E2E untested — Gap 6.1 CRITICAL)
+# ============================================================================
+
+[debug.debug_launch]
+type = "tool"
+category = "debug"
+status = "untested"
+probe_id = "debug-launch"
+threshold = "tool launches debugger session"
+priority = "medium"
+note = "Gap 6.1 CRITICAL in maturity analysis"
+
+[debug.debug_set_breakpoint]
+type = "tool"
+category = "debug"
+status = "untested"
+probe_id = "debug-breakpoint"
+threshold = "tool sets breakpoint at line"
+priority = "medium"
+
+[debug.debug_continue]
+type = "tool"
+category = "debug"
+status = "untested"
+probe_id = "debug-continue"
+threshold = "tool continues execution"
+priority = "medium"
+
+[debug.debug_step]
+type = "tool"
+category = "debug"
+status = "untested"
+probe_id = "debug-step"
+threshold = "tool steps one instruction"
+priority = "medium"
+
+[debug.debug_eval]
+type = "tool"
+category = "debug"
+status = "untested"
+probe_id = "debug-eval"
+threshold = "tool evaluates expression in debug context"
+priority = "medium"
+
+[debug.debug_stack_trace]
+type = "tool"
+category = "debug"
+status = "untested"
+probe_id = "debug-stack"
+threshold = "tool returns stack frames"
+priority = "medium"
+
+[debug.debug_scopes]
+type = "tool"
+category = "debug"
+status = "untested"
+probe_id = "debug-scopes"
+threshold = "tool returns variable scopes"
+priority = "low"
+
+[debug.debug_variables]
+type = "tool"
+category = "debug"
+status = "untested"
+probe_id = "debug-variables"
+threshold = "tool returns variable values"
+priority = "low"
+
+[debug.debug_threads]
+type = "tool"
+category = "debug"
+status = "untested"
+probe_id = "debug-threads"
+threshold = "tool lists active threads"
+priority = "low"
+
+[debug.debug_status]
+type = "tool"
+category = "debug"
+status = "untested"
+probe_id = "debug-status"
+threshold = "tool returns debugger session status"
+priority = "low"
+
+[debug.debug_terminate]
+type = "tool"
+category = "debug"
+status = "untested"
+probe_id = "debug-terminate"
+threshold = "tool terminates debug session cleanly"
+priority = "low"
+
+# ============================================================================
+# WIKI SYSTEM (8 features) — LLM-compiled wiki for HUMANS to understand codebases
+# Objective: Humans read the wiki, not the code. Wiki Agent keeps it alive.
+# Contract: HUMAN=reader, WIKI_AGENT=writer (background sub-agent), MANUAL=optional
+# Architecture: Skeleton (tree-sitter, free) + Enrichment (LLM via Wiki Agent)
+# Ref: docs/pesquisas/wiki/INDEX.md, docs/pesquisas/wiki/wiki-system-sota.md
+# ============================================================================
+
+[wiki.wiki_agent]
+type = "wiki"
+category = "core"
+status = "untested"
+probe_id = "wiki-agent"
+threshold = "Wiki Agent exists as background sub-agent in theo-agent-runtime AND is the ONLY writer of wiki content AND activates on triggers (git commit, ADR, tests, session end, cron)"
+priority = "high"
+note = "The wiki is ALIVE — maintained by an autonomous agent, not manual commands. No other tool on the market does this"
+ref = "docs/pesquisas/wiki/INDEX.md"
+
+[wiki.skeleton_generation]
+type = "wiki"
+category = "skeleton"
+status = "untested"
+probe_id = "wiki-skeleton"
+threshold = "Skeleton generated from tree-sitter parse (free, no LLM) with: file inventory, symbol list, public APIs, dependency edges, module groupings"
+priority = "high"
+note = "Skeleton already exists via theo-engine-graph. This is the structural base that enrichment builds on"
+
+[wiki.enrichment_pipeline]
+type = "wiki"
+category = "enrichment"
+status = "untested"
+probe_id = "wiki-enrichment"
+threshold = "LLM enrichment transforms skeleton into human-readable wiki pages with: 'what it does', 'why it exists', 'how it works', 'what breaks if you change it', 'architectural decisions'"
+priority = "high"
+note = "This is what transforms inventory into understanding. Uses cheap model (Haiku/Compact role)"
+
+[wiki.trigger_system]
+type = "wiki"
+category = "triggers"
+status = "untested"
+probe_id = "wiki-triggers"
+threshold = "Wiki Agent triggers on: git commit (re-enrich affected pages), new ADR (decision page), cargo test (coverage update), session end (ingest insights), cron (lint + freshness check)"
+priority = "high"
+note = "Triggers make the wiki ALIVE. Without them it's just another stale doc generator"
+
+[wiki.wiki_generate_tool]
+type = "tool"
+category = "wiki"
+status = "untested"
+probe_id = "wiki-generate"
+threshold = "tool generates/rebuilds wiki pages from code graph skeleton + LLM enrichment AND respects hash-based incremental (unchanged files = no LLM calls)"
+priority = "medium"
+note = "Manual override. The Wiki Agent normally handles this automatically via triggers"
+
+[wiki.wiki_query_tool]
+type = "tool"
+category = "wiki"
+status = "untested"
+probe_id = "wiki-query"
+threshold = "tool searches wiki pages AND returns ranked results AND query answers can be filed back as wiki pages (compounding knowledge)"
+priority = "medium"
+note = "Karpathy pattern: query answers become new wiki pages for future queries"
+
+[wiki.wiki_lint_tool]
+type = "tool"
+category = "wiki"
+status = "untested"
+probe_id = "wiki-lint"
+threshold = "tool lints wiki for: broken wikilinks, orphan pages, stale pages (>48h without update), missing enrichment, contradictions between pages"
+priority = "medium"
+note = "6+ structural lint rules from llm-wiki-compiler + freshness check"
+
+[wiki.freshness_guarantee]
+type = "wiki"
+category = "quality"
+status = "untested"
+probe_id = "wiki-freshness"
+threshold = "Wiki pages for actively modified modules are never more than 48h stale AND freshness tracked per-page AND stale pages flagged by lint"
+priority = "high"
+note = "The fundamental promise: wiki is NEVER stale because Wiki Agent updates automatically"
+
+# ============================================================================
+# CLI SUBCOMMANDS (17)
+# ============================================================================
+
+[cli.init]
+type = "cli-subcommand"
+status = "untested"
+probe_id = "cli-init"
+threshold = "creates .theo/ directory structure"
+priority = "high"
+
+[cli.agent]
+type = "cli-subcommand"
+status = "untested"
+probe_id = "cli-agent"
+threshold = "enters interactive REPL or executes single-shot task"
+priority = "high"
+
+[cli.pilot]
+type = "cli-subcommand"
+status = "untested"
+probe_id = "cli-pilot"
+threshold = "autonomous loop completes or exits with clear status"
+priority = "high"
+
+[cli.context]
+type = "cli-subcommand"
+status = "untested"
+probe_id = "cli-context"
+threshold = "assembles GRAPHCTX context AND outputs file list"
+priority = "high"
+
+[cli.impact]
+type = "cli-subcommand"
+status = "untested"
+probe_id = "cli-impact"
+threshold = "analyzes file impact AND returns affected files"
+priority = "medium"
+
+[cli.stats]
+type = "cli-subcommand"
+status = "untested"
+probe_id = "cli-stats"
+threshold = "shows graph statistics for repository"
+priority = "low"
+
+[cli.memory]
+type = "cli-subcommand"
+status = "untested"
+probe_id = "cli-memory"
+threshold = "memory lint/inspect executes without crash"
+priority = "medium"
+
+[cli.login]
+type = "cli-subcommand"
+status = "untested"
+probe_id = "cli-login"
+threshold = "OAuth flow initiates AND stores credentials"
+priority = "high"
+note = "Requires provider credentials"
+
+[cli.logout]
+type = "cli-subcommand"
+status = "untested"
+probe_id = "cli-logout"
+threshold = "removes saved credentials"
+priority = "low"
+
+[cli.dashboard]
+type = "cli-subcommand"
+status = "untested"
+probe_id = "cli-dashboard"
+threshold = "starts HTTP server AND responds to health check"
+priority = "medium"
+
+[cli.subagent]
+type = "cli-subcommand"
+status = "untested"
+probe_id = "cli-subagent"
+threshold = "manages persisted sub-agent runs"
+priority = "medium"
+
+[cli.checkpoints]
+type = "cli-subcommand"
+status = "untested"
+probe_id = "cli-checkpoints"
+threshold = "manages workdir checkpoints"
+priority = "low"
+
+[cli.agents]
+type = "cli-subcommand"
+status = "untested"
+probe_id = "cli-agents"
+threshold = "manages project agents approval"
+priority = "low"
+
+[cli.mcp]
+type = "cli-subcommand"
+status = "untested"
+probe_id = "cli-mcp"
+threshold = "manages MCP discovery cache"
+priority = "low"
+
+[cli.skill]
+type = "cli-subcommand"
+status = "untested"
+probe_id = "cli-skill"
+threshold = "lists/views/deletes skills"
+priority = "medium"
+
+[cli.trajectory]
+type = "cli-subcommand"
+status = "untested"
+probe_id = "cli-trajectory"
+threshold = "exports trajectory data"
+priority = "low"
+
+[cli.help]
+type = "cli-subcommand"
+status = "untested"
+probe_id = "cli-help"
+threshold = "prints help text with all 17 subcommands listed"
+priority = "high"
+
+# ============================================================================
+# LLM PROVIDERS (26)
+# ============================================================================
+
+# --- Tier 1: OpenAI-Compatible (12) ---
+
+[providers.openai]
+type = "provider"
+tier = 1
+status = "untested"
+probe_id = "provider-openai"
+threshold = "authenticate AND complete minimal chat request"
+priority = "high"
+auth_type = "api_key"
+
+[providers.openrouter]
+type = "provider"
+tier = 1
+status = "untested"
+probe_id = "provider-openrouter"
+threshold = "authenticate AND complete minimal chat request"
+priority = "medium"
+auth_type = "api_key"
+
+[providers.xai]
+type = "provider"
+tier = 1
+status = "untested"
+probe_id = "provider-xai"
+threshold = "authenticate AND complete minimal chat request"
+priority = "medium"
+auth_type = "api_key"
+
+[providers.mistral]
+type = "provider"
+tier = 1
+status = "untested"
+probe_id = "provider-mistral"
+threshold = "authenticate AND complete minimal chat request"
+priority = "medium"
+auth_type = "api_key"
+
+[providers.groq]
+type = "provider"
+tier = 1
+status = "untested"
+probe_id = "provider-groq"
+threshold = "authenticate AND complete minimal chat request"
+priority = "medium"
+auth_type = "api_key"
+
+[providers.deepinfra]
+type = "provider"
+tier = 1
+status = "untested"
+probe_id = "provider-deepinfra"
+threshold = "authenticate AND complete minimal chat request"
+priority = "low"
+auth_type = "api_key"
+
+[providers.cerebras]
+type = "provider"
+tier = 1
+status = "untested"
+probe_id = "provider-cerebras"
+threshold = "authenticate AND complete minimal chat request"
+priority = "low"
+auth_type = "api_key"
+
+[providers.cohere]
+type = "provider"
+tier = 1
+status = "untested"
+probe_id = "provider-cohere"
+threshold = "authenticate AND complete minimal chat request"
+priority = "low"
+auth_type = "api_key"
+
+[providers.togetherai]
+type = "provider"
+tier = 1
+status = "untested"
+probe_id = "provider-togetherai"
+threshold = "authenticate AND complete minimal chat request"
+priority = "low"
+auth_type = "api_key"
+
+[providers.perplexity]
+type = "provider"
+tier = 1
+status = "untested"
+probe_id = "provider-perplexity"
+threshold = "authenticate AND complete minimal chat request"
+priority = "low"
+auth_type = "api_key"
+
+[providers.vercel]
+type = "provider"
+tier = 1
+status = "untested"
+probe_id = "provider-vercel"
+threshold = "authenticate AND complete minimal chat request"
+priority = "low"
+auth_type = "api_key"
+
+[providers.chatgpt_codex]
+type = "provider"
+tier = 1
+status = "untested"
+probe_id = "provider-chatgpt-codex"
+threshold = "OAuth flow completes AND chat request succeeds"
+priority = "high"
+auth_type = "oauth"
+note = "Primary provider for E2E validation"
+
+# --- Tier 2: Non-OpenAI Compatible (1) ---
+
+[providers.anthropic]
+type = "provider"
+tier = 2
+status = "untested"
+probe_id = "provider-anthropic"
+threshold = "authenticate AND complete minimal chat request"
+priority = "high"
+auth_type = "api_key"
+
+# --- Tier 3: Cloud Special Auth (7) ---
+
+[providers.azure]
+type = "provider"
+tier = 3
+status = "untested"
+probe_id = "provider-azure"
+threshold = "authenticate via Azure AD AND complete chat request"
+priority = "medium"
+auth_type = "azure_ad"
+
+[providers.azure_cognitive]
+type = "provider"
+tier = 3
+status = "untested"
+probe_id = "provider-azure-cognitive"
+threshold = "authenticate AND complete chat request"
+priority = "low"
+auth_type = "azure_ad"
+
+[providers.github_copilot]
+type = "provider"
+tier = 3
+status = "untested"
+probe_id = "provider-github-copilot"
+threshold = "authenticate via GitHub AND complete chat request"
+priority = "medium"
+auth_type = "oauth"
+
+[providers.gitlab]
+type = "provider"
+tier = 3
+status = "untested"
+probe_id = "provider-gitlab"
+threshold = "authenticate AND complete chat request"
+priority = "low"
+auth_type = "api_key"
+
+[providers.cloudflare_workers]
+type = "provider"
+tier = 3
+status = "untested"
+probe_id = "provider-cloudflare-workers"
+threshold = "authenticate AND complete chat request"
+priority = "low"
+auth_type = "api_key"
+
+[providers.cloudflare_gateway]
+type = "provider"
+tier = 3
+status = "untested"
+probe_id = "provider-cloudflare-gateway"
+threshold = "authenticate AND complete chat request"
+priority = "low"
+auth_type = "api_key"
+
+[providers.sap_ai_core]
+type = "provider"
+tier = 3
+status = "untested"
+probe_id = "provider-sap-ai-core"
+threshold = "authenticate AND complete chat request"
+priority = "low"
+auth_type = "oauth"
+
+# --- Tier 4: Complex Cloud Auth (3) ---
+
+[providers.amazon_bedrock]
+type = "provider"
+tier = 4
+status = "untested"
+probe_id = "provider-amazon-bedrock"
+threshold = "authenticate via AWS STS AND complete chat request"
+priority = "medium"
+auth_type = "aws_sts"
+
+[providers.google_vertex]
+type = "provider"
+tier = 4
+status = "untested"
+probe_id = "provider-google-vertex"
+threshold = "authenticate via GCP AND complete chat request"
+priority = "medium"
+auth_type = "gcp_service_account"
+
+[providers.google_vertex_anthropic]
+type = "provider"
+tier = 4
+status = "untested"
+probe_id = "provider-google-vertex-anthropic"
+threshold = "authenticate via GCP AND complete Anthropic chat request"
+priority = "medium"
+auth_type = "gcp_service_account"
+
+# --- Tier 5: Local Models (3) ---
+
+[providers.ollama]
+type = "provider"
+tier = 5
+status = "untested"
+probe_id = "provider-ollama"
+threshold = "connect to local server AND complete chat request"
+priority = "high"
+auth_type = "none"
+note = "No auth required — just needs running server"
+
+[providers.vllm]
+type = "provider"
+tier = 5
+status = "untested"
+probe_id = "provider-vllm"
+threshold = "connect to vLLM server AND complete chat request"
+priority = "high"
+auth_type = "none"
+note = "Used for SWE-bench with Qwen3-30B"
+
+[providers.lm_studio]
+type = "provider"
+tier = 5
+status = "untested"
+probe_id = "provider-lm-studio"
+threshold = "connect to LM Studio AND complete chat request"
+priority = "low"
+auth_type = "none"
+
+# ============================================================================
+# TREE-SITTER LANGUAGES (14)
+# ============================================================================
+
+[languages.c]
+type = "language"
+status = "untested"
+probe_id = "lang-c"
+threshold = "parse sample .c file AND extract >= 1 function symbol"
+priority = "medium"
+
+[languages.cpp]
+type = "language"
+status = "untested"
+probe_id = "lang-cpp"
+threshold = "parse sample .cpp file AND extract >= 1 class/function"
+priority = "medium"
+
+[languages.csharp]
+type = "language"
+status = "untested"
+probe_id = "lang-csharp"
+threshold = "parse sample .cs file AND extract >= 1 class/method"
+priority = "medium"
+
+[languages.go]
+type = "language"
+status = "untested"
+probe_id = "lang-go"
+threshold = "parse sample .go file AND extract >= 1 func"
+priority = "high"
+
+[languages.java]
+type = "language"
+status = "untested"
+probe_id = "lang-java"
+threshold = "parse sample .java file AND extract >= 1 class/method"
+priority = "high"
+
+[languages.javascript]
+type = "language"
+status = "untested"
+probe_id = "lang-javascript"
+threshold = "parse sample .js file AND extract >= 1 function"
+priority = "high"
+
+[languages.kotlin]
+type = "language"
+status = "untested"
+probe_id = "lang-kotlin"
+threshold = "parse sample .kt file AND extract >= 1 fun/class"
+priority = "medium"
+
+[languages.php]
+type = "language"
+status = "untested"
+probe_id = "lang-php"
+threshold = "parse sample .php file AND extract >= 1 function/class"
+priority = "low"
+
+[languages.python]
+type = "language"
+status = "untested"
+probe_id = "lang-python"
+threshold = "parse sample .py file AND extract >= 1 def/class"
+priority = "high"
+
+[languages.ruby]
+type = "language"
+status = "untested"
+probe_id = "lang-ruby"
+threshold = "parse sample .rb file AND extract >= 1 def/class"
+priority = "low"
+
+[languages.rust]
+type = "language"
+status = "untested"
+probe_id = "lang-rust"
+threshold = "parse sample .rs file AND extract >= 1 fn/struct/impl"
+priority = "high"
+
+[languages.scala]
+type = "language"
+status = "untested"
+probe_id = "lang-scala"
+threshold = "parse sample .scala file AND extract >= 1 def/class"
+priority = "low"
+
+[languages.swift]
+type = "language"
+status = "untested"
+probe_id = "lang-swift"
+threshold = "parse sample .swift file AND extract >= 1 func/class"
+priority = "low"
+
+[languages.typescript]
+type = "language"
+status = "untested"
+probe_id = "lang-typescript"
+threshold = "parse sample .ts file AND extract >= 1 function/interface"
+priority = "high"
+
+# ============================================================================
+# AGENT RUNTIME PHASES (5)
+# ============================================================================
+
+[runtime.plan_phase]
+type = "runtime-phase"
+status = "untested"
+probe_id = "runtime-plan"
+threshold = "agent enters Plan phase AND produces task decomposition"
+priority = "high"
+
+[runtime.act_phase]
+type = "runtime-phase"
+status = "untested"
+probe_id = "runtime-act"
+threshold = "agent enters Act phase AND executes at least 1 tool call"
+priority = "high"
+
+[runtime.observe_phase]
+type = "runtime-phase"
+status = "untested"
+probe_id = "runtime-observe"
+threshold = "agent enters Observe phase AND processes tool results"
+priority = "high"
+
+[runtime.reflect_phase]
+type = "runtime-phase"
+status = "untested"
+probe_id = "runtime-reflect"
+threshold = "agent enters Reflect phase AND produces self-assessment"
+priority = "high"
+
+[runtime.budget_enforcer]
+type = "runtime-phase"
+status = "untested"
+probe_id = "runtime-budget"
+threshold = "agent stops when token budget exceeded (no infinite loop)"
+priority = "high"
+note = "Critical safety mechanism"
+
+# ============================================================================
+# MEMORY SYSTEM (9 features) — CoALA taxonomy + Karpathy Wiki
+# Ref: docs/pesquisas/agent-memory-sota.md, arXiv:2309.02427 (CoALA)
+# ============================================================================
+
+[memory.stm_buffer]
+type = "memory"
+category = "stm"
+status = "untested"
+probe_id = "memory-stm-buffer"
+threshold = "ShortTermBuffer maintains bounded FIFO of turns AND respects pinned messages"
+priority = "high"
+note = "STM = context window management. Currently implicit in ChatRequest turn list"
+ref = "agent-memory-sota.md §3 row 1"
+
+[memory.working_memory]
+type = "memory"
+category = "wm"
+status = "untested"
+probe_id = "memory-working-memory"
+threshold = "WorkingSet is read/written by RunEngine during agent loop AND tracks current task + subgoals + errors"
+priority = "high"
+note = "working_set.rs exists (291 LOC) but wiring into agent_loop unclear"
+ref = "agent-memory-sota.md §3 row 2"
+
+[memory.ltm_semantic_builtin]
+type = "memory"
+category = "ltm-semantic"
+status = "untested"
+probe_id = "memory-ltm-builtin"
+threshold = "BuiltinMemoryProvider stores AND retrieves MEMORY.md entries with frozen-snapshot injection AND security scan rejects injection patterns"
+priority = "high"
+note = "Port of hermes memory_tool.py:105-389. RM3a in roadmap"
+ref = "agent-memory-sota.md §3 row 3, MemGPT arXiv:2310.08560"
+
+[memory.ltm_semantic_wiki]
+type = "memory"
+category = "ltm-semantic"
+status = "untested"
+probe_id = "memory-ltm-wiki"
+threshold = "WikiMemoryProvider compiles .theo/wiki/ via hash-based incremental pipeline AND wiki manifest injected in system prompt AND retrieval returns scored MemoryEntry"
+priority = "high"
+note = "Karpathy LLM Wiki pattern. RM5a/RM5b in roadmap"
+ref = "agent-memory-sota.md §4, karpathy-llm-wiki-tutorial.md"
+
+[memory.ltm_episodic]
+type = "memory"
+category = "ltm-episodic"
+status = "untested"
+probe_id = "memory-ltm-episodic"
+threshold = "EpisodeSummary written on compaction AND queryable via EpisodicMemory::last_n(query, limit) returning events with cause + timestamp + context"
+priority = "high"
+note = "episode.rs exists (1328 LOC). Write-site in compaction needs verification"
+ref = "agent-memory-sota.md §3 row 4, CoALA arXiv:2309.02427"
+
+[memory.ltm_procedural]
+type = "memory"
+category = "ltm-procedural"
+status = "untested"
+probe_id = "memory-ltm-procedural"
+threshold = "Learned procedural observations written to wiki/procedures/ AND skill catalog reads them for future sessions"
+priority = "medium"
+note = "Skills exist but are static. No learned procedural memory yet"
+ref = "agent-memory-sota.md §3 row 5"
+
+[memory.reflection_lessons]
+type = "memory"
+category = "reflection"
+status = "untested"
+probe_id = "memory-lessons"
+threshold = "MemoryLesson written at convergence AND compaction with 7 gates (confidence 0.6-0.95, evidence >= 2, contradiction scan, provenance hash, semantic dedup, quarantine 7d, aging decay)"
+priority = "high"
+note = "Renamed from Reflection to avoid collision with theo-domain::evolution::Reflection. RM4 in roadmap"
+ref = "agent-memory-plan.md RM4, MemoryBank arXiv:2305.10250"
+
+[memory.meta_memory_engine]
+type = "memory"
+category = "meta-memory"
+status = "untested"
+probe_id = "memory-meta-engine"
+threshold = "MemoryEngine coordinates providers via fan-out with error isolation AND enforces WritePolicy + ForgetPolicy + RankPolicy AND panicking provider does not crash agent loop"
+priority = "high"
+note = "The decision engine. Port of hermes MemoryManager. RM1 in roadmap"
+ref = "agent-memory-sota.md §5.2, agent-memory-plan.md RM1"
+
+[memory.retrieval_backed]
+type = "memory"
+category = "retrieval"
+status = "untested"
+probe_id = "memory-retrieval-backed"
+threshold = "RetrievalBackedMemory delegates prefetch to theo-engine-retrieval with source_type filter AND memory_token_budget 15% of total AND code ranking not cannibalized"
+priority = "medium"
+note = "Feature-gated behind memory-retrieval. RM2 in roadmap"
+ref = "agent-memory-plan.md RM2"
+
+# ============================================================================
+# AGENT LOOP (12 features) — ReAct, doom loop, convergence, compaction
+# Ref: harness-engineering-guide.md, effective-harnesses-for-long-running-agents.md
+# ============================================================================
+
+[agent_loop.react_cycle]
+type = "agent-loop"
+category = "core"
+status = "untested"
+probe_id = "loop-react-cycle"
+threshold = "Agent completes Plan→Act→Observe→Reflect cycle for a simple task AND each phase produces observable output"
+priority = "high"
+note = "State machine in theo-agent-runtime"
+
+[agent_loop.doom_loop_detection]
+type = "agent-loop"
+category = "safety"
+status = "untested"
+probe_id = "loop-doom-detection"
+threshold = "Agent detects repeated identical tool calls (doom loop) within doom_loop_threshold AND breaks out with diagnostic message"
+priority = "high"
+note = "doom_loop_threshold in config.rs. Critical safety mechanism"
+ref = "opendev ReactLoop doom-loop detection"
+
+[agent_loop.convergence_detection]
+type = "agent-loop"
+category = "core"
+status = "untested"
+probe_id = "loop-convergence"
+threshold = "Agent detects task completion AND produces convergence signal (not premature completion)"
+priority = "high"
+note = "Premature completion is the #2 failure mode per Anthropic"
+ref = "effective-harnesses-for-long-running-agents.md"
+
+[agent_loop.incremental_progress]
+type = "agent-loop"
+category = "core"
+status = "untested"
+probe_id = "loop-incremental"
+threshold = "Agent works on one feature at a time AND commits progress AND updates progress log between sessions"
+priority = "high"
+note = "Key insight from Anthropic long-running agents research"
+ref = "effective-harnesses-for-long-running-agents.md:66-70"
+
+[agent_loop.compaction_stages]
+type = "agent-loop"
+category = "context"
+status = "untested"
+probe_id = "loop-compaction"
+threshold = "Compaction preserves critical context across 5+ stages AND alignment prevents cutting tool-call/result pairs AND agent continues effectively post-compaction"
+priority = "high"
+note = "compaction_stages.rs. 5 stages already implemented per CLAUDE.md"
+
+[agent_loop.self_evolution_loop]
+type = "agent-loop"
+category = "evolution"
+status = "untested"
+probe_id = "loop-self-evolution"
+threshold = "Self-evolution loop retries with acceptance gate AND starts narrow, expands only on failure signals AND measurably improves outcome (+4.8 SWE-Bench points)"
+priority = "high"
+note = "Only consistently beneficial module in Tsinghua ablation"
+ref = "harness-engineering-guide.md:92-96"
+
+[agent_loop.no_verifier_overhead]
+type = "agent-loop"
+category = "anti-pattern"
+status = "untested"
+probe_id = "loop-no-verifier"
+threshold = "No separate verifier agent in hot path (verifiers harm -0.8 to -8.4 points) AND verification is integrated into evaluator-optimizer loop"
+priority = "high"
+note = "Anti-pattern explicitly avoided per Tsinghua ablation"
+ref = "harness-engineering-guide.md:94-95"
+
+[agent_loop.no_multi_candidate]
+type = "agent-loop"
+category = "anti-pattern"
+status = "untested"
+probe_id = "loop-no-multi-candidate"
+threshold = "No multi-candidate search pattern (-2.4 points) AND single-path with retry preferred"
+priority = "medium"
+note = "Anti-pattern explicitly avoided per Tsinghua ablation"
+ref = "harness-engineering-guide.md:96"
+
+[agent_loop.tool_parallelization]
+type = "agent-loop"
+category = "performance"
+status = "untested"
+probe_id = "loop-tool-parallel"
+threshold = "Read-only tools execute in parallel AND write tools execute sequentially AND parallelization correctly classified"
+priority = "medium"
+note = "hermes-agent parallel-safe classification, opendev parallel read-only"
+ref = "INDEX.md §1 Agent Loop"
+
+[agent_loop.iteration_budget]
+type = "agent-loop"
+category = "safety"
+status = "untested"
+probe_id = "loop-iteration-budget"
+threshold = "Agent respects max iteration count AND gracefully terminates with summary when budget exceeded"
+priority = "high"
+note = "hermes allows 90 iterations max with smart timeouts"
+
+[agent_loop.session_continuity]
+type = "agent-loop"
+category = "long-horizon"
+status = "untested"
+probe_id = "loop-session-continuity"
+threshold = "Agent resumes work across sessions via progress artifacts (SessionSummary, git history) AND does not re-do completed work"
+priority = "high"
+note = "Core long-running agent capability"
+ref = "effective-harnesses-for-long-running-agents.md:33-38"
+
+[agent_loop.failure_classification]
+type = "agent-loop"
+category = "resilience"
+status = "untested"
+probe_id = "loop-failure-classify"
+threshold = "Agent classifies failures (RepeatedSameError, ToolTimeout, LLMRefusal, etc.) AND adapts strategy per class"
+priority = "medium"
+note = "reflector.rs classify_failure() pattern"
+
+# ============================================================================
+# CONTEXT ENGINEERING (14 features) — theo-engine-retrieval
+# Objective: Graph-augmented agentic retrieval — structural intelligence
+# derived FROM code (never from stale docs), exposed as tool backends.
+# Ref: docs/pesquisas/context/code-retrieval-deep-research.md (963 lines, 68 sources)
+# Ref: crates/theo-engine-retrieval/README.md
+# ============================================================================
+
+# --- Search layer: "encontrar código" ---
+
+[context_eng.bm25_code_aware]
+type = "context-engineering"
+category = "search"
+status = "untested"
+probe_id = "ctx-bm25"
+threshold = "BM25F with code-aware tokenization (camelCase/snake_case split, identifier stemming) AND field boosts (filename 5×, path 3×, symbols 3×) AND PRF expansion when top-1 is 2× more confident than #2"
+priority = "high"
+note = "file_bm25.rs. Sourcegraph reports +20% with BM25F over plain BM25"
+ref = "code-retrieval-deep-research.md §3"
+
+[context_eng.dense_search_code_model]
+type = "context-engineering"
+category = "search"
+status = "untested"
+probe_id = "ctx-dense-model"
+threshold = "Dense search uses a CODE-SPECIFIC embedding model (Jina Code v2 or Voyage Code 3, NOT AllMiniLM-L6-v2) AND MRR >= 0.90 on internal benchmark"
+priority = "high"
+note = "P0 ACTION: AllMiniLM-L6-v2 is 15-25 points behind code-specific models on CoIR benchmarks. This is the single biggest improvement opportunity"
+ref = "code-retrieval-deep-research.md §4, sota-thresholds.toml retrieval.mrr"
+
+[context_eng.query_type_routing]
+type = "context-engineering"
+category = "search"
+status = "untested"
+probe_id = "ctx-query-routing"
+threshold = "QueryType classifier routes Identifier queries to BM25 AND NaturalLanguage queries to Dense AND Mixed to both via RRF"
+priority = "medium"
+note = "query_type.rs — routes to the right ranker per query type"
+
+[context_eng.rrf_fusion]
+type = "context-engineering"
+category = "fusion"
+status = "untested"
+probe_id = "ctx-rrf-fusion"
+threshold = "RRF fusion combines BM25 + Dense + Tantivy scores AND produces top-50 candidates AND fusion outperforms any single ranker"
+priority = "high"
+note = "pipeline.rs. RRF is baseline standard; learned fusion outperforms when tuning data exists"
+ref = "code-retrieval-deep-research.md §5"
+
+# --- Graph layer: "entender relações" (unique competitive advantage) ---
+
+[context_eng.graph_attention]
+type = "context-engineering"
+category = "graph"
+status = "untested"
+probe_id = "ctx-graph-attention"
+threshold = "Graph Attention Propagation discovers transitively related files (multi-hop, damping 0.5) AND improves retrieval over text-only search by measurable margin"
+priority = "high"
+note = "graph_attention.rs. UNIQUE — no other coding agent has this. LocAgent (ACL 2025) validates graph-based retrieval: 92.7% file localization via graph"
+ref = "code-retrieval-deep-research.md §6"
+
+[context_eng.pagerank]
+type = "context-engineering"
+category = "graph"
+status = "untested"
+probe_id = "ctx-pagerank"
+threshold = "PageRank on code graph identifies structurally important files AND PageRank-weighted results better than unweighted"
+priority = "medium"
+note = "signals.rs. Aider also uses PageRank on code graphs — validated approach"
+ref = "code-retrieval-deep-research.md §6"
+
+[context_eng.community_detection]
+type = "context-engineering"
+category = "graph"
+status = "untested"
+probe_id = "ctx-community-detection"
+threshold = "Community detection groups related files into cohesive modules AND cluster-aware context picks whole communities when relevant"
+priority = "medium"
+note = "UNIQUE — no other coding agent clusters code this way. Enables repo_map tool"
+
+[context_eng.dependency_coverage]
+type = "context-engineering"
+category = "graph"
+status = "untested"
+probe_id = "ctx-depcov"
+threshold = "Dependency Coverage (DepCov) >= 0.96 — context includes both sides of every dependency edge"
+priority = "high"
+note = "UNIQUE metric. Current: 0.767 (BELOW FLOOR). Ensures context has no dependency holes"
+ref = "sota-thresholds.toml retrieval.depcov"
+
+# --- Reranking layer ---
+
+[context_eng.cross_encoder_reranking]
+type = "context-engineering"
+category = "reranking"
+status = "untested"
+probe_id = "ctx-cross-encoder"
+threshold = "Cross-encoder reranker (Jina v2 or BGE) refines top-50 RRF candidates to top-20 AND improves nDCG@5 over RRF-only by measurable margin"
+priority = "medium"
+note = "reranker.rs. Currently OOMs on 8GB RAM. Optional, gated by config"
+ref = "code-retrieval-deep-research.md §5"
+
+# --- Assembly layer: "montar contexto completo" ---
+
+[context_eng.token_budget_assembly]
+type = "context-engineering"
+category = "assembly"
+status = "untested"
+probe_id = "ctx-budget-assembly"
+threshold = "Greedy knapsack packs context within token budget (repo_map 15% + modules 25% + code 40% + history 15% + reserve 5%) AND budget respected AND graceful degradation when tight"
+priority = "high"
+note = "assembly/greedy.rs + budget.rs"
+
+[context_eng.context_miss_detection]
+type = "context-engineering"
+category = "assembly"
+status = "untested"
+probe_id = "ctx-miss-detection"
+threshold = "Context miss detection identifies when a necessary file is excluded AND suggests 1-hop neighbors for expansion"
+priority = "medium"
+note = "escape.rs. Prevents fragile contexts by detecting holes"
+
+# --- Interface layer: "tool backends" ---
+
+[context_eng.agentic_interface]
+type = "context-engineering"
+category = "interface"
+status = "untested"
+probe_id = "ctx-agentic-interface"
+threshold = "Retrieval algorithms exposed as tool backends (search, impact, context, repo_map) that the LLM invokes on demand, NOT as an automatic pipeline that pre-selects context"
+priority = "high"
+note = "CRITICAL ARCHITECTURE CHANGE: Claude Code abandoned RAG for agentic tools. OpenDev uses 4-layer agentic pipeline. The LLM must decide what to search, not the pipeline"
+ref = "code-retrieval-deep-research.md §9, crates/theo-engine-retrieval/README.md"
+
+# --- Metrics ---
+
+[context_eng.per_language_recall]
+type = "context-engineering"
+category = "metrics"
+status = "untested"
+probe_id = "ctx-per-lang-recall"
+threshold = "Recall@5 >= 0.85 for EACH of the 14 supported languages independently"
+priority = "high"
+note = "Currently unmeasured. Requires per-language ground-truth corpora"
+ref = "sota-thresholds.toml retrieval.per_language_recall_at_5"
+
+[context_eng.representation_format]
+type = "context-engineering"
+category = "prompt"
+status = "untested"
+probe_id = "ctx-representation"
+threshold = "Context represented as structured natural language (not raw code dumps) AND representation quality contributes to +16.8 SWE-Bench points"
+priority = "high"
+note = "Tsinghua: code-native → structured NL = +16.8 points"
+ref = "harness-engineering-guide.md:118"
+
+# ============================================================================
+# MODEL ROUTING (7 features) — Smart routing, orchestrator-worker
+# Ref: smart-model-routing.md, smart-model-routing-plan.md
+# ============================================================================
+
+[model_routing.role_based_routing]
+type = "model-routing"
+category = "core"
+status = "untested"
+probe_id = "routing-role-based"
+threshold = "ModelRouter resolves model per role (Normal, Compact, Vision, Subagent, Compaction, Reviewer) AND uses cheapest viable model per role"
+priority = "high"
+note = "Zero routing exists today. One model field on AgentConfig"
+ref = "smart-model-routing.md §3"
+
+[model_routing.orchestrator_worker]
+type = "model-routing"
+category = "architecture"
+status = "untested"
+probe_id = "routing-orchestrator-worker"
+threshold = "Opus/strong model orchestrates AND Sonnet/cheaper model executes worker tasks AND improvement >= 50% over single-model baseline"
+priority = "high"
+note = "Anthropic reports +90.2% on BrowseComp-style tasks"
+ref = "smart-model-routing.md §1.1, INDEX.md insight-orchestrator-worker-dominant"
+
+[model_routing.cost_optimization]
+type = "model-routing"
+category = "efficiency"
+status = "untested"
+probe_id = "routing-cost-optimization"
+threshold = "Rule-based routing reduces cost by >= 30% vs single-model AND quality does not degrade"
+priority = "medium"
+note = "Back-of-envelope: 50% simple turns × 5× cheaper = ~40% savings"
+ref = "smart-model-routing.md §1.4"
+
+[model_routing.subagent_model_override]
+type = "model-routing"
+category = "config"
+status = "untested"
+probe_id = "routing-subagent-override"
+threshold = "SubAgentRole carries model() method AND sub-agents can use different model than parent"
+priority = "medium"
+note = "SubAgentRole has capability_set() and system_prompt() but no model()"
+ref = "smart-model-routing.md §3, sota-subagent-architectures.md §1.1"
+
+[model_routing.cascade_fallback]
+type = "model-routing"
+category = "resilience"
+status = "untested"
+probe_id = "routing-cascade-fallback"
+threshold = "On provider error (HTTP 402/429/500), router falls back to next provider in chain AND logs the fallback"
+priority = "medium"
+note = "hermes auxiliary_client.py cascade pattern"
+ref = "smart-model-routing.md §2.4"
+
+[model_routing.feature_flagged]
+type = "model-routing"
+category = "safety"
+status = "untested"
+probe_id = "routing-feature-flag"
+threshold = "Routing gated behind routing.enabled config flag AND default OFF AND single-model behavior preserved when off"
+priority = "medium"
+note = "Conservative rollout per hermes pattern"
+ref = "smart-model-routing.md §2.4"
+
+[model_routing.cross_provider]
+type = "model-routing"
+category = "flexibility"
+status = "untested"
+probe_id = "routing-cross-provider"
+threshold = "Router can route to different providers (Anthropic orchestrator + Ollama workers, etc.) AND respects per-provider auth"
+priority = "low"
+note = "Anthropic SDK does NOT support this natively — harness must implement"
+ref = "smart-model-routing.md §1.1 limitation"
+
+# ============================================================================
+# SELF-EVOLUTION / AUTODREAM (6 features)
+# Ref: harness-engineering-guide.md, Tsinghua ablation
+# ============================================================================
+
+[self_evolution.acceptance_gate]
+type = "self-evolution"
+category = "core"
+status = "untested"
+probe_id = "evo-acceptance-gate"
+threshold = "Self-evolution loop has quality gate that accepts/rejects each iteration AND only accepted iterations persist"
+priority = "high"
+note = "Keep/discard pattern from Karpathy autoresearch"
+ref = "harness-engineering-guide.md:92-96"
+
+[self_evolution.narrow_then_expand]
+type = "self-evolution"
+category = "strategy"
+status = "untested"
+probe_id = "evo-narrow-expand"
+threshold = "Loop starts with narrow scope AND only expands when failure signals justify AND scope tracked explicitly"
+priority = "high"
+note = "Only consistently beneficial module in Tsinghua ablation (+4.8)"
+ref = "harness-engineering-guide.md:92-100"
+
+[self_evolution.ablation_measurable]
+type = "self-evolution"
+category = "quality"
+status = "untested"
+probe_id = "evo-ablation"
+threshold = "Each component of the harness can be disabled independently AND impact measured via benchmark AND results compared to baseline"
+priority = "high"
+note = "If you can't turn it off and measure, you don't know if it helps"
+ref = "harness-engineering-guide.md:193-195"
+
+[self_evolution.harness_pruning]
+type = "self-evolution"
+category = "maintenance"
+status = "untested"
+probe_id = "evo-pruning"
+threshold = "Harness components reviewed periodically AND components that no longer help are removed AND removal improves or maintains performance"
+priority = "medium"
+note = "Vercel removed 80% of tools → better results. Manus rewrote 5x in 6 months"
+ref = "harness-engineering-guide.md:160-170"
+
+[self_evolution.trace_analysis]
+type = "self-evolution"
+category = "learning"
+status = "untested"
+probe_id = "evo-trace-analysis"
+threshold = "Failed execution traces analyzed AND root cause identified AND harness adjusted based on trace evidence"
+priority = "medium"
+note = "Stanford Meta-Harness reads traces of failed executions to improve"
+ref = "harness-engineering-guide.md:124-130"
+
+[self_evolution.cross_model_transfer]
+type = "self-evolution"
+category = "portability"
+status = "untested"
+probe_id = "evo-cross-model"
+threshold = "Harness optimized on one model transfers to improve other models AND performance gain reproducible across >= 2 models"
+priority = "low"
+note = "Stanford: harness optimized on one model improved five others"
+ref = "harness-engineering-guide.md:143-145"
+
+# ============================================================================
+# PROMPT ENGINEERING (8 features) — System prompts, tool schemas, representation
+# Ref: harness-engineering-guide.md, context-engine.md
+# ============================================================================
+
+[prompt_eng.system_prompt_structure]
+type = "prompt-engineering"
+category = "design"
+status = "untested"
+probe_id = "prompt-system-structure"
+threshold = "System prompt has clear sections (role, rules, tools, context) AND sections are ordered by priority AND total length is bounded"
+priority = "high"
+
+[prompt_eng.tool_schema_quality]
+type = "prompt-engineering"
+category = "tools"
+status = "untested"
+probe_id = "prompt-tool-schema"
+threshold = "Tool schemas have clear descriptions AND parameter constraints AND error surfaces documented AND schema validated at registration"
+priority = "high"
+note = "opendev BaseTool with validation/normalization/sanitization"
+ref = "INDEX.md §4 Tool Design"
+
+[prompt_eng.structured_nl_representation]
+type = "prompt-engineering"
+category = "representation"
+status = "untested"
+probe_id = "prompt-structured-nl"
+threshold = "Agent strategies expressed as structured natural language (not code-native) AND representation contributes to measurable performance gain"
+priority = "high"
+note = "+16.8 SWE-Bench points from representation change alone"
+ref = "harness-engineering-guide.md:110-118"
+
+[prompt_eng.progressive_disclosure]
+type = "prompt-engineering"
+category = "design"
+status = "untested"
+probe_id = "prompt-progressive-disclosure"
+threshold = "Tool/skill information disclosed progressively based on task context AND not all 72 tools dumped in system prompt at once"
+priority = "medium"
+note = "11/12 context-engineering patterns already landed per evolution assessment"
+
+[prompt_eng.few_shot_examples]
+type = "prompt-engineering"
+category = "design"
+status = "untested"
+probe_id = "prompt-few-shot"
+threshold = "Critical tool calls have few-shot examples in schema AND examples are representative AND examples improve first-call accuracy"
+priority = "medium"
+
+[prompt_eng.error_message_quality]
+type = "prompt-engineering"
+category = "feedback"
+status = "untested"
+probe_id = "prompt-error-messages"
+threshold = "Tool errors return actionable messages (what failed, why, how to fix) AND not generic error strings"
+priority = "high"
+note = "Fail-fast principle from CLAUDE.md global rules"
+
+[prompt_eng.role_specific_prompts]
+type = "prompt-engineering"
+category = "routing"
+status = "untested"
+probe_id = "prompt-role-specific"
+threshold = "Different prompts for different roles (review vs implement vs plan) AND prompts tailored to model capabilities"
+priority = "medium"
+note = "OpenAI harness uses specialized prompts per role"
+ref = "harness-engineering-openai.md"
+
+[prompt_eng.anti_hallucination]
+type = "prompt-engineering"
+category = "safety"
+status = "untested"
+probe_id = "prompt-anti-hallucination"
+threshold = "System prompt includes anti-hallucination instructions AND agent cites evidence for claims AND fabricated information rate measurably reduced"
+priority = "high"
+note = "rippletide hallucination detection in agent evaluation"
+ref = "INDEX.md §11 Verification/Evals"
+
+# ============================================================================
+# OBSERVABILITY (6 features) — Cost tracking, tracing, dashboard
+# Ref: INDEX.md §10, CLAUDE.md capabilities
+# ============================================================================
+
+[observability.cost_tracking]
+type = "observability"
+category = "cost"
+status = "untested"
+probe_id = "obs-cost-tracking"
+threshold = "Per-session cost tracked (tokens + USD per provider) AND cumulative cost available AND budget alerts when approaching limit"
+priority = "high"
+note = "opendev CostTracker per-session pattern"
+ref = "INDEX.md §10 Observability"
+
+[observability.structured_logging]
+type = "observability"
+category = "logging"
+status = "untested"
+probe_id = "obs-structured-logging"
+threshold = "Logs are structured (JSON/key-value) AND include request_id for correlation AND severity levels used correctly"
+priority = "medium"
+
+[observability.trajectory_export]
+type = "observability"
+category = "tracing"
+status = "untested"
+probe_id = "obs-trajectory-export"
+threshold = "Agent trajectory (sequence of thought/action/observation) exportable for analysis AND trajectory includes tool calls with timing"
+priority = "medium"
+note = "CLI subcommand 'trajectory' exists. hermes trajectory saving for RL training"
+ref = "INDEX.md §14 Long Horizon"
+
+[observability.dashboard_health]
+type = "observability"
+category = "monitoring"
+status = "untested"
+probe_id = "obs-dashboard-health"
+threshold = "Dashboard HTTP server starts AND responds to health check AND displays session metrics"
+priority = "low"
+note = "theo dashboard CLI subcommand exists"
+
+[observability.token_usage_breakdown]
+type = "observability"
+category = "cost"
+status = "untested"
+probe_id = "obs-token-breakdown"
+threshold = "Token usage broken down by input/output/cached AND per-tool-call token cost visible AND optimization opportunities surfaced"
+priority = "medium"
+
+[observability.performance_metrics]
+type = "observability"
+category = "performance"
+status = "untested"
+probe_id = "obs-perf-metrics"
+threshold = "Tool execution latency tracked AND LLM response latency tracked AND p50/p95 available per tool"
+priority = "low"
+
+# ============================================================================
+# SECURITY & GOVERNANCE (7 features) — Sandbox, permissions, injection protection
+# Ref: INDEX.md §6 Sandbox/Security, §8 Permissions
+# ============================================================================
+
+[security.sandbox_execution]
+type = "security"
+category = "isolation"
+status = "untested"
+probe_id = "sec-sandbox"
+threshold = "Bash tool executes commands in sandbox (bwrap/landlock/noop fallback) AND sandbox prevents filesystem escape AND sandbox prevents network access when configured"
+priority = "high"
+note = "theo-isolation crate with bwrap/landlock/noop. theo-governance policy engine"
+
+[security.tool_permission_system]
+type = "security"
+category = "permissions"
+status = "untested"
+probe_id = "sec-tool-permissions"
+threshold = "Tools have permission levels (read-only, write, dangerous) AND dangerous tools require approval AND approval rules are pattern-based and persistent"
+priority = "high"
+note = "opendev ApprovalRulesManager pattern"
+ref = "INDEX.md §8 Permissions & Auth"
+
+[security.memory_injection_scan]
+type = "security"
+category = "injection"
+status = "untested"
+probe_id = "sec-memory-injection"
+threshold = "Memory writes scanned for injection patterns (prompt injection, exfiltration, shell escape) AND malicious patterns rejected before storage"
+priority = "high"
+note = "hermes memory_tool.py:65-103 security scan. Critical for RM3a"
+ref = "agent-memory-sota.md §2.4"
+
+[security.context_fence]
+type = "security"
+category = "injection"
+status = "untested"
+probe_id = "sec-context-fence"
+threshold = "Recalled memory wrapped in <memory-context> fence tags AND system note distinguishes recalled content from user input AND fence is idempotent"
+priority = "high"
+note = "Already in theo-domain memory.rs:25-53. MEMORY_FENCE_NOTE constant"
+ref = "agent-memory-sota.md §2.2"
+
+[security.credential_protection]
+type = "security"
+category = "auth"
+status = "untested"
+probe_id = "sec-credential-protection"
+threshold = "API keys stored securely AND .env files protected from tool access AND secrets scan (gitleaks) passes with 0 leaks"
+priority = "high"
+note = "make check-secrets currently passes"
+
+[security.dangerous_command_detection]
+type = "security"
+category = "safety"
+status = "untested"
+probe_id = "sec-dangerous-cmd"
+threshold = "Dangerous commands (rm -rf, DROP TABLE, force-push) detected AND user warned before execution AND approval required"
+priority = "medium"
+note = "hermes dangerous command detection + approval workflow"
+ref = "INDEX.md §6 Sandbox/Security"
+
+[security.governance_rules]
+type = "security"
+category = "governance"
+status = "untested"
+probe_id = "sec-governance-rules"
+threshold = "Policy engine enforces architectural rules AND code changes violating rules blocked AND rules are configurable per project"
+priority = "medium"
+note = "theo-governance crate. rippletide rule-based governance via hooks"
+ref = "INDEX.md §6 Sandbox/Security"
+
+# ============================================================================
+# SUB-AGENT ARCHITECTURE (8 features)
+# Ref: sota-subagent-architectures.md
+# ============================================================================
+
+[subagent.role_specialization]
+type = "subagent"
+category = "design"
+status = "untested"
+probe_id = "sub-role-specialization"
+threshold = "SubAgentRole defines Explorer/Implementer/Verifier/Reviewer with per-role capability_set() AND system_prompt() AND roles restrict tool access appropriately"
+priority = "high"
+note = "SubAgentRole already exists in subagent/mod.rs:20-101"
+ref = "sota-subagent-architectures.md §1.1"
+
+[subagent.context_isolation]
+type = "subagent"
+category = "isolation"
+status = "untested"
+probe_id = "sub-context-isolation"
+threshold = "Sub-agent operates in own context window AND returns only summary to parent AND exploratory work stays out of main context"
+priority = "high"
+note = "Claude Code pattern: subagent returns output only, not full context"
+ref = "sota-subagent-architectures.md §1.1"
+
+[subagent.flat_depth_policy]
+type = "subagent"
+category = "safety"
+status = "untested"
+probe_id = "sub-flat-depth"
+threshold = "Default max_depth=1 (no recursive sub-agents) AND depth configurable AND deep nesting warns about token cost"
+priority = "medium"
+note = "OpenAI Codex agents.max_depth=1 default"
+ref = "sota-subagent-architectures.md §1.2"
+
+[subagent.delegation_efficiency]
+type = "subagent"
+category = "performance"
+status = "untested"
+probe_id = "sub-delegation-efficiency"
+threshold = "~90% of compute flows through delegated sub-agents AND orchestrator only decomposes + verifies AND token overhead bounded"
+priority = "medium"
+note = "Tsinghua: 90% compute in child agents, not parent"
+ref = "harness-engineering-guide.md:103-104"
+
+[subagent.error_recovery]
+type = "subagent"
+category = "resilience"
+status = "untested"
+probe_id = "sub-error-recovery"
+threshold = "Failed sub-agent does not crash parent AND parent retries with adjusted strategy OR reports failure clearly"
+priority = "high"
+
+[subagent.parallel_subagents]
+type = "subagent"
+category = "performance"
+status = "untested"
+probe_id = "sub-parallel"
+threshold = "Independent sub-agents run in parallel AND results consolidated correctly AND file conflicts prevented"
+priority = "medium"
+note = "Claude Code Agent Teams: shared task list + file locks"
+ref = "sota-subagent-architectures.md §1.1"
+
+[subagent.markdown_defined]
+type = "subagent"
+category = "config"
+status = "untested"
+probe_id = "sub-markdown-defined"
+threshold = "Sub-agent definitions stored as Markdown files AND version-controllable AND composable across projects"
+priority = "low"
+note = "Claude Code's declarative Markdown agent specification format"
+ref = "sota-subagent-architectures.md §1.1"
+
+[subagent.capability_restriction]
+type = "subagent"
+category = "security"
+status = "untested"
+probe_id = "sub-capability-restrict"
+threshold = "Explorer sub-agent has read-only tools AND Implementer has write tools AND Reviewer cannot modify code"
+priority = "high"
+note = "Capability-restricted sub-agents is the dominant pattern"
+ref = "sota-subagent-architectures.md §1.1"

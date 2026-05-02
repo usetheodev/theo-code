@@ -8,8 +8,38 @@
 use std::path::Path;
 
 use serde::Deserialize;
+use thiserror::Error;
 
 use crate::config::AgentConfig;
+
+/// Errors produced by [`ProjectConfig::validate`]. Per ADR-014 we keep
+/// validation in a small manual function rather than pulling `garde` +
+/// `garde-derive` for a single DTO.
+#[derive(Debug, Error, PartialEq)]
+pub enum ConfigValidationError {
+    #[error("temperature must be in [0.0, 2.0], got {0}")]
+    TemperatureOutOfRange(f32),
+
+    #[error("max_iterations must be > 0 and <= 10000, got {0}")]
+    MaxIterationsOutOfRange(usize),
+
+    #[error("max_tokens must be > 0 and <= 2_000_000, got {0}")]
+    MaxTokensOutOfRange(u32),
+
+    #[error("doom_loop_threshold must be < max_iterations; got threshold={threshold}, max={max}")]
+    DoomLoopInconsistent { threshold: usize, max: usize },
+
+    #[error(
+        "context_loop_interval must be > 0 and <= max_iterations; got interval={interval}, max={max:?}"
+    )]
+    ContextLoopInterval {
+        interval: usize,
+        max: Option<usize>,
+    },
+
+    #[error("reasoning_effort must be one of 'low'|'medium'|'high', got {0:?}")]
+    UnknownReasoningEffort(String),
+}
 
 // ---------------------------------------------------------------------------
 // ProjectConfig — parsed from .theo/config.toml
@@ -38,43 +68,105 @@ impl ProjectConfig {
         }
 
         match std::fs::read_to_string(&config_path) {
-            Ok(content) => match toml::from_str(&content) {
-                Ok(config) => config,
+            Ok(content) => match toml::from_str::<Self>(&content) {
+                Ok(config) => match config.validate() {
+                    Ok(()) => config,
+                    Err(e) => {
+                        tracing::warn!(error = %e, ".theo/config.toml failed validation");
+                        Self::default()
+                    }
+                },
                 Err(e) => {
-                    eprintln!("[theo] Warning: failed to parse .theo/config.toml: {e}");
+                    tracing::warn!(error = %e, "failed to parse .theo/config.toml");
                     Self::default()
                 }
             },
             Err(e) => {
-                eprintln!("[theo] Warning: failed to read .theo/config.toml: {e}");
+                tracing::warn!(error = %e, "failed to read .theo/config.toml");
                 Self::default()
             }
         }
     }
 
+    /// Validate every optional field against its accepted domain.
+    ///
+    /// Called from [`Self::load`] immediately after the TOML deserialize
+    /// step, so users get a clear warning instead of silently corrupt
+    /// runtime behaviour. Per ADR-014 this is a hand-written function
+    /// rather than a `#[derive(Garde)]`.
+    pub fn validate(&self) -> Result<(), ConfigValidationError> {
+        if let Some(t) = self.temperature
+            && !(0.0..=2.0).contains(&t)
+        {
+            return Err(ConfigValidationError::TemperatureOutOfRange(t));
+        }
+        if let Some(n) = self.max_iterations
+            && (n == 0 || n > 10_000)
+        {
+            return Err(ConfigValidationError::MaxIterationsOutOfRange(n));
+        }
+        if let Some(n) = self.max_tokens
+            && (n == 0 || n > 2_000_000)
+        {
+            return Err(ConfigValidationError::MaxTokensOutOfRange(n));
+        }
+        if let Some(threshold) = self.doom_loop_threshold
+            && let Some(max) = self.max_iterations
+            && threshold >= max
+        {
+            return Err(ConfigValidationError::DoomLoopInconsistent {
+                threshold,
+                max,
+            });
+        }
+        if let Some(interval) = self.context_loop_interval {
+            if interval == 0 {
+                return Err(ConfigValidationError::ContextLoopInterval {
+                    interval,
+                    max: self.max_iterations,
+                });
+            }
+            if let Some(max) = self.max_iterations
+                && interval > max
+            {
+                return Err(ConfigValidationError::ContextLoopInterval {
+                    interval,
+                    max: Some(max),
+                });
+            }
+        }
+        if let Some(ref effort) = self.reasoning_effort
+            && !matches!(effort.as_str(), "low" | "medium" | "high")
+        {
+            return Err(ConfigValidationError::UnknownReasoningEffort(effort.clone()));
+        }
+        Ok(())
+    }
+
     /// Merge project config into an AgentConfig.
     /// Project values override defaults. CLI args should be applied AFTER this.
     pub fn apply_to(&self, config: &mut AgentConfig) {
+        // T3.2 PR1 — LLM-related fields now live in `config.llm`.
         if let Some(ref model) = self.model {
-            config.model = model.clone();
+            config.llm.model = model.clone();
         }
         if let Some(temp) = self.temperature {
-            config.temperature = temp;
+            config.llm.temperature = temp;
         }
         if let Some(max_iter) = self.max_iterations {
-            config.max_iterations = max_iter;
+            config.loop_cfg.max_iterations = max_iter;
         }
         if let Some(max_tok) = self.max_tokens {
-            config.max_tokens = max_tok;
+            config.llm.max_tokens = max_tok;
         }
         if let Some(ref effort) = self.reasoning_effort {
-            config.reasoning_effort = Some(effort.clone());
+            config.llm.reasoning_effort = Some(effort.clone());
         }
         if let Some(threshold) = self.doom_loop_threshold {
-            config.doom_loop_threshold = Some(threshold);
+            config.loop_cfg.doom_loop_threshold = Some(threshold);
         }
         if let Some(interval) = self.context_loop_interval {
-            config.context_loop_interval = interval;
+            config.context.context_loop_interval = interval;
         }
     }
 }
@@ -84,28 +176,25 @@ impl ProjectConfig {
     /// Variables: THEO_MODEL, THEO_TEMPERATURE, THEO_MAX_ITERATIONS, THEO_MAX_TOKENS,
     /// THEO_REASONING_EFFORT, THEO_DOOM_LOOP_THRESHOLD.
     pub fn with_env_overrides(mut self) -> Self {
-        if let Ok(v) = std::env::var("THEO_MODEL") {
+        use theo_domain::environment::{parse_var, theo_var};
+        if let Some(v) = theo_var("THEO_MODEL") {
             self.model = Some(v);
         }
-        if let Ok(v) = std::env::var("THEO_TEMPERATURE")
-            && let Ok(t) = v.parse::<f32>() {
-                self.temperature = Some(t);
-            }
-        if let Ok(v) = std::env::var("THEO_MAX_ITERATIONS")
-            && let Ok(n) = v.parse::<usize>() {
-                self.max_iterations = Some(n);
-            }
-        if let Ok(v) = std::env::var("THEO_MAX_TOKENS")
-            && let Ok(n) = v.parse::<u32>() {
-                self.max_tokens = Some(n);
-            }
-        if let Ok(v) = std::env::var("THEO_REASONING_EFFORT") {
+        if let Some(t) = parse_var::<f32>("THEO_TEMPERATURE") {
+            self.temperature = Some(t);
+        }
+        if let Some(n) = parse_var::<usize>("THEO_MAX_ITERATIONS") {
+            self.max_iterations = Some(n);
+        }
+        if let Some(n) = parse_var::<u32>("THEO_MAX_TOKENS") {
+            self.max_tokens = Some(n);
+        }
+        if let Some(v) = theo_var("THEO_REASONING_EFFORT") {
             self.reasoning_effort = Some(v);
         }
-        if let Ok(v) = std::env::var("THEO_DOOM_LOOP_THRESHOLD")
-            && let Ok(n) = v.parse::<usize>() {
-                self.doom_loop_threshold = Some(n);
-            }
+        if let Some(n) = parse_var::<usize>("THEO_DOOM_LOOP_THRESHOLD") {
+            self.doom_loop_threshold = Some(n);
+        }
         self
     }
 }
@@ -234,6 +323,223 @@ fn parse_agent_file(content: &str) -> Option<CustomAgentDef> {
 mod tests {
     use super::*;
 
+    /// Process-wide env var lock so tests that mutate `THEO_*` don't
+    /// race when run in parallel (cargo test default) or under the
+    /// serial scheduler used by `cargo tarpaulin`. Mirrors the same
+    /// pattern in `observability::otel_exporter::tests`.
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        use std::sync::{Mutex, OnceLock};
+        static M: OnceLock<Mutex<()>> = OnceLock::new();
+        M.get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Snapshot of the env vars touched by `with_env_overrides`. Used
+    /// to restore the process state when a test exits — guards against
+    /// other test files that read these vars (e.g. live config loaders
+    /// in long integration tests).
+    struct EnvSnapshot {
+        prior: Vec<(&'static str, Option<std::ffi::OsString>)>,
+    }
+
+    impl EnvSnapshot {
+        fn capture() -> Self {
+            let keys = ["THEO_TEMPERATURE", "THEO_MODEL", "THEO_MAX_ITERATIONS"];
+            let prior = keys
+                .iter()
+                .map(|k| (*k, std::env::var_os(k)))
+                .collect::<Vec<_>>();
+            // Strip any pre-existing value so `with_env_overrides`
+            // sees a known-clean slate.
+            // SAFETY: ADR-021#rust_2024_test_env_var — Rust 2024 made
+            // env::remove_var unsafe; this snapshot helper is invoked
+            // only from #[cfg(test)] tests serialised by cargo test.
+            unsafe {
+                for (k, _) in &prior {
+                    std::env::remove_var(k);
+                }
+            }
+            Self { prior }
+        }
+    }
+
+    impl Drop for EnvSnapshot {
+        fn drop(&mut self) {
+            // SAFETY: ADR-021#rust_2024_test_env_var — same test-only
+            // env mutation contract as the constructor above.
+            unsafe {
+                for (k, v) in &self.prior {
+                    match v {
+                        Some(val) => std::env::set_var(k, val),
+                        None => std::env::remove_var(k),
+                    }
+                }
+            }
+        }
+    }
+
+    // ── validate() — per-field error coverage ────────────────────
+
+    #[test]
+    fn validate_accepts_all_none_defaults() {
+        let cfg = ProjectConfig::default();
+        assert_eq!(cfg.validate(), Ok(()));
+    }
+
+    #[test]
+    fn validate_rejects_negative_temperature() {
+        let cfg = ProjectConfig {
+            temperature: Some(-0.1),
+            ..ProjectConfig::default()
+        };
+        assert_eq!(
+            cfg.validate(),
+            Err(ConfigValidationError::TemperatureOutOfRange(-0.1))
+        );
+    }
+
+    #[test]
+    fn validate_rejects_temperature_above_two() {
+        let cfg = ProjectConfig {
+            temperature: Some(2.5),
+            ..ProjectConfig::default()
+        };
+        assert_eq!(
+            cfg.validate(),
+            Err(ConfigValidationError::TemperatureOutOfRange(2.5))
+        );
+    }
+
+    #[test]
+    fn validate_accepts_temperature_at_boundary() {
+        for t in [0.0, 1.0, 2.0] {
+            let cfg = ProjectConfig {
+                temperature: Some(t),
+                ..ProjectConfig::default()
+            };
+            assert_eq!(cfg.validate(), Ok(()));
+        }
+    }
+
+    #[test]
+    fn validate_rejects_zero_max_iterations() {
+        let cfg = ProjectConfig {
+            max_iterations: Some(0),
+            ..ProjectConfig::default()
+        };
+        assert_eq!(
+            cfg.validate(),
+            Err(ConfigValidationError::MaxIterationsOutOfRange(0))
+        );
+    }
+
+    #[test]
+    fn validate_rejects_huge_max_iterations() {
+        let cfg = ProjectConfig {
+            max_iterations: Some(1_000_000),
+            ..ProjectConfig::default()
+        };
+        assert!(matches!(
+            cfg.validate(),
+            Err(ConfigValidationError::MaxIterationsOutOfRange(1_000_000))
+        ));
+    }
+
+    #[test]
+    fn validate_rejects_zero_max_tokens() {
+        let cfg = ProjectConfig {
+            max_tokens: Some(0),
+            ..ProjectConfig::default()
+        };
+        assert_eq!(
+            cfg.validate(),
+            Err(ConfigValidationError::MaxTokensOutOfRange(0))
+        );
+    }
+
+    #[test]
+    fn validate_rejects_doom_loop_ge_max_iterations() {
+        let cfg = ProjectConfig {
+            max_iterations: Some(10),
+            doom_loop_threshold: Some(10),
+            ..ProjectConfig::default()
+        };
+        assert_eq!(
+            cfg.validate(),
+            Err(ConfigValidationError::DoomLoopInconsistent {
+                threshold: 10,
+                max: 10,
+            })
+        );
+    }
+
+    #[test]
+    fn validate_rejects_context_loop_zero_interval() {
+        let cfg = ProjectConfig {
+            context_loop_interval: Some(0),
+            ..ProjectConfig::default()
+        };
+        assert!(matches!(
+            cfg.validate(),
+            Err(ConfigValidationError::ContextLoopInterval { interval: 0, .. })
+        ));
+    }
+
+    #[test]
+    fn validate_rejects_context_loop_greater_than_max() {
+        let cfg = ProjectConfig {
+            max_iterations: Some(5),
+            context_loop_interval: Some(6),
+            ..ProjectConfig::default()
+        };
+        assert!(matches!(
+            cfg.validate(),
+            Err(ConfigValidationError::ContextLoopInterval {
+                interval: 6,
+                max: Some(5),
+            })
+        ));
+    }
+
+    #[test]
+    fn validate_rejects_unknown_reasoning_effort() {
+        let cfg = ProjectConfig {
+            reasoning_effort: Some("ultra".into()),
+            ..ProjectConfig::default()
+        };
+        assert_eq!(
+            cfg.validate(),
+            Err(ConfigValidationError::UnknownReasoningEffort("ultra".into()))
+        );
+    }
+
+    #[test]
+    fn validate_accepts_every_valid_reasoning_effort() {
+        for level in ["low", "medium", "high"] {
+            let cfg = ProjectConfig {
+                reasoning_effort: Some(level.into()),
+                ..ProjectConfig::default()
+            };
+            assert_eq!(cfg.validate(), Ok(()));
+        }
+    }
+
+    #[test]
+    fn load_degrades_to_defaults_on_invalid_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let theo_dir = dir.path().join(".theo");
+        std::fs::create_dir_all(&theo_dir).unwrap();
+        std::fs::write(
+            theo_dir.join("config.toml"),
+            "temperature = -1.0\n",
+        )
+        .unwrap();
+        let cfg = ProjectConfig::load(dir.path());
+        // Invalid field → defaults (all None).
+        assert!(cfg.temperature.is_none());
+    }
+
     #[test]
     fn project_config_missing_returns_defaults() {
         let config = ProjectConfig::load(Path::new("/nonexistent/path"));
@@ -284,61 +590,63 @@ max_iterations = 50
         };
 
         let mut config = AgentConfig::default();
-        let original_temp = config.temperature;
+        let original_temp = config.llm.temperature;
         project.apply_to(&mut config);
 
-        assert_eq!(config.model, "custom-model");
-        assert_eq!(config.max_iterations, 42);
-        assert_eq!(config.temperature, original_temp); // unchanged
+        assert_eq!(config.llm.model, "custom-model");
+        assert_eq!(config.loop_cfg.max_iterations, 42);
+        assert_eq!(config.llm.temperature, original_temp); // unchanged
     }
 
     #[test]
     fn env_override_temperature_applied_to_agent_config() {
         // This test proves the P0 bug fix: THEO_TEMPERATURE env var must
-        // propagate through ProjectConfig → apply_to → AgentConfig.temperature
+        // propagate through ProjectConfig → apply_to → AgentConfig.temperature.
+        // The lock + snapshot guarantees this test never races with sibling
+        // env-mutating tests under either parallel or serial schedulers.
+        let _lock = env_lock();
+        let _snap = EnvSnapshot::capture();
         unsafe { std::env::set_var("THEO_TEMPERATURE", "0.0") };
 
         let project = ProjectConfig::default().with_env_overrides();
         assert_eq!(project.temperature, Some(0.0), "env var should set temperature");
 
         let mut config = AgentConfig::default();
-        assert_eq!(config.temperature, 0.1, "default should be 0.1");
+        assert_eq!(config.llm.temperature, 0.1, "default should be 0.1");
 
         project.apply_to(&mut config);
         assert_eq!(
-            config.temperature, 0.0,
+            config.llm.temperature, 0.0,
             "after apply_to, temperature should be 0.0 from env var"
         );
-
-        // Cleanup
-        unsafe { std::env::remove_var("THEO_TEMPERATURE") };
+        // EnvSnapshot::drop restores the original env automatically.
     }
 
     #[test]
     fn env_override_does_not_affect_unset_fields() {
-        unsafe { std::env::remove_var("THEO_TEMPERATURE") };
-        unsafe { std::env::remove_var("THEO_MODEL") };
+        let _lock = env_lock();
+        let _snap = EnvSnapshot::capture(); // strips THEO_* into a clean slate
 
         let project = ProjectConfig::default().with_env_overrides();
         assert!(project.temperature.is_none());
         assert!(project.model.is_none());
 
         let mut config = AgentConfig::default();
-        let original_temp = config.temperature;
+        let original_temp = config.llm.temperature;
         project.apply_to(&mut config);
-        assert_eq!(config.temperature, original_temp, "should remain unchanged");
+        assert_eq!(config.llm.temperature, original_temp, "should remain unchanged");
     }
 
     #[test]
     fn merge_with_empty_project_config_equals_base_config() {
         let project = ProjectConfig::default();
         let mut config = AgentConfig::default();
-        let original_model = config.model.clone();
-        let original_max = config.max_iterations;
+        let original_model = config.llm.model.clone();
+        let original_max = config.loop_cfg.max_iterations;
         project.apply_to(&mut config);
 
-        assert_eq!(config.model, original_model);
-        assert_eq!(config.max_iterations, original_max);
+        assert_eq!(config.llm.model, original_model);
+        assert_eq!(config.loop_cfg.max_iterations, original_max);
     }
 
     #[test]

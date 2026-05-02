@@ -125,7 +125,7 @@ impl Tool for WebFetchTool {
     async fn execute(
         &self,
         args: serde_json::Value,
-        _ctx: &ToolContext,
+        ctx: &ToolContext,
         permissions: &mut PermissionCollector,
     ) -> Result<ToolOutput, ToolError> {
         let url = require_string(&args, "url")?;
@@ -140,6 +140,12 @@ impl Tool for WebFetchTool {
             always: vec![],
             metadata: serde_json::json!({}),
         });
+
+        // T14.1 — surface the network round-trip as a partial. A
+        // slow / hung HTTP request is the #1 source of "tool seems
+        // frozen" UX confusion; this single line tells the operator
+        // the agent is alive and waiting on the network.
+        crate::partial::emit_progress(ctx, "webfetch", format!("GET {url}"));
 
         let response = reqwest::get(&url)
             .await

@@ -175,6 +175,7 @@ mod tests {
             EnvelopeKind::Summary => {
                 TrajectoryEnvelope::summary(run_id, seq, 0, serde_json::json!({}))
             }
+            EnvelopeKind::Rating => TrajectoryEnvelope::rating(run_id, seq, 0, 1, 0, None),
         };
         serde_json::to_string(&env).unwrap()
     }
@@ -214,7 +215,7 @@ mod tests {
     fn test_reader_detects_sequence_gaps() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("r.jsonl");
-        let lines = vec![
+        let lines = [
             env_line(0, "r", EnvelopeKind::Event),
             env_line(1, "r", EnvelopeKind::Event),
             env_line(2, "r", EnvelopeKind::Event),
@@ -232,7 +233,7 @@ mod tests {
     fn test_reader_counts_drop_sentinels() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("r.jsonl");
-        let lines = vec![
+        let lines = [
             env_line(0, "r", EnvelopeKind::Event),
             env_line(1, "r", EnvelopeKind::DropSentinel),
             env_line(2, "r", EnvelopeKind::Event),
@@ -248,7 +249,7 @@ mod tests {
     fn test_reader_counts_writer_recoveries() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("r.jsonl");
-        let lines = vec![
+        let lines = [
             env_line(0, "r", EnvelopeKind::Event),
             env_line(1, "r", EnvelopeKind::WriterRecovered),
         ];
@@ -262,7 +263,7 @@ mod tests {
     fn test_reader_computes_confidence() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("r.jsonl");
-        let lines = vec![
+        let lines = [
             env_line(0, "r", EnvelopeKind::Event),
             env_line(1, "r", EnvelopeKind::Event),
             env_line(2, "r", EnvelopeKind::Event),

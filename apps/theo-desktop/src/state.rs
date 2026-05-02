@@ -1,7 +1,8 @@
 use std::path::PathBuf;
 use tokio::sync::{Mutex, watch};
 
-use theo_agent_runtime::AgentConfig;
+// T1.3: route runtime types through the theo-application facade.
+use theo_application::facade::agent::AgentConfig;
 
 /// Application state shared across Tauri commands.
 pub struct AppState {

@@ -10,6 +10,7 @@
 
 pub mod builtin;
 pub mod engine;
+pub mod file_memory;
 pub mod fs_util;
 pub mod lint;
 pub mod retrieval;
@@ -19,6 +20,8 @@ pub mod wiki;
 
 pub use builtin::BuiltinMemoryProvider;
 pub use engine::{EngineStats, MemoryEngine};
+pub use file_memory::entries_from_providers;
+pub use theo_domain::memory::FileMemoryLookup;
 pub use fs_util::atomic_write;
 pub use lint::{LessonMetric, LintInputs, LintIssue, LintThresholds, Severity, render_json, run_lint};
 pub use retrieval::{

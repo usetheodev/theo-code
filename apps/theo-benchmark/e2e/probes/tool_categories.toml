@@ -1,0 +1,32 @@
+# E2E probes for tool categories.
+# Tests that critical tool categories work end-to-end.
+
+[[probe]]
+id = "tool-file-read"
+category = "tool-smoke"
+command = "pilot 'read the file Cargo.toml and tell me the workspace members'"
+mode = "headless"
+timeout_secs = 120
+requires_llm = true
+requires_project = true
+success_check = "result.get('success', False)"
+
+[[probe]]
+id = "tool-bash-ls"
+category = "tool-smoke"
+command = "pilot 'run ls -la in the current directory and count the files'"
+mode = "headless"
+timeout_secs = 120
+requires_llm = true
+requires_project = true
+success_check = "result.get('success', False)"
+
+[[probe]]
+id = "tool-git-status"
+category = "tool-smoke"
+command = "pilot 'check git status of this repository'"
+mode = "headless"
+timeout_secs = 120
+requires_llm = true
+requires_project = true
+success_check = "result.get('success', False)"

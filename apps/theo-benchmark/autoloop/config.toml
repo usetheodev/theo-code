@@ -1,0 +1,40 @@
+# Refinement Cycle Configuration
+#
+# Controls the autoloop behavior. Conservative defaults.
+# Meeting: 20260429-143744 (D2, D3)
+
+[cycle]
+max_iterations = 5
+quality_threshold = 0.7       # 0.0-1.0, phase must score above this to advance
+budget_usd = 10.0             # hard budget cap per full cycle run
+
+[scope]
+# Only these crates can be modified by the refinement cycle
+allowed_crates = [
+    "theo-engine-retrieval",
+    "theo-agent-runtime",
+]
+
+# These paths are FORBIDDEN — human-only (meeting D3)
+forbidden_paths = [
+    ".claude/rules/*-allowlist.txt",
+    ".claude/rules/*.yaml",
+    "CLAUDE.md",
+    "Makefile",
+    "scripts/check-*.sh",
+]
+
+[benchmarks]
+# Which suites to run per iteration
+suites = ["smoke"]
+# SWE-bench only in nightly mode (too expensive for loop)
+nightly_suites = ["smoke", "e2e-probe", "swe-bench-lite"]
+
+[thresholds]
+# Path to the SOTA thresholds TOML
+path = "docs/sota-thresholds.toml"
+
+[output]
+# Where to write refinement reports
+reports_dir = "apps/theo-benchmark/reports"
+log_file = "apps/theo-benchmark/reports/refinement-log.jsonl"

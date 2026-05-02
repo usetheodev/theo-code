@@ -11,9 +11,10 @@ pub mod graph_attention;
 pub mod harm_filter;
 pub mod inline_builder;
 pub mod metrics;
-#[cfg(feature = "reranker")]
+// T8.1 — `pipeline` (RRF + Rerank) still depends on `dense-retrieval`
+// for tantivy_search. The reranker module itself is always compiled.
+#[cfg(feature = "dense-retrieval")]
 pub mod pipeline;
-#[cfg(feature = "reranker")]
 pub mod reranker;
 pub mod search;
 pub mod summary;

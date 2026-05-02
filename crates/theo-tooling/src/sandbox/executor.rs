@@ -98,159 +98,183 @@ impl SandboxExecutor for LandlockExecutor {
         config: &SandboxConfig,
     ) -> Result<SandboxResult, SandboxError> {
         let mut audit_entries = Vec::new();
-
-        // Step 1: Validate command lexically
-        let validator_config = ValidatorConfig::default();
-        match command_validator::validate_command(command, &validator_config) {
-            ValidationResult::Blocked(violation) => {
-                audit_entries.push(AuditEntry {
-                    timestamp: now_iso8601(),
-                    event_type: AuditEventType::ViolationBlocked,
-                    detail: format!("command blocked by validator: {command}"),
-                    metadata: serde_json::json!({"command": command}),
-                });
-                return Ok(SandboxResult::blocked(violation));
-            }
-            ValidationResult::Warning(msg) => {
-                audit_entries.push(AuditEntry {
-                    timestamp: now_iso8601(),
-                    event_type: AuditEventType::ViolationBlocked,
-                    detail: format!("command warning: {msg}"),
-                    metadata: serde_json::json!({"command": command, "warning": msg}),
-                });
-                // Warning = allow but log
-            }
-            ValidationResult::Allowed => {}
+        if let Some(blocked) = validate_command_phase(command, &mut audit_entries) {
+            return Ok(blocked);
         }
+        audit_entries.push(landlock_init_audit(self.capabilities.landlock_abi_version));
+        audit_entries.push(command_start_audit(command, working_dir));
+        let mut cmd = build_landlock_command(command, working_dir, config);
+        audit_entries.push(env_sanitized_audit(config));
+        audit_entries.push(rlimits_audit(config));
+        run_command_and_collect(cmd.output(), audit_entries)
+    }
+}
 
-        audit_entries.push(AuditEntry {
-            timestamp: now_iso8601(),
-            event_type: AuditEventType::SandboxInit,
-            detail: format!(
-                "initializing landlock sandbox (ABI v{})",
-                self.capabilities.landlock_abi_version
-            ),
-            metadata: serde_json::json!({"abi_version": self.capabilities.landlock_abi_version}),
-        });
-
-        // Step 2: Build landlock ruleset for the child process
-        let working_dir_owned = working_dir.to_path_buf();
-        let allowed_read: Vec<String> = config.filesystem.allowed_read.clone();
-        let allowed_write: Vec<String> = config.filesystem.allowed_write.clone();
-        let process_policy = config.process.clone();
-
-        audit_entries.push(AuditEntry {
-            timestamp: now_iso8601(),
-            event_type: AuditEventType::CommandStart,
-            detail: format!("executing: {command}"),
-            metadata: serde_json::json!({"command": command, "workdir": working_dir.display().to_string()}),
-        });
-
-        // Step 3: Build command with env sanitization
-        use std::os::unix::process::CommandExt;
-
-        let mut cmd = std::process::Command::new("sh");
-        cmd.arg("-c")
-            .arg(command)
-            .current_dir(working_dir)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-
-        // Apply env sanitization (whitelist approach)
-        super::env_sanitizer::apply_to_command(&mut cmd, &config.process);
-
-        audit_entries.push(AuditEntry {
-            timestamp: now_iso8601(),
-            event_type: AuditEventType::EnvVarStripped,
-            detail: format!(
-                "env sanitized: {} vars allowed",
-                config.process.allowed_env_vars.len()
-            ),
-            metadata: serde_json::json!({"allowed_count": config.process.allowed_env_vars.len()}),
-        });
-
-        // Step 4: Apply rlimits + network ns + landlock in child via pre_exec
-        // Order: rlimits → unshare(net) → landlock (per governance decision)
-        // SAFETY: All syscalls (setrlimit, unshare, landlock_restrict_self) are
-        // async-signal-safe.
-        let network_policy = config.network.clone();
-        unsafe {
-            cmd.pre_exec(move || {
-                // 1. Apply resource limits
-                super::rlimits::apply_rlimits(&process_policy)?;
-                // 2. Apply network isolation (unshare NEWUSER|NEWNET)
-                super::network::apply_network_isolation(&network_policy)?;
-                // 3. Apply landlock filesystem restrictions
-                apply_landlock_in_child(&working_dir_owned, &allowed_read, &allowed_write)
+/// Step 1: validate the shell command lexically. Returns `Some(blocked)` if
+/// the command is rejected; otherwise pushes warnings to the audit trail
+/// and returns `None`.
+fn validate_command_phase(
+    command: &str,
+    audit_entries: &mut Vec<AuditEntry>,
+) -> Option<SandboxResult> {
+    let validator_config = ValidatorConfig::default();
+    match command_validator::validate_command(command, &validator_config) {
+        ValidationResult::Blocked(violation) => {
+            audit_entries.push(AuditEntry {
+                timestamp: now_iso8601(),
+                event_type: AuditEventType::ViolationBlocked,
+                detail: format!("command blocked by validator: {command}"),
+                metadata: serde_json::json!({"command": command}),
             });
+            Some(SandboxResult::blocked(violation))
         }
+        ValidationResult::Warning(msg) => {
+            audit_entries.push(AuditEntry {
+                timestamp: now_iso8601(),
+                event_type: AuditEventType::ViolationBlocked,
+                detail: format!("command warning: {msg}"),
+                metadata: serde_json::json!({"command": command, "warning": msg}),
+            });
+            None
+        }
+        ValidationResult::Allowed => None,
+    }
+}
 
-        audit_entries.push(AuditEntry {
-            timestamp: now_iso8601(),
-            event_type: AuditEventType::ResourceLimitApplied,
-            detail: format!(
-                "rlimits: cpu={}s mem={}B fsize={}B nproc={}",
-                config.process.max_cpu_seconds,
-                config.process.max_memory_bytes,
-                config.process.max_file_size_bytes,
-                config.process.max_processes,
-            ),
-            metadata: serde_json::json!({
-                "max_cpu_seconds": config.process.max_cpu_seconds,
-                "max_memory_bytes": config.process.max_memory_bytes,
-                "max_file_size_bytes": config.process.max_file_size_bytes,
-                "max_processes": config.process.max_processes,
-            }),
+#[cfg(target_os = "linux")]
+fn landlock_init_audit(abi_version: i32) -> AuditEntry {
+    AuditEntry {
+        timestamp: now_iso8601(),
+        event_type: AuditEventType::SandboxInit,
+        detail: format!("initializing landlock sandbox (ABI v{abi_version})"),
+        metadata: serde_json::json!({"abi_version": abi_version}),
+    }
+}
+
+fn command_start_audit(command: &str, working_dir: &Path) -> AuditEntry {
+    AuditEntry {
+        timestamp: now_iso8601(),
+        event_type: AuditEventType::CommandStart,
+        detail: format!("executing: {command}"),
+        metadata: serde_json::json!({"command": command, "workdir": working_dir.display().to_string()}),
+    }
+}
+
+fn env_sanitized_audit(config: &SandboxConfig) -> AuditEntry {
+    AuditEntry {
+        timestamp: now_iso8601(),
+        event_type: AuditEventType::EnvVarStripped,
+        detail: format!(
+            "env sanitized: {} vars allowed",
+            config.process.allowed_env_vars.len()
+        ),
+        metadata: serde_json::json!({"allowed_count": config.process.allowed_env_vars.len()}),
+    }
+}
+
+fn rlimits_audit(config: &SandboxConfig) -> AuditEntry {
+    AuditEntry {
+        timestamp: now_iso8601(),
+        event_type: AuditEventType::ResourceLimitApplied,
+        detail: format!(
+            "rlimits: cpu={}s mem={}B fsize={}B nproc={}",
+            config.process.max_cpu_seconds,
+            config.process.max_memory_bytes,
+            config.process.max_file_size_bytes,
+            config.process.max_processes,
+        ),
+        metadata: serde_json::json!({
+            "max_cpu_seconds": config.process.max_cpu_seconds,
+            "max_memory_bytes": config.process.max_memory_bytes,
+            "max_file_size_bytes": config.process.max_file_size_bytes,
+            "max_processes": config.process.max_processes,
+        }),
+    }
+}
+
+/// Build the `Command` with env sanitization and the landlock pre_exec
+/// closure (rlimits → unshare(net) → landlock, in that order).
+#[cfg(target_os = "linux")]
+fn build_landlock_command(
+    command: &str,
+    working_dir: &Path,
+    config: &SandboxConfig,
+) -> std::process::Command {
+    use std::os::unix::process::CommandExt;
+    let mut cmd = std::process::Command::new("sh");
+    cmd.arg("-c")
+        .arg(command)
+        .current_dir(working_dir)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    super::env_sanitizer::apply_to_command(&mut cmd, &config.process);
+
+    let working_dir_owned = working_dir.to_path_buf();
+    let allowed_read: Vec<String> = config.filesystem.allowed_read.clone();
+    let allowed_write: Vec<String> = config.filesystem.allowed_write.clone();
+    let process_policy = config.process.clone();
+    let network_policy = config.network.clone();
+    // SAFETY: ADR-021#unsafe — pre_exec runs in the forked child.
+    // All three syscalls invoked here (setrlimit, unshare(NEWUSER|NEWNET),
+    // landlock_restrict_self) are async-signal-safe per the kernel docs.
+    unsafe {
+        cmd.pre_exec(move || {
+            super::rlimits::apply_rlimits(&process_policy)?;
+            super::network::apply_network_isolation(&network_policy)?;
+            apply_landlock_in_child(&working_dir_owned, &allowed_read, &allowed_write)
         });
+    }
+    cmd
+}
 
-        let output = cmd.output();
-
-        let output = match output {
-            Ok(o) => o,
-            Err(e) => {
-                audit_entries.push(AuditEntry {
-                    timestamp: now_iso8601(),
-                    event_type: AuditEventType::CommandEnd,
-                    detail: format!("spawn failed: {e}"),
-                    metadata: serde_json::json!({"error": e.to_string()}),
-                });
-                return Ok(SandboxResult::failed(
-                    -1,
-                    String::new(),
-                    format!("sandbox spawn failed: {e}"),
-                    vec![],
-                    audit_entries,
-                ));
-            }
-        };
-
-        let exit_code = output.status.code().unwrap_or(-1);
-        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-
-        audit_entries.push(AuditEntry {
-            timestamp: now_iso8601(),
-            event_type: AuditEventType::CommandEnd,
-            detail: format!("command finished with exit code {exit_code}"),
-            metadata: serde_json::json!({"exit_code": exit_code}),
-        });
-
-        if output.status.success() {
-            Ok(SandboxResult::success(
-                exit_code,
-                stdout,
-                stderr,
-                audit_entries,
-            ))
-        } else {
-            Ok(SandboxResult::failed(
-                exit_code,
-                stdout,
-                stderr,
+/// Convert the spawned `Command::output()` result into a `SandboxResult`,
+/// pushing CommandEnd audit entries on both success and failure paths.
+fn run_command_and_collect(
+    output: std::io::Result<std::process::Output>,
+    mut audit_entries: Vec<AuditEntry>,
+) -> Result<SandboxResult, SandboxError> {
+    let output = match output {
+        Ok(o) => o,
+        Err(e) => {
+            audit_entries.push(AuditEntry {
+                timestamp: now_iso8601(),
+                event_type: AuditEventType::CommandEnd,
+                detail: format!("spawn failed: {e}"),
+                metadata: serde_json::json!({"error": e.to_string()}),
+            });
+            return Ok(SandboxResult::failed(
+                -1,
+                String::new(),
+                format!("sandbox spawn failed: {e}"),
                 vec![],
                 audit_entries,
-            ))
+            ));
         }
+    };
+    let exit_code = output.status.code().unwrap_or(-1);
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    audit_entries.push(AuditEntry {
+        timestamp: now_iso8601(),
+        event_type: AuditEventType::CommandEnd,
+        detail: format!("command finished with exit code {exit_code}"),
+        metadata: serde_json::json!({"exit_code": exit_code}),
+    });
+    if output.status.success() {
+        Ok(SandboxResult::success(
+            exit_code,
+            stdout,
+            stderr,
+            audit_entries,
+        ))
+    } else {
+        Ok(SandboxResult::failed(
+            exit_code,
+            stdout,
+            stderr,
+            vec![],
+            audit_entries,
+        ))
     }
 }
 
@@ -337,46 +361,130 @@ fn apply_landlock_in_child(
     Ok(())
 }
 
+/// Result of the backend-selection decision — pure data, no side effects.
+///
+/// Extracted so `decide_backend` can be unit-tested without touching the
+/// real kernel probes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum BackendDecision {
+    /// Sandbox disabled by configuration.
+    Disabled,
+    /// Use bwrap (preferred on Linux).
+    Bwrap,
+    /// Use landlock (Linux fallback when bwrap missing).
+    Landlock,
+    /// No backend available; user opted into running without isolation.
+    /// The reason is preserved so the wrapper can log it.
+    NoopFallback { reason: &'static str },
+}
+
+/// Input to the decision function — presence of kernel-level capabilities.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct BackendProbe {
+    pub is_linux: bool,
+    pub bwrap_ok: bool,
+    pub landlock_ok: bool,
+}
+
+/// Pure decision function — given config + probed capabilities, pick a backend.
+///
+/// Keeping this pure lets us test every branch cross-platform, including the
+/// "no backend available" fallback path which is otherwise unreachable on a
+/// Linux CI host that has landlock.
+pub(crate) fn decide_backend(
+    config: &SandboxConfig,
+    probe: BackendProbe,
+) -> Result<BackendDecision, SandboxError> {
+    if !config.enabled {
+        return Ok(BackendDecision::Disabled);
+    }
+
+    if probe.is_linux {
+        if probe.bwrap_ok {
+            return Ok(BackendDecision::Bwrap);
+        }
+        if probe.landlock_ok {
+            return Ok(BackendDecision::Landlock);
+        }
+        if config.fail_if_unavailable {
+            return Err(SandboxError::Unavailable(
+                "neither bwrap nor landlock available".to_string(),
+            ));
+        }
+        return Ok(BackendDecision::NoopFallback {
+            reason: "no linux sandbox backend available (neither bwrap nor landlock)",
+        });
+    }
+
+    if config.fail_if_unavailable {
+        return Err(SandboxError::Unavailable(
+            "sandbox not supported on this platform".to_string(),
+        ));
+    }
+    Ok(BackendDecision::NoopFallback {
+        reason: "sandbox not supported on this platform",
+    })
+}
+
 /// Create the appropriate SandboxExecutor for the current platform.
 ///
 /// Cascading preference: bwrap > landlock > noop.
 /// - bwrap: Full isolation (PID ns, net ns, mount ns, capabilities) — preferred
 /// - landlock: Filesystem isolation only — fallback on Linux without bwrap
-/// - noop: No isolation — last resort or when sandbox disabled
+/// - noop: No isolation — last resort (only when `fail_if_unavailable=false`)
+///
+/// Safety-critical: when falling back to `NoopExecutor`, emits a structured
+/// WARN log so the operator is never silently left without isolation.
 pub fn create_executor(config: &SandboxConfig) -> Result<Box<dyn SandboxExecutor>, SandboxError> {
-    if !config.enabled {
-        return Ok(Box::new(NoopExecutor));
-    }
+    // Probe once, then defer to the pure decision function.
+    let is_linux = cfg!(target_os = "linux");
 
     #[cfg(target_os = "linux")]
-    {
-        // Try bwrap first (best isolation)
-        if let Ok(executor) = super::bwrap::BwrapExecutor::new() {
-            return Ok(Box::new(executor));
-        }
-
-        // Fallback to landlock (filesystem only)
-        if let Ok(executor) = LandlockExecutor::new() {
-            return Ok(Box::new(executor));
-        }
-
-        // Neither available
-        if config.fail_if_unavailable {
-            Err(SandboxError::Unavailable(
-                "neither bwrap nor landlock available".to_string(),
-            ))
+    let (bwrap_candidate, landlock_candidate) = {
+        // Constructing the executor IS the probe — the constructor returns
+        // Err when the kernel feature is missing. We hold onto the successful
+        // instance to avoid a second construction when it is selected.
+        let bwrap = super::bwrap::BwrapExecutor::new().ok();
+        let landlock = if bwrap.is_none() {
+            LandlockExecutor::new().ok()
         } else {
-            Ok(Box::new(NoopExecutor))
-        }
-    }
-
+            None
+        };
+        (bwrap, landlock)
+    };
     #[cfg(not(target_os = "linux"))]
-    {
-        if config.fail_if_unavailable {
-            Err(SandboxError::Unavailable(
-                "sandbox not supported on this platform".to_string(),
-            ))
-        } else {
+    let (bwrap_candidate, landlock_candidate): (Option<NoopExecutor>, Option<NoopExecutor>) =
+        (None, None);
+
+    let probe = BackendProbe {
+        is_linux,
+        bwrap_ok: bwrap_candidate.is_some(),
+        landlock_ok: landlock_candidate.is_some(),
+    };
+
+    match decide_backend(config, probe)? {
+        BackendDecision::Disabled => Ok(Box::new(NoopExecutor)),
+        #[cfg(target_os = "linux")]
+        BackendDecision::Bwrap => {
+            // unwrap is sound — decide_backend only yields Bwrap when probe.bwrap_ok is true
+            Ok(Box::new(bwrap_candidate.expect(
+                "decide_backend returned Bwrap but bwrap_candidate is None",
+            )))
+        }
+        #[cfg(target_os = "linux")]
+        BackendDecision::Landlock => Ok(Box::new(landlock_candidate.expect(
+            "decide_backend returned Landlock but landlock_candidate is None",
+        ))),
+        #[cfg(not(target_os = "linux"))]
+        BackendDecision::Bwrap | BackendDecision::Landlock => {
+            // Unreachable on non-linux because probe.is_linux == false.
+            unreachable!("linux-only branch reached on non-linux target");
+        }
+        BackendDecision::NoopFallback { reason } => {
+            log::warn!(
+                target: "theo_tooling::sandbox",
+                "sandbox backend unavailable ({reason}); falling back to NoopExecutor — bash tools will execute WITHOUT isolation. Set SandboxConfig::fail_if_unavailable=true to refuse this fallback."
+            );
             Ok(Box::new(NoopExecutor))
         }
     }
@@ -452,6 +560,169 @@ mod tests {
             .execute_sandboxed("echo test", Path::new("/tmp"), &config)
             .unwrap();
         assert!(result.success);
+    }
+
+    // ── decide_backend tests (pure, cross-platform) ─────────────
+    //
+    // Every branch of the backend selection is tested here without
+    // touching the real kernel. This is the only way to cover the
+    // "no linux backend available" path on a Linux host that actually
+    // has landlock.
+
+    #[test]
+    fn decide_backend_disabled_when_config_off() {
+        let config = SandboxConfig {
+            enabled: false,
+            ..SandboxConfig::default()
+        };
+        let probe = BackendProbe {
+            is_linux: true,
+            bwrap_ok: true,
+            landlock_ok: true,
+        };
+        assert_eq!(
+            decide_backend(&config, probe).unwrap(),
+            BackendDecision::Disabled
+        );
+    }
+
+    #[test]
+    fn decide_backend_prefers_bwrap_on_linux() {
+        let config = SandboxConfig {
+            enabled: true,
+            fail_if_unavailable: true,
+            ..SandboxConfig::default()
+        };
+        let probe = BackendProbe {
+            is_linux: true,
+            bwrap_ok: true,
+            landlock_ok: true,
+        };
+        assert_eq!(
+            decide_backend(&config, probe).unwrap(),
+            BackendDecision::Bwrap
+        );
+    }
+
+    #[test]
+    fn decide_backend_falls_back_to_landlock_without_bwrap() {
+        let config = SandboxConfig {
+            enabled: true,
+            fail_if_unavailable: true,
+            ..SandboxConfig::default()
+        };
+        let probe = BackendProbe {
+            is_linux: true,
+            bwrap_ok: false,
+            landlock_ok: true,
+        };
+        assert_eq!(
+            decide_backend(&config, probe).unwrap(),
+            BackendDecision::Landlock
+        );
+    }
+
+    #[test]
+    fn decide_backend_errors_on_linux_when_strict_and_no_backend() {
+        let config = SandboxConfig {
+            enabled: true,
+            fail_if_unavailable: true,
+            ..SandboxConfig::default()
+        };
+        let probe = BackendProbe {
+            is_linux: true,
+            bwrap_ok: false,
+            landlock_ok: false,
+        };
+        let result = decide_backend(&config, probe);
+        assert!(
+            matches!(result, Err(SandboxError::Unavailable(_))),
+            "expected Unavailable, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn decide_backend_noop_fallback_when_linux_no_backend_permissive() {
+        let config = SandboxConfig {
+            enabled: true,
+            fail_if_unavailable: false,
+            ..SandboxConfig::default()
+        };
+        let probe = BackendProbe {
+            is_linux: true,
+            bwrap_ok: false,
+            landlock_ok: false,
+        };
+        match decide_backend(&config, probe).unwrap() {
+            BackendDecision::NoopFallback { reason } => {
+                assert!(
+                    reason.contains("linux"),
+                    "reason should mention linux: {reason}"
+                );
+                assert!(!reason.is_empty());
+            }
+            other => panic!("expected NoopFallback, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decide_backend_errors_on_non_linux_when_strict() {
+        let config = SandboxConfig {
+            enabled: true,
+            fail_if_unavailable: true,
+            ..SandboxConfig::default()
+        };
+        let probe = BackendProbe {
+            is_linux: false,
+            bwrap_ok: false,
+            landlock_ok: false,
+        };
+        assert!(matches!(
+            decide_backend(&config, probe),
+            Err(SandboxError::Unavailable(_))
+        ));
+    }
+
+    #[test]
+    fn decide_backend_noop_fallback_when_non_linux_permissive() {
+        let config = SandboxConfig {
+            enabled: true,
+            fail_if_unavailable: false,
+            ..SandboxConfig::default()
+        };
+        let probe = BackendProbe {
+            is_linux: false,
+            bwrap_ok: false,
+            landlock_ok: false,
+        };
+        match decide_backend(&config, probe).unwrap() {
+            BackendDecision::NoopFallback { reason } => {
+                assert!(
+                    reason.contains("platform"),
+                    "reason should mention platform: {reason}"
+                );
+            }
+            other => panic!("expected NoopFallback, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decide_backend_ignores_probes_when_disabled() {
+        // Even with no sandbox available, disabled config → Disabled (not error).
+        let config = SandboxConfig {
+            enabled: false,
+            fail_if_unavailable: true,
+            ..SandboxConfig::default()
+        };
+        let probe = BackendProbe {
+            is_linux: true,
+            bwrap_ok: false,
+            landlock_ok: false,
+        };
+        assert_eq!(
+            decide_backend(&config, probe).unwrap(),
+            BackendDecision::Disabled
+        );
     }
 
     // ── LandlockExecutor tests (Linux only, may need #[ignore]) ─

@@ -1,0 +1,62 @@
+# Phase 47 — OTel Collector pipeline.
+#
+# Receives spans/metrics on OTLP gRPC (4317) + HTTP (4318), batches,
+# fans out to:
+#   - Jaeger (visual trace inspection)
+#   - File exporter at /var/log/otel/spans.jsonl (for analysis/post_run.py)
+#   - Prometheus scrape on :8889 (live metrics during runs)
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 1s
+    send_batch_size: 256
+
+  # Insert a uniform "bench.run" attribute so multi-run JSONL stays sortable.
+  attributes/bench:
+    actions:
+      - key: bench.host
+        action: insert
+        value: "${HOSTNAME}"
+
+exporters:
+  # Visual UI — bug #5 fix: jaeger 2.x accepts OTLP gRPC on internal :4317
+  otlp/jaeger:
+    endpoint: jaeger:4317
+    tls:
+      insecure: true
+
+  # File output for post-run analysis
+  file/spans:
+    path: /var/log/otel/spans.jsonl
+    rotation:
+      max_megabytes: 256
+      max_days: 7
+      max_backups: 5
+
+  # Live metrics scrape
+  prometheus:
+    endpoint: 0.0.0.0:8889
+    namespace: theo_bench
+
+  # Stderr (visible in `docker compose logs`)
+  debug:
+    verbosity: basic
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch, attributes/bench]
+      exporters: [otlp/jaeger, file/spans, debug]
+    metrics:
+      receivers: [otlp]
+      processors: [batch, attributes/bench]
+      exporters: [prometheus, file/spans, debug]

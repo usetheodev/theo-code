@@ -1,6 +1,7 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
+use parking_lot::Mutex;
 use theo_domain::capability::CapabilityDenied;
 use theo_domain::error::TransitionError;
 use theo_domain::event::{DomainEvent, EventType};
@@ -45,6 +46,16 @@ impl ToolCallManager {
         self
     }
 
+    /// Whether this manager has a capability gate installed.
+    ///
+    /// Always `true` after the runtime builds the manager via
+    /// `AgentLoop::build_run_engine` (T2.3 / FIND-P6-005). Used by
+    /// regression tests to assert the gate is wired regardless of the
+    /// user's `capability_set` configuration.
+    pub fn has_capability_gate(&self) -> bool {
+        self.capability_gate.is_some()
+    }
+
 
     /// Enqueues a new tool call with a unique CallId (Invariant 2).
     ///
@@ -66,8 +77,7 @@ impl ToolCallManager {
 
         self.records
             .lock()
-            .expect("records lock poisoned")
-            .insert(call_id.clone(), record);
+                        .insert(call_id.clone(), record);
 
         self.event_bus.publish(DomainEvent::new(
             EventType::ToolCallQueued,
@@ -92,51 +102,76 @@ impl ToolCallManager {
         registry: &ToolRegistry,
         ctx: &ToolContext,
     ) -> Result<ToolResultRecord, ToolCallManagerError> {
-        // 0. Capability check (if gate is set)
-        {
-            let records = self.records.lock().expect("records lock poisoned");
-            if let Some(record) = records.get(call_id)
-                && let Some(gate) = &self.capability_gate {
-                    // Determine category from registry, default to Utility
-                    let category = registry
-                        .get(&record.tool_name)
-                        .map(|t| t.category())
-                        .unwrap_or(ToolCategory::Utility);
-                    gate.check_tool(&record.tool_name, category)?;
-                }
-        }
+        // T6.5 — lock discipline:
+        //   Entry:  single `records` lock does capability check +
+        //           Queued→Dispatched→Running transitions + snapshot of
+        //           tool_name/input/raw_input for the duration of the
+        //           dispatch. Publishes ToolCallDispatched inside the
+        //           lock (dispatch_event does not touch `records`).
+        //   Await:  lock released; tool executes concurrent-safely.
+        //   Exit:   single `records` lock for Running→terminal +
+        //           completed_at. Single `results` insert. No re-acquire
+        //           to re-read tool_name — we cached it on entry.
+        //
+        // Previous implementation took 6 locks total; this path takes 3
+        // on the happy case (entry on records, exit on records, single
+        // insert on results).
 
-        // 1. Transition Queued → Dispatched (under lock)
-        let lmm_call = {
-            let mut records = self.records.lock().expect("records lock poisoned");
+        let (llm_call, tool_name, raw_input) = {
+            let mut records = self.records.lock();
             let record = records
                 .get_mut(call_id)
                 .ok_or_else(|| ToolCallManagerError::CallNotFound(call_id.as_str().to_string()))?;
 
+            if let Some(gate) = &self.capability_gate {
+                let category = registry
+                    .get(&record.tool_name)
+                    .map(|t| t.category())
+                    .unwrap_or(ToolCategory::Utility);
+                gate.check_tool(&record.tool_name, category)?;
+            }
+
             transition_record(record, ToolCallState::Dispatched)?;
 
+            // payload carries an `otel`
+            // attribute map that the OtelExportingListener turns into
+            // span attributes (theo.tool.name + theo.tool.call_id).
+            let mut start_span = crate::observability::otel::tool_call_span(&record.tool_name);
+            start_span.set(
+                crate::observability::otel::ATTR_THEO_TOOL_CALL_ID,
+                call_id.as_str(),
+            );
             self.event_bus.publish(DomainEvent::new(
                 EventType::ToolCallDispatched,
                 call_id.as_str(),
-                serde_json::json!({ "tool_name": &record.tool_name }),
+                serde_json::json!({
+                    "tool_name": &record.tool_name,
+                    "otel": start_span.to_json(),
+                }),
             ));
 
-            // 2. Transition Dispatched → Running
             transition_record(record, ToolCallState::Running)?;
             record.started_at = Some(now_millis());
 
-            // Build the LLM ToolCall for tool_bridge
-            ToolCall::new(
-                call_id.as_str(),
-                &record.tool_name,
-                record.input.to_string(),
+            (
+                ToolCall::new(
+                    call_id.as_str(),
+                    &record.tool_name,
+                    record.input.to_string(),
+                ),
+                record.tool_name.clone(),
+                record.input.clone(),
             )
         };
-        // Lock is released here — safe to await
+        // Lock is released here — safe to await.
 
-        // 3. Execute tool via tool_bridge (no lock held)
+        // 3. Execute tool via tool_bridge (no lock held).
+        // T1.2 / T0.1 — use the metadata-aware dispatch so vision-emitting
+        // tools (e.g., `read_image`) can have their `image_block` propagated
+        // through `ToolResultRecord.metadata` for the conversation builder.
         let start = std::time::Instant::now();
-        let (message, success) = tool_bridge::execute_tool_call(registry, &lmm_call, ctx).await;
+        let (message, success, metadata) =
+            tool_bridge::execute_tool_call_with_metadata(registry, &llm_call, ctx).await;
         let duration_ms = start.elapsed().as_millis() as u64;
 
         // 4. Determine final state
@@ -149,82 +184,91 @@ impl ToolCallManager {
         let output = message.content.clone().unwrap_or_default();
         let error = if success { None } else { Some(output.clone()) };
 
-        // 5. Transition Running → final state (under lock)
+        // 5. Transition Running → final state (under lock).
         {
-            let mut records = self.records.lock().expect("records lock poisoned");
+            let mut records = self.records.lock();
             if let Some(record) = records.get_mut(call_id) {
                 let _ = transition_record(record, final_state);
                 record.completed_at = Some(now_millis());
             }
         }
 
-        // 6. Store result (Invariant 3: result references call_id)
+        // 6. Store result (Invariant 3: result references call_id).
         let result = ToolResultRecord {
             call_id: call_id.clone(),
             output,
             status: final_state,
             error,
             duration_ms,
+            metadata,
         };
-
         self.results
             .lock()
-            .expect("results lock poisoned")
             .insert(call_id.clone(), result.clone());
 
-        // 7. Publish completion event (enriched with tool details)
-        let tool_name = {
-            self.records
-                .lock()
-                .expect("records lock poisoned")
-                .get(call_id)
-                .map(|r| r.tool_name.clone())
-                .unwrap_or_default()
-        };
-        let input_args = {
-            let raw = self
-                .records
-                .lock()
-                .expect("records lock poisoned")
-                .get(call_id)
-                .map(|r| r.input.clone())
-                .unwrap_or(serde_json::Value::Null);
-            // Truncate large string fields to keep event payload reasonable
-            truncate_input_for_event(raw)
-        };
-        // Truncate output preview for events (avoid huge payloads)
-        let output_preview = if result.output.len() > 200 {
-            let mut end = 200;
-            while end > 0 && !result.output.is_char_boundary(end) {
-                end -= 1;
-            }
-            format!("{}...", &result.output[..end])
-        } else {
-            result.output.clone()
-        };
+        // 7. Publish completion event using the cached snapshot —
+        // no re-acquire of `records` (T6.5).
+        self.publish_tool_completed(
+            call_id,
+            &tool_name,
+            &result,
+            success,
+            final_state,
+            duration_ms,
+            raw_input,
+        );
+        Ok(result)
+    }
 
+    /// Returns a clone of the tool call record.
+    fn publish_tool_completed(
+        &self,
+        call_id: &CallId,
+        tool_name: &str,
+        result: &ToolResultRecord,
+        success: bool,
+        final_state: ToolCallState,
+        duration_ms: u64,
+        raw_input: serde_json::Value,
+    ) {
+        let input_args = truncate_input_for_event(raw_input);
+        let output_preview = theo_domain::prompt_sanitizer::char_boundary_truncate(
+            &result.output,
+            crate::constants::TOOL_PREVIEW_BYTES,
+        );
+        let status_str = format!("{:?}", final_state);
+        let mut end_span = crate::observability::otel::tool_call_span(tool_name);
+        end_span.set(
+            crate::observability::otel::ATTR_THEO_TOOL_CALL_ID,
+            call_id.as_str(),
+        );
+        end_span.set(
+            crate::observability::otel::ATTR_THEO_TOOL_DURATION_MS,
+            duration_ms,
+        );
+        end_span.set(
+            crate::observability::otel::ATTR_THEO_TOOL_STATUS,
+            status_str.clone(),
+        );
         self.event_bus.publish(DomainEvent::new(
             EventType::ToolCallCompleted,
             call_id.as_str(),
             serde_json::json!({
-                "status": format!("{:?}", final_state),
+                "status": status_str,
                 "duration_ms": duration_ms,
                 "success": success,
                 "tool_name": tool_name,
                 "input": input_args,
                 "output_preview": output_preview,
+                "otel": end_span.to_json(),
             }),
         ));
-
-        Ok(result)
     }
 
-    /// Returns a clone of the tool call record.
     pub fn get_record(&self, call_id: &CallId) -> Option<ToolCallRecord> {
         self.records
             .lock()
-            .expect("records lock poisoned")
-            .get(call_id)
+                        .get(call_id)
             .cloned()
     }
 
@@ -232,8 +276,7 @@ impl ToolCallManager {
     pub fn get_result(&self, call_id: &CallId) -> Option<ToolResultRecord> {
         self.results
             .lock()
-            .expect("results lock poisoned")
-            .get(call_id)
+                        .get(call_id)
             .cloned()
     }
 
@@ -241,11 +284,59 @@ impl ToolCallManager {
     pub fn calls_for_task(&self, task_id: &TaskId) -> Vec<ToolCallRecord> {
         self.records
             .lock()
-            .expect("records lock poisoned")
             .values()
             .filter(|r| r.task_id == *task_id)
             .cloned()
             .collect()
+    }
+
+    /// Purge records (and their results) whose state is terminal AND
+    /// whose `completed_at` is older than `older_than_ms` milliseconds
+    /// before `now_ms`. Returns the number of entries removed.
+    ///
+    /// T6.3: prevents unbounded `HashMap` growth in long-running sessions
+    /// (e.g., a REPL that issues 10k+ tool calls). Typical call site is
+    /// `record_session_exit` or periodic maintenance in the main loop.
+    ///
+    /// **TOCTOU note (T4.10k / find_p4_003):** the function acquires
+    /// `records` twice — once read-only to compute `to_remove`, then
+    /// again exclusively to delete. A concurrent dispatch could
+    /// transition a record from terminal → terminal-but-newer in the
+    /// gap (impossible in practice — terminal states are sinks) or a
+    /// new record could be enqueued under the same `CallId` (impossible
+    /// because `CallId::generate` is collision-resistant per T4.6).
+    /// Conservative usage is at session shutdown where there is no
+    /// concurrent dispatch; concurrent maintenance is supported but
+    /// callers should not over-invoke this from the hot path.
+    pub fn purge_completed(&self, now_ms: u64, older_than_ms: u64) -> usize {
+        let cutoff = now_ms.saturating_sub(older_than_ms);
+        let to_remove: Vec<CallId> = {
+            let records = self.records.lock();
+            records
+                .iter()
+                .filter(|(_, r)| {
+                    r.state.is_terminal()
+                        && r.completed_at.map(|ts| ts < cutoff).unwrap_or(false)
+                })
+                .map(|(id, _)| id.clone())
+                .collect()
+        };
+        if to_remove.is_empty() {
+            return 0;
+        }
+        let mut records = self.records.lock();
+        let mut results = self.results.lock();
+        let count = to_remove.len();
+        for id in &to_remove {
+            records.remove(id);
+            results.remove(id);
+        }
+        count
+    }
+
+    /// Current number of tracked records (testing / diagnostics).
+    pub fn record_count(&self) -> usize {
+        self.records.lock().len()
     }
 }
 
@@ -258,31 +349,26 @@ fn transition_record(
 }
 
 /// Truncate large string fields in tool input for event payload.
-/// Keeps first ~500 chars of each string field to prevent huge events.
-/// Uses char boundary safe truncation to avoid panics on multi-byte UTF-8.
+/// Uses `theo_domain::prompt_sanitizer::char_boundary_truncate` for UTF-8
+/// safety. Cap lives in `crate::constants::TOOL_INPUT_TRUNCATE_BYTES`.
 fn truncate_input_for_event(mut input: serde_json::Value) -> serde_json::Value {
     if let Some(obj) = input.as_object_mut() {
         for (_key, value) in obj.iter_mut() {
             if let Some(s) = value.as_str()
-                && s.len() > 500 {
-                    // Find the nearest char boundary at or before 500
-                    let mut end = 500;
-                    while end > 0 && !s.is_char_boundary(end) {
-                        end -= 1;
-                    }
-                    *value = serde_json::Value::String(format!("{}...", &s[..end]));
-                }
+                && s.len() > crate::constants::TOOL_INPUT_TRUNCATE_BYTES
+            {
+                let truncated = theo_domain::prompt_sanitizer::char_boundary_truncate(
+                    s,
+                    crate::constants::TOOL_INPUT_TRUNCATE_BYTES,
+                );
+                *value = serde_json::Value::String(truncated);
+            }
         }
     }
     input
 }
 
-fn now_millis() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("system clock before UNIX epoch")
-        .as_millis() as u64
-}
+use theo_domain::clock::now_millis;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ToolCallManagerError {
@@ -445,6 +531,58 @@ mod tests {
         assert!(completion.payload.get("duration_ms").is_some());
     }
 
+    // ── — otel payload keys ──
+
+    #[tokio::test]
+    async fn dispatched_event_payload_includes_otel_attributes() {
+        let (manager, _, listener) = setup();
+        let registry = create_default_registry();
+        let call_id = manager.enqueue(
+            TaskId::new("t-1"),
+            "read".into(),
+            serde_json::json!({"filePath": "/tmp/nonexistent"}),
+        );
+        let ctx = ToolContext::test_context(std::path::PathBuf::from("/tmp"));
+        let _ = manager.dispatch_and_execute(&call_id, &registry, &ctx).await;
+
+        let events = listener.captured();
+        let dispatched = events
+            .iter()
+            .find(|e| e.event_type == EventType::ToolCallDispatched)
+            .expect("dispatched event present");
+        let otel = dispatched
+            .payload
+            .get("otel")
+            .expect("otel payload key present on ToolCallDispatched");
+        assert_eq!(otel["theo.tool.name"], serde_json::json!("read"));
+        assert_eq!(otel["theo.tool.call_id"], serde_json::json!(call_id.as_str()));
+    }
+
+    #[tokio::test]
+    async fn completed_event_payload_otel_includes_duration_and_status() {
+        let (manager, _, listener) = setup();
+        let registry = create_default_registry();
+        let call_id = manager.enqueue(
+            TaskId::new("t-1"),
+            "read".into(),
+            serde_json::json!({"filePath": "/tmp/nonexistent"}),
+        );
+        let ctx = ToolContext::test_context(std::path::PathBuf::from("/tmp"));
+        let _ = manager.dispatch_and_execute(&call_id, &registry, &ctx).await;
+
+        let events = listener.captured();
+        let completed = events
+            .iter()
+            .find(|e| e.event_type == EventType::ToolCallCompleted)
+            .expect("completed event present");
+        let otel = completed
+            .payload
+            .get("otel")
+            .expect("otel payload key present on ToolCallCompleted");
+        assert!(otel.get("theo.tool.duration_ms").is_some(), "duration_ms must be set");
+        assert!(otel.get("theo.tool.status").is_some(), "status must be set");
+    }
+
     // -----------------------------------------------------------------------
     // Queries
     // -----------------------------------------------------------------------
@@ -493,6 +631,49 @@ mod tests {
     // -----------------------------------------------------------------------
     // Thread safety
     // -----------------------------------------------------------------------
+
+    // T6.3 — purge_completed
+    #[tokio::test]
+    async fn purge_completed_removes_terminal_records_older_than_cutoff() {
+        let (manager, _, _) = setup();
+        let registry = create_default_registry();
+        // Enqueue and execute two failing calls — they land in Failed terminal state.
+        let c1 = manager.enqueue(
+            TaskId::new("t-1"),
+            "read".into(),
+            serde_json::json!({"filePath": "/nonexistent/a"}),
+        );
+        let c2 = manager.enqueue(
+            TaskId::new("t-1"),
+            "read".into(),
+            serde_json::json!({"filePath": "/nonexistent/b"}),
+        );
+        let ctx = ToolContext::test_context(std::path::PathBuf::from("/tmp"));
+        let _ = manager.dispatch_and_execute(&c1, &registry, &ctx).await;
+        let _ = manager.dispatch_and_execute(&c2, &registry, &ctx).await;
+
+        assert_eq!(manager.record_count(), 2);
+
+        // Purge everything completed more than 0 ms ago → both go.
+        let far_future = theo_domain::clock::now_millis() + 1_000_000;
+        let purged = manager.purge_completed(far_future, 0);
+        assert_eq!(purged, 2);
+        assert_eq!(manager.record_count(), 0);
+    }
+
+    #[test]
+    fn purge_completed_keeps_non_terminal_records() {
+        let (manager, _, _) = setup();
+        // Queued is non-terminal — must survive purge.
+        let _id = manager.enqueue(
+            TaskId::new("t-1"),
+            "read".into(),
+            serde_json::json!({}),
+        );
+        let purged = manager.purge_completed(u64::MAX, 0);
+        assert_eq!(purged, 0);
+        assert_eq!(manager.record_count(), 1);
+    }
 
     #[test]
     fn concurrent_enqueues_are_safe() {

@@ -1,0 +1,11 @@
+# E2E probes for provider authentication.
+# Tests that configured LLM providers can authenticate and complete a minimal request.
+
+[[probe]]
+id = "provider-default-ping"
+category = "provider-auth"
+command = "pilot 'respond with the word PONG'"
+mode = "headless"
+timeout_secs = 60
+requires_llm = true
+success_check = "'PONG' in result.get('summary', '').upper()"

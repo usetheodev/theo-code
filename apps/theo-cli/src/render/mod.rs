@@ -8,6 +8,7 @@ pub mod code_block;
 pub mod diff;
 pub mod errors;
 pub mod markdown;
+pub mod partial_progress;
 pub mod progress;
 pub mod streaming;
 pub mod style;

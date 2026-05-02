@@ -1,4 +1,6 @@
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+
+use parking_lot::RwLock;
 
 /// Aggregated runtime metrics for observability.
 #[derive(Debug, Clone, Default)]
@@ -52,22 +54,107 @@ impl RuntimeMetrics {
     }
 }
 
+/// Single routing decision recorded for
+/// post-mortem analysis. Aggregated in `RuntimeMetrics::routing_decisions`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub struct RoutingDecisionMetric {
+    /// Detected task type (Retrieval/Implementation/Analysis/Planning/Generic).
+    pub task_type: String,
+    /// Tier chosen by `ComplexityClassifier::classify`.
+    pub tier: String,
+    /// Concrete model id selected from the slot config.
+    pub model_id: String,
+}
+
+/// Aggregated routing histogram. Map key = (task_type, tier, model_id),
+/// value = count.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct RoutingHistogram {
+    pub buckets: std::collections::BTreeMap<String, u64>,
+}
+
+impl RoutingHistogram {
+    pub fn record(&mut self, decision: &RoutingDecisionMetric) {
+        let key = format!(
+            "{}|{}|{}",
+            decision.task_type, decision.tier, decision.model_id
+        );
+        *self.buckets.entry(key).or_insert(0) += 1;
+    }
+
+    pub fn total(&self) -> u64 {
+        self.buckets.values().sum()
+    }
+
+    pub fn count_for(&self, task_type: &str, tier: &str, model_id: &str) -> u64 {
+        let key = format!("{}|{}|{}", task_type, tier, model_id);
+        *self.buckets.get(&key).unwrap_or(&0)
+    }
+}
+
 /// Thread-safe metrics collector.
 ///
 /// Uses RwLock to allow concurrent reads (snapshot) and exclusive writes (record).
 pub struct MetricsCollector {
     metrics: Arc<RwLock<RuntimeMetrics>>,
+    /// Per-agent metrics breakdown for the dashboard.
+    by_agent: Arc<RwLock<crate::observability::otel::MetricsByAgent>>,
+    /// Routing decisions histogram.
+    routing: Arc<RwLock<RoutingHistogram>>,
 }
 
 impl MetricsCollector {
     pub fn new() -> Self {
         Self {
             metrics: Arc::new(RwLock::new(RuntimeMetrics::default())),
+            by_agent: Arc::new(RwLock::new(
+                crate::observability::otel::MetricsByAgent::new(),
+            )),
+            routing: Arc::new(RwLock::new(RoutingHistogram::default())),
         }
     }
 
+    /// Record a single routing decision. Aggregated into the
+    /// `RoutingHistogram` for post-mortem analysis.
+    pub fn record_routing_decision(
+        &self,
+        task_type: &str,
+        tier: &str,
+        model_id: &str,
+    ) {
+        self.routing.write().record(&RoutingDecisionMetric {
+            task_type: task_type.to_string(),
+            tier: tier.to_string(),
+            model_id: model_id.to_string(),
+        });
+    }
+
+    /// Snapshot of the routing histogram (cloned for safe reading).
+    pub fn routing_snapshot(&self) -> RoutingHistogram {
+        self.routing.read().clone()
+    }
+
+    /// Record per-agent run completion (called from spawn_with_spec
+    /// after final result is known).
+    pub fn record_subagent_run(
+        &self,
+        agent_name: &str,
+        success: bool,
+        payload: crate::observability::otel::SubagentRunMetrics,
+    ) {
+        let mut m = self.by_agent.write();
+        m.record(agent_name, success, payload);
+    }
+
+    /// Snapshot per-agent metrics breakdown.
+    pub fn by_agent_snapshot(&self) -> crate::observability::otel::MetricsByAgent {
+        self.by_agent
+            .read()
+                        .clone()
+    }
+
     pub fn record_llm_call(&self, duration_ms: u64, tokens: u64) {
-        let mut m = self.metrics.write().expect("metrics write lock poisoned");
+        let mut m = self.metrics.write();
         m.total_llm_calls += 1;
         m.total_tokens_used += tokens;
         m.total_llm_call_ms += duration_ms;
@@ -82,7 +169,7 @@ impl MetricsCollector {
         output_tokens: u64,
     ) {
         let total = input_tokens + output_tokens;
-        let mut m = self.metrics.write().expect("metrics write lock poisoned");
+        let mut m = self.metrics.write();
         m.total_llm_calls += 1;
         m.total_tokens_used += total;
         m.total_input_tokens += input_tokens;
@@ -95,12 +182,12 @@ impl MetricsCollector {
     /// Acumulates tokens WITHOUT incrementing total_llm_calls
     /// (sub-agent calls are not LLM calls of the parent).
     pub fn record_delegated_tokens(&self, tokens: u64) {
-        let mut m = self.metrics.write().expect("metrics write lock poisoned");
+        let mut m = self.metrics.write();
         m.total_tokens_used += tokens;
     }
 
     pub fn record_tool_call(&self, _tool_name: &str, duration_ms: u64, success: bool) {
-        let mut m = self.metrics.write().expect("metrics write lock poisoned");
+        let mut m = self.metrics.write();
         m.total_tool_calls += 1;
         if success {
             m.successful_tool_calls += 1;
@@ -110,17 +197,17 @@ impl MetricsCollector {
     }
 
     pub fn record_retry(&self) {
-        let mut m = self.metrics.write().expect("metrics write lock poisoned");
+        let mut m = self.metrics.write();
         m.total_retries += 1;
     }
 
     pub fn record_dlq_entry(&self) {
-        let mut m = self.metrics.write().expect("metrics write lock poisoned");
+        let mut m = self.metrics.write();
         m.total_dlq_entries += 1;
     }
 
     pub fn record_run_complete(&self, converged: bool) {
-        let mut m = self.metrics.write().expect("metrics write lock poisoned");
+        let mut m = self.metrics.write();
         m.total_runs += 1;
         if converged {
             m.converged_runs += 1;
@@ -129,12 +216,12 @@ impl MetricsCollector {
 
     /// Accumulate dollar cost from an LLM call.
     pub fn record_cost(&self, cost_usd: f64) {
-        let mut m = self.metrics.write().expect("metrics write lock poisoned");
+        let mut m = self.metrics.write();
         m.total_cost_usd += cost_usd;
     }
 
     pub fn record_iteration(&self, duration_ms: u64) {
-        let mut m = self.metrics.write().expect("metrics write lock poisoned");
+        let mut m = self.metrics.write();
         m.total_iteration_ms += duration_ms;
         m.iteration_count += 1;
     }
@@ -143,8 +230,7 @@ impl MetricsCollector {
     pub fn snapshot(&self) -> RuntimeMetrics {
         self.metrics
             .read()
-            .expect("metrics read lock poisoned")
-            .clone()
+                        .clone()
     }
 }
 
@@ -287,6 +373,59 @@ mod tests {
     }
 
     #[test]
+    fn record_subagent_run_aggregates_per_agent_metrics() {
+        use crate::observability::otel::SubagentRunMetrics;
+        let collector = MetricsCollector::new();
+        collector.record_subagent_run(
+            "explorer",
+            true,
+            SubagentRunMetrics {
+                tokens_used: 1000,
+                input_tokens: 700,
+                output_tokens: 300,
+                llm_calls: 2,
+                iterations_used: 5,
+                duration_ms: 200,
+            },
+        );
+        collector.record_subagent_run(
+            "explorer",
+            false,
+            SubagentRunMetrics {
+                tokens_used: 500,
+                ..Default::default()
+            },
+        );
+        collector.record_subagent_run(
+            "implementer",
+            true,
+            SubagentRunMetrics {
+                tokens_used: 3000,
+                ..Default::default()
+            },
+        );
+
+        let by_agent = collector.by_agent_snapshot();
+        let exp = by_agent.get("explorer").expect("explorer recorded");
+        assert_eq!(exp.runs, 2);
+        assert_eq!(exp.success, 1);
+        assert_eq!(exp.failure, 1);
+        assert_eq!(exp.total_tokens, 1500);
+        assert_eq!(exp.success_rate(), 0.5);
+
+        let imp = by_agent.get("implementer").expect("implementer recorded");
+        assert_eq!(imp.runs, 1);
+        assert_eq!(imp.total_tokens, 3000);
+    }
+
+    #[test]
+    fn by_agent_snapshot_empty_for_new_collector() {
+        let collector = MetricsCollector::new();
+        let by_agent = collector.by_agent_snapshot();
+        assert!(by_agent.by_agent.is_empty());
+    }
+
+    #[test]
     fn record_delegated_tokens_adds_tokens_without_incrementing_calls() {
         let collector = MetricsCollector::new();
         collector.record_llm_call(100, 1000); // parent call
@@ -302,5 +441,64 @@ mod tests {
             m.total_llm_calls, 1,
             "delegated tokens should NOT increment llm_calls"
         );
+    }
+
+    // ── Routing telemetry ──
+
+    pub mod routing {
+        use super::*;
+
+        #[test]
+        fn metrics_collector_records_routing_decision() {
+            let c = MetricsCollector::new();
+            c.record_routing_decision("Retrieval", "Cheap", "haiku");
+            let snap = c.routing_snapshot();
+            assert_eq!(snap.total(), 1);
+            assert_eq!(snap.count_for("Retrieval", "Cheap", "haiku"), 1);
+        }
+
+        #[test]
+        fn metrics_collector_aggregates_decisions_by_tier() {
+            let c = MetricsCollector::new();
+            c.record_routing_decision("Retrieval", "Cheap", "haiku");
+            c.record_routing_decision("Retrieval", "Cheap", "haiku");
+            c.record_routing_decision("Planning", "Strong", "opus");
+            let snap = c.routing_snapshot();
+            assert_eq!(snap.total(), 3);
+            assert_eq!(snap.count_for("Retrieval", "Cheap", "haiku"), 2);
+            assert_eq!(snap.count_for("Planning", "Strong", "opus"), 1);
+        }
+
+        #[test]
+        fn metrics_collector_routing_count_zero_for_unseen_combination() {
+            let c = MetricsCollector::new();
+            c.record_routing_decision("Planning", "Strong", "opus");
+            assert_eq!(c.routing_snapshot().count_for("Planning", "Cheap", "haiku"), 0);
+        }
+
+        #[test]
+        fn routing_histogram_serde_roundtrip() {
+            let mut h = RoutingHistogram::default();
+            h.record(&RoutingDecisionMetric {
+                task_type: "Analysis".into(),
+                tier: "Strong".into(),
+                model_id: "opus".into(),
+            });
+            let json = serde_json::to_string(&h).unwrap();
+            let back: RoutingHistogram = serde_json::from_str(&json).unwrap();
+            assert_eq!(back.total(), 1);
+        }
+
+        #[test]
+        fn routing_decision_metric_serde_preserves_all_fields() {
+            let m = RoutingDecisionMetric {
+                task_type: "Implementation".into(),
+                tier: "Default".into(),
+                model_id: "sonnet".into(),
+            };
+            let json = serde_json::to_string(&m).unwrap();
+            let back: RoutingDecisionMetric = serde_json::from_str(&json).unwrap();
+            assert_eq!(m, back);
+        }
     }
 }

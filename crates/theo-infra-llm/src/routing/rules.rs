@@ -9,7 +9,8 @@
 //! §4.2 (file citation in-line below).
 
 use theo_domain::routing::{
-    ModelChoice, ModelRouter, RoutingContext, RoutingFailureHint, RoutingPhase, SubAgentRoleId,
+    ComplexityTier, ModelChoice, ModelRouter, RoutingContext, RoutingFailureHint, RoutingPhase,
+    SubAgentRoleId,
 };
 
 use super::keywords::{MAX_SIMPLE_CHARS, MAX_SIMPLE_WORDS, matches_complex_keyword};
@@ -90,6 +91,16 @@ impl ModelRouter for RuleBasedRouter {
             RoutingPhase::Normal => {
                 if ctx.requires_vision {
                     return self.resolve_slot("vision", "vision_required");
+                }
+                // Phase 14: ComplexityClassifier hint takes precedence over
+                // keyword heuristic when present.
+                if let Some(tier) = ctx.complexity_hint {
+                    let (slot, reason) = match tier {
+                        ComplexityTier::Cheap => ("cheap", "tier_cheap"),
+                        ComplexityTier::Default => ("default", "tier_default"),
+                        ComplexityTier::Strong => ("strong", "tier_strong"),
+                    };
+                    return self.resolve_slot(slot, reason);
                 }
                 if let Some(msg) = ctx.latest_user_message
                     && Self::is_simple_turn(msg) {

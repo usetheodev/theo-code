@@ -5,31 +5,45 @@ members = [
     "crates/theo-engine-retrieval",
     "crates/theo-governance",
     "crates/theo-engine-parser",
+    "crates/theo-isolation",
+    "crates/theo-infra-mcp",
     "crates/theo-tooling",
     "crates/theo-infra-llm",
     "crates/theo-agent-runtime",
     "crates/theo-infra-auth",
     "crates/theo-infra-memory",
     "crates/theo-test-memory-fixtures",
+    "crates/theo-engine-wiki",
     "crates/theo-api-contracts",
     "crates/theo-application",
     "apps/theo-desktop",
     "apps/theo-cli",
     "apps/theo-marklive",
 ]
+exclude = [
+    # CLEAN-F1 / 2026-04-28 — orphaned satellite Cargo project.
+    # Depends on ../commands, ../tools, ../runtime which do not exist
+    # in this repository (experimental harness from commits 914534d/3140ce8).
+    # Preserved for git-history reference; see crates/theo-compat-harness/README.md.
+    # Workspace excludes it explicitly so cargo never tries to resolve it.
+    "crates/theo-compat-harness",
+]
 resolver = "3"
 
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-license = "MIT"
+license = "Apache-2.0"
 
 [workspace.dependencies]
 theo-domain = { path = "crates/theo-domain" }
 theo-engine-graph = { path = "crates/theo-engine-graph" }
 theo-engine-retrieval = { path = "crates/theo-engine-retrieval" }
+theo-engine-wiki = { path = "crates/theo-engine-wiki" }
 theo-governance = { path = "crates/theo-governance" }
 theo-engine-parser = { path = "crates/theo-engine-parser" }
+theo-isolation = { path = "crates/theo-isolation" }
+theo-infra-mcp = { path = "crates/theo-infra-mcp" }
 theo-tooling = { path = "crates/theo-tooling" }
 theo-infra-llm = { path = "crates/theo-infra-llm" }
 theo-agent-runtime = { path = "crates/theo-agent-runtime" }
@@ -43,9 +57,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 async-trait = "0.1"
+base64 = "0.22"
 tempfile = "3"
 glob = "0.3"
-grep-regex = "0.1"
 regex = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "http2", "charset", "rustls-tls"] }
 similar = "2"
@@ -53,6 +67,7 @@ walkdir = "2"
 clap = { version = "4", features = ["derive"] }
 ignore = "0.4"
 log = "0.4"
+tracing = "0.1"
 landlock = "0.4"
 libc = "0.2"
 rustyline = "15"
@@ -73,9 +88,26 @@ criterion = { version = "0.5", features = ["html_reports"] }
 toml = "0.8"
 rayon = "1"
 bincode = "1"
-scip = "0.5"
+scip = "0.7"
 protobuf = "3"
 tantivy = "0.22"
 blake3 = "1"
 axum = "0.7"
 tower-http = { version = "0.5", features = ["fs", "cors"] }
+indexmap = { version = "2", features = ["serde"] }
+serde_yaml = "0.9"
+sha2 = "0.10"
+tokio-util = { version = "0.7", features = ["rt"] }
+dashmap = "6"
+parking_lot = "0.12"
+# T4.6 / find_p4_010 / find_p5_008 — UUID v4 backs `random_u64()` so
+# concurrent `*Id::generate()` calls cannot collide on fast hardware.
+uuid = { version = "1", features = ["v4"] }
+notify = "6"
+notify-debouncer-mini = "0.4"
+# Phase 40 (otlp-exporter-plan) — OpenTelemetry SDK, opt-in via feature `otel`.
+# Pin major.minor to avoid breaking changes between 0.x bumps.
+opentelemetry = "0.27"
+opentelemetry_sdk = { version = "0.27", features = ["rt-tokio"] }
+opentelemetry-otlp = { version = "0.27", features = ["grpc-tonic", "http-proto", "reqwest-client"] }
+opentelemetry-semantic-conventions = "0.27"

@@ -26,6 +26,8 @@ use tower_http::services::ServeDir;
 
 use theo_application::use_cases::observability_ui;
 
+use crate::dashboard_agents;
+
 #[derive(Clone)]
 struct AppState {
     project_dir: Arc<PathBuf>,
@@ -88,8 +90,15 @@ async fn compare_runs_handler(
     Json(metrics).into_response()
 }
 
+// ---------------------------------------------------------------------------
+// Phase 15: per-agent dashboard endpoints
+// ---------------------------------------------------------------------------
+// Handlers + tests live in `dashboard_agents.rs`; `build_router` below
+// nests the sub-router under `/api/agents`.
+
 /// Build the router.
 fn build_router(project_dir: PathBuf, static_dir: Option<PathBuf>) -> Router {
+    let agents_router = dashboard_agents::build_router(project_dir.clone());
     let state = AppState {
         project_dir: Arc::new(project_dir),
     };
@@ -101,7 +110,9 @@ fn build_router(project_dir: PathBuf, static_dir: Option<PathBuf>) -> Router {
         .route("/run/:run_id/report", get(get_report_handler))
         .route("/system/stats", get(system_stats_handler))
         .route("/runs/compare", post(compare_runs_handler))
-        .with_state(state);
+        .with_state(state)
+        // Phase 15 (sota-gaps): per-agent endpoints in dashboard_agents.rs
+        .nest("/agents", agents_router);
 
     let mut app = Router::new().nest("/api", api);
 
@@ -184,15 +195,16 @@ pub async fn serve(project_dir: PathBuf, port: u16, static_dir: Option<PathBuf>)
     axum::serve(listener, app).await
 }
 
+
 /// Heuristic: locate the UI bundle shipped next to the binary (or dev path).
 pub fn find_default_static_dir() -> Option<PathBuf> {
     // 1) Binary-relative dist/ (e.g., ./dashboard-dist)
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let candidate = dir.join("dashboard-dist");
-            if candidate.exists() {
-                return Some(candidate);
-            }
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(dir) = exe.parent()
+    {
+        let candidate = dir.join("dashboard-dist");
+        if candidate.exists() {
+            return Some(candidate);
         }
     }
     // 2) Workspace-relative for dev runs: apps/theo-ui/dist

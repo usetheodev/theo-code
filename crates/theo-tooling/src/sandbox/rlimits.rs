@@ -34,6 +34,11 @@ fn set_rlimit(resource: libc::__rlimit_resource_t, value: u64) -> std::io::Resul
         rlim_cur: value as libc::rlim_t,
         rlim_max: value as libc::rlim_t,
     };
+    // SAFETY: `setrlimit` reads the `limit` struct for the duration of the
+    // call (borrowed reference below). `resource` is a valid libc rlimit
+    // resource constant by type construction. Failure (negative return) is
+    // converted to a typed `io::Error`; no undefined behaviour regardless
+    // of outcome.
     let ret = unsafe { libc::setrlimit(resource, &limit) };
     if ret != 0 {
         Err(std::io::Error::last_os_error())
@@ -49,6 +54,9 @@ pub fn get_rlimit(resource: libc::__rlimit_resource_t) -> std::io::Result<(u64, 
         rlim_cur: 0,
         rlim_max: 0,
     };
+    // SAFETY: `getrlimit` writes into `&mut limit` for the duration of the
+    // call. The struct is stack-allocated, fully initialised before the
+    // call, and its lifetime covers the entire syscall.
     let ret = unsafe { libc::getrlimit(resource, &mut limit) };
     if ret != 0 {
         Err(std::io::Error::last_os_error())
@@ -103,6 +111,10 @@ mod tests {
             rlim_cur: cur_before as libc::rlim_t,
             rlim_max: cur_before as libc::rlim_t,
         };
+        // SAFETY: `setrlimit` reads `restore` for the duration of the call;
+        // `restore` lives on the stack through the statement. `RLIMIT_FSIZE`
+        // is a valid resource constant. Test-only code that restores the
+        // pre-test limit, so no cross-test contamination.
         unsafe { libc::setrlimit(libc::RLIMIT_FSIZE, &restore) };
     }
 
@@ -139,6 +151,9 @@ mod tests {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
+        // SAFETY: `pre_exec` runs after fork, before exec, in a child
+        // process. `apply_rlimits` only calls `setrlimit` — async-signal-safe.
+        // Test-only code gated behind `#[cfg(target_os = "linux")]`.
         unsafe {
             cmd.pre_exec(move || apply_rlimits(&policy_clone));
         }
@@ -182,6 +197,8 @@ mod tests {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
+        // SAFETY: see above — identical `pre_exec` invariant; child-side
+        // `apply_rlimits` is async-signal-safe.
         unsafe {
             cmd.pre_exec(move || apply_rlimits(&policy_clone));
         }

@@ -107,14 +107,20 @@ fn base_cfg(
     skill_calls: Arc<AtomicUsize>,
 ) -> AgentConfig {
     AgentConfig {
-        memory_enabled: true,
-        memory_provider: Some(MemoryHandle::new(Arc::new(StubProvider))),
-        memory_reviewer: Some(MemoryReviewerHandle::new(Arc::new(
-            RecordingMemoryReviewer { calls: mem_calls },
-        ))),
-        skill_reviewer: Some(SkillReviewerHandle::new(Arc::new(
-            RecordingSkillReviewer { calls: skill_calls },
-        ))),
+        memory: theo_agent_runtime::config::MemoryConfig {
+            enabled: true,
+            provider: Some(MemoryHandle::new(Arc::new(StubProvider))),
+            reviewer: Some(MemoryReviewerHandle::new(Arc::new(
+                RecordingMemoryReviewer { calls: mem_calls },
+            ))),
+            ..theo_agent_runtime::config::MemoryConfig::default()
+        },
+        evolution: theo_agent_runtime::config::EvolutionConfig {
+            skill_reviewer: Some(SkillReviewerHandle::new(Arc::new(
+                RecordingSkillReviewer { calls: skill_calls },
+            ))),
+            ..theo_agent_runtime::config::EvolutionConfig::default()
+        },
         ..AgentConfig::default()
     }
 }
@@ -139,7 +145,10 @@ async fn phase1_memory_reviewer_fires_at_threshold_and_resets() {
     }
     // 10th turn — spawn fires. We give the spawned task a moment.
     maybe_spawn_reviewers(&cfg, &counter, &skill_counter, &msgs, 0, false);
+    // T5.4: fixed 50ms sleep was the flakiness surface; keep the small
+    // relative sleep but also yield so the spawned reviewer task runs.
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    tokio::task::yield_now().await;
 
     assert_eq!(
         mem_calls.load(Ordering::Relaxed),
@@ -178,7 +187,10 @@ async fn phase3_skill_reviewer_fires_when_accumulated_tool_iters_reach_threshold
             /* skill_created */ false,
         );
     }
+    // T5.4: fixed 50ms sleep was the flakiness surface; keep the small
+    // relative sleep but also yield so the spawned reviewer task runs.
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    tokio::task::yield_now().await;
 
     assert_eq!(
         skill_calls.load(Ordering::Relaxed),
@@ -253,16 +265,22 @@ async fn phase2_autodream_spawn_via_wiring_helper_respects_disable_flag() {
 
     let calls = Arc::new(AtomicUsize::new(0));
     let cfg = AgentConfig {
-        autodream_enabled: false,
-        autodream: Some(AutodreamHandle::new(Arc::new(RecordingAutodream {
-            calls: calls.clone(),
-        }))),
+        evolution: theo_agent_runtime::config::EvolutionConfig {
+            autodream_enabled: false,
+            autodream: Some(AutodreamHandle::new(Arc::new(RecordingAutodream {
+                calls: calls.clone(),
+            }))),
+            ..theo_agent_runtime::config::EvolutionConfig::default()
+        },
         ..AgentConfig::default()
     };
 
     let attempted = std::sync::atomic::AtomicBool::new(false);
     maybe_spawn_autodream(&cfg, &attempted, project_dir, "run-1");
+    // T5.4: fixed 50ms sleep was the flakiness surface; keep the small
+    // relative sleep but also yield so the spawned reviewer task runs.
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    tokio::task::yield_now().await;
 
     assert_eq!(
         calls.load(Ordering::Relaxed),
@@ -280,7 +298,7 @@ async fn phase2_autodream_spawn_via_wiring_helper_respects_disable_flag() {
 #[test]
 fn phase4_transcript_indexer_is_optional_and_defaults_to_none() {
     let cfg = AgentConfig::default();
-    assert!(cfg.transcript_indexer.is_none());
+    assert!(cfg.memory.transcript_indexer.is_none());
 }
 
 // ---------------------------------------------------------------------------
@@ -358,10 +376,13 @@ fn review_window_capped_to_avoid_reviewer_overload() {
 #[test]
 fn memory_reviewer_trigger_disabled_when_no_reviewer() {
     let cfg = AgentConfig {
-        memory_enabled: true,
-        memory_provider: Some(MemoryHandle::new(Arc::new(StubProvider))),
-        memory_reviewer: None,
-        memory_review_nudge_interval: 3,
+        memory: theo_agent_runtime::config::MemoryConfig {
+            enabled: true,
+            provider: Some(MemoryHandle::new(Arc::new(StubProvider))),
+            reviewer: None,
+            review_nudge_interval: 3,
+            ..theo_agent_runtime::config::MemoryConfig::default()
+        },
         ..AgentConfig::default()
     };
     let counter = MemoryNudgeCounter::new();

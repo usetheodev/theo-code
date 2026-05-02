@@ -55,7 +55,10 @@ impl Tool for ShellTool {
     }
 
     fn category(&self) -> ToolCategory {
-        ToolCategory::Utility
+        // ShellTool is the wrapper for plugin-provided tools. Classifying
+        // as `Plugin` ensures the capability gate blocks it unless the
+        // host agent explicitly opts in (T1.3 — supply-chain guard).
+        ToolCategory::Plugin
     }
 
     async fn execute(
@@ -142,7 +145,10 @@ mod tests {
         );
         assert_eq!(tool.id(), "my_tool");
         assert_eq!(tool.description(), "A test tool");
-        assert_eq!(tool.category(), ToolCategory::Utility);
+        // T1.3: ShellTool is the plugin wrapper; its category is gated
+        // as `Plugin` to force capability opt-in even on unrestricted
+        // default capability sets.
+        assert_eq!(tool.category(), ToolCategory::Plugin);
     }
 
     #[test]

@@ -1,5 +1,43 @@
-// LSP tool - experimental, requires Language Server Protocol integration
-// TODO: Implement LSP operations (goToDefinition, references, hover, etc.)
+//! T3.1 — Agent-callable LSP tool family + protocol primitives.
+//!
+//! Wraps `LspSessionManager` so the agent can invoke `lsp_definition`,
+//! `lsp_references`, `lsp_hover`, `lsp_rename`, `lsp_status` against the
+//! project's native language servers (rust-analyzer, pyright, gopls,
+//! etc.). 5 tools, one per file. Pre-2026-04-28 the family lived in a
+//! single 974-LOC `tool.rs`; the per-file split was T1.3 of
+//! `docs/plans/god-files-2026-07-23-plan.md` (ADR D2).
+
+pub mod client;
+pub mod discovery;
+pub mod operations;
+pub mod protocol;
+pub mod session_manager;
+
+pub(crate) mod tool_common;
+
+mod definition;
+mod hover;
+mod references;
+mod rename;
+mod status;
+
+pub use definition::LspDefinitionTool;
+pub use hover::LspHoverTool;
+pub use references::LspReferencesTool;
+pub use rename::LspRenameTool;
+pub use status::LspStatusTool;
+
+pub use client::{LspClient, LspClientError};
+pub use discovery::{DiscoveredServer, discover, discover_with_path};
+pub use protocol::{
+    InboundMessage, JsonRpcErrorObj, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse,
+    LspProtocolError, RequestIdGen, encode_frame, encode_message, try_decode_frame,
+};
+pub use session_manager::{LspSessionError, LspSessionManager};
+
+// ── Legacy umbrella stub kept for the all_tools_have_valid_schemas
+// ── contract test in registry/mod.rs. Production agents call the
+// ── per-operation tools (LspDefinitionTool, LspReferencesTool, etc.).
 
 use async_trait::async_trait;
 use theo_domain::error::ToolError;
@@ -59,8 +97,8 @@ impl Tool for LspTool {
                     required: true,
                 },
             ],
-        input_examples: Vec::new(),
-    }
+            input_examples: Vec::new(),
+        }
     }
 
     fn category(&self) -> ToolCategory {
@@ -78,3 +116,26 @@ impl Tool for LspTool {
         ))
     }
 }
+
+// Sibling tests split per-tool (T3.7 of code-hygiene-5x5).
+#[cfg(test)]
+#[path = "lsp_test_helpers.rs"]
+mod lsp_test_helpers;
+#[cfg(test)]
+#[path = "lsp_status_tests.rs"]
+mod lsp_status_tests;
+#[cfg(test)]
+#[path = "lsp_definition_tests.rs"]
+mod lsp_definition_tests;
+#[cfg(test)]
+#[path = "lsp_references_tests.rs"]
+mod lsp_references_tests;
+#[cfg(test)]
+#[path = "lsp_hover_tests.rs"]
+mod lsp_hover_tests;
+#[cfg(test)]
+#[path = "lsp_rename_tests.rs"]
+mod lsp_rename_tests;
+#[cfg(test)]
+#[path = "lsp_common_tests.rs"]
+mod lsp_common_tests;

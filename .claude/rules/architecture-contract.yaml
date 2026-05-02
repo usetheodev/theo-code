@@ -1,0 +1,97 @@
+# Architecture Contract — machine-readable mirror of `.claude/rules/architecture.md`.
+# Keep this aligned with:
+#   - the current Cargo workspace
+#   - `README.md` dependency direction
+#   - `docs/pesquisas/*/INDEX.md` crate/domain mapping
+#
+# Schema:
+#   crates[].path                    workspace-relative directory
+#   crates[].allowed_workspace_deps  list of theo-* crates this crate may declare
+#   crates[].allows_any              reserved — true means the rule is "all crates above"
+#                                    (used for the aggregating crate theo-application)
+#
+# `check-arch-contract.sh` still embeds the effective rules in bash, so any
+# architectural update must change both places in the same patch.
+
+crates:
+  - path: crates/theo-domain
+    allowed_workspace_deps: []
+
+  - path: crates/theo-engine-graph
+    allowed_workspace_deps: [theo-domain]
+
+  - path: crates/theo-engine-parser
+    allowed_workspace_deps: [theo-domain]
+
+  - path: crates/theo-engine-retrieval
+    # Per ADR-011: retrieval consumes graph + parser (unidirectional).
+    allowed_workspace_deps: [theo-domain, theo-engine-graph, theo-engine-parser]
+
+  - path: crates/theo-engine-wiki
+    allowed_workspace_deps: [theo-domain, theo-engine-graph, theo-engine-parser]
+
+  - path: crates/theo-governance
+    allowed_workspace_deps: [theo-domain]
+
+  - path: crates/theo-isolation
+    allowed_workspace_deps: [theo-domain]
+
+  - path: crates/theo-infra-llm
+    allowed_workspace_deps: [theo-domain]
+
+  - path: crates/theo-infra-auth
+    allowed_workspace_deps: [theo-domain]
+
+  - path: crates/theo-infra-mcp
+    allowed_workspace_deps: [theo-domain]
+
+  - path: crates/theo-infra-memory
+    # Per ADR-011: the optional tantivy backend needs retrieval.
+    allowed_workspace_deps: [theo-domain, theo-engine-retrieval]
+
+  - path: crates/theo-tooling
+    allowed_workspace_deps: [theo-domain]
+
+  - path: crates/theo-agent-runtime
+    # Per ADR-016: orchestrator consumes its collaborators (LLM + tools +
+    # auth) directly. Trait extraction deferred — revisit 2026-10-23.
+    allowed_workspace_deps:
+      - theo-domain
+      - theo-governance
+      - theo-infra-llm
+      - theo-infra-auth
+      - theo-tooling
+      - theo-isolation
+      - theo-infra-mcp
+
+  - path: crates/theo-api-contracts
+    allowed_workspace_deps: [theo-domain]
+
+  - path: crates/theo-application
+    allowed_workspace_deps:
+      - theo-domain
+      - theo-engine-graph
+      - theo-engine-parser
+      - theo-engine-retrieval
+      - theo-engine-wiki
+      - theo-governance
+      - theo-isolation
+      - theo-infra-llm
+      - theo-infra-auth
+      - theo-infra-mcp
+      - theo-infra-memory
+      - theo-tooling
+      - theo-agent-runtime
+      - theo-api-contracts
+
+  - path: crates/theo-test-memory-fixtures
+    allowed_workspace_deps: [theo-domain, theo-infra-memory]
+
+  - path: apps/theo-cli
+    allowed_workspace_deps: [theo-application, theo-api-contracts, theo-domain]
+
+  - path: apps/theo-desktop
+    allowed_workspace_deps: [theo-application, theo-api-contracts, theo-domain]
+
+  - path: apps/theo-marklive
+    allowed_workspace_deps: [theo-application, theo-api-contracts, theo-domain]

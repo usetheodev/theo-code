@@ -23,9 +23,12 @@ pub fn diff_to_lines(old: &str, new: &str, filename: &str) -> Vec<Line<'static>>
     )));
 
     for group in diff.grouped_ops(3) {
-        // Hunk header
-        let first = group.first().unwrap();
-        let last = group.last().unwrap();
+        // Hunk header — `grouped_ops` returns non-empty groups by
+        // contract (similar crate); the `first()`/`last()` Option chain
+        // here is a defensive guard rather than a real panic surface.
+        let (Some(first), Some(last)) = (group.first(), group.last()) else {
+            continue;
+        };
         let old_start = first.old_range().start + 1;
         let old_len = last.old_range().end - first.old_range().start;
         let new_start = first.new_range().start + 1;

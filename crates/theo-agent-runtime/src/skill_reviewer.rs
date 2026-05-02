@@ -1,4 +1,4 @@
-//! Skill reviewer trait — Phase 3 of PLAN_AUTO_EVOLUTION_SOTA.
+//! Skill reviewer trait — 
 //!
 //! Background skill reviewer spawned after `skill_review_nudge_interval`
 //! tool iterations in a task without any skill being created. Mirror of
@@ -191,13 +191,13 @@ pub fn spawn_skill_reviewer(
         match handle.as_reviewer().review(&window).await {
             Ok(SkillAction::NoOp) => {}
             Ok(action) => {
-                eprintln!(
-                    "[theo::skill_reviewer] action ready: {action:?} (executor wiring happens \
-                     at application layer)"
+                tracing::info!(
+                    action = ?action,
+                    "skill_reviewer action ready (executor wiring happens at application layer)"
                 );
             }
             Err(err) => {
-                eprintln!("[theo::skill_reviewer] background review failed: {err}");
+                tracing::warn!(error = %err, "skill_reviewer background review failed");
             }
         }
     })

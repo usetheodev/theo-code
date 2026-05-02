@@ -78,11 +78,11 @@ pub fn compute_doom_loop_frequency(steps: &[ProjectedStep]) -> SurrogateMetric {
             tool_calls[i].tool_name.clone().unwrap_or_default(),
             tool_calls[i].payload_summary
         );
-        for j in low..i {
+        for prior in &tool_calls[low..i] {
             let key_j = format!(
                 "{}|{}",
-                tool_calls[j].tool_name.clone().unwrap_or_default(),
-                tool_calls[j].payload_summary
+                prior.tool_name.clone().unwrap_or_default(),
+                prior.payload_summary
             );
             if key_i == key_j {
                 repetitions += 1;
@@ -119,11 +119,9 @@ pub fn compute_llm_efficiency(steps: &[ProjectedStep]) -> SurrogateMetric {
     for s in steps {
         if s.event_type == "ToolCallCompleted"
             && matches!(s.outcome, Some(StepOutcome::Success))
-        {
-            if let Some(tn) = &s.tool_name {
+            && let Some(tn) = &s.tool_name {
                 distinct.insert(tn.clone());
             }
-        }
     }
     let num = distinct.len() as f64;
     let den = llm_calls as f64;

@@ -1,0 +1,536 @@
+# Recognized Rust idioms — machine-readable companion to ADR-021.
+#
+# Format:
+#   [[<gate>_pattern]]
+#   name = "<short-id>"
+#   regex = '<rust-style-regex>'  # interpreted by check-<gate>.sh
+#   scope = "<glob>"              # bash-glob; multiple via [[...]] entries
+#   invariant = "<one-line>"
+#   adr = "021-recognized-rust-idioms.md#<anchor>"
+#   alternative_rejected = "<one-line>"
+#
+# Entries here are NOT exceptions — they are the canonical idioms the
+# project uses. The gate scripts treat them as ALLOWED first, then
+# fall back to the legacy allowlist for any remaining sites.
+#
+# Adding a new pattern requires (a) a new ADR-021 section and (b) an
+# entry below. Removing a pattern requires the symmetric deletion.
+
+version = 1
+spec = "021-recognized-rust-idioms.md"
+
+# ---------------------------------------------------------------------------
+# unwrap_pattern entries (consumed by scripts/check-unwrap.sh)
+# ---------------------------------------------------------------------------
+
+[[unwrap_pattern]]
+name = "mutex_poison_lock"
+regex = '\.(lock|read|write)\(\)\.expect\(.*(poisoned|lock).*\)'
+scope = "crates/**/*.rs"
+invariant = "Mutex/RwLock poisoning is unrecoverable; .expect() documents the contract"
+adr = "021-recognized-rust-idioms.md#1-mutex_poison_lock"
+alternative_rejected = "wrap in Result<T, MutexPoisonError> — every consumer would re-panic identically"
+
+[[unwrap_pattern]]
+name = "mutex_poison_lock_apps"
+regex = '\.(lock|read|write)\(\)\.expect\(.*(poisoned|lock).*\)'
+scope = "apps/**/*.rs"
+invariant = "Same Mutex/RwLock poison contract as crates/"
+adr = "021-recognized-rust-idioms.md#1-mutex_poison_lock"
+alternative_rejected = "see crates entry"
+
+[[unwrap_pattern]]
+name = "mutex_poison_expect_split"
+regex = '^[[:space:]]*\.expect\("[^"]*(poisoned|snapshot lock|mutex lock)[^"]*"\)'
+scope = "crates/**/*.rs"
+invariant = "Multi-line .lock()/.expect() chain — same Mutex/RwLock poison contract as mutex_poison_lock"
+adr = "021-recognized-rust-idioms.md#1-mutex_poison_lock"
+alternative_rejected = "rewrite as single-line — fights rustfmt's chained-method style"
+
+[[unwrap_pattern]]
+name = "system_clock_unix_epoch_domain"
+regex = '\.expect\("system clock before UNIX epoch"\)'
+scope = "crates/theo-domain/**/*.rs"
+invariant = "SystemTime::duration_since(UNIX_EPOCH) only fails if clock is set before 1970-01-01 — fatal misconfiguration"
+adr = "021-recognized-rust-idioms.md#2-system_clock_unix_epoch"
+alternative_rejected = "Result<u64, ClockError> — caller can only re-panic"
+
+[[unwrap_pattern]]
+name = "system_clock_unix_epoch_tooling"
+regex = '\.expect\("system clock before UNIX epoch"\)'
+scope = "crates/theo-tooling/**/*.rs"
+invariant = "Same UNIX-clock invariant as theo-domain"
+adr = "021-recognized-rust-idioms.md#2-system_clock_unix_epoch"
+alternative_rejected = "see domain entry"
+
+[[unwrap_pattern]]
+name = "embedded_tool_schema_valid"
+regex = '\.expect\(".*tool schema is valid"\)'
+scope = "crates/theo-tooling/**/*.rs"
+invariant = "Tool schemas are embedded const data; build_registry contract test validates each"
+adr = "021-recognized-rust-idioms.md#3-embedded_tool_schema_valid"
+alternative_rejected = "unwrap_or + log — masks programming bugs in embedded data"
+
+[[unwrap_pattern]]
+name = "process_entrypoint_runtime_init"
+regex = 'tokio::runtime::Runtime::new\(\)\.expect\('
+scope = "apps/theo-cli/**/*.rs"
+invariant = "Runtime spawn failure at process entrypoint is fatal by design"
+adr = "021-recognized-rust-idioms.md#4-process_entrypoint_runtime_init"
+alternative_rejected = "process::exit(1) with manual print — expect() IS that pattern with stack trace"
+
+[[unwrap_pattern]]
+name = "observability_writer_spawn"
+regex = '\.expect\(.*(metrics|spawn).*\)'
+scope = "crates/theo-agent-runtime/**/*.rs"
+invariant = "Failure to spawn observability writer / metrics mutex is fatal — blind agent is worse than fast crash"
+adr = "021-recognized-rust-idioms.md#5-observability_writer_spawn"
+alternative_rejected = "silently degrade to no-op — masks observability failures in CI"
+
+[[unwrap_pattern]]
+name = "syntect_default_theme"
+regex = 'themes\.values\(\)\.next\(\)\.expect\("at least one theme"\)'
+scope = "apps/theo-cli/**/*.rs"
+invariant = "Syntect bundles at least one theme at compile time — invariant proven by sibling test"
+adr = "021-recognized-rust-idioms.md#3-embedded_tool_schema_valid"
+alternative_rejected = "fallback theme constant — duplicates Syntect data"
+
+# ── Pattern 10: local_proven_invariant ──────────────────────────────────
+# Each entry is a narrow `expect("<proof message>")` whose call site is
+# proven unreachable by a guard immediately above. See ADR-021#10.
+
+[[unwrap_pattern]]
+name = "local_invariant_bash_is_some"
+regex = '\.expect\("checked is_some above"\)'
+scope = "crates/theo-tooling/**/*.rs"
+invariant = "Local `is_some()` guard checked one line above"
+adr = "021-recognized-rust-idioms.md#10-local_proven_invariant"
+alternative_rejected = "if let Some(x) = … reshape — adds nesting without earning safety"
+
+[[unwrap_pattern]]
+name = "local_invariant_skill_name_nonempty"
+regex = '\.expect\("invariant: name is non-empty \(checked above\)"\)'
+scope = "crates/theo-agent-runtime/**/*.rs"
+invariant = "Local non-empty check on skill name immediately above"
+adr = "021-recognized-rust-idioms.md#10-local_proven_invariant"
+alternative_rejected = "see ADR-021#10"
+
+[[unwrap_pattern]]
+name = "local_invariant_just_pushed"
+regex = '\.expect\("just pushed"\)'
+scope = "crates/theo-agent-runtime/**/*.rs"
+invariant = "Vec was pushed-to one line above; .expect() documents post-push"
+adr = "021-recognized-rust-idioms.md#10-local_proven_invariant"
+alternative_rejected = "see ADR-021#10"
+
+[[unwrap_pattern]]
+name = "local_invariant_snapshot_serialize"
+regex = '\.expect\("snapshot serialization failed"\)'
+scope = "crates/theo-agent-runtime/**/*.rs"
+invariant = "serde_json on derived Serialize struct cannot fail unless OOM"
+adr = "021-recognized-rust-idioms.md#10-local_proven_invariant"
+alternative_rejected = "see ADR-021#10"
+
+[[unwrap_pattern]]
+name = "local_invariant_spawn_semaphore"
+regex = '\.expect\("spawn_semaphore is never closed during runtime"\)'
+scope = "crates/theo-agent-runtime/**/*.rs"
+invariant = "Semaphore lifetime tied to AgentRuntime; closing implies use-after-drop"
+adr = "021-recognized-rust-idioms.md#10-local_proven_invariant"
+alternative_rejected = "see ADR-021#10"
+
+[[unwrap_pattern]]
+name = "local_invariant_scrubber_regex"
+regex = '\.expect\("scrubber regex constants are valid"\)'
+scope = "crates/theo-agent-runtime/**/*.rs"
+invariant = "Regex patterns are compile-time const strings; sibling tests exercise them"
+adr = "021-recognized-rust-idioms.md#10-local_proven_invariant"
+alternative_rejected = "see ADR-021#10"
+
+[[unwrap_pattern]]
+name = "local_invariant_sandbox_decision"
+regex = '_candidate\.expect\('
+scope = "crates/theo-tooling/**/*.rs"
+invariant = "Sandbox backend already proven Some by BackendDecision::* match arm above"
+adr = "021-recognized-rust-idioms.md#10-local_proven_invariant"
+alternative_rejected = "see ADR-021#10"
+
+[[unwrap_pattern]]
+name = "local_invariant_summary_last"
+regex = '\.last\(\)\.unwrap\(\)'
+scope = "crates/theo-engine-retrieval/**/*.rs"
+invariant = "chain non-empty by construction at the call site"
+adr = "021-recognized-rust-idioms.md#10-local_proven_invariant"
+alternative_rejected = "see ADR-021#10"
+
+[[unwrap_pattern]]
+name = "local_invariant_apply_patch_candidates"
+regex = '\*candidates\.last\(\)\.unwrap\(\)'
+scope = "crates/theo-tooling/**/*.rs"
+invariant = "candidates non-empty: early-return on len==0 above"
+adr = "021-recognized-rust-idioms.md#10-local_proven_invariant"
+alternative_rejected = "see ADR-021#10"
+
+[[unwrap_pattern]]
+name = "local_invariant_test_gen_property_name"
+regex = 'name\.chars\(\)\.next\(\)\.unwrap\(\)'
+scope = "crates/theo-tooling/**/*.rs"
+invariant = "name validated non-empty by calling tool registry"
+adr = "021-recognized-rust-idioms.md#10-local_proven_invariant"
+alternative_rejected = "see ADR-021#10"
+
+[[unwrap_pattern]]
+name = "local_invariant_lsp_tool_unwrap_in_match"
+regex = '\.unwrap\(\)'
+scope = "crates/theo-tooling/src/lsp/tool.rs"
+invariant = "Inside Option chain already pattern-matched Some — local invariant"
+adr = "021-recognized-rust-idioms.md#10-local_proven_invariant"
+alternative_rejected = "see ADR-021#10"
+
+[[unwrap_pattern]]
+name = "local_invariant_webfetch_quote_strip"
+regex = 'quote\.unwrap\(\)'
+scope = "crates/theo-tooling/**/*.rs"
+invariant = "Quote-stripping inside a match arm where quote is Some"
+adr = "021-recognized-rust-idioms.md#10-local_proven_invariant"
+alternative_rejected = "see ADR-021#10"
+
+[[unwrap_pattern]]
+name = "local_invariant_php_extractor_test_fixture"
+regex = 'parse_http_method.*\.unwrap\(\)'
+scope = "crates/theo-engine-parser/**/*.rs"
+invariant = "test fixture using hardcoded literal as input"
+adr = "021-recognized-rust-idioms.md#10-local_proven_invariant"
+alternative_rejected = "see ADR-021#10"
+
+# ── Pattern 11: process_entrypoint_desktop ──────────────────────────────
+
+[[unwrap_pattern]]
+name = "process_entrypoint_desktop"
+regex = '\.expect\("error while running Theo Code"\)'
+scope = "apps/theo-desktop/**/*.rs"
+invariant = "Tauri desktop entrypoint — fatal by design"
+adr = "021-recognized-rust-idioms.md#11-process_entrypoint_desktop"
+alternative_rejected = "DesktopRunError typed-error — no caller to receive it"
+
+# ── Pattern 12: process_entrypoint_agent_bin ────────────────────────────
+
+[[unwrap_pattern]]
+name = "process_entrypoint_agent_bin"
+regex = '\.unwrap\(\)'
+scope = "crates/theo-agent-runtime/src/bin/theo-agent.rs"
+invariant = "Developer-only binary entrypoint; main()-level unwrap is fatal by design"
+adr = "021-recognized-rust-idioms.md#12-process_entrypoint_agent_bin"
+alternative_rejected = "thread Result<()> through main — wrapper not worth the ceremony"
+
+# ── Pattern 13: lsp_tool_common_unwrap ──────────────────────────────────
+
+[[unwrap_pattern]]
+name = "lsp_tool_common_unwrap"
+regex = '\.unwrap\(\)'
+scope = "crates/theo-tooling/src/lsp/tool_common.rs"
+invariant = "Internal LSP helpers — JSON-RPC contract guarantees field presence"
+adr = "021-recognized-rust-idioms.md#13-lsp_tool_common_unwrap"
+alternative_rejected = "duplicate LspError typing in helpers — ceremony without info"
+
+# Test-fixture / mock crates — `.unwrap()` is the canonical idiom for
+# Mutex::lock() and tempdir-based file I/O inside test scaffolding.
+# These 4 patterns codify the last 5 path entries in unwrap-allowlist.txt
+# (T6 closeout of code-hygiene-5x5).
+
+[[unwrap_pattern]]
+name = "test_memory_fixtures_crate"
+regex = '\.unwrap\(\)'
+scope = "crates/theo-test-memory-fixtures/**/*.rs"
+invariant = "theo-test-memory-fixtures is publish=false test scaffolding (mock_llm.rs, mock_retrieval.rs); Mutex::lock().unwrap() is the canonical idiom in mocks"
+adr = "021-recognized-rust-idioms.md#14-test_fixture_unwrap"
+alternative_rejected = "Result<MutexGuard, PoisonError> propagation in mocks — ceremony without info; mocks never recover from a poisoned lock"
+
+[[unwrap_pattern]]
+name = "infra_llm_mock_provider"
+regex = '\.unwrap\(\)'
+scope = "crates/theo-infra-llm/src/mock.rs"
+invariant = "Mock LLM provider used only from test harnesses; same Mutex/test-fixture contract as theo-test-memory-fixtures"
+adr = "021-recognized-rust-idioms.md#14-test_fixture_unwrap"
+alternative_rejected = "see test_memory_fixtures_crate"
+
+[[unwrap_pattern]]
+name = "tooling_test_helpers"
+regex = '(\.unwrap\(\)|\.expect\(")'
+scope = "crates/theo-tooling/src/test_helpers.rs"
+invariant = "Test helpers exposed to sibling crates' test harnesses; every site is .expect(\"Failed to <fs op>\") against a freshly-created tempdir that cannot fail in any realistic test environment"
+adr = "021-recognized-rust-idioms.md#14-test_fixture_unwrap"
+alternative_rejected = "Result-returning helpers — every test would have to .unwrap() the result anyway"
+
+[[unwrap_pattern]]
+name = "tooling_read_base64_test_helper"
+regex = '\.unwrap\(\)'
+scope = "crates/theo-tooling/src/read/mod.rs"
+invariant = "Test-only base64 helper inside Read tool's binary file rendering tests; the input is a known-good fixture"
+adr = "021-recognized-rust-idioms.md#14-test_fixture_unwrap"
+alternative_rejected = "fallible decoder — would only matter if input were untrusted; this is a test fixture"
+
+# ---------------------------------------------------------------------------
+# unsafe_pattern entries (consumed by scripts/check-unsafe.sh)
+# ---------------------------------------------------------------------------
+
+[[unsafe_pattern]]
+name = "rust_2024_test_env_var"
+regex = 'unsafe\s*\{\s*std::env::(set_var|remove_var)\('
+scope = "crates/**/*.rs"
+invariant = "Rust 2024 made env::set_var/remove_var unsafe; tests serialise via per-module Mutex<()>"
+adr = "021-recognized-rust-idioms.md#6-rust_2024_test_env_var"
+alternative_rejected = "thread-safe shim crate — adds dep for test-only need"
+
+[[unsafe_pattern]]
+name = "rust_2024_test_env_var_apps"
+regex = 'unsafe\s*\{\s*std::env::(set_var|remove_var)\('
+scope = "apps/**/*.rs"
+invariant = "Same Rust 2024 env_var contract as crates/"
+adr = "021-recognized-rust-idioms.md#6-rust_2024_test_env_var"
+alternative_rejected = "see crates entry"
+
+# ---------------------------------------------------------------------------
+# panic_pattern entries (consumed by scripts/check-panic.sh)
+# ---------------------------------------------------------------------------
+
+[[panic_pattern]]
+name = "builtin_tool_schema_panic"
+regex = 'panic!\(".*invalid schema.*"\)'
+scope = "crates/theo-tooling/**/*.rs"
+invariant = "Startup panic if a built-in tool ships an invalid schema; no recoverable path"
+adr = "021-recognized-rust-idioms.md#7-builtin_tool_schema_panic"
+alternative_rejected = "compile-time validation via proc-macro — scope creep"
+
+[[panic_pattern]]
+name = "observability_normalizer_compile_panic"
+regex = 'panic!\(".*regex.*compile.*"\)'
+scope = "crates/theo-agent-runtime/src/observability/normalizer.rs"
+invariant = "Patterns are compile-time literals validated by sibling tests; this branch is unreachable in practice"
+adr = "021-recognized-rust-idioms.md#8-observability_normalizer_compile_panic"
+alternative_rejected = "Result<&Regex, regex::Error> — pollutes callers without safety gain"
+
+# ---------------------------------------------------------------------------
+# secret_pattern entries (consumed by scripts/check-secrets.sh)
+# ---------------------------------------------------------------------------
+
+[[secret_pattern]]
+name = "test_fixture_dummy_keys"
+scope_path = "tests/"
+invariant = "Strings inside test directories are dummy fixtures; they cannot grant access"
+adr = "021-recognized-rust-idioms.md#9-test_fixture_dummy_keys"
+alternative_rejected = "PRNG-generated dummies — hurts test reproducibility"
+
+[[secret_pattern]]
+name = "test_fixture_dummy_keys_mock_files"
+scope_path = "mock_"
+invariant = "Files named mock_*.rs are test mocks; same dummy-fixture contract"
+adr = "021-recognized-rust-idioms.md#9-test_fixture_dummy_keys"
+alternative_rejected = "see test_fixture_dummy_keys"
+
+[[secret_pattern]]
+name = "test_fixture_dummy_keys_test_helpers"
+scope_path = "test_helpers.rs"
+invariant = "Files named test_helpers.rs are test infrastructure; same dummy-fixture contract"
+adr = "021-recognized-rust-idioms.md#9-test_fixture_dummy_keys"
+alternative_rejected = "see test_fixture_dummy_keys"
+
+[[secret_pattern]]
+name = "test_fixture_dummy_keys_memory_fixtures"
+scope_path = "theo-test-memory-fixtures"
+invariant = "Whole crate is the test-fixture container; same dummy-fixture contract"
+adr = "021-recognized-rust-idioms.md#9-test_fixture_dummy_keys"
+alternative_rejected = "see test_fixture_dummy_keys"
+
+[[secret_pattern]]
+name = "test_fixture_dummy_keys_secret_scrubber"
+scope_path = "secret_scrubber.rs"
+invariant = "secret_scrubber.rs is the redaction module; its tests MUST contain dummy AWS/Anthropic/RSA shapes to validate the regex — that's literally what it tests"
+adr = "021-recognized-rust-idioms.md#9-test_fixture_dummy_keys"
+alternative_rejected = "PRNG dummies — would break golden-test reproducibility on the canonical AWS docs example"
+
+[[secret_pattern]]
+name = "test_fixture_dummy_keys_env_sanitizer"
+scope_path = "sandbox/env_sanitizer.rs"
+invariant = "env_sanitizer.rs validates that AWS/OpenAI/Anthropic/GitHub keys are stripped from child-process env; its tests need real-shape dummies"
+adr = "021-recognized-rust-idioms.md#9-test_fixture_dummy_keys"
+alternative_rejected = "see test_fixture_dummy_keys_secret_scrubber"
+
+[[secret_pattern]]
+name = "test_fixture_dummy_keys_sibling_tests"
+scope_path = "_tests.rs"
+invariant = "Sibling test files (suffix _tests.rs) extracted by T0.2 of god-files plan are tests by construction; same dummy-fixture contract"
+adr = "021-recognized-rust-idioms.md#9-test_fixture_dummy_keys"
+alternative_rejected = "Move every _tests.rs file under tests/ — would break the per-feature sibling split codified in ADR-017 v2"
+
+[[secret_pattern]]
+name = "test_fixture_dummy_keys_auth_use_case"
+scope_path = "use_cases/auth.rs"
+invariant = "Auth use-case unit tests verify provider redaction; require dummy `sk-` shaped tokens"
+adr = "021-recognized-rust-idioms.md#9-test_fixture_dummy_keys"
+alternative_rejected = "see test_fixture_dummy_keys_secret_scrubber"
+
+[[secret_pattern]]
+name = "test_fixture_dummy_keys_adr_docs"
+scope_path = "docs/adr/"
+invariant = "ADR docs cite canonical dummy keys (sk-test-..., AKIAIOSFODNN7EXAMPLE) verbatim to illustrate codified patterns; redacting them defeats the documentation"
+adr = "021-recognized-rust-idioms.md#9-test_fixture_dummy_keys"
+alternative_rejected = "Use placeholder names — but then the doc doesn't actually demonstrate the regex shape"
+
+[[secret_pattern]]
+name = "test_fixture_dummy_keys_changelog"
+scope_path = "CHANGELOG.md"
+invariant = "CHANGELOG entries describing scrubber/env-sanitizer changes cite the same canonical dummy keys for traceability"
+adr = "021-recognized-rust-idioms.md#9-test_fixture_dummy_keys"
+alternative_rejected = "Drop the references — but then commit traceability to AWS docs / OpenAI shape is lost"
+
+# ---------------------------------------------------------------------------
+# io_test_pattern entries (consumed by scripts/check-inline-io-tests.sh v2)
+# T5.1 of code-hygiene-5x5 — see docs/adr/017-inline-io-tests.md.
+# ---------------------------------------------------------------------------
+
+[[io_test_pattern]]
+name = "tempfile_isolated_fs"
+markers = [
+    "tempfile::TempDir",
+    "tempfile::tempdir",
+    "tempfile::NamedTempFile",
+    "tempfile::Builder",
+    "use tempfile::",
+    "TestDir::",
+]
+scope = "crates/**/*.rs|apps/**/*.rs"
+invariant = "Inline #[cfg(test)] I/O is allowed when the test isolates FS via tempfile (RAII per-test scratch dir, no shared mutable state)"
+adr = "017-inline-io-tests.md#pattern-inline_io_test"
+alternative_rejected = "move every I/O test to crates/<crate>/tests/ — slow tests still need a home; tempfile handles isolation"
+
+# scope_path-based io_test patterns: legitimate I/O categories that
+# don't fit `tempfile_isolated_fs`. Each codifies a category of tests
+# that exercises real subprocess / network / sandbox plumbing — the
+# inline assertion shape is correct, the path-prefix proves it.
+
+[[io_test_pattern]]
+name = "subprocess_jsonrpc_lsp"
+scope_path = "crates/theo-tooling/src/lsp/"
+invariant = "LSP client/session_manager tests use subprocess JSON-RPC against rust-analyzer; cannot use tempfile alone"
+adr = "017-inline-io-tests.md#scope_path-categories"
+
+[[io_test_pattern]]
+name = "subprocess_jsonrpc_dap"
+scope_path = "crates/theo-tooling/src/dap/"
+invariant = "DAP client/session_manager tests use subprocess JSON-RPC against lldb-vscode/debugpy/dlv"
+adr = "017-inline-io-tests.md#scope_path-categories"
+
+[[io_test_pattern]]
+name = "subprocess_jsonrpc_generic"
+scope_path = "crates/theo-tooling/src/jsonrpc_"
+invariant = "Generic JSON-RPC subprocess + session helpers (jsonrpc_session, jsonrpc_subprocess)"
+adr = "017-inline-io-tests.md#scope_path-categories"
+
+[[io_test_pattern]]
+name = "subprocess_browser_cdp"
+scope_path = "crates/theo-tooling/src/browser/"
+invariant = "Browser sidecar tests use Chrome DevTools Protocol over subprocess + websocket"
+adr = "017-inline-io-tests.md#scope_path-categories"
+
+[[io_test_pattern]]
+name = "subprocess_screenshot"
+scope_path = "crates/theo-tooling/src/screenshot/"
+invariant = "Screenshot capture tests run platform helper subprocesses"
+adr = "017-inline-io-tests.md#scope_path-categories"
+
+[[io_test_pattern]]
+name = "subprocess_computer_use"
+scope_path = "crates/theo-tooling/src/computer/"
+invariant = "Computer Use driver tests run platform tools (xdotool/cliclick) via subprocess"
+adr = "017-inline-io-tests.md#scope_path-categories"
+
+[[io_test_pattern]]
+name = "sandbox_executor"
+scope_path = "crates/theo-tooling/src/sandbox/"
+invariant = "Sandbox executors (bwrap, landlock, macos, network, probe, rlimits, env_sanitizer, executor) run real subprocesses to verify isolation invariants"
+adr = "017-inline-io-tests.md#scope_path-categories"
+
+[[io_test_pattern]]
+name = "subprocess_env_inspect"
+scope_path = "crates/theo-tooling/src/env_info/"
+invariant = "env_info module runs read-only subprocess inspection (uname, lscpu)"
+adr = "017-inline-io-tests.md#scope_path-categories"
+
+[[io_test_pattern]]
+name = "subprocess_git_inspect"
+scope_path = "crates/theo-tooling/src/git/"
+invariant = "Git inspector tests run `git --version` etc. — read-only subprocess"
+adr = "017-inline-io-tests.md#scope_path-categories"
+
+[[io_test_pattern]]
+name = "subprocess_undo"
+scope_path = "crates/theo-tooling/src/undo.rs"
+invariant = "Undo helper invokes `git stash` / restore via subprocess"
+adr = "017-inline-io-tests.md#scope_path-categories"
+
+[[io_test_pattern]]
+name = "subprocess_mcp_transports"
+scope_path = "crates/theo-infra-mcp/src/"
+invariant = "MCP stdio/HTTP transports + dispatch test against real client subprocesses"
+adr = "017-inline-io-tests.md#scope_path-categories"
+
+[[io_test_pattern]]
+name = "scip_reader_io"
+scope_path = "crates/theo-engine-graph/src/scip/"
+invariant = "SCIP reader streams a real protobuf file (read-only, deterministic)"
+adr = "017-inline-io-tests.md#scope_path-categories"
+
+[[io_test_pattern]]
+name = "memory_fs_helpers"
+scope_path = "crates/theo-infra-memory/src/"
+invariant = "Memory subsystem helpers (builtin/fs_util/wiki/hash) read existing project files (read-only fs probes)"
+adr = "017-inline-io-tests.md#scope_path-categories"
+
+[[io_test_pattern]]
+name = "auth_oauth_servers"
+scope_path = "crates/theo-infra-auth/src/"
+invariant = "OAuth callback + OpenAI device flow tests bind a localhost server / hit a real HTTP endpoint"
+adr = "017-inline-io-tests.md#scope_path-categories"
+
+[[io_test_pattern]]
+name = "domain_truncate_io"
+scope_path = "crates/theo-domain/src/truncate.rs"
+invariant = "Truncate helper has an env-var roundtrip test (read-only env probe)"
+adr = "017-inline-io-tests.md#scope_path-categories"
+
+[[io_test_pattern]]
+name = "agent_runtime_fs_errors"
+scope_path = "crates/theo-agent-runtime/src/fs_errors.rs"
+invariant = "fs_errors helper exercises real fs error mapping (no FS writes)"
+adr = "017-inline-io-tests.md#scope_path-categories"
+
+[[io_test_pattern]]
+name = "agent_runtime_convergence"
+scope_path = "crates/theo-agent-runtime/src/convergence.rs"
+invariant = "Convergence detector tests use a small process::Command probe to compare exit codes"
+adr = "017-inline-io-tests.md#scope_path-categories"
+
+[[io_test_pattern]]
+name = "agent_runtime_observability"
+scope_path = "crates/theo-agent-runtime/src/observability/"
+invariant = "Observability writer round-trips real JSONL files; Drop guarantees cleanup"
+adr = "017-inline-io-tests.md#scope_path-categories"
+
+[[io_test_pattern]]
+name = "infra_llm_client"
+scope_path = "crates/theo-infra-llm/src/client.rs"
+invariant = "LLM client tests boot a localhost mock HTTP server"
+adr = "017-inline-io-tests.md#scope_path-categories"
+
+[[io_test_pattern]]
+name = "infra_llm_routing"
+scope_path = "crates/theo-infra-llm/src/routing/rules.rs"
+invariant = "Routing rules tests probe THEO_* env vars (read-only)"
+adr = "017-inline-io-tests.md#scope_path-categories"
+
+[[io_test_pattern]]
+name = "tui_autocomplete_config"
+scope_path = "apps/theo-cli/src/tui/"
+invariant = "TUI autocomplete + config tests resolve real on-disk fixtures inside the project tree"
+adr = "017-inline-io-tests.md#scope_path-categories"

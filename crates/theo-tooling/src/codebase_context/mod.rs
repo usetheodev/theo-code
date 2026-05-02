@@ -86,167 +86,180 @@ impl Tool for CodebaseContextTool {
         _perms: &mut PermissionCollector,
     ) -> Result<ToolOutput, ToolError> {
         let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
-
         let budget = args
             .get("budget_tokens")
             .and_then(|v| v.as_u64())
             .map(|v| v as usize)
             .unwrap_or(DEFAULT_BUDGET);
-
-        let mode = args
-            .get("mode")
-            .and_then(|v| v.as_str())
-            .unwrap_or("search");
-
+        let mode = args.get("mode").and_then(|v| v.as_str()).unwrap_or("search");
         let symbol = args.get("symbol").and_then(|v| v.as_str()).unwrap_or("");
 
-        // Check if graph context provider is available.
         let provider = match &ctx.graph_context {
             Some(p) => p,
-            None => {
-                return Ok(ToolOutput {
-                    title: "Codebase Context".into(),
-                    output: "Code intelligence is not available for this project. Use grep and glob to explore the codebase manually.".into(),
-                    metadata: serde_json::json!({"status": "unavailable"}),
-                    attachments: None,
-                    llm_suffix: None,
-                });
-            }
+            None => return Ok(unavailable_output()),
         };
-
-        // If not ready (Building state), return immediately with status.
         if !provider.is_ready() {
-            return Ok(ToolOutput {
-                title: "Codebase Context (building)".into(),
-                output: "Code graph is being built in the background. Try again in a few seconds, or use grep/glob to explore manually while waiting.".into(),
-                metadata: serde_json::json!({"status": "building"}),
-                attachments: None,
-                llm_suffix: None,
-            });
+            return Ok(building_output());
         }
-
-        // Dispatch by navigation mode.
-        use theo_domain::graph_context::NavigationMode;
-        let nav_mode = match mode {
-            "callers" => Some(NavigationMode::Callers),
-            "callees" => Some(NavigationMode::Callees),
-            "imports" => Some(NavigationMode::Imports),
-            "dependents" => Some(NavigationMode::Dependents),
-            _ => None, // "search" or default
-        };
 
         let result =
             tokio::time::timeout(std::time::Duration::from_secs(QUERY_TIMEOUT_SECS), async {
-                if let Some(nav) = nav_mode {
-                    // Navigation mode: traverse graph from symbol
-                    let sym = if symbol.is_empty() { query } else { symbol };
-                    provider.navigate_symbol(sym, nav, budget).await
-                } else {
-                    // Search mode: BM25 + multi-signal ranking (default)
-                    provider.query_context(query, budget).await
-                }
+                run_query(provider.as_ref(), mode, query, symbol, budget).await
             })
             .await;
 
         match result {
             Ok(Ok(ctx_result)) => {
-                let (ctx_result, retrieval_method) = if ctx_result.blocks.is_empty() {
-                    // Veto Protocol: BM25 returned nothing → fallback to symbol lookup.
-                    // Paper "Navigation Paradox" shows graph resolves 99.4% of cases
-                    // where retrieval fails.
-                    match provider.query_by_symbol(query, budget).await {
-                        Ok(fallback) if !fallback.blocks.is_empty() => {
-                            (fallback, "symbol_fallback")
-                        }
-                        _ => (ctx_result, "empty"),
-                    }
-                } else {
-                    (ctx_result, "search")
-                };
-
-                let text = ctx_result.to_prompt_text();
-                if text.is_empty() {
-                    return Ok(ToolOutput {
-                        title: "Codebase Context".into(),
-                        output: "No relevant code structures found for this query. Try a different search term, or use mode='callers'/'callees' with a specific symbol name.".into(),
-                        metadata: serde_json::json!({
-                            "status": "empty",
-                            "retrieval_method": retrieval_method,
-                            "query": query,
-                            "budget_tokens": budget,
-                        }),
-                        attachments: None,
-                        llm_suffix: None,
-                    });
-                }
-
-                // Build typed attachments: structured data for runtime/tracing.
-                // The LLM reads `output` (markdown). The runtime reads `attachments` (JSON).
-                let typed_blocks: Vec<serde_json::Value> = ctx_result
-                    .blocks
-                    .iter()
-                    .map(|b| {
-                        // Extract file paths from content (lines starting with "## ")
-                        let file_paths: Vec<&str> = b
-                            .content
-                            .lines()
-                            .filter(|l| l.starts_with("## "))
-                            .map(|l| l.trim_start_matches("## ").trim())
-                            .collect();
-
-                        serde_json::json!({
-                            "source_id": b.source_id,
-                            "score": b.score,
-                            "token_count": b.token_count,
-                            "file_paths": file_paths,
-                        })
-                    })
-                    .collect();
-
-                let budget_used_pct = if ctx_result.budget_tokens > 0 {
-                    (ctx_result.total_tokens as f64 / ctx_result.budget_tokens as f64 * 100.0)
-                        as u32
-                } else {
-                    0
-                };
-
-                Ok(ToolOutput {
-                    title: format!("Codebase Context ({} tokens)", ctx_result.total_tokens),
-                    output: text,
-                    metadata: serde_json::json!({
-                        "status": "ok",
-                        "retrieval_method": retrieval_method,
-                        "mode": mode,
-                        "total_tokens": ctx_result.total_tokens,
-                        "budget_tokens": ctx_result.budget_tokens,
-                        "budget_used_pct": budget_used_pct,
-                        "blocks_count": ctx_result.blocks.len(),
-                        "blocks": typed_blocks,
-                        "query": query,
-                    }),
-                    attachments: None,
-                    llm_suffix: None,
-                })
+                Ok(format_search_result(ctx_result, provider.as_ref(), query, mode, budget).await)
             }
-            Ok(Err(e)) => Ok(ToolOutput {
-                title: "Codebase Context (error)".into(),
-                output: format!(
-                    "Code intelligence query failed: {e}. Use grep and glob to explore the codebase manually."
-                ),
-                metadata: serde_json::json!({"status": "error", "error": e.to_string()}),
-                attachments: None,
-                llm_suffix: None,
-            }),
-            Err(_timeout) => Ok(ToolOutput {
-                title: "Codebase Context (timeout)".into(),
-                output: format!(
-                    "Code graph query timed out after {QUERY_TIMEOUT_SECS}s. The codebase may be too large. Use grep and glob instead."
-                ),
-                metadata: serde_json::json!({"status": "timeout", "timeout_secs": QUERY_TIMEOUT_SECS}),
-                attachments: None,
-                llm_suffix: None,
-            }),
+            Ok(Err(e)) => Ok(error_output(&e)),
+            Err(_timeout) => Ok(timeout_output()),
         }
+    }
+}
+
+fn unavailable_output() -> ToolOutput {
+    ToolOutput {
+        title: "Codebase Context".into(),
+        output: "Code intelligence is not available for this project. Use grep and glob to explore the codebase manually.".into(),
+        metadata: serde_json::json!({"status": "unavailable"}),
+        attachments: None,
+        llm_suffix: None,
+    }
+}
+
+fn building_output() -> ToolOutput {
+    ToolOutput {
+        title: "Codebase Context (building)".into(),
+        output: "Code graph is being built in the background. Try again in a few seconds, or use grep/glob to explore manually while waiting.".into(),
+        metadata: serde_json::json!({"status": "building"}),
+        attachments: None,
+        llm_suffix: None,
+    }
+}
+
+fn error_output(e: &theo_domain::graph_context::GraphContextError) -> ToolOutput {
+    ToolOutput {
+        title: "Codebase Context (error)".into(),
+        output: format!(
+            "Code intelligence query failed: {e}. Use grep and glob to explore the codebase manually."
+        ),
+        metadata: serde_json::json!({"status": "error", "error": e.to_string()}),
+        attachments: None,
+        llm_suffix: None,
+    }
+}
+
+fn timeout_output() -> ToolOutput {
+    ToolOutput {
+        title: "Codebase Context (timeout)".into(),
+        output: format!(
+            "Code graph query timed out after {QUERY_TIMEOUT_SECS}s. The codebase may be too large. Use grep and glob instead."
+        ),
+        metadata: serde_json::json!({"status": "timeout", "timeout_secs": QUERY_TIMEOUT_SECS}),
+        attachments: None,
+        llm_suffix: None,
+    }
+}
+
+async fn run_query(
+    provider: &dyn theo_domain::graph_context::GraphContextProvider,
+    mode: &str,
+    query: &str,
+    symbol: &str,
+    budget: usize,
+) -> Result<
+    theo_domain::graph_context::GraphContextResult,
+    theo_domain::graph_context::GraphContextError,
+> {
+    use theo_domain::graph_context::NavigationMode;
+    let nav_mode = match mode {
+        "callers" => Some(NavigationMode::Callers),
+        "callees" => Some(NavigationMode::Callees),
+        "imports" => Some(NavigationMode::Imports),
+        "dependents" => Some(NavigationMode::Dependents),
+        _ => None,
+    };
+    if let Some(nav) = nav_mode {
+        let sym = if symbol.is_empty() { query } else { symbol };
+        provider.navigate_symbol(sym, nav, budget).await
+    } else {
+        provider.query_context(query, budget).await
+    }
+}
+
+async fn format_search_result(
+    ctx_result: theo_domain::graph_context::GraphContextResult,
+    provider: &dyn theo_domain::graph_context::GraphContextProvider,
+    query: &str,
+    mode: &str,
+    budget: usize,
+) -> ToolOutput {
+    let (ctx_result, retrieval_method) = if ctx_result.blocks.is_empty() {
+        // Veto Protocol: BM25 returned nothing → fallback to symbol lookup.
+        match provider.query_by_symbol(query, budget).await {
+            Ok(fallback) if !fallback.blocks.is_empty() => (fallback, "symbol_fallback"),
+            _ => (ctx_result, "empty"),
+        }
+    } else {
+        (ctx_result, "search")
+    };
+
+    let text = ctx_result.to_prompt_text();
+    if text.is_empty() {
+        return ToolOutput {
+            title: "Codebase Context".into(),
+            output: "No relevant code structures found for this query. Try a different search term, or use mode='callers'/'callees' with a specific symbol name.".into(),
+            metadata: serde_json::json!({
+                "status": "empty",
+                "retrieval_method": retrieval_method,
+                "query": query,
+                "budget_tokens": budget,
+            }),
+            attachments: None,
+            llm_suffix: None,
+        };
+    }
+
+    let typed_blocks: Vec<serde_json::Value> = ctx_result
+        .blocks
+        .iter()
+        .map(|b| {
+            let file_paths: Vec<&str> = b
+                .content
+                .lines()
+                .filter(|l| l.starts_with("## "))
+                .map(|l| l.trim_start_matches("## ").trim())
+                .collect();
+            serde_json::json!({
+                "source_id": b.source_id,
+                "score": b.score,
+                "token_count": b.token_count,
+                "file_paths": file_paths,
+            })
+        })
+        .collect();
+    let budget_used_pct = if ctx_result.budget_tokens > 0 {
+        (ctx_result.total_tokens as f64 / ctx_result.budget_tokens as f64 * 100.0) as u32
+    } else {
+        0
+    };
+    ToolOutput {
+        title: format!("Codebase Context ({} tokens)", ctx_result.total_tokens),
+        output: text,
+        metadata: serde_json::json!({
+            "status": "ok",
+            "retrieval_method": retrieval_method,
+            "mode": mode,
+            "total_tokens": ctx_result.total_tokens,
+            "budget_tokens": ctx_result.budget_tokens,
+            "budget_used_pct": budget_used_pct,
+            "blocks_count": ctx_result.blocks.len(),
+            "blocks": typed_blocks,
+            "query": query,
+        }),
+        attachments: None,
+        llm_suffix: None,
     }
 }
 

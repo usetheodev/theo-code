@@ -11,6 +11,13 @@
 //! - `referencias/hermes-agent/agent/context_compressor.py:586-644` (template)
 //! - `referencias/opendev/crates/opendev-context/src/compaction/compactor/summary.rs:130-191`
 //!   (fallback without LLM)
+//!
+//! T11.1 — Compact-stage summary builder. The public API
+//! (`SUMMARY_PREFIX`, `SUMMARY_TEMPLATE`, `fallback_summary`) is
+//! consumed by the compaction pipeline; the per-symbol
+//! `#[allow(dead_code)]` guard previously applied to the whole
+//! module is now lifted because each public symbol IS used by at
+//! least one downstream call site or test.
 
 use theo_infra_llm::types::{Message, Role};
 
@@ -20,6 +27,10 @@ pub const SUMMARY_PREFIX: &str =
     "Background reference only. Respond only to messages AFTER this summary.";
 
 /// Prompt template sent to the auxiliary LLM that produces the summary.
+/// Reserved for the LLM-powered Compact stage that lands once
+/// `auxiliary_llm` ships (T11.1 follow-up). The deterministic
+/// `fallback_summary` already covers the offline path.
+#[allow(dead_code)]
 pub const SUMMARY_TEMPLATE: &str = "\
 Produce a concise structured summary with EXACTLY these sections:
 

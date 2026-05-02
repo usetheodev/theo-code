@@ -2,6 +2,7 @@
 name = "theo-application"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [dependencies]
 theo-domain.workspace = true
@@ -11,14 +12,17 @@ theo-api-contracts.workspace = true
 theo-engine-graph.workspace = true
 theo-engine-parser.workspace = true
 theo-engine-retrieval.workspace = true
+theo-isolation.workspace = true
+theo-infra-mcp.workspace = true
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+toml.workspace = true
 thiserror.workspace = true
 async-trait.workspace = true
 ignore.workspace = true
 theo-governance.workspace = true
-theo-infra-auth = { path = "../theo-infra-auth" }
+theo-infra-auth.workspace = true
 theo-infra-llm.workspace = true
 theo-infra-memory.workspace = true
 rayon.workspace = true
@@ -30,6 +34,8 @@ sha2 = "0.10"
 default = []
 tantivy-backend = ["theo-engine-retrieval/tantivy-backend"]
 dense-retrieval = ["tantivy-backend", "theo-engine-retrieval/dense-retrieval"]
+# Phase 40 (otlp-exporter-plan) — passthrough to theo-agent-runtime/otel.
+otel = ["theo-agent-runtime/otel"]
 
 [dev-dependencies]
 tempfile.workspace = true

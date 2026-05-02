@@ -1,0 +1,59 @@
+# CODEOWNERS — required-reviewer rules
+#
+# Created in T4.8 of the agent-runtime remediation plan (find_p5_006).
+#
+# This file defines GitHub-required reviewers. The first matching pattern
+# for any path wins. To enforce this in practice, also enable
+# "Require review from Code Owners" in Settings → Branches → develop / main.
+#
+# Owner placeholders (`@usetheodev/*`) are GitHub team handles; replace
+# with concrete logins or update the team membership as the org grows.
+
+# ── Default fallback ────────────────────────────────────────────────────
+# Any file not matched by a more specific rule below requires a review
+# from the maintainers team.
+*                                       @usetheodev/maintainers
+
+# ── Bounded contexts ────────────────────────────────────────────────────
+crates/theo-domain/                     @usetheodev/runtime-team
+crates/theo-engine-graph/               @usetheodev/engine-team
+crates/theo-engine-parser/              @usetheodev/engine-team
+crates/theo-engine-retrieval/           @usetheodev/engine-team
+crates/theo-governance/                 @usetheodev/runtime-team
+crates/theo-agent-runtime/              @usetheodev/runtime-team
+crates/theo-infra-llm/                  @usetheodev/runtime-team
+crates/theo-infra-auth/                 @usetheodev/security-team
+crates/theo-infra-mcp/                  @usetheodev/runtime-team
+crates/theo-infra-memory/               @usetheodev/engine-team
+crates/theo-isolation/                  @usetheodev/security-team
+crates/theo-tooling/                    @usetheodev/runtime-team
+crates/theo-application/                @usetheodev/maintainers
+crates/theo-api-contracts/              @usetheodev/runtime-team
+
+# ── Apps ────────────────────────────────────────────────────────────────
+apps/theo-cli/                          @usetheodev/runtime-team
+apps/theo-desktop/                      @usetheodev/desktop-team
+apps/theo-ui/                           @usetheodev/desktop-team
+
+# ── Architectural artefacts ─────────────────────────────────────────────
+# ADRs and the architecture contract are governance-critical — every
+# change requires the architecture lead.
+docs/adr/                               @usetheodev/arch-leads
+.claude/rules/architecture.md           @usetheodev/arch-leads
+.claude/rules/architecture-contract.yaml @usetheodev/arch-leads
+scripts/check-arch-contract.sh          @usetheodev/arch-leads
+scripts/check-arch-contract.test.sh     @usetheodev/arch-leads
+
+# ── Security-critical scripts ───────────────────────────────────────────
+scripts/check-secrets.sh                @usetheodev/security-team
+scripts/check-unwrap.sh                 @usetheodev/security-team
+scripts/check-panic.sh                  @usetheodev/security-team
+scripts/check-unsafe.sh                 @usetheodev/security-team
+
+# ── CI / CD ─────────────────────────────────────────────────────────────
+.github/workflows/                      @usetheodev/platform-team
+.github/CODEOWNERS                      @usetheodev/maintainers @usetheodev/security-team
+
+# ── Plans and Kanban ────────────────────────────────────────────────────
+docs/plans/                             @usetheodev/maintainers
+docs/kanban/                            @usetheodev/maintainers

@@ -107,20 +107,34 @@ pub fn lint(wiki_dir: &Path) -> LintReport {
 /// Run lint with configurable large-page token threshold.
 pub fn lint_with_threshold(wiki_dir: &Path, large_page_threshold: usize) -> LintReport {
     let mut report = LintReport::default();
+    let pages = collect_pages(wiki_dir);
+    report.total_pages = pages.len();
+    let outbound_links = extract_outbound_links(&pages);
+    let all_slugs: HashSet<String> = pages.keys().cloned().collect();
+    detect_orphans(&outbound_links, &all_slugs, &mut report);
+    detect_broken_links(&outbound_links, &all_slugs, &mut report);
+    detect_large_pages(&pages, large_page_threshold, &mut report);
+    detect_empty_sections(&pages, &mut report);
+    detect_stale_cache(wiki_dir, &mut report);
+    report.total_issues = report.orphan_pages.len()
+        + report.broken_links.len()
+        + report.large_pages.len()
+        + report.empty_sections.len()
+        + report.stale_cache_pages.len()
+        + report.duplicate_candidates.len();
+    report
+}
 
+fn collect_pages(wiki_dir: &Path) -> HashMap<String, String> {
     let modules_dir = wiki_dir.join("modules");
     let cache_dir = wiki_dir.join("cache");
-
-    // Collect all pages: slug → content
     let mut pages: HashMap<String, String> = HashMap::new();
-
     for dir in [&modules_dir, &cache_dir] {
         if !dir.exists() {
             continue;
         }
-        let entries = match std::fs::read_dir(dir) {
-            Ok(e) => e,
-            Err(_) => continue,
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            continue;
         };
         for entry in entries.flatten() {
             let path = entry.path();
@@ -140,14 +154,12 @@ pub fn lint_with_threshold(wiki_dir: &Path, large_page_threshold: usize) -> Lint
             }
         }
     }
+    pages
+}
 
-    report.total_pages = pages.len();
-
-    // Extract all [[wiki-links]] per page
+fn extract_outbound_links(pages: &HashMap<String, String>) -> HashMap<String, Vec<String>> {
     let mut outbound_links: HashMap<String, Vec<String>> = HashMap::new();
-    let all_slugs: HashSet<String> = pages.keys().cloned().collect();
-
-    for (slug, content) in &pages {
+    for (slug, content) in pages {
         let mut links = Vec::new();
         let mut search_from = 0;
         while let Some(start) = content[search_from..].find("[[") {
@@ -161,105 +173,119 @@ pub fn lint_with_threshold(wiki_dir: &Path, large_page_threshold: usize) -> Lint
         }
         outbound_links.insert(slug.clone(), links);
     }
+    outbound_links
+}
 
-    // Detect orphan pages (no inbound links)
+fn detect_orphans(
+    outbound_links: &HashMap<String, Vec<String>>,
+    all_slugs: &HashSet<String>,
+    report: &mut LintReport,
+) {
     let mut has_inbound: HashSet<String> = HashSet::new();
     for links in outbound_links.values() {
         for link in links {
             has_inbound.insert(link.clone());
         }
     }
-    for slug in &all_slugs {
+    for slug in all_slugs {
         if slug == "index" {
             continue;
-        } // Index is always root
+        }
         if !has_inbound.contains(slug) {
             report.orphan_pages.push(slug.clone());
         }
     }
     report.orphan_pages.sort();
+}
 
-    // Detect broken links
-    for (source, links) in &outbound_links {
+fn detect_broken_links(
+    outbound_links: &HashMap<String, Vec<String>>,
+    all_slugs: &HashSet<String>,
+    report: &mut LintReport,
+) {
+    for (source, links) in outbound_links {
         for target in links {
             if !all_slugs.contains(target) {
                 report.broken_links.push((source.clone(), target.clone()));
             }
         }
     }
+}
 
-    // Detect large pages
-    for (slug, content) in &pages {
+fn detect_large_pages(
+    pages: &HashMap<String, String>,
+    large_page_threshold: usize,
+    report: &mut LintReport,
+) {
+    for (slug, content) in pages {
         let token_estimate = content.len() / 4;
         if token_estimate > large_page_threshold {
             report.large_pages.push((slug.clone(), token_estimate));
         }
     }
     report.large_pages.sort_by_key(|item| std::cmp::Reverse(item.1));
+}
 
-    // Detect empty sections (## followed by ## with no content)
-    for (slug, content) in &pages {
+fn detect_empty_sections(pages: &HashMap<String, String>, report: &mut LintReport) {
+    for (slug, content) in pages {
         let lines: Vec<&str> = content.lines().collect();
         for i in 0..lines.len().saturating_sub(1) {
-            if lines[i].starts_with("## ") {
-                // Check if next non-empty line is also a heading
-                let mut j = i + 1;
-                while j < lines.len() && lines[j].trim().is_empty() {
-                    j += 1;
-                }
-                if j < lines.len()
-                    && (lines[j].starts_with("## ")
-                        || lines[j].starts_with("# ")
-                        || lines[j].starts_with("---"))
-                {
-                    let section = lines[i].trim_start_matches("## ").trim().to_string();
-                    report.empty_sections.push((slug.clone(), section));
-                }
+            if !lines[i].starts_with("## ") {
+                continue;
+            }
+            let mut j = i + 1;
+            while j < lines.len() && lines[j].trim().is_empty() {
+                j += 1;
+            }
+            if j < lines.len()
+                && (lines[j].starts_with("## ")
+                    || lines[j].starts_with("# ")
+                    || lines[j].starts_with("---"))
+            {
+                let section = lines[i].trim_start_matches("## ").trim().to_string();
+                report.empty_sections.push((slug.clone(), section));
             }
         }
     }
+}
 
-    // Detect stale cache pages
+fn detect_stale_cache(wiki_dir: &Path, report: &mut LintReport) {
     // wiki_dir = .theo/wiki, project_dir = wiki_dir/../../
     let project_dir = wiki_dir.parent().and_then(|p| p.parent());
     let manifest_hash = project_dir
         .and_then(super::persistence::load_manifest)
         .map(|m| m.graph_hash);
-
-    if let Some(current_hash) = manifest_hash {
-        let cache_dir = wiki_dir.join("cache");
-        if cache_dir.exists()
-            && let Ok(entries) = std::fs::read_dir(&cache_dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.extension().and_then(|e| e.to_str()) != Some("md") {
-                        continue;
-                    }
-                    let slug = path
-                        .file_stem()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or("")
-                        .to_string();
-                    if let Ok(content) = std::fs::read_to_string(&path) {
-                        let fm = super::model::parse_frontmatter(&content);
-                        if let Some(page_hash) = fm.graph_hash
-                            && page_hash != current_hash {
-                                report.stale_cache_pages.push(slug.clone());
-                                report.eviction_candidates.push(slug);
-                            }
-                    }
-                }
-            }
+    let Some(current_hash) = manifest_hash else {
+        return;
+    };
+    let cache_dir = wiki_dir.join("cache");
+    if !cache_dir.exists() {
+        return;
     }
-
-    report.total_issues = report.orphan_pages.len()
-        + report.broken_links.len()
-        + report.large_pages.len()
-        + report.empty_sections.len()
-        + report.stale_cache_pages.len()
-        + report.duplicate_candidates.len();
-
-    report
+    let Ok(entries) = std::fs::read_dir(&cache_dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("md") {
+            continue;
+        }
+        let slug = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_string();
+        let Ok(content) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let fm = super::model::parse_frontmatter(&content);
+        if let Some(page_hash) = fm.graph_hash
+            && page_hash != current_hash
+        {
+            report.stale_cache_pages.push(slug.clone());
+            report.eviction_candidates.push(slug);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

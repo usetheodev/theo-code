@@ -9,6 +9,7 @@ import {
   ChevronsLeft,
   User,
   ScrollText,
+  Bot,
 } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 
@@ -33,6 +34,7 @@ const MAIN_ITEMS = [
 
 const WORKSPACE_ITEMS = [
   { id: "observability", label: "Observability", icon: ScrollText },
+  { id: "agents", label: "Agents", icon: Bot },
   { id: "deploys", label: "Deploys", icon: Rocket },
   { id: "monitoring", label: "Monitoring", icon: Activity },
   { id: "database", label: "Database", icon: Database },

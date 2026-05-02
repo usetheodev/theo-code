@@ -1,11 +1,12 @@
 //! Pilot CLI runner — autonomous development loop with real-time display.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use theo_agent_runtime::AgentConfig;
-use theo_agent_runtime::event_bus::EventBus;
-use theo_agent_runtime::pilot::{PilotConfig, PilotLoop, PilotResult, load_promise};
+// T1.2: route runtime types through the theo-application facade.
+use theo_application::facade::agent::{
+    AgentConfig, EventBus, PilotConfig, PilotLoop, PilotResult, load_promise,
+};
 use theo_domain::graph_context::GraphContextProvider;
 
 use crate::render::style::{StyleCaps, accent, bold, dim, error, success, warn};
@@ -16,19 +17,16 @@ fn caps() -> StyleCaps {
     TtyCaps::detect().style_caps()
 }
 
-/// Run the pilot loop with CLI rendering.
-pub async fn run_pilot(
-    config: AgentConfig,
-    pilot_config: PilotConfig,
-    project_dir: PathBuf,
-    promise: String,
-    complete: Option<String>,
-) -> PilotResult {
-    // Print banner
+fn print_pilot_banner(
+    promise: &str,
+    complete: Option<&str>,
+    project_dir: &Path,
+    pilot_config: &PilotConfig,
+) {
     let c = caps();
     eprintln!("{} — autonomous mode", bold("✈  Theo Pilot", c));
-    eprintln!("  Promise: {}", accent(truncate(&promise, 80), c));
-    if let Some(ref dod) = complete {
+    eprintln!("  Promise: {}", accent(truncate(promise, 80), c));
+    if let Some(dod) = complete {
         eprintln!("  Done when: {}", warn(truncate(dod, 80), c));
     }
     eprintln!("  Project: {}", project_dir.display());
@@ -37,32 +35,86 @@ pub async fn run_pilot(
         pilot_config.max_total_calls, pilot_config.max_loops_per_hour
     );
     eprintln!();
+}
 
-    // Create parent EventBus with renderer
+fn build_pilot_event_bus() -> Arc<EventBus> {
     let event_bus = Arc::new(EventBus::new());
     let renderer = Arc::new(PilotRenderer::new());
     event_bus.subscribe(renderer);
     let cli_renderer = Arc::new(CliRenderer::new());
     event_bus.subscribe(cli_renderer);
+    event_bus
+}
 
-    // Check if there's a roadmap to execute from (before moving project_dir)
-    let roadmap_path = theo_agent_runtime::roadmap::find_latest_roadmap(&project_dir);
+/// Fire-and-forget GRAPHCTX background build. Disabled when
+/// `THEO_NO_GRAPHCTX=1`; otherwise spawns the service and returns it.
+async fn init_graph_context(
+    project_dir: &Path,
+) -> Option<Arc<dyn theo_domain::graph_context::GraphContextProvider>> {
+    if std::env::var("THEO_NO_GRAPHCTX").is_ok() {
+        return None;
+    }
+    let service = Arc::new(
+        theo_application::use_cases::graph_context_service::GraphContextService::new(),
+    );
+    let _ = service.initialize(project_dir).await;
+    eprintln!("[theo] GRAPHCTX building in background");
+    Some(service)
+}
 
-    // Initialize GRAPHCTX — fire-and-forget background build.
-    // Disabled entirely when THEO_NO_GRAPHCTX=1.
-    let graph_context: Option<Arc<dyn theo_domain::graph_context::GraphContextProvider>> =
-        if std::env::var("THEO_NO_GRAPHCTX").is_ok() {
-            None // Enabled by default. Set THEO_NO_GRAPHCTX=1 to disable.
-        } else {
-            let service = Arc::new(
-                theo_application::use_cases::graph_context_service::GraphContextService::new(),
+/// T6.1 final — opt-in auto-replan advisor. `THEO_AUTO_REPLAN=1`
+/// builds an `LlmReplanAdvisor`; on threshold breach the pilot calls
+/// advisor.propose with a 5 s timeout and auto-applies the patch.
+/// Default OFF — manual `plan_failure_status` + `plan_replan` is the
+/// recommended workflow for human review.
+fn init_replan_advisor(
+    config: &AgentConfig,
+) -> Option<Arc<dyn theo_domain::plan_patch::ReplanAdvisor>> {
+    if !env_auto_replan_enabled() {
+        return None;
+    }
+    match build_replan_advisor(config) {
+        Some(adv) => {
+            eprintln!(
+                "[theo:auto_replan] enabled — threshold breaches will trigger \
+                 LLM-driven plan_replan automatically (5s timeout per call)"
             );
-            let _ = service.initialize(&project_dir).await;
-            eprintln!("[theo] GRAPHCTX building in background");
-            Some(service)
-        };
+            Some(adv)
+        }
+        None => {
+            eprintln!(
+                "[theo:auto_replan] requested but provider construction \
+                 failed — falling back to manual replan flow"
+            );
+            None
+        }
+    }
+}
 
-    // Create pilot loop
+/// Run the pilot loop with CLI rendering.
+pub async fn run_pilot(
+    config: AgentConfig,
+    pilot_config: PilotConfig,
+    project_dir: PathBuf,
+    promise: String,
+    complete: Option<String>,
+) -> PilotResult {
+    print_pilot_banner(&promise, complete.as_deref(), &project_dir, &pilot_config);
+    let event_bus = build_pilot_event_bus();
+    let plan_path = theo_application::facade::agent::find_latest_plan(&project_dir);
+    let is_json_plan = plan_path
+        .as_ref()
+        .and_then(|p| p.extension())
+        .and_then(|e| e.to_str())
+        == Some("json");
+    let roadmap_path: Option<PathBuf> = if is_json_plan {
+        None
+    } else {
+        plan_path.clone()
+    };
+    let graph_context = init_graph_context(&project_dir).await;
+    let replan_advisor = init_replan_advisor(&config);
+
     let mut pilot = PilotLoop::new(
         config,
         pilot_config,
@@ -74,8 +126,10 @@ pub async fn run_pilot(
     if let Some(gc) = graph_context {
         pilot = pilot.with_graph_context(gc);
     }
+    if let Some(advisor) = replan_advisor {
+        pilot = pilot.with_replan_advisor(advisor);
+    }
 
-    // Setup Ctrl+C handler
     let interrupt = pilot.interrupt_flag();
     tokio::spawn(async move {
         if tokio::signal::ctrl_c().await.is_ok() {
@@ -87,9 +141,42 @@ pub async fn run_pilot(
         }
     });
 
-    // Execute from roadmap if available, otherwise normal loop
-    let result = if let Some(ref rmap) = roadmap_path {
-        let tasks = theo_agent_runtime::roadmap::parse_roadmap(rmap).unwrap_or_default();
+    // Execute from plan/roadmap if available, otherwise normal loop.
+    // Priority: JSON plan > legacy markdown roadmap > pure pilot.
+    let result = if is_json_plan
+        && let Some(ref pjson) = plan_path
+    {
+        match theo_application::facade::agent::load_plan(pjson) {
+            Ok(plan) => {
+                let pending = plan
+                    .all_tasks()
+                    .iter()
+                    .filter(|t| !t.status.is_terminal())
+                    .count();
+                eprintln!(
+                    "  Plan: {} ({} pending tasks)",
+                    accent(pjson.display().to_string(), caps()),
+                    pending
+                );
+                eprintln!();
+                if pending > 0 {
+                    pilot.run_from_plan(pjson).await
+                } else {
+                    pilot.run().await
+                }
+            }
+            Err(e) => {
+                eprintln!(
+                    "  {} {}",
+                    error("Plan parse error:", caps()),
+                    e
+                );
+                pilot.run().await
+            }
+        }
+    } else if let Some(ref rmap) = roadmap_path {
+        let tasks =
+            theo_application::facade::agent::parse_roadmap(rmap).unwrap_or_default();
         let pending = tasks.iter().filter(|t| !t.completed).count();
         if pending > 0 {
             eprintln!(
@@ -177,7 +264,7 @@ fn truncate(s: &str, max: usize) -> String {
 // PilotRenderer — loop-level events
 // ---------------------------------------------------------------------------
 
-use theo_agent_runtime::event_bus::EventListener;
+use theo_application::facade::agent::EventListener;
 use theo_domain::event::{DomainEvent, EventType};
 
 struct PilotRenderer {
@@ -240,5 +327,137 @@ impl EventListener for PilotRenderer {
             }
             _ => {} // CliRenderer handles all other events
         }
+    }
+}
+
+/// T6.1 final — Read `THEO_AUTO_REPLAN` from the environment.
+/// Truthy (`1`/`true`/`yes`/`on`, case-insensitive) opts the pilot
+/// loop into automatic LLM-driven plan_replan on threshold breach.
+/// Default OFF — manual replan via plan_failure_status remains the
+/// safe default.
+fn env_auto_replan_enabled() -> bool {
+    match std::env::var("THEO_AUTO_REPLAN") {
+        Ok(v) => {
+            let lower = v.to_ascii_lowercase();
+            matches!(lower.as_str(), "1" | "true" | "yes" | "on")
+        }
+        Err(_) => false,
+    }
+}
+
+/// T6.1 final — Build an `LlmReplanAdvisor` from the agent's
+/// `AgentConfig.llm` block. Returns `None` on any failure path
+/// (missing API key, base_url empty, ...) so the caller can fall
+/// back gracefully.
+fn build_replan_advisor(
+    config: &AgentConfig,
+) -> Option<Arc<dyn theo_domain::plan_patch::ReplanAdvisor>> {
+    let api_key = config.llm.api_key.clone();
+    let base_url = config.llm.base_url.clone();
+    if base_url.trim().is_empty() {
+        return None;
+    }
+    let model = config.llm.model.clone();
+    if model.trim().is_empty() {
+        return None;
+    }
+    let mut client = theo_application::facade::llm::LlmClient::new(
+        base_url, api_key, model,
+    );
+    if let Some(ep) = config.llm.endpoint_override.clone() {
+        client = client.with_endpoint(ep);
+    }
+    let llm: Arc<dyn theo_application::facade::llm::LlmProvider> = Arc::new(client);
+    let advisor = theo_application::use_cases::replan_advisor::LlmReplanAdvisor::new(llm);
+    Some(Arc::new(advisor))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Mutex, MutexGuard};
+
+    /// Serializes the two tests that mutate `THEO_AUTO_REPLAN` (a
+    /// production env var read by `env_auto_replan_enabled`). Same
+    /// flake class as the wiki/compiler / onboarding / subagent
+    /// fixes (commits 8025a70 / 184ff59 / 8635f0d) — without this
+    /// lock cargo's parallel test runner would race them with each
+    /// other AND with any other test in this binary that calls
+    /// `env_auto_replan_enabled` (today none, but defending against
+    /// future regressions).
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn env_lock() -> MutexGuard<'static, ()> {
+        ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    #[test]
+    fn t61pilot_env_auto_replan_disabled_by_default() {
+        // SAFETY: holding `ENV_LOCK` serialises against the sibling
+        // test that also mutates THEO_AUTO_REPLAN, so for the
+        // duration of this test no other thread reads or writes it.
+        let _guard = env_lock();
+        let prev = std::env::var_os("THEO_AUTO_REPLAN");
+        unsafe {
+            std::env::remove_var("THEO_AUTO_REPLAN");
+        }
+        assert!(!env_auto_replan_enabled());
+        if let Some(v) = prev {
+            // SAFETY: see top of test — still inside the ENV_LOCK
+            // critical section.
+            unsafe {
+                std::env::set_var("THEO_AUTO_REPLAN", v);
+            }
+        }
+    }
+
+    #[test]
+    fn t61pilot_env_auto_replan_recognises_truthy_values() {
+        // SAFETY: holding `ENV_LOCK` serialises against the sibling
+        // env-mutating test; the inner unsafe block stays inside
+        // the same critical section.
+        let _guard = env_lock();
+        let prev = std::env::var_os("THEO_AUTO_REPLAN");
+        unsafe {
+            for v in ["1", "true", "TRUE", "yes", "on"] {
+                std::env::set_var("THEO_AUTO_REPLAN", v);
+                assert!(env_auto_replan_enabled(), "{v} should opt in");
+            }
+            for v in ["0", "false", "no", "off", "", "garbage"] {
+                std::env::set_var("THEO_AUTO_REPLAN", v);
+                assert!(!env_auto_replan_enabled(), "{v} should NOT opt in");
+            }
+            std::env::remove_var("THEO_AUTO_REPLAN");
+            if let Some(v) = prev {
+                std::env::set_var("THEO_AUTO_REPLAN", v);
+            }
+        }
+    }
+
+    #[test]
+    fn t61pilot_build_advisor_returns_none_when_base_url_empty() {
+        let mut config = AgentConfig::default();
+        config.llm.base_url = String::new();
+        config.llm.model = "gpt-4o".into();
+        assert!(build_replan_advisor(&config).is_none());
+    }
+
+    #[test]
+    fn t61pilot_build_advisor_returns_none_when_model_empty() {
+        let mut config = AgentConfig::default();
+        config.llm.base_url = "http://localhost:8000".into();
+        config.llm.model = "   ".into();
+        assert!(build_replan_advisor(&config).is_none());
+    }
+
+    #[test]
+    fn t61pilot_build_advisor_returns_some_when_minimum_fields_present() {
+        let mut config = AgentConfig::default();
+        config.llm.base_url = "http://localhost:8000".into();
+        config.llm.model = "gpt-4o".into();
+        // No API key needed for construction (the client uses None
+        // when unset and surfaces auth failures at request time).
+        let advisor = build_replan_advisor(&config);
+        assert!(advisor.is_some(), "minimum config should yield a working advisor");
     }
 }

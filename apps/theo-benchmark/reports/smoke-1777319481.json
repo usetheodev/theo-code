@@ -1,0 +1,4621 @@
+{
+  "schema": "theo.smoke.v2",
+  "scenarios_total": 20,
+  "scenarios_passed": 19,
+  "pass_rate": 0.95,
+  "totals": {
+    "input_tokens": 2501974,
+    "output_tokens": 20013,
+    "iterations": 175,
+    "tool_calls": 206,
+    "llm_calls": 175,
+    "retries": 0,
+    "duration_ms": 797673,
+    "cost_usd": 12.810065
+  },
+  "by_category": {
+    "read": {
+      "total": 1,
+      "passed": 1
+    },
+    "search": {
+      "total": 2,
+      "passed": 1
+    },
+    "fix-bug": {
+      "total": 10,
+      "passed": 10
+    },
+    "add-feature": {
+      "total": 2,
+      "passed": 2
+    },
+    "refactor": {
+      "total": 1,
+      "passed": 1
+    },
+    "explore": {
+      "total": 2,
+      "passed": 2
+    },
+    "multi-file": {
+      "total": 1,
+      "passed": 1
+    },
+    "plan": {
+      "total": 1,
+      "passed": 1
+    }
+  },
+  "results": [
+    {
+      "id": "01-read-answer",
+      "category": "read",
+      "mode": "agent",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 6.35,
+      "check_passed": true,
+      "check_stderr": "rc=0 stdout='' stderr=''",
+      "headless": {
+        "duration_ms": 6173,
+        "environment": {
+          "temperature_actual": 0.0,
+          "theo_version": "0.1.0"
+        },
+        "error_class": "solved",
+        "files_edited": [],
+        "iterations": 2,
+        "llm": {
+          "calls": 2,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.4",
+        "provider": "ChatGPT Codex (OAuth)",
+        "report": {
+          "context_health": {
+            "action_repetition_rate": 0.0,
+            "avg_context_size_tokens": 3316.5,
+            "compaction_count": 0,
+            "compaction_savings_ratio": 0.0,
+            "context_growth_rate": 15.5,
+            "max_context_size_tokens": 3332,
+            "refetch_rate": 0.0,
+            "usefulness_avg": 0.0
+          },
+          "error_taxonomy": {
+            "budget_errors": 0,
+            "failure_mode_errors": 0,
+            "llm_errors": 0,
+            "network_errors": 0,
+            "other_errors": 0,
+            "sandbox_errors": 0,
+            "tool_errors": 0,
+            "total_errors": 0,
+            "validation_errors": 0
+          },
+          "integrity": {
+            "complete": true,
+            "confidence": 1.0,
+            "drop_sentinels_found": 0,
+            "missing_sequences": [],
+            "schema_version": 1,
+            "total_events_expected": 16,
+            "total_events_received": 16,
+            "writer_recoveries_found": 0
+          },
+          "loop_metrics": {
+            "budget_utilization": {
+              "iterations_pct": 0.1,
+              "time_pct": 0.0016666666666666668,
+              "tokens_pct": 0.026639
+            },
+            "convergence_rate": 1.0,
+            "done_blocked_count": 0,
+            "evolution_attempts": 0,
+            "evolution_success": false,
+            "phase_distribution": {
+              "Done": {
+                "duration_ms": 0,
+                "iterations": 1,
+                "pct": 0.5
+              },
+              "Edit": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Explore": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Verify": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              }
+            },
+            "total_iterations": 2
+          },
+          "memory_metrics": {
+            "constraints_learned": 0,
+            "episodes_created": 1,
+            "episodes_injected": 0,
+            "failure_fingerprints_new": 0,
+            "failure_fingerprints_recurrent": 0,
+            "hypotheses_active": 0,
+            "hypotheses_formed": 0,
+            "hypotheses_invalidated": 0
+          },
+          "subagent_metrics": {
+            "avg_duration_ms": 0.0,
+            "failed": 0,
+            "max_duration_ms": 0,
+            "spawned": 0,
+            "succeeded": 0,
+            "success_rate": 0.0
+          },
+          "surrogate_metrics": {
+            "context_waste_ratio": {
+              "caveat": "Proxy for context bloat: overflow events per iteration.",
+              "confidence": 1.0,
+              "denominator": 2.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "doom_loop_frequency": {
+              "caveat": "Proxy for stuck loops: repeated identical tool calls in a sliding window.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "hypothesis_churn_rate": {
+              "caveat": "Approximates reasoning churn: invalidated / formed hypotheses.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "llm_efficiency": {
+              "caveat": "Approximates productive work: distinct successful tools per LLM call.",
+              "confidence": 1.0,
+              "denominator": 2.0,
+              "is_surrogate": true,
+              "numerator": 1.0,
+              "value": 0.5
+            },
+            "time_to_first_tool_ms": {
+              "caveat": "Proxy for startup latency: ms from RunInitialized to first ToolCallDispatched.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 4474.0,
+              "value": 4474.0
+            }
+          },
+          "token_metrics": {
+            "cache_hit_rate": 0.0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "input_tokens": 26596,
+            "output_tokens": 43,
+            "reasoning_tokens": 0,
+            "tokens_per_successful_edit": 0.0,
+            "total_cost_usd": 0.0
+          },
+          "tool_breakdown": [
+            {
+              "avg_latency_ms": 1.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 1,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "read"
+            }
+          ]
+        },
+        "schema": "theo.headless.v4",
+        "success": true,
+        "summary": "7",
+        "tokens": {
+          "input": 26596,
+          "output": 43,
+          "total": 26639
+        },
+        "tools": {
+          "success": 1,
+          "total": 1
+        },
+        "cost_usd": 0.133625
+      },
+      "stderr_tail": "",
+      "workdir": null
+    },
+    {
+      "id": "02-grep-pattern",
+      "category": "search",
+      "mode": "agent",
+      "exit_code": -1,
+      "error": "timeout after 240s",
+      "wallclock_secs": 240.07,
+      "check_passed": false,
+      "check_stderr": "",
+      "headless": null,
+      "stderr_tail": "",
+      "workdir": null
+    },
+    {
+      "id": "03-fix-typo",
+      "category": "fix-bug",
+      "mode": "agent",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 13.75,
+      "check_passed": true,
+      "check_stderr": "rc=0 stdout='' stderr=''",
+      "headless": {
+        "duration_ms": 13680,
+        "environment": {
+          "temperature_actual": 0.0,
+          "theo_version": "0.1.0"
+        },
+        "error_class": "solved",
+        "files_edited": [
+          "src/messages.rs"
+        ],
+        "iterations": 4,
+        "llm": {
+          "calls": 4,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.4",
+        "provider": "ChatGPT Codex (OAuth)",
+        "report": {
+          "context_health": {
+            "action_repetition_rate": 0.0,
+            "avg_context_size_tokens": 3370.5,
+            "compaction_count": 0,
+            "compaction_savings_ratio": 0.0,
+            "context_growth_rate": 43.25,
+            "max_context_size_tokens": 3470,
+            "refetch_rate": 0.5,
+            "usefulness_avg": 0.0
+          },
+          "error_taxonomy": {
+            "budget_errors": 0,
+            "failure_mode_errors": 0,
+            "llm_errors": 0,
+            "network_errors": 0,
+            "other_errors": 0,
+            "sandbox_errors": 0,
+            "tool_errors": 0,
+            "total_errors": 0,
+            "validation_errors": 0
+          },
+          "integrity": {
+            "complete": true,
+            "confidence": 1.0,
+            "drop_sentinels_found": 0,
+            "missing_sequences": [],
+            "schema_version": 1,
+            "total_events_expected": 37,
+            "total_events_received": 37,
+            "writer_recoveries_found": 0
+          },
+          "loop_metrics": {
+            "budget_utilization": {
+              "iterations_pct": 0.2,
+              "time_pct": 0.003611111111111111,
+              "tokens_pct": 0.054141
+            },
+            "convergence_rate": 1.0,
+            "done_blocked_count": 1,
+            "evolution_attempts": 0,
+            "evolution_success": false,
+            "phase_distribution": {
+              "Done": {
+                "duration_ms": 0,
+                "iterations": 1,
+                "pct": 0.25
+              },
+              "Edit": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Explore": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Verify": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              }
+            },
+            "total_iterations": 4
+          },
+          "memory_metrics": {
+            "constraints_learned": 0,
+            "episodes_created": 1,
+            "episodes_injected": 0,
+            "failure_fingerprints_new": 0,
+            "failure_fingerprints_recurrent": 0,
+            "hypotheses_active": 0,
+            "hypotheses_formed": 0,
+            "hypotheses_invalidated": 0
+          },
+          "subagent_metrics": {
+            "avg_duration_ms": 0.0,
+            "failed": 0,
+            "max_duration_ms": 0,
+            "spawned": 0,
+            "succeeded": 0,
+            "success_rate": 0.0
+          },
+          "surrogate_metrics": {
+            "context_waste_ratio": {
+              "caveat": "Proxy for context bloat: overflow events per iteration.",
+              "confidence": 1.0,
+              "denominator": 4.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "doom_loop_frequency": {
+              "caveat": "Proxy for stuck loops: repeated identical tool calls in a sliding window.",
+              "confidence": 1.0,
+              "denominator": 3.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "hypothesis_churn_rate": {
+              "caveat": "Approximates reasoning churn: invalidated / formed hypotheses.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "llm_efficiency": {
+              "caveat": "Approximates productive work: distinct successful tools per LLM call.",
+              "confidence": 1.0,
+              "denominator": 4.0,
+              "is_surrogate": true,
+              "numerator": 3.0,
+              "value": 0.75
+            },
+            "time_to_first_tool_ms": {
+              "caveat": "Proxy for startup latency: ms from RunInitialized to first ToolCallDispatched.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 4421.0,
+              "value": 4421.0
+            }
+          },
+          "token_metrics": {
+            "cache_hit_rate": 0.0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "input_tokens": 53712,
+            "output_tokens": 429,
+            "reasoning_tokens": 0,
+            "tokens_per_successful_edit": 54141.0,
+            "total_cost_usd": 0.0
+          },
+          "tool_breakdown": [
+            {
+              "avg_latency_ms": 1.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 1,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "read"
+            },
+            {
+              "avg_latency_ms": 12.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 12,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "batch_execute"
+            },
+            {
+              "avg_latency_ms": 0.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 0,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "edit"
+            }
+          ]
+        },
+        "schema": "theo.headless.v4",
+        "success": true,
+        "summary": "Fixed the typo in `src/messages.rs`, changing `recieved` to `received`. Verified by re-reading the file and running `grep`, which now shows `Request received successfully` in `src/messages.rs`.",
+        "tokens": {
+          "input": 53712,
+          "output": 429,
+          "total": 54141
+        },
+        "tools": {
+          "success": 3,
+          "total": 3
+        },
+        "cost_usd": 0.274995
+      },
+      "stderr_tail": "",
+      "workdir": null
+    },
+    {
+      "id": "04-fix-return",
+      "category": "fix-bug",
+      "mode": "agent",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 57.08,
+      "check_passed": true,
+      "check_stderr": "rc=0 stdout='' stderr=''",
+      "headless": {
+        "duration_ms": 57030,
+        "environment": {
+          "temperature_actual": 0.0,
+          "theo_version": "0.1.0"
+        },
+        "error_class": "solved",
+        "files_edited": [
+          "src/math.rs",
+          "src/math.rs"
+        ],
+        "iterations": 14,
+        "llm": {
+          "calls": 14,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.4",
+        "provider": "ChatGPT Codex (OAuth)",
+        "report": {
+          "context_health": {
+            "action_repetition_rate": 0.0,
+            "avg_context_size_tokens": 3726.8571428571427,
+            "compaction_count": 0,
+            "compaction_savings_ratio": 0.0,
+            "context_growth_rate": 60.92857142857143,
+            "max_context_size_tokens": 4156,
+            "refetch_rate": 0.5,
+            "usefulness_avg": 0.0
+          },
+          "error_taxonomy": {
+            "budget_errors": 0,
+            "failure_mode_errors": 0,
+            "llm_errors": 0,
+            "network_errors": 0,
+            "other_errors": 0,
+            "sandbox_errors": 0,
+            "tool_errors": 0,
+            "total_errors": 0,
+            "validation_errors": 0
+          },
+          "integrity": {
+            "complete": true,
+            "confidence": 1.0,
+            "drop_sentinels_found": 0,
+            "missing_sequences": [],
+            "schema_version": 1,
+            "total_events_expected": 118,
+            "total_events_received": 118,
+            "writer_recoveries_found": 0
+          },
+          "loop_metrics": {
+            "budget_utilization": {
+              "iterations_pct": 0.7,
+              "time_pct": 0.015833333333333335,
+              "tokens_pct": 0.200335
+            },
+            "convergence_rate": 1.0,
+            "done_blocked_count": 1,
+            "evolution_attempts": 0,
+            "evolution_success": false,
+            "phase_distribution": {
+              "Done": {
+                "duration_ms": 0,
+                "iterations": 1,
+                "pct": 0.07142857142857142
+              },
+              "Edit": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Explore": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Verify": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              }
+            },
+            "total_iterations": 14
+          },
+          "memory_metrics": {
+            "constraints_learned": 0,
+            "episodes_created": 1,
+            "episodes_injected": 0,
+            "failure_fingerprints_new": 0,
+            "failure_fingerprints_recurrent": 0,
+            "hypotheses_active": 0,
+            "hypotheses_formed": 0,
+            "hypotheses_invalidated": 0
+          },
+          "subagent_metrics": {
+            "avg_duration_ms": 0.0,
+            "failed": 0,
+            "max_duration_ms": 0,
+            "spawned": 0,
+            "succeeded": 0,
+            "success_rate": 0.0
+          },
+          "surrogate_metrics": {
+            "context_waste_ratio": {
+              "caveat": "Proxy for context bloat: overflow events per iteration.",
+              "confidence": 1.0,
+              "denominator": 14.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "doom_loop_frequency": {
+              "caveat": "Proxy for stuck loops: repeated identical tool calls in a sliding window.",
+              "confidence": 1.0,
+              "denominator": 12.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "hypothesis_churn_rate": {
+              "caveat": "Approximates reasoning churn: invalidated / formed hypotheses.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "llm_efficiency": {
+              "caveat": "Approximates productive work: distinct successful tools per LLM call.",
+              "confidence": 1.0,
+              "denominator": 14.0,
+              "is_surrogate": true,
+              "numerator": 6.0,
+              "value": 0.42857142857142855
+            },
+            "time_to_first_tool_ms": {
+              "caveat": "Proxy for startup latency: ms from RunInitialized to first ToolCallDispatched.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 5574.0,
+              "value": 5574.0
+            }
+          },
+          "token_metrics": {
+            "cache_hit_rate": 0.0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "input_tokens": 198802,
+            "output_tokens": 1533,
+            "reasoning_tokens": 0,
+            "tokens_per_successful_edit": 100167.5,
+            "total_cost_usd": 0.0
+          },
+          "tool_breakdown": [
+            {
+              "avg_latency_ms": 5.333333333333333,
+              "call_count": 3,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 6,
+              "retry_count": 0,
+              "success_count": 3,
+              "success_rate": 1.0,
+              "tool_name": "bash"
+            },
+            {
+              "avg_latency_ms": 0.0,
+              "call_count": 3,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 0,
+              "retry_count": 0,
+              "success_count": 3,
+              "success_rate": 1.0,
+              "tool_name": "batch"
+            },
+            {
+              "avg_latency_ms": 0.0,
+              "call_count": 2,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 0,
+              "retry_count": 0,
+              "success_count": 2,
+              "success_rate": 1.0,
+              "tool_name": "task_update"
+            },
+            {
+              "avg_latency_ms": 4.0,
+              "call_count": 2,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 7,
+              "retry_count": 0,
+              "success_count": 2,
+              "success_rate": 1.0,
+              "tool_name": "edit"
+            },
+            {
+              "avg_latency_ms": 1.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 1,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "task_create"
+            },
+            {
+              "avg_latency_ms": 0.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 0,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "reflect"
+            }
+          ]
+        },
+        "schema": "theo.headless.v4",
+        "success": true,
+        "summary": "Updated `src/math.rs` so `double` now returns `n * 2` and added a regression test asserting `double(3) == 6`. I verified the file contents on disk, but execution verification was blocked by the environment because every `bash` command failed with `sh: 1: Cannot fork`, so `cargo test` could not be run.",
+        "tokens": {
+          "input": 198802,
+          "output": 1533,
+          "total": 200335
+        },
+        "tools": {
+          "success": 15,
+          "total": 16
+        },
+        "cost_usd": 1.017005
+      },
+      "stderr_tail": "",
+      "workdir": null
+    },
+    {
+      "id": "05-add-function",
+      "category": "add-feature",
+      "mode": "agent",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 74.08,
+      "check_passed": true,
+      "check_stderr": "rc=0 stdout='' stderr=''",
+      "headless": {
+        "duration_ms": 74015,
+        "environment": {
+          "temperature_actual": 0.0,
+          "theo_version": "0.1.0"
+        },
+        "error_class": "solved",
+        "files_edited": [
+          "src/math.rs"
+        ],
+        "iterations": 14,
+        "llm": {
+          "calls": 14,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.4",
+        "provider": "ChatGPT Codex (OAuth)",
+        "report": {
+          "context_health": {
+            "action_repetition_rate": 0.0,
+            "avg_context_size_tokens": 4000.0,
+            "compaction_count": 0,
+            "compaction_savings_ratio": 0.0,
+            "context_growth_rate": 89.57142857142857,
+            "max_context_size_tokens": 4560,
+            "refetch_rate": 0.6,
+            "usefulness_avg": 0.0
+          },
+          "error_taxonomy": {
+            "budget_errors": 0,
+            "failure_mode_errors": 0,
+            "llm_errors": 0,
+            "network_errors": 0,
+            "other_errors": 0,
+            "sandbox_errors": 0,
+            "tool_errors": 0,
+            "total_errors": 0,
+            "validation_errors": 0
+          },
+          "integrity": {
+            "complete": true,
+            "confidence": 1.0,
+            "drop_sentinels_found": 0,
+            "missing_sequences": [],
+            "schema_version": 1,
+            "total_events_expected": 139,
+            "total_events_received": 139,
+            "writer_recoveries_found": 0
+          },
+          "loop_metrics": {
+            "budget_utilization": {
+              "iterations_pct": 0.7,
+              "time_pct": 0.020277777777777777,
+              "tokens_pct": 0.207524
+            },
+            "convergence_rate": 1.0,
+            "done_blocked_count": 1,
+            "evolution_attempts": 0,
+            "evolution_success": false,
+            "phase_distribution": {
+              "Done": {
+                "duration_ms": 0,
+                "iterations": 1,
+                "pct": 0.07142857142857142
+              },
+              "Edit": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Explore": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Verify": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              }
+            },
+            "total_iterations": 14
+          },
+          "memory_metrics": {
+            "constraints_learned": 0,
+            "episodes_created": 1,
+            "episodes_injected": 0,
+            "failure_fingerprints_new": 1,
+            "failure_fingerprints_recurrent": 0,
+            "hypotheses_active": 0,
+            "hypotheses_formed": 0,
+            "hypotheses_invalidated": 0
+          },
+          "subagent_metrics": {
+            "avg_duration_ms": 0.0,
+            "failed": 0,
+            "max_duration_ms": 0,
+            "spawned": 0,
+            "succeeded": 0,
+            "success_rate": 0.0
+          },
+          "surrogate_metrics": {
+            "context_waste_ratio": {
+              "caveat": "Proxy for context bloat: overflow events per iteration.",
+              "confidence": 1.0,
+              "denominator": 14.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "doom_loop_frequency": {
+              "caveat": "Proxy for stuck loops: repeated identical tool calls in a sliding window.",
+              "confidence": 1.0,
+              "denominator": 17.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "hypothesis_churn_rate": {
+              "caveat": "Approximates reasoning churn: invalidated / formed hypotheses.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "llm_efficiency": {
+              "caveat": "Approximates productive work: distinct successful tools per LLM call.",
+              "confidence": 1.0,
+              "denominator": 14.0,
+              "is_surrogate": true,
+              "numerator": 9.0,
+              "value": 0.6428571428571429
+            },
+            "time_to_first_tool_ms": {
+              "caveat": "Proxy for startup latency: ms from RunInitialized to first ToolCallDispatched.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 5058.0,
+              "value": 5058.0
+            }
+          },
+          "token_metrics": {
+            "cache_hit_rate": 0.0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "input_tokens": 205645,
+            "output_tokens": 1879,
+            "reasoning_tokens": 0,
+            "tokens_per_successful_edit": 207524.0,
+            "total_cost_usd": 0.0
+          },
+          "tool_breakdown": [
+            {
+              "avg_latency_ms": 0.5,
+              "call_count": 4,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 1,
+              "retry_count": 0,
+              "success_count": 4,
+              "success_rate": 1.0,
+              "tool_name": "read"
+            },
+            {
+              "avg_latency_ms": 11.25,
+              "call_count": 4,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 17,
+              "retry_count": 0,
+              "success_count": 4,
+              "success_rate": 1.0,
+              "tool_name": "bash"
+            },
+            {
+              "avg_latency_ms": 0.0,
+              "call_count": 2,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 0,
+              "retry_count": 0,
+              "success_count": 2,
+              "success_rate": 1.0,
+              "tool_name": "task_update"
+            },
+            {
+              "avg_latency_ms": 0.5,
+              "call_count": 2,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 1,
+              "retry_count": 0,
+              "success_count": 2,
+              "success_rate": 1.0,
+              "tool_name": "glob"
+            },
+            {
+              "avg_latency_ms": 0.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 0,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "memory"
+            },
+            {
+              "avg_latency_ms": 8.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 8,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "git_status"
+            },
+            {
+              "avg_latency_ms": 2.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 2,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "edit"
+            },
+            {
+              "avg_latency_ms": 1.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 1,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "reflect"
+            },
+            {
+              "avg_latency_ms": 1.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 1,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "task_create"
+            }
+          ]
+        },
+        "schema": "theo.headless.v4",
+        "success": true,
+        "summary": "Added `pub fn square(n: i32) -> i32 { n * n }` to `src/math.rs` and left `double`/`triple` untouched. Verified the file contents after editing; attempted to compile with `rustc` three times, but the environment failed before compilation with `OS can't spawn worker thread: Resource temporarily unavailable`, so runtime verification was blocked by the harness.",
+        "tokens": {
+          "input": 205645,
+          "output": 1879,
+          "total": 207524
+        },
+        "tools": {
+          "success": 16,
+          "total": 17
+        },
+        "cost_usd": 1.05641
+      },
+      "stderr_tail": "",
+      "workdir": null
+    },
+    {
+      "id": "06-rename-var",
+      "category": "refactor",
+      "mode": "agent",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 14.39,
+      "check_passed": true,
+      "check_stderr": "rc=0 stdout='' stderr=''",
+      "headless": {
+        "duration_ms": 14321,
+        "environment": {
+          "temperature_actual": 0.0,
+          "theo_version": "0.1.0"
+        },
+        "error_class": "solved",
+        "files_edited": [
+          "src/parse.rs"
+        ],
+        "iterations": 4,
+        "llm": {
+          "calls": 4,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.4",
+        "provider": "ChatGPT Codex (OAuth)",
+        "report": {
+          "context_health": {
+            "action_repetition_rate": 0.0,
+            "avg_context_size_tokens": 3436.5,
+            "compaction_count": 0,
+            "compaction_savings_ratio": 0.0,
+            "context_growth_rate": 58.75,
+            "max_context_size_tokens": 3541,
+            "refetch_rate": 0.5,
+            "usefulness_avg": 0.0
+          },
+          "error_taxonomy": {
+            "budget_errors": 0,
+            "failure_mode_errors": 0,
+            "llm_errors": 0,
+            "network_errors": 0,
+            "other_errors": 0,
+            "sandbox_errors": 0,
+            "tool_errors": 0,
+            "total_errors": 0,
+            "validation_errors": 0
+          },
+          "integrity": {
+            "complete": true,
+            "confidence": 1.0,
+            "drop_sentinels_found": 0,
+            "missing_sequences": [],
+            "schema_version": 1,
+            "total_events_expected": 37,
+            "total_events_received": 37,
+            "writer_recoveries_found": 0
+          },
+          "loop_metrics": {
+            "budget_utilization": {
+              "iterations_pct": 0.2,
+              "time_pct": 0.0038888888888888888,
+              "tokens_pct": 0.05457
+            },
+            "convergence_rate": 1.0,
+            "done_blocked_count": 1,
+            "evolution_attempts": 0,
+            "evolution_success": false,
+            "phase_distribution": {
+              "Done": {
+                "duration_ms": 0,
+                "iterations": 1,
+                "pct": 0.25
+              },
+              "Edit": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Explore": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Verify": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              }
+            },
+            "total_iterations": 4
+          },
+          "memory_metrics": {
+            "constraints_learned": 0,
+            "episodes_created": 1,
+            "episodes_injected": 0,
+            "failure_fingerprints_new": 1,
+            "failure_fingerprints_recurrent": 0,
+            "hypotheses_active": 0,
+            "hypotheses_formed": 0,
+            "hypotheses_invalidated": 0
+          },
+          "subagent_metrics": {
+            "avg_duration_ms": 0.0,
+            "failed": 0,
+            "max_duration_ms": 0,
+            "spawned": 0,
+            "succeeded": 0,
+            "success_rate": 0.0
+          },
+          "surrogate_metrics": {
+            "context_waste_ratio": {
+              "caveat": "Proxy for context bloat: overflow events per iteration.",
+              "confidence": 1.0,
+              "denominator": 4.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "doom_loop_frequency": {
+              "caveat": "Proxy for stuck loops: repeated identical tool calls in a sliding window.",
+              "confidence": 1.0,
+              "denominator": 3.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "hypothesis_churn_rate": {
+              "caveat": "Approximates reasoning churn: invalidated / formed hypotheses.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "llm_efficiency": {
+              "caveat": "Approximates productive work: distinct successful tools per LLM call.",
+              "confidence": 1.0,
+              "denominator": 4.0,
+              "is_surrogate": true,
+              "numerator": 3.0,
+              "value": 0.75
+            },
+            "time_to_first_tool_ms": {
+              "caveat": "Proxy for startup latency: ms from RunInitialized to first ToolCallDispatched.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 3437.0,
+              "value": 3437.0
+            }
+          },
+          "token_metrics": {
+            "cache_hit_rate": 0.0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "input_tokens": 54232,
+            "output_tokens": 338,
+            "reasoning_tokens": 0,
+            "tokens_per_successful_edit": 54570.0,
+            "total_cost_usd": 0.0
+          },
+          "tool_breakdown": [
+            {
+              "avg_latency_ms": 1.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 1,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "read"
+            },
+            {
+              "avg_latency_ms": 1.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 1,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "batch_execute"
+            },
+            {
+              "avg_latency_ms": 1.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 1,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "edit"
+            }
+          ]
+        },
+        "schema": "theo.headless.v4",
+        "success": true,
+        "summary": "Renamed the local variable `x` to `value` inside `parse_int` in `src/parse.rs` and verified by rereading the file that no other code changed.",
+        "tokens": {
+          "input": 54232,
+          "output": 338,
+          "total": 54570
+        },
+        "tools": {
+          "success": 2,
+          "total": 3
+        },
+        "cost_usd": 0.27623
+      },
+      "stderr_tail": "",
+      "workdir": null
+    },
+    {
+      "id": "07-count-files",
+      "category": "explore",
+      "mode": "agent",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 11.27,
+      "check_passed": true,
+      "check_stderr": "rc=0 stdout='' stderr=''",
+      "headless": {
+        "duration_ms": 11215,
+        "environment": {
+          "temperature_actual": 0.0,
+          "theo_version": "0.1.0"
+        },
+        "error_class": "solved",
+        "files_edited": [],
+        "iterations": 2,
+        "llm": {
+          "calls": 2,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.4",
+        "provider": "ChatGPT Codex (OAuth)",
+        "report": {
+          "context_health": {
+            "action_repetition_rate": 0.0,
+            "avg_context_size_tokens": 3299.5,
+            "compaction_count": 0,
+            "compaction_savings_ratio": 0.0,
+            "context_growth_rate": 6.5,
+            "max_context_size_tokens": 3306,
+            "refetch_rate": 0.0,
+            "usefulness_avg": 0.0
+          },
+          "error_taxonomy": {
+            "budget_errors": 0,
+            "failure_mode_errors": 0,
+            "llm_errors": 0,
+            "network_errors": 0,
+            "other_errors": 0,
+            "sandbox_errors": 0,
+            "tool_errors": 0,
+            "total_errors": 0,
+            "validation_errors": 0
+          },
+          "integrity": {
+            "complete": true,
+            "confidence": 1.0,
+            "drop_sentinels_found": 0,
+            "missing_sequences": [],
+            "schema_version": 1,
+            "total_events_expected": 16,
+            "total_events_received": 16,
+            "writer_recoveries_found": 0
+          },
+          "loop_metrics": {
+            "budget_utilization": {
+              "iterations_pct": 0.1,
+              "time_pct": 0.0030555555555555557,
+              "tokens_pct": 0.026608
+            },
+            "convergence_rate": 1.0,
+            "done_blocked_count": 0,
+            "evolution_attempts": 0,
+            "evolution_success": false,
+            "phase_distribution": {
+              "Done": {
+                "duration_ms": 0,
+                "iterations": 1,
+                "pct": 0.5
+              },
+              "Edit": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Explore": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Verify": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              }
+            },
+            "total_iterations": 2
+          },
+          "memory_metrics": {
+            "constraints_learned": 0,
+            "episodes_created": 1,
+            "episodes_injected": 0,
+            "failure_fingerprints_new": 0,
+            "failure_fingerprints_recurrent": 0,
+            "hypotheses_active": 0,
+            "hypotheses_formed": 0,
+            "hypotheses_invalidated": 0
+          },
+          "subagent_metrics": {
+            "avg_duration_ms": 0.0,
+            "failed": 0,
+            "max_duration_ms": 0,
+            "spawned": 0,
+            "succeeded": 0,
+            "success_rate": 0.0
+          },
+          "surrogate_metrics": {
+            "context_waste_ratio": {
+              "caveat": "Proxy for context bloat: overflow events per iteration.",
+              "confidence": 1.0,
+              "denominator": 2.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "doom_loop_frequency": {
+              "caveat": "Proxy for stuck loops: repeated identical tool calls in a sliding window.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "hypothesis_churn_rate": {
+              "caveat": "Approximates reasoning churn: invalidated / formed hypotheses.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "llm_efficiency": {
+              "caveat": "Approximates productive work: distinct successful tools per LLM call.",
+              "confidence": 1.0,
+              "denominator": 2.0,
+              "is_surrogate": true,
+              "numerator": 1.0,
+              "value": 0.5
+            },
+            "time_to_first_tool_ms": {
+              "caveat": "Proxy for startup latency: ms from RunInitialized to first ToolCallDispatched.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 7146.0,
+              "value": 7146.0
+            }
+          },
+          "token_metrics": {
+            "cache_hit_rate": 0.0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "input_tokens": 26549,
+            "output_tokens": 59,
+            "reasoning_tokens": 0,
+            "tokens_per_successful_edit": 0.0,
+            "total_cost_usd": 0.0
+          },
+          "tool_breakdown": [
+            {
+              "avg_latency_ms": 0.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 0,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "glob"
+            }
+          ]
+        },
+        "schema": "theo.headless.v4",
+        "success": true,
+        "summary": "3",
+        "tokens": {
+          "input": 26549,
+          "output": 59,
+          "total": 26608
+        },
+        "tools": {
+          "success": 1,
+          "total": 1
+        },
+        "cost_usd": 0.13363
+      },
+      "stderr_tail": "",
+      "workdir": null
+    },
+    {
+      "id": "08-multi-file-edit",
+      "category": "multi-file",
+      "mode": "agent",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 16.69,
+      "check_passed": true,
+      "check_stderr": "rc=0 stdout='' stderr=''",
+      "headless": {
+        "duration_ms": 16582,
+        "environment": {
+          "temperature_actual": 0.0,
+          "theo_version": "0.1.0"
+        },
+        "error_class": "solved",
+        "files_edited": [
+          "src/config.rs",
+          "src/server.rs"
+        ],
+        "iterations": 4,
+        "llm": {
+          "calls": 4,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.4",
+        "provider": "ChatGPT Codex (OAuth)",
+        "report": {
+          "context_health": {
+            "action_repetition_rate": 0.0,
+            "avg_context_size_tokens": 3433.0,
+            "compaction_count": 0,
+            "compaction_savings_ratio": 0.0,
+            "context_growth_rate": 55.0,
+            "max_context_size_tokens": 3543,
+            "refetch_rate": 0.6666666666666666,
+            "usefulness_avg": 0.0
+          },
+          "error_taxonomy": {
+            "budget_errors": 0,
+            "failure_mode_errors": 0,
+            "llm_errors": 0,
+            "network_errors": 0,
+            "other_errors": 0,
+            "sandbox_errors": 0,
+            "tool_errors": 0,
+            "total_errors": 0,
+            "validation_errors": 0
+          },
+          "integrity": {
+            "complete": true,
+            "confidence": 1.0,
+            "drop_sentinels_found": 0,
+            "missing_sequences": [],
+            "schema_version": 1,
+            "total_events_expected": 43,
+            "total_events_received": 43,
+            "writer_recoveries_found": 0
+          },
+          "loop_metrics": {
+            "budget_utilization": {
+              "iterations_pct": 0.2,
+              "time_pct": 0.0044444444444444444,
+              "tokens_pct": 0.054616
+            },
+            "convergence_rate": 1.0,
+            "done_blocked_count": 0,
+            "evolution_attempts": 0,
+            "evolution_success": false,
+            "phase_distribution": {
+              "Done": {
+                "duration_ms": 0,
+                "iterations": 1,
+                "pct": 0.25
+              },
+              "Edit": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Explore": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Verify": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              }
+            },
+            "total_iterations": 4
+          },
+          "memory_metrics": {
+            "constraints_learned": 0,
+            "episodes_created": 1,
+            "episodes_injected": 0,
+            "failure_fingerprints_new": 0,
+            "failure_fingerprints_recurrent": 0,
+            "hypotheses_active": 0,
+            "hypotheses_formed": 0,
+            "hypotheses_invalidated": 0
+          },
+          "subagent_metrics": {
+            "avg_duration_ms": 0.0,
+            "failed": 0,
+            "max_duration_ms": 0,
+            "spawned": 0,
+            "succeeded": 0,
+            "success_rate": 0.0
+          },
+          "surrogate_metrics": {
+            "context_waste_ratio": {
+              "caveat": "Proxy for context bloat: overflow events per iteration.",
+              "confidence": 1.0,
+              "denominator": 4.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "doom_loop_frequency": {
+              "caveat": "Proxy for stuck loops: repeated identical tool calls in a sliding window.",
+              "confidence": 1.0,
+              "denominator": 6.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "hypothesis_churn_rate": {
+              "caveat": "Approximates reasoning churn: invalidated / formed hypotheses.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "llm_efficiency": {
+              "caveat": "Approximates productive work: distinct successful tools per LLM call.",
+              "confidence": 1.0,
+              "denominator": 4.0,
+              "is_surrogate": true,
+              "numerator": 2.0,
+              "value": 0.5
+            },
+            "time_to_first_tool_ms": {
+              "caveat": "Proxy for startup latency: ms from RunInitialized to first ToolCallDispatched.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 4817.0,
+              "value": 4817.0
+            }
+          },
+          "token_metrics": {
+            "cache_hit_rate": 0.0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "input_tokens": 54284,
+            "output_tokens": 332,
+            "reasoning_tokens": 0,
+            "tokens_per_successful_edit": 27308.0,
+            "total_cost_usd": 0.0
+          },
+          "tool_breakdown": [
+            {
+              "avg_latency_ms": 0.75,
+              "call_count": 4,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 2,
+              "retry_count": 0,
+              "success_count": 4,
+              "success_rate": 1.0,
+              "tool_name": "read"
+            },
+            {
+              "avg_latency_ms": 1.0,
+              "call_count": 2,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 1,
+              "retry_count": 0,
+              "success_count": 2,
+              "success_rate": 1.0,
+              "tool_name": "edit"
+            }
+          ]
+        },
+        "schema": "theo.headless.v4",
+        "success": true,
+        "summary": "Updated `src/config.rs` to set `DEFAULT_PORT` to `9090`, and updated the comment in `src/server.rs` to say it listens on `9090`. Verified both file contents after editing.",
+        "tokens": {
+          "input": 54284,
+          "output": 332,
+          "total": 54616
+        },
+        "tools": {
+          "success": 6,
+          "total": 6
+        },
+        "cost_usd": 0.2764
+      },
+      "stderr_tail": "",
+      "workdir": null
+    },
+    {
+      "id": "09-plan-mode",
+      "category": "plan",
+      "mode": "plan",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 54.81,
+      "check_passed": true,
+      "check_stderr": "rc=0 stdout='' stderr=''",
+      "headless": {
+        "duration_ms": 54653,
+        "environment": {
+          "temperature_actual": 0.0,
+          "theo_version": "0.1.0"
+        },
+        "error_class": "solved",
+        "files_edited": [
+          ".theo/plans/02-mean.md"
+        ],
+        "iterations": 6,
+        "llm": {
+          "calls": 6,
+          "retries": 0
+        },
+        "mode": "plan",
+        "model": "gpt-5.4",
+        "provider": "ChatGPT Codex (OAuth)",
+        "report": {
+          "context_health": {
+            "action_repetition_rate": 0.0,
+            "avg_context_size_tokens": 1878.3333333333333,
+            "compaction_count": 0,
+            "compaction_savings_ratio": 0.0,
+            "context_growth_rate": 225.83333333333334,
+            "max_context_size_tokens": 2614,
+            "refetch_rate": 0.0,
+            "usefulness_avg": 0.0
+          },
+          "error_taxonomy": {
+            "budget_errors": 0,
+            "failure_mode_errors": 0,
+            "llm_errors": 0,
+            "network_errors": 0,
+            "other_errors": 0,
+            "sandbox_errors": 0,
+            "tool_errors": 0,
+            "total_errors": 0,
+            "validation_errors": 0
+          },
+          "integrity": {
+            "complete": true,
+            "confidence": 1.0,
+            "drop_sentinels_found": 0,
+            "missing_sequences": [],
+            "schema_version": 1,
+            "total_events_expected": 47,
+            "total_events_received": 47,
+            "writer_recoveries_found": 0
+          },
+          "loop_metrics": {
+            "budget_utilization": {
+              "iterations_pct": 0.3,
+              "time_pct": 0.015,
+              "tokens_pct": 0.077254
+            },
+            "convergence_rate": 1.0,
+            "done_blocked_count": 1,
+            "evolution_attempts": 0,
+            "evolution_success": false,
+            "phase_distribution": {
+              "Done": {
+                "duration_ms": 0,
+                "iterations": 1,
+                "pct": 0.16666666666666666
+              },
+              "Edit": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Explore": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Verify": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              }
+            },
+            "total_iterations": 6
+          },
+          "memory_metrics": {
+            "constraints_learned": 0,
+            "episodes_created": 1,
+            "episodes_injected": 0,
+            "failure_fingerprints_new": 0,
+            "failure_fingerprints_recurrent": 0,
+            "hypotheses_active": 0,
+            "hypotheses_formed": 0,
+            "hypotheses_invalidated": 0
+          },
+          "subagent_metrics": {
+            "avg_duration_ms": 0.0,
+            "failed": 0,
+            "max_duration_ms": 0,
+            "spawned": 0,
+            "succeeded": 0,
+            "success_rate": 0.0
+          },
+          "surrogate_metrics": {
+            "context_waste_ratio": {
+              "caveat": "Proxy for context bloat: overflow events per iteration.",
+              "confidence": 1.0,
+              "denominator": 6.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "doom_loop_frequency": {
+              "caveat": "Proxy for stuck loops: repeated identical tool calls in a sliding window.",
+              "confidence": 1.0,
+              "denominator": 4.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "hypothesis_churn_rate": {
+              "caveat": "Approximates reasoning churn: invalidated / formed hypotheses.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "llm_efficiency": {
+              "caveat": "Approximates productive work: distinct successful tools per LLM call.",
+              "confidence": 1.0,
+              "denominator": 6.0,
+              "is_surrogate": true,
+              "numerator": 4.0,
+              "value": 0.6666666666666666
+            },
+            "time_to_first_tool_ms": {
+              "caveat": "Proxy for startup latency: ms from RunInitialized to first ToolCallDispatched.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 25968.0,
+              "value": 25968.0
+            }
+          },
+          "token_metrics": {
+            "cache_hit_rate": 0.0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "input_tokens": 74908,
+            "output_tokens": 2346,
+            "reasoning_tokens": 0,
+            "tokens_per_successful_edit": 77254.0,
+            "total_cost_usd": 0.0
+          },
+          "tool_breakdown": [
+            {
+              "avg_latency_ms": 1.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 1,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "task_create"
+            },
+            {
+              "avg_latency_ms": 1.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 1,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "write"
+            },
+            {
+              "avg_latency_ms": 0.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 0,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "batch"
+            },
+            {
+              "avg_latency_ms": 1.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 1,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "task_update"
+            }
+          ]
+        },
+        "schema": "theo.headless.v4",
+        "success": true,
+        "summary": "Plan saved to `.theo/plans/02-mean.md`; no changes were made to `src/stats.rs`.",
+        "tokens": {
+          "input": 74908,
+          "output": 2346,
+          "total": 77254
+        },
+        "tools": {
+          "success": 5,
+          "total": 5
+        },
+        "cost_usd": 0.40973
+      },
+      "stderr_tail": "",
+      "workdir": null
+    },
+    {
+      "id": "10-logic-bug",
+      "category": "fix-bug",
+      "mode": "agent",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 66.74,
+      "check_passed": true,
+      "check_stderr": "rc=0 stdout='' stderr=''",
+      "headless": {
+        "duration_ms": 66632,
+        "environment": {
+          "temperature_actual": 0.0,
+          "theo_version": "0.1.0"
+        },
+        "error_class": "solved",
+        "files_edited": [
+          "src/seq.rs"
+        ],
+        "iterations": 15,
+        "llm": {
+          "calls": 15,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.4",
+        "provider": "ChatGPT Codex (OAuth)",
+        "report": {
+          "context_health": {
+            "action_repetition_rate": 0.0,
+            "avg_context_size_tokens": 3875.6666666666665,
+            "compaction_count": 0,
+            "compaction_savings_ratio": 0.0,
+            "context_growth_rate": 72.06666666666666,
+            "max_context_size_tokens": 4418,
+            "refetch_rate": 0.0,
+            "usefulness_avg": 0.0
+          },
+          "error_taxonomy": {
+            "budget_errors": 0,
+            "failure_mode_errors": 0,
+            "llm_errors": 0,
+            "network_errors": 0,
+            "other_errors": 0,
+            "sandbox_errors": 0,
+            "tool_errors": 0,
+            "total_errors": 0,
+            "validation_errors": 0
+          },
+          "integrity": {
+            "complete": true,
+            "confidence": 1.0,
+            "drop_sentinels_found": 0,
+            "missing_sequences": [],
+            "schema_version": 1,
+            "total_events_expected": 125,
+            "total_events_received": 125,
+            "writer_recoveries_found": 0
+          },
+          "loop_metrics": {
+            "budget_utilization": {
+              "iterations_pct": 0.75,
+              "time_pct": 0.018333333333333333,
+              "tokens_pct": 0.218631
+            },
+            "convergence_rate": 1.0,
+            "done_blocked_count": 1,
+            "evolution_attempts": 0,
+            "evolution_success": false,
+            "phase_distribution": {
+              "Done": {
+                "duration_ms": 0,
+                "iterations": 1,
+                "pct": 0.06666666666666667
+              },
+              "Edit": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Explore": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Verify": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              }
+            },
+            "total_iterations": 15
+          },
+          "memory_metrics": {
+            "constraints_learned": 0,
+            "episodes_created": 1,
+            "episodes_injected": 0,
+            "failure_fingerprints_new": 0,
+            "failure_fingerprints_recurrent": 0,
+            "hypotheses_active": 0,
+            "hypotheses_formed": 0,
+            "hypotheses_invalidated": 0
+          },
+          "subagent_metrics": {
+            "avg_duration_ms": 0.0,
+            "failed": 0,
+            "max_duration_ms": 0,
+            "spawned": 0,
+            "succeeded": 0,
+            "success_rate": 0.0
+          },
+          "surrogate_metrics": {
+            "context_waste_ratio": {
+              "caveat": "Proxy for context bloat: overflow events per iteration.",
+              "confidence": 1.0,
+              "denominator": 15.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "doom_loop_frequency": {
+              "caveat": "Proxy for stuck loops: repeated identical tool calls in a sliding window.",
+              "confidence": 1.0,
+              "denominator": 13.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "hypothesis_churn_rate": {
+              "caveat": "Approximates reasoning churn: invalidated / formed hypotheses.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "llm_efficiency": {
+              "caveat": "Approximates productive work: distinct successful tools per LLM call.",
+              "confidence": 1.0,
+              "denominator": 15.0,
+              "is_surrogate": true,
+              "numerator": 6.0,
+              "value": 0.4
+            },
+            "time_to_first_tool_ms": {
+              "caveat": "Proxy for startup latency: ms from RunInitialized to first ToolCallDispatched.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 7067.0,
+              "value": 7067.0
+            }
+          },
+          "token_metrics": {
+            "cache_hit_rate": 0.0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "input_tokens": 217002,
+            "output_tokens": 1629,
+            "reasoning_tokens": 0,
+            "tokens_per_successful_edit": 218631.0,
+            "total_cost_usd": 0.0
+          },
+          "tool_breakdown": [
+            {
+              "avg_latency_ms": 10.75,
+              "call_count": 4,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 25,
+              "retry_count": 0,
+              "success_count": 4,
+              "success_rate": 1.0,
+              "tool_name": "bash"
+            },
+            {
+              "avg_latency_ms": 0.0,
+              "call_count": 4,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 0,
+              "retry_count": 0,
+              "success_count": 4,
+              "success_rate": 1.0,
+              "tool_name": "batch"
+            },
+            {
+              "avg_latency_ms": 0.0,
+              "call_count": 2,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 0,
+              "retry_count": 0,
+              "success_count": 2,
+              "success_rate": 1.0,
+              "tool_name": "task_update"
+            },
+            {
+              "avg_latency_ms": 0.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 0,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "task_create"
+            },
+            {
+              "avg_latency_ms": 7.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 7,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "write"
+            },
+            {
+              "avg_latency_ms": 1.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 1,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "reflect"
+            }
+          ]
+        },
+        "schema": "theo.headless.v4",
+        "success": true,
+        "summary": "Fixed `src/seq.rs` by changing `nth_even` from `n * 2 + 2` to `n * 2`, and added a regression test covering `n=0..3`. I attempted verification with `rustc --test src/seq.rs -o target/seq_tests && ./target/seq_tests`, but execution in this environment is blocked by `sh: 1: Cannot fork`; a minimal `true` command does run, so the compile step specifically could not be completed here.",
+        "tokens": {
+          "input": 217002,
+          "output": 1629,
+          "total": 218631
+        },
+        "tools": {
+          "success": 18,
+          "total": 20
+        },
+        "cost_usd": 1.109445
+      },
+      "stderr_tail": "",
+      "workdir": null
+    },
+    {
+      "id": "11-python-fix",
+      "category": "fix-bug",
+      "mode": "agent",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 62.48,
+      "check_passed": true,
+      "check_stderr": "rc=0 stdout='' stderr=''",
+      "headless": {
+        "duration_ms": 62399,
+        "environment": {
+          "temperature_actual": 0.0,
+          "theo_version": "0.1.0"
+        },
+        "error_class": "solved",
+        "files_edited": [
+          "src/stats.py",
+          "test_stats.py"
+        ],
+        "iterations": 15,
+        "llm": {
+          "calls": 15,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.4",
+        "provider": "ChatGPT Codex (OAuth)",
+        "report": {
+          "context_health": {
+            "action_repetition_rate": 0.0,
+            "avg_context_size_tokens": 3790.0666666666666,
+            "compaction_count": 0,
+            "compaction_savings_ratio": 0.0,
+            "context_growth_rate": 69.6,
+            "max_context_size_tokens": 4348,
+            "refetch_rate": 0.0,
+            "usefulness_avg": 0.0
+          },
+          "error_taxonomy": {
+            "budget_errors": 0,
+            "failure_mode_errors": 0,
+            "llm_errors": 0,
+            "network_errors": 0,
+            "other_errors": 0,
+            "sandbox_errors": 0,
+            "tool_errors": 0,
+            "total_errors": 0,
+            "validation_errors": 0
+          },
+          "integrity": {
+            "complete": true,
+            "confidence": 1.0,
+            "drop_sentinels_found": 0,
+            "missing_sequences": [],
+            "schema_version": 1,
+            "total_events_expected": 125,
+            "total_events_received": 125,
+            "writer_recoveries_found": 0
+          },
+          "loop_metrics": {
+            "budget_utilization": {
+              "iterations_pct": 0.75,
+              "time_pct": 0.017222222222222222,
+              "tokens_pct": 0.216505
+            },
+            "convergence_rate": 1.0,
+            "done_blocked_count": 1,
+            "evolution_attempts": 0,
+            "evolution_success": false,
+            "phase_distribution": {
+              "Done": {
+                "duration_ms": 0,
+                "iterations": 1,
+                "pct": 0.06666666666666667
+              },
+              "Edit": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Explore": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Verify": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              }
+            },
+            "total_iterations": 15
+          },
+          "memory_metrics": {
+            "constraints_learned": 0,
+            "episodes_created": 1,
+            "episodes_injected": 0,
+            "failure_fingerprints_new": 0,
+            "failure_fingerprints_recurrent": 0,
+            "hypotheses_active": 0,
+            "hypotheses_formed": 0,
+            "hypotheses_invalidated": 0
+          },
+          "subagent_metrics": {
+            "avg_duration_ms": 0.0,
+            "failed": 0,
+            "max_duration_ms": 0,
+            "spawned": 0,
+            "succeeded": 0,
+            "success_rate": 0.0
+          },
+          "surrogate_metrics": {
+            "context_waste_ratio": {
+              "caveat": "Proxy for context bloat: overflow events per iteration.",
+              "confidence": 1.0,
+              "denominator": 15.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "doom_loop_frequency": {
+              "caveat": "Proxy for stuck loops: repeated identical tool calls in a sliding window.",
+              "confidence": 1.0,
+              "denominator": 13.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "hypothesis_churn_rate": {
+              "caveat": "Approximates reasoning churn: invalidated / formed hypotheses.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "llm_efficiency": {
+              "caveat": "Approximates productive work: distinct successful tools per LLM call.",
+              "confidence": 1.0,
+              "denominator": 15.0,
+              "is_surrogate": true,
+              "numerator": 6.0,
+              "value": 0.4
+            },
+            "time_to_first_tool_ms": {
+              "caveat": "Proxy for startup latency: ms from RunInitialized to first ToolCallDispatched.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 15014.0,
+              "value": 15014.0
+            }
+          },
+          "token_metrics": {
+            "cache_hit_rate": 0.0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "input_tokens": 214899,
+            "output_tokens": 1606,
+            "reasoning_tokens": 0,
+            "tokens_per_successful_edit": 108252.5,
+            "total_cost_usd": 0.0
+          },
+          "tool_breakdown": [
+            {
+              "avg_latency_ms": 137.75,
+              "call_count": 4,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 512,
+              "retry_count": 0,
+              "success_count": 4,
+              "success_rate": 1.0,
+              "tool_name": "bash"
+            },
+            {
+              "avg_latency_ms": 0.0,
+              "call_count": 4,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 0,
+              "retry_count": 0,
+              "success_count": 4,
+              "success_rate": 1.0,
+              "tool_name": "batch"
+            },
+            {
+              "avg_latency_ms": 0.5,
+              "call_count": 2,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 1,
+              "retry_count": 0,
+              "success_count": 2,
+              "success_rate": 1.0,
+              "tool_name": "task_update"
+            },
+            {
+              "avg_latency_ms": 1.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 1,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "edit"
+            },
+            {
+              "avg_latency_ms": 1.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 1,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "reflect"
+            },
+            {
+              "avg_latency_ms": 0.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 0,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "write"
+            }
+          ]
+        },
+        "schema": "theo.headless.v4",
+        "success": true,
+        "summary": "Updated `src/stats.py` so `avg([])` returns `0.0` instead of dividing by zero, and added `test_stats.py` covering empty and non-empty inputs. I verified the original bug first with `python3`, which raised `ZeroDivisionError`; after the fix I could not rerun verification because the sandbox started failing every `bash` execution with `sh: 1: Cannot fork`.",
+        "tokens": {
+          "input": 214899,
+          "output": 1606,
+          "total": 216505
+        },
+        "tools": {
+          "success": 18,
+          "total": 19
+        },
+        "cost_usd": 1.098585
+      },
+      "stderr_tail": "",
+      "workdir": null
+    },
+    {
+      "id": "12-bash-command",
+      "category": "explore",
+      "mode": "agent",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 9.28,
+      "check_passed": true,
+      "check_stderr": "rc=0 stdout='' stderr=''",
+      "headless": {
+        "duration_ms": 9228,
+        "environment": {
+          "temperature_actual": 0.0,
+          "theo_version": "0.1.0"
+        },
+        "error_class": "solved",
+        "files_edited": [],
+        "iterations": 3,
+        "llm": {
+          "calls": 3,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.4",
+        "provider": "ChatGPT Codex (OAuth)",
+        "report": {
+          "context_health": {
+            "action_repetition_rate": 0.0,
+            "avg_context_size_tokens": 3312.6666666666665,
+            "compaction_count": 0,
+            "compaction_savings_ratio": 0.0,
+            "context_growth_rate": 13.0,
+            "max_context_size_tokens": 3335,
+            "refetch_rate": 0.0,
+            "usefulness_avg": 0.0
+          },
+          "error_taxonomy": {
+            "budget_errors": 0,
+            "failure_mode_errors": 0,
+            "llm_errors": 0,
+            "network_errors": 0,
+            "other_errors": 0,
+            "sandbox_errors": 0,
+            "tool_errors": 0,
+            "total_errors": 0,
+            "validation_errors": 0
+          },
+          "integrity": {
+            "complete": true,
+            "confidence": 1.0,
+            "drop_sentinels_found": 0,
+            "missing_sequences": [],
+            "schema_version": 1,
+            "total_events_expected": 25,
+            "total_events_received": 25,
+            "writer_recoveries_found": 0
+          },
+          "loop_metrics": {
+            "budget_utilization": {
+              "iterations_pct": 0.15,
+              "time_pct": 0.0025,
+              "tokens_pct": 0.040154
+            },
+            "convergence_rate": 1.0,
+            "done_blocked_count": 0,
+            "evolution_attempts": 0,
+            "evolution_success": false,
+            "phase_distribution": {
+              "Done": {
+                "duration_ms": 0,
+                "iterations": 1,
+                "pct": 0.3333333333333333
+              },
+              "Edit": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Explore": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Verify": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              }
+            },
+            "total_iterations": 3
+          },
+          "memory_metrics": {
+            "constraints_learned": 0,
+            "episodes_created": 1,
+            "episodes_injected": 0,
+            "failure_fingerprints_new": 0,
+            "failure_fingerprints_recurrent": 0,
+            "hypotheses_active": 0,
+            "hypotheses_formed": 0,
+            "hypotheses_invalidated": 0
+          },
+          "subagent_metrics": {
+            "avg_duration_ms": 0.0,
+            "failed": 0,
+            "max_duration_ms": 0,
+            "spawned": 0,
+            "succeeded": 0,
+            "success_rate": 0.0
+          },
+          "surrogate_metrics": {
+            "context_waste_ratio": {
+              "caveat": "Proxy for context bloat: overflow events per iteration.",
+              "confidence": 1.0,
+              "denominator": 3.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "doom_loop_frequency": {
+              "caveat": "Proxy for stuck loops: repeated identical tool calls in a sliding window.",
+              "confidence": 1.0,
+              "denominator": 2.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "hypothesis_churn_rate": {
+              "caveat": "Approximates reasoning churn: invalidated / formed hypotheses.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "llm_efficiency": {
+              "caveat": "Approximates productive work: distinct successful tools per LLM call.",
+              "confidence": 1.0,
+              "denominator": 3.0,
+              "is_surrogate": true,
+              "numerator": 2.0,
+              "value": 0.6666666666666666
+            },
+            "time_to_first_tool_ms": {
+              "caveat": "Proxy for startup latency: ms from RunInitialized to first ToolCallDispatched.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 4493.0,
+              "value": 4493.0
+            }
+          },
+          "token_metrics": {
+            "cache_hit_rate": 0.0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "input_tokens": 39974,
+            "output_tokens": 180,
+            "reasoning_tokens": 0,
+            "tokens_per_successful_edit": 0.0,
+            "total_cost_usd": 0.0
+          },
+          "tool_breakdown": [
+            {
+              "avg_latency_ms": 5.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 5,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "bash"
+            },
+            {
+              "avg_latency_ms": 0.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 0,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "read"
+            }
+          ]
+        },
+        "schema": "theo.headless.v4",
+        "success": true,
+        "summary": "5",
+        "tokens": {
+          "input": 39974,
+          "output": 180,
+          "total": 40154
+        },
+        "tools": {
+          "success": 2,
+          "total": 2
+        },
+        "cost_usd": 0.20257
+      },
+      "stderr_tail": "",
+      "workdir": null
+    },
+    {
+      "id": "13-multi-step-fix",
+      "category": "fix-bug",
+      "mode": "agent",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 56.89,
+      "check_passed": true,
+      "check_stderr": "rc=0 stdout='' stderr=''",
+      "headless": {
+        "duration_ms": 56828,
+        "environment": {
+          "temperature_actual": 0.0,
+          "theo_version": "0.1.0"
+        },
+        "error_class": "solved",
+        "files_edited": [
+          "src/calc.py"
+        ],
+        "iterations": 11,
+        "llm": {
+          "calls": 11,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.4",
+        "provider": "ChatGPT Codex (OAuth)",
+        "report": {
+          "context_health": {
+            "action_repetition_rate": 0.0,
+            "avg_context_size_tokens": 3681.7272727272725,
+            "compaction_count": 0,
+            "compaction_savings_ratio": 0.0,
+            "context_growth_rate": 66.45454545454545,
+            "max_context_size_tokens": 4042,
+            "refetch_rate": 0.0,
+            "usefulness_avg": 0.0
+          },
+          "error_taxonomy": {
+            "budget_errors": 0,
+            "failure_mode_errors": 0,
+            "llm_errors": 0,
+            "network_errors": 0,
+            "other_errors": 0,
+            "sandbox_errors": 0,
+            "tool_errors": 0,
+            "total_errors": 0,
+            "validation_errors": 0
+          },
+          "integrity": {
+            "complete": true,
+            "confidence": 1.0,
+            "drop_sentinels_found": 0,
+            "missing_sequences": [],
+            "schema_version": 1,
+            "total_events_expected": 92,
+            "total_events_received": 92,
+            "writer_recoveries_found": 0
+          },
+          "loop_metrics": {
+            "budget_utilization": {
+              "iterations_pct": 0.55,
+              "time_pct": 0.015555555555555555,
+              "tokens_pct": 0.15503
+            },
+            "convergence_rate": 1.0,
+            "done_blocked_count": 0,
+            "evolution_attempts": 0,
+            "evolution_success": false,
+            "phase_distribution": {
+              "Done": {
+                "duration_ms": 0,
+                "iterations": 1,
+                "pct": 0.09090909090909091
+              },
+              "Edit": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Explore": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Verify": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              }
+            },
+            "total_iterations": 11
+          },
+          "memory_metrics": {
+            "constraints_learned": 0,
+            "episodes_created": 1,
+            "episodes_injected": 0,
+            "failure_fingerprints_new": 0,
+            "failure_fingerprints_recurrent": 0,
+            "hypotheses_active": 0,
+            "hypotheses_formed": 0,
+            "hypotheses_invalidated": 0
+          },
+          "subagent_metrics": {
+            "avg_duration_ms": 0.0,
+            "failed": 0,
+            "max_duration_ms": 0,
+            "spawned": 0,
+            "succeeded": 0,
+            "success_rate": 0.0
+          },
+          "surrogate_metrics": {
+            "context_waste_ratio": {
+              "caveat": "Proxy for context bloat: overflow events per iteration.",
+              "confidence": 1.0,
+              "denominator": 11.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "doom_loop_frequency": {
+              "caveat": "Proxy for stuck loops: repeated identical tool calls in a sliding window.",
+              "confidence": 1.0,
+              "denominator": 9.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "hypothesis_churn_rate": {
+              "caveat": "Approximates reasoning churn: invalidated / formed hypotheses.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "llm_efficiency": {
+              "caveat": "Approximates productive work: distinct successful tools per LLM call.",
+              "confidence": 1.0,
+              "denominator": 11.0,
+              "is_surrogate": true,
+              "numerator": 6.0,
+              "value": 0.5454545454545454
+            },
+            "time_to_first_tool_ms": {
+              "caveat": "Proxy for startup latency: ms from RunInitialized to first ToolCallDispatched.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 9463.0,
+              "value": 9463.0
+            }
+          },
+          "token_metrics": {
+            "cache_hit_rate": 0.0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "input_tokens": 153975,
+            "output_tokens": 1055,
+            "reasoning_tokens": 0,
+            "tokens_per_successful_edit": 155030.0,
+            "total_cost_usd": 0.0
+          },
+          "tool_breakdown": [
+            {
+              "avg_latency_ms": 6.0,
+              "call_count": 3,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 7,
+              "retry_count": 0,
+              "success_count": 3,
+              "success_rate": 1.0,
+              "tool_name": "bash"
+            },
+            {
+              "avg_latency_ms": 0.5,
+              "call_count": 2,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 1,
+              "retry_count": 0,
+              "success_count": 2,
+              "success_rate": 1.0,
+              "tool_name": "task_update"
+            },
+            {
+              "avg_latency_ms": 0.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 0,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "task_create"
+            },
+            {
+              "avg_latency_ms": 0.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 0,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "reflect"
+            },
+            {
+              "avg_latency_ms": 0.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 0,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "batch"
+            },
+            {
+              "avg_latency_ms": 1.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 1,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "edit"
+            }
+          ]
+        },
+        "schema": "theo.headless.v4",
+        "success": true,
+        "summary": "Updated `src/calc.py` so `subtract(a, b)` now returns `a - b` instead of `a + b`, matching `tests/test_calc.py`\u2019s expectations.\n\nVerification was blocked by the environment: `pytest` is not installed, and both `python3 -m unittest tests/test_calc.py` and a direct Python smoke check failed with `Cannot fork`. The code change is minimal and aligns exactly with the test assertions (`5-3=2`, `10-4=6`).",
+        "tokens": {
+          "input": 153975,
+          "output": 1055,
+          "total": 155030
+        },
+        "tools": {
+          "success": 10,
+          "total": 11
+        },
+        "cost_usd": 0.7857
+      },
+      "stderr_tail": "",
+      "workdir": null
+    },
+    {
+      "id": "14-add-import",
+      "category": "fix-bug",
+      "mode": "agent",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 19.94,
+      "check_passed": true,
+      "check_stderr": "rc=0 stdout='' stderr=''",
+      "headless": {
+        "duration_ms": 19861,
+        "environment": {
+          "temperature_actual": 0.0,
+          "theo_version": "0.1.0"
+        },
+        "error_class": "solved",
+        "files_edited": [
+          "src/app.py"
+        ],
+        "iterations": 5,
+        "llm": {
+          "calls": 5,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.4",
+        "provider": "ChatGPT Codex (OAuth)",
+        "report": {
+          "context_health": {
+            "action_repetition_rate": 0.0,
+            "avg_context_size_tokens": 3477.4,
+            "compaction_count": 0,
+            "compaction_savings_ratio": 0.0,
+            "context_growth_rate": 77.4,
+            "max_context_size_tokens": 3683,
+            "refetch_rate": 0.0,
+            "usefulness_avg": 0.0
+          },
+          "error_taxonomy": {
+            "budget_errors": 0,
+            "failure_mode_errors": 0,
+            "llm_errors": 0,
+            "network_errors": 0,
+            "other_errors": 0,
+            "sandbox_errors": 0,
+            "tool_errors": 0,
+            "total_errors": 0,
+            "validation_errors": 0
+          },
+          "integrity": {
+            "complete": true,
+            "confidence": 1.0,
+            "drop_sentinels_found": 0,
+            "missing_sequences": [],
+            "schema_version": 1,
+            "total_events_expected": 46,
+            "total_events_received": 46,
+            "writer_recoveries_found": 0
+          },
+          "loop_metrics": {
+            "budget_utilization": {
+              "iterations_pct": 0.25,
+              "time_pct": 0.005277777777777778,
+              "tokens_pct": 0.068515
+            },
+            "convergence_rate": 1.0,
+            "done_blocked_count": 1,
+            "evolution_attempts": 0,
+            "evolution_success": false,
+            "phase_distribution": {
+              "Done": {
+                "duration_ms": 0,
+                "iterations": 1,
+                "pct": 0.2
+              },
+              "Edit": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Explore": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Verify": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              }
+            },
+            "total_iterations": 5
+          },
+          "memory_metrics": {
+            "constraints_learned": 0,
+            "episodes_created": 1,
+            "episodes_injected": 0,
+            "failure_fingerprints_new": 0,
+            "failure_fingerprints_recurrent": 0,
+            "hypotheses_active": 0,
+            "hypotheses_formed": 0,
+            "hypotheses_invalidated": 0
+          },
+          "subagent_metrics": {
+            "avg_duration_ms": 0.0,
+            "failed": 0,
+            "max_duration_ms": 0,
+            "spawned": 0,
+            "succeeded": 0,
+            "success_rate": 0.0
+          },
+          "surrogate_metrics": {
+            "context_waste_ratio": {
+              "caveat": "Proxy for context bloat: overflow events per iteration.",
+              "confidence": 1.0,
+              "denominator": 5.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "doom_loop_frequency": {
+              "caveat": "Proxy for stuck loops: repeated identical tool calls in a sliding window.",
+              "confidence": 1.0,
+              "denominator": 4.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "hypothesis_churn_rate": {
+              "caveat": "Approximates reasoning churn: invalidated / formed hypotheses.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "llm_efficiency": {
+              "caveat": "Approximates productive work: distinct successful tools per LLM call.",
+              "confidence": 1.0,
+              "denominator": 5.0,
+              "is_surrogate": true,
+              "numerator": 4.0,
+              "value": 0.8
+            },
+            "time_to_first_tool_ms": {
+              "caveat": "Proxy for startup latency: ms from RunInitialized to first ToolCallDispatched.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 2880.0,
+              "value": 2880.0
+            }
+          },
+          "token_metrics": {
+            "cache_hit_rate": 0.0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "input_tokens": 68040,
+            "output_tokens": 475,
+            "reasoning_tokens": 0,
+            "tokens_per_successful_edit": 68515.0,
+            "total_cost_usd": 0.0
+          },
+          "tool_breakdown": [
+            {
+              "avg_latency_ms": 2.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 2,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "edit"
+            },
+            {
+              "avg_latency_ms": 6.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 6,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "bash"
+            },
+            {
+              "avg_latency_ms": 49.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 49,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "batch_execute"
+            },
+            {
+              "avg_latency_ms": 0.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 0,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "reflect"
+            }
+          ]
+        },
+        "schema": "theo.headless.v4",
+        "success": true,
+        "summary": "Added the missing `import json` to `src/app.py`. I attempted to verify by running `python3 src/app.py`, but execution is blocked in this environment with `sh: 1: Cannot fork`.",
+        "tokens": {
+          "input": 68040,
+          "output": 475,
+          "total": 68515
+        },
+        "tools": {
+          "success": 4,
+          "total": 4
+        },
+        "cost_usd": 0.347325
+      },
+      "stderr_tail": "",
+      "workdir": null
+    },
+    {
+      "id": "15-cross-file-search",
+      "category": "search",
+      "mode": "agent",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 31.87,
+      "check_passed": true,
+      "check_stderr": "rc=0 stdout='' stderr=''",
+      "headless": {
+        "duration_ms": 31783,
+        "environment": {
+          "temperature_actual": 0.0,
+          "theo_version": "0.1.0"
+        },
+        "error_class": "solved",
+        "files_edited": [],
+        "iterations": 6,
+        "llm": {
+          "calls": 6,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.4",
+        "provider": "ChatGPT Codex (OAuth)",
+        "report": {
+          "context_health": {
+            "action_repetition_rate": 0.2,
+            "avg_context_size_tokens": 3429.0,
+            "compaction_count": 0,
+            "compaction_savings_ratio": 0.0,
+            "context_growth_rate": 52.5,
+            "max_context_size_tokens": 3632,
+            "refetch_rate": 0.0,
+            "usefulness_avg": 0.0
+          },
+          "error_taxonomy": {
+            "budget_errors": 0,
+            "failure_mode_errors": 0,
+            "llm_errors": 0,
+            "network_errors": 0,
+            "other_errors": 0,
+            "sandbox_errors": 0,
+            "tool_errors": 0,
+            "total_errors": 0,
+            "validation_errors": 0
+          },
+          "integrity": {
+            "complete": true,
+            "confidence": 1.0,
+            "drop_sentinels_found": 0,
+            "missing_sequences": [],
+            "schema_version": 1,
+            "total_events_expected": 67,
+            "total_events_received": 67,
+            "writer_recoveries_found": 0
+          },
+          "loop_metrics": {
+            "budget_utilization": {
+              "iterations_pct": 0.3,
+              "time_pct": 0.008611111111111111,
+              "tokens_pct": 0.082049
+            },
+            "convergence_rate": 1.0,
+            "done_blocked_count": 0,
+            "evolution_attempts": 0,
+            "evolution_success": false,
+            "phase_distribution": {
+              "Done": {
+                "duration_ms": 0,
+                "iterations": 1,
+                "pct": 0.16666666666666666
+              },
+              "Edit": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Explore": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Verify": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              }
+            },
+            "total_iterations": 6
+          },
+          "memory_metrics": {
+            "constraints_learned": 0,
+            "episodes_created": 1,
+            "episodes_injected": 0,
+            "failure_fingerprints_new": 0,
+            "failure_fingerprints_recurrent": 0,
+            "hypotheses_active": 0,
+            "hypotheses_formed": 0,
+            "hypotheses_invalidated": 0
+          },
+          "subagent_metrics": {
+            "avg_duration_ms": 0.0,
+            "failed": 0,
+            "max_duration_ms": 0,
+            "spawned": 0,
+            "succeeded": 0,
+            "success_rate": 0.0
+          },
+          "surrogate_metrics": {
+            "context_waste_ratio": {
+              "caveat": "Proxy for context bloat: overflow events per iteration.",
+              "confidence": 1.0,
+              "denominator": 6.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "doom_loop_frequency": {
+              "caveat": "Proxy for stuck loops: repeated identical tool calls in a sliding window.",
+              "confidence": 1.0,
+              "denominator": 10.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "hypothesis_churn_rate": {
+              "caveat": "Approximates reasoning churn: invalidated / formed hypotheses.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "llm_efficiency": {
+              "caveat": "Approximates productive work: distinct successful tools per LLM call.",
+              "confidence": 1.0,
+              "denominator": 6.0,
+              "is_surrogate": true,
+              "numerator": 4.0,
+              "value": 0.6666666666666666
+            },
+            "time_to_first_tool_ms": {
+              "caveat": "Proxy for startup latency: ms from RunInitialized to first ToolCallDispatched.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 5710.0,
+              "value": 5710.0
+            }
+          },
+          "token_metrics": {
+            "cache_hit_rate": 0.0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "input_tokens": 81601,
+            "output_tokens": 448,
+            "reasoning_tokens": 0,
+            "tokens_per_successful_edit": 0.0,
+            "total_cost_usd": 0.0
+          },
+          "tool_breakdown": [
+            {
+              "avg_latency_ms": 0.5,
+              "call_count": 4,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 1,
+              "retry_count": 0,
+              "success_count": 4,
+              "success_rate": 1.0,
+              "tool_name": "glob"
+            },
+            {
+              "avg_latency_ms": 0.75,
+              "call_count": 4,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 3,
+              "retry_count": 0,
+              "success_count": 4,
+              "success_rate": 1.0,
+              "tool_name": "read"
+            },
+            {
+              "avg_latency_ms": 7.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 7,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "git_status"
+            },
+            {
+              "avg_latency_ms": 4.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 4,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "grep"
+            }
+          ]
+        },
+        "schema": "theo.headless.v4",
+        "success": true,
+        "summary": "MAX_CONNECTIONS=100, used by create_pool",
+        "tokens": {
+          "input": 81601,
+          "output": 448,
+          "total": 82049
+        },
+        "tools": {
+          "success": 10,
+          "total": 10
+        },
+        "cost_usd": 0.414725
+      },
+      "stderr_tail": "",
+      "workdir": null
+    },
+    {
+      "id": "16-cross-file-bug",
+      "category": "fix-bug",
+      "mode": "agent",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 72.96,
+      "check_passed": true,
+      "check_stderr": "rc=0 stdout='OK\\n' stderr=''",
+      "headless": {
+        "duration_ms": 72838,
+        "environment": {
+          "temperature_actual": 0.0,
+          "theo_version": "0.1.0"
+        },
+        "error_class": "solved",
+        "files_edited": [
+          "src/orders.py",
+          "verify_process_order.py"
+        ],
+        "iterations": 19,
+        "llm": {
+          "calls": 19,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.4",
+        "provider": "ChatGPT Codex (OAuth)",
+        "report": {
+          "context_health": {
+            "action_repetition_rate": 0.0,
+            "avg_context_size_tokens": 4207.631578947368,
+            "compaction_count": 0,
+            "compaction_savings_ratio": 0.0,
+            "context_growth_rate": 82.42105263157895,
+            "max_context_size_tokens": 4890,
+            "refetch_rate": 0.25,
+            "usefulness_avg": 0.0
+          },
+          "error_taxonomy": {
+            "budget_errors": 0,
+            "failure_mode_errors": 0,
+            "llm_errors": 0,
+            "network_errors": 0,
+            "other_errors": 0,
+            "sandbox_errors": 0,
+            "tool_errors": 0,
+            "total_errors": 0,
+            "validation_errors": 0
+          },
+          "integrity": {
+            "complete": true,
+            "confidence": 1.0,
+            "drop_sentinels_found": 0,
+            "missing_sequences": [],
+            "schema_version": 1,
+            "total_events_expected": 160,
+            "total_events_received": 160,
+            "writer_recoveries_found": 0
+          },
+          "loop_metrics": {
+            "budget_utilization": {
+              "iterations_pct": 0.95,
+              "time_pct": 0.02,
+              "tokens_pct": 0.28709
+            },
+            "convergence_rate": 1.0,
+            "done_blocked_count": 0,
+            "evolution_attempts": 0,
+            "evolution_success": false,
+            "phase_distribution": {
+              "Done": {
+                "duration_ms": 0,
+                "iterations": 1,
+                "pct": 0.05263157894736842
+              },
+              "Edit": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Explore": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Verify": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              }
+            },
+            "total_iterations": 19
+          },
+          "memory_metrics": {
+            "constraints_learned": 0,
+            "episodes_created": 1,
+            "episodes_injected": 0,
+            "failure_fingerprints_new": 0,
+            "failure_fingerprints_recurrent": 0,
+            "hypotheses_active": 0,
+            "hypotheses_formed": 0,
+            "hypotheses_invalidated": 0
+          },
+          "subagent_metrics": {
+            "avg_duration_ms": 0.0,
+            "failed": 0,
+            "max_duration_ms": 0,
+            "spawned": 0,
+            "succeeded": 0,
+            "success_rate": 0.0
+          },
+          "surrogate_metrics": {
+            "context_waste_ratio": {
+              "caveat": "Proxy for context bloat: overflow events per iteration.",
+              "confidence": 1.0,
+              "denominator": 19.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "doom_loop_frequency": {
+              "caveat": "Proxy for stuck loops: repeated identical tool calls in a sliding window.",
+              "confidence": 1.0,
+              "denominator": 17.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "hypothesis_churn_rate": {
+              "caveat": "Approximates reasoning churn: invalidated / formed hypotheses.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "llm_efficiency": {
+              "caveat": "Approximates productive work: distinct successful tools per LLM call.",
+              "confidence": 1.0,
+              "denominator": 19.0,
+              "is_surrogate": true,
+              "numerator": 9.0,
+              "value": 0.47368421052631576
+            },
+            "time_to_first_tool_ms": {
+              "caveat": "Proxy for startup latency: ms from RunInitialized to first ToolCallDispatched.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 5377.0,
+              "value": 5377.0
+            }
+          },
+          "token_metrics": {
+            "cache_hit_rate": 0.0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "input_tokens": 285456,
+            "output_tokens": 1634,
+            "reasoning_tokens": 0,
+            "tokens_per_successful_edit": 143545.0,
+            "total_cost_usd": 0.0
+          },
+          "tool_breakdown": [
+            {
+              "avg_latency_ms": 7.2,
+              "call_count": 5,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 18,
+              "retry_count": 0,
+              "success_count": 5,
+              "success_rate": 1.0,
+              "tool_name": "bash"
+            },
+            {
+              "avg_latency_ms": 0.0,
+              "call_count": 3,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 0,
+              "retry_count": 0,
+              "success_count": 3,
+              "success_rate": 1.0,
+              "tool_name": "batch"
+            },
+            {
+              "avg_latency_ms": 0.5,
+              "call_count": 2,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 1,
+              "retry_count": 0,
+              "success_count": 2,
+              "success_rate": 1.0,
+              "tool_name": "read"
+            },
+            {
+              "avg_latency_ms": 0.0,
+              "call_count": 2,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 0,
+              "retry_count": 0,
+              "success_count": 2,
+              "success_rate": 1.0,
+              "tool_name": "task_update"
+            },
+            {
+              "avg_latency_ms": 0.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 0,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "reflect"
+            },
+            {
+              "avg_latency_ms": 0.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 0,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "task_create"
+            },
+            {
+              "avg_latency_ms": 1.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 1,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "write"
+            },
+            {
+              "avg_latency_ms": 1.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 1,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "apply_patch"
+            },
+            {
+              "avg_latency_ms": 2.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 2,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "edit"
+            }
+          ]
+        },
+        "schema": "theo.headless.v4",
+        "success": true,
+        "summary": "Fixed `src/orders.py:6` so `process_order` now calls `calculate_tax(rate, amount)` instead of `calculate_tax(amount, rate)`.\n\nI verified the bug against the source by reading `src/orders.py` and `src/tax.py`, and attempted runtime execution with `/usr/bin/python3`, but this environment blocked execution (`Cannot fork` / sandbox denial), so I could not complete an empirical run here.",
+        "tokens": {
+          "input": 285456,
+          "output": 1634,
+          "total": 287090
+        },
+        "tools": {
+          "success": 24,
+          "total": 25
+        },
+        "cost_usd": 1.45179
+      },
+      "stderr_tail": "",
+      "workdir": null
+    },
+    {
+      "id": "17-missing-error-handling",
+      "category": "fix-bug",
+      "mode": "agent",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 45.46,
+      "check_passed": true,
+      "check_stderr": "rc=0 stdout='OK\\n' stderr=''",
+      "headless": {
+        "duration_ms": 45366,
+        "environment": {
+          "temperature_actual": 0.0,
+          "theo_version": "0.1.0"
+        },
+        "error_class": "solved",
+        "files_edited": [
+          "src/pipeline.py"
+        ],
+        "iterations": 11,
+        "llm": {
+          "calls": 11,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.4",
+        "provider": "ChatGPT Codex (OAuth)",
+        "report": {
+          "context_health": {
+            "action_repetition_rate": 0.0,
+            "avg_context_size_tokens": 3793.2727272727275,
+            "compaction_count": 0,
+            "compaction_savings_ratio": 0.0,
+            "context_growth_rate": 76.27272727272727,
+            "max_context_size_tokens": 4178,
+            "refetch_rate": 0.5,
+            "usefulness_avg": 0.0
+          },
+          "error_taxonomy": {
+            "budget_errors": 0,
+            "failure_mode_errors": 0,
+            "llm_errors": 0,
+            "network_errors": 0,
+            "other_errors": 0,
+            "sandbox_errors": 0,
+            "tool_errors": 0,
+            "total_errors": 0,
+            "validation_errors": 0
+          },
+          "integrity": {
+            "complete": true,
+            "confidence": 1.0,
+            "drop_sentinels_found": 0,
+            "missing_sequences": [],
+            "schema_version": 1,
+            "total_events_expected": 99,
+            "total_events_received": 99,
+            "writer_recoveries_found": 0
+          },
+          "loop_metrics": {
+            "budget_utilization": {
+              "iterations_pct": 0.55,
+              "time_pct": 0.0125,
+              "tokens_pct": 0.158433
+            },
+            "convergence_rate": 1.0,
+            "done_blocked_count": 1,
+            "evolution_attempts": 0,
+            "evolution_success": false,
+            "phase_distribution": {
+              "Done": {
+                "duration_ms": 0,
+                "iterations": 1,
+                "pct": 0.09090909090909091
+              },
+              "Edit": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Explore": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Verify": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              }
+            },
+            "total_iterations": 11
+          },
+          "memory_metrics": {
+            "constraints_learned": 0,
+            "episodes_created": 1,
+            "episodes_injected": 0,
+            "failure_fingerprints_new": 0,
+            "failure_fingerprints_recurrent": 0,
+            "hypotheses_active": 0,
+            "hypotheses_formed": 0,
+            "hypotheses_invalidated": 0
+          },
+          "subagent_metrics": {
+            "avg_duration_ms": 0.0,
+            "failed": 0,
+            "max_duration_ms": 0,
+            "spawned": 0,
+            "succeeded": 0,
+            "success_rate": 0.0
+          },
+          "surrogate_metrics": {
+            "context_waste_ratio": {
+              "caveat": "Proxy for context bloat: overflow events per iteration.",
+              "confidence": 1.0,
+              "denominator": 11.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "doom_loop_frequency": {
+              "caveat": "Proxy for stuck loops: repeated identical tool calls in a sliding window.",
+              "confidence": 1.0,
+              "denominator": 11.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "hypothesis_churn_rate": {
+              "caveat": "Approximates reasoning churn: invalidated / formed hypotheses.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "llm_efficiency": {
+              "caveat": "Approximates productive work: distinct successful tools per LLM call.",
+              "confidence": 1.0,
+              "denominator": 11.0,
+              "is_surrogate": true,
+              "numerator": 7.0,
+              "value": 0.6363636363636364
+            },
+            "time_to_first_tool_ms": {
+              "caveat": "Proxy for startup latency: ms from RunInitialized to first ToolCallDispatched.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 5614.0,
+              "value": 5614.0
+            }
+          },
+          "token_metrics": {
+            "cache_hit_rate": 0.0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "input_tokens": 157066,
+            "output_tokens": 1367,
+            "reasoning_tokens": 0,
+            "tokens_per_successful_edit": 158433.0,
+            "total_cost_usd": 0.0
+          },
+          "tool_breakdown": [
+            {
+              "avg_latency_ms": 141.0,
+              "call_count": 3,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 370,
+              "retry_count": 0,
+              "success_count": 3,
+              "success_rate": 1.0,
+              "tool_name": "bash"
+            },
+            {
+              "avg_latency_ms": 0.0,
+              "call_count": 2,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 0,
+              "retry_count": 0,
+              "success_count": 2,
+              "success_rate": 1.0,
+              "tool_name": "batch"
+            },
+            {
+              "avg_latency_ms": 0.5,
+              "call_count": 2,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 1,
+              "retry_count": 0,
+              "success_count": 2,
+              "success_rate": 1.0,
+              "tool_name": "task_update"
+            },
+            {
+              "avg_latency_ms": 0.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 0,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "edit"
+            },
+            {
+              "avg_latency_ms": 0.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 0,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "memory"
+            },
+            {
+              "avg_latency_ms": 0.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 0,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "task_create"
+            },
+            {
+              "avg_latency_ms": 1.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 1,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "read"
+            }
+          ]
+        },
+        "schema": "theo.headless.v4",
+        "success": true,
+        "summary": "Updated `src/pipeline.py` so `transform_records` now skips records whose `name` is `None` before calling `.upper()`. Verified by first reproducing the original `AttributeError` with `python3`, then rerunning a repro script after the fix and confirming the function returned only passing named records with an accurate count of `2`.",
+        "tokens": {
+          "input": 157066,
+          "output": 1367,
+          "total": 158433
+        },
+        "tools": {
+          "success": 14,
+          "total": 15
+        },
+        "cost_usd": 0.805835
+      },
+      "stderr_tail": "",
+      "workdir": null
+    },
+    {
+      "id": "18-three-file-feature",
+      "category": "add-feature",
+      "mode": "agent",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 60.01,
+      "check_passed": true,
+      "check_stderr": "rc=0 stdout='OK\\n' stderr=''",
+      "headless": {
+        "duration_ms": 59887,
+        "environment": {
+          "temperature_actual": 0.0,
+          "theo_version": "0.1.0"
+        },
+        "error_class": "solved",
+        "files_edited": [
+          "src/config.py",
+          "src/pricing.py",
+          "src/checkout.py"
+        ],
+        "iterations": 13,
+        "llm": {
+          "calls": 13,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.4",
+        "provider": "ChatGPT Codex (OAuth)",
+        "report": {
+          "context_health": {
+            "action_repetition_rate": 0.0,
+            "avg_context_size_tokens": 4089.230769230769,
+            "compaction_count": 0,
+            "compaction_savings_ratio": 0.0,
+            "context_growth_rate": 99.61538461538461,
+            "max_context_size_tokens": 4661,
+            "refetch_rate": 0.0,
+            "usefulness_avg": 0.0
+          },
+          "error_taxonomy": {
+            "budget_errors": 0,
+            "failure_mode_errors": 0,
+            "llm_errors": 0,
+            "network_errors": 0,
+            "other_errors": 0,
+            "sandbox_errors": 0,
+            "tool_errors": 0,
+            "total_errors": 0,
+            "validation_errors": 0
+          },
+          "integrity": {
+            "complete": true,
+            "confidence": 1.0,
+            "drop_sentinels_found": 0,
+            "missing_sequences": [],
+            "schema_version": 1,
+            "total_events_expected": 115,
+            "total_events_received": 115,
+            "writer_recoveries_found": 0
+          },
+          "loop_metrics": {
+            "budget_utilization": {
+              "iterations_pct": 0.65,
+              "time_pct": 0.01638888888888889,
+              "tokens_pct": 0.195974
+            },
+            "convergence_rate": 1.0,
+            "done_blocked_count": 1,
+            "evolution_attempts": 0,
+            "evolution_success": false,
+            "phase_distribution": {
+              "Done": {
+                "duration_ms": 0,
+                "iterations": 1,
+                "pct": 0.07692307692307693
+              },
+              "Edit": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Explore": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Verify": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              }
+            },
+            "total_iterations": 13
+          },
+          "memory_metrics": {
+            "constraints_learned": 0,
+            "episodes_created": 1,
+            "episodes_injected": 0,
+            "failure_fingerprints_new": 0,
+            "failure_fingerprints_recurrent": 0,
+            "hypotheses_active": 0,
+            "hypotheses_formed": 0,
+            "hypotheses_invalidated": 0
+          },
+          "subagent_metrics": {
+            "avg_duration_ms": 0.0,
+            "failed": 0,
+            "max_duration_ms": 0,
+            "spawned": 0,
+            "succeeded": 0,
+            "success_rate": 0.0
+          },
+          "surrogate_metrics": {
+            "context_waste_ratio": {
+              "caveat": "Proxy for context bloat: overflow events per iteration.",
+              "confidence": 1.0,
+              "denominator": 13.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "doom_loop_frequency": {
+              "caveat": "Proxy for stuck loops: repeated identical tool calls in a sliding window.",
+              "confidence": 1.0,
+              "denominator": 13.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "hypothesis_churn_rate": {
+              "caveat": "Approximates reasoning churn: invalidated / formed hypotheses.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "llm_efficiency": {
+              "caveat": "Approximates productive work: distinct successful tools per LLM call.",
+              "confidence": 1.0,
+              "denominator": 13.0,
+              "is_surrogate": true,
+              "numerator": 8.0,
+              "value": 0.6153846153846154
+            },
+            "time_to_first_tool_ms": {
+              "caveat": "Proxy for startup latency: ms from RunInitialized to first ToolCallDispatched.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 4781.0,
+              "value": 4781.0
+            }
+          },
+          "token_metrics": {
+            "cache_hit_rate": 0.0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "input_tokens": 194197,
+            "output_tokens": 1777,
+            "reasoning_tokens": 0,
+            "tokens_per_successful_edit": 65324.666666666664,
+            "total_cost_usd": 0.0
+          },
+          "tool_breakdown": [
+            {
+              "avg_latency_ms": 4.0,
+              "call_count": 3,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 6,
+              "retry_count": 0,
+              "success_count": 3,
+              "success_rate": 1.0,
+              "tool_name": "bash"
+            },
+            {
+              "avg_latency_ms": 0.0,
+              "call_count": 3,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 0,
+              "retry_count": 0,
+              "success_count": 3,
+              "success_rate": 1.0,
+              "tool_name": "batch"
+            },
+            {
+              "avg_latency_ms": 0.0,
+              "call_count": 2,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 0,
+              "retry_count": 0,
+              "success_count": 2,
+              "success_rate": 1.0,
+              "tool_name": "task_update"
+            },
+            {
+              "avg_latency_ms": 1.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 1,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "reflect"
+            },
+            {
+              "avg_latency_ms": 0.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 0,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "read"
+            },
+            {
+              "avg_latency_ms": 0.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 0,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "task_create"
+            },
+            {
+              "avg_latency_ms": 0.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 0,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "glob"
+            },
+            {
+              "avg_latency_ms": 0.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 0,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "memory"
+            }
+          ]
+        },
+        "schema": "theo.headless.v4",
+        "success": true,
+        "summary": "Added configurable discount support: `src/config.py` now defines `DISCOUNT_RATE = 0.10` and `DISCOUNT_THRESHOLD = 100.0`, `src/pricing.py` now exposes `apply_discount(subtotal)`, and `src/checkout.py` applies that discount before returning the total. I attempted to verify by executing Python assertions, but this sandbox blocks Python execution (`python` missing, `python3` cannot fork / `python3 -c` denied), so runtime verification could not be completed here.",
+        "tokens": {
+          "input": 194197,
+          "output": 1777,
+          "total": 195974
+        },
+        "tools": {
+          "success": 20,
+          "total": 21
+        },
+        "cost_usd": 0.99764
+      },
+      "stderr_tail": "",
+      "workdir": null
+    },
+    {
+      "id": "19-off-by-one",
+      "category": "fix-bug",
+      "mode": "agent",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 47.49,
+      "check_passed": true,
+      "check_stderr": "rc=0 stdout='OK\\n' stderr=''",
+      "headless": {
+        "duration_ms": 47400,
+        "environment": {
+          "temperature_actual": 0.0,
+          "theo_version": "0.1.0"
+        },
+        "error_class": "solved",
+        "files_edited": [
+          "src/pagination.py"
+        ],
+        "iterations": 12,
+        "llm": {
+          "calls": 12,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.4",
+        "provider": "ChatGPT Codex (OAuth)",
+        "report": {
+          "context_health": {
+            "action_repetition_rate": 0.0,
+            "avg_context_size_tokens": 3881.75,
+            "compaction_count": 0,
+            "compaction_savings_ratio": 0.0,
+            "context_growth_rate": 109.91666666666667,
+            "max_context_size_tokens": 4657,
+            "refetch_rate": 0.6666666666666666,
+            "usefulness_avg": 0.0
+          },
+          "error_taxonomy": {
+            "budget_errors": 0,
+            "failure_mode_errors": 0,
+            "llm_errors": 0,
+            "network_errors": 0,
+            "other_errors": 0,
+            "sandbox_errors": 0,
+            "tool_errors": 0,
+            "total_errors": 0,
+            "validation_errors": 0
+          },
+          "integrity": {
+            "complete": true,
+            "confidence": 1.0,
+            "drop_sentinels_found": 0,
+            "missing_sequences": [],
+            "schema_version": 1,
+            "total_events_expected": 107,
+            "total_events_received": 107,
+            "writer_recoveries_found": 0
+          },
+          "loop_metrics": {
+            "budget_utilization": {
+              "iterations_pct": 0.6,
+              "time_pct": 0.013055555555555556,
+              "tokens_pct": 0.173689
+            },
+            "convergence_rate": 1.0,
+            "done_blocked_count": 0,
+            "evolution_attempts": 0,
+            "evolution_success": false,
+            "phase_distribution": {
+              "Done": {
+                "duration_ms": 0,
+                "iterations": 1,
+                "pct": 0.08333333333333333
+              },
+              "Edit": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Explore": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Verify": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              }
+            },
+            "total_iterations": 12
+          },
+          "memory_metrics": {
+            "constraints_learned": 0,
+            "episodes_created": 1,
+            "episodes_injected": 0,
+            "failure_fingerprints_new": 0,
+            "failure_fingerprints_recurrent": 0,
+            "hypotheses_active": 0,
+            "hypotheses_formed": 0,
+            "hypotheses_invalidated": 0
+          },
+          "subagent_metrics": {
+            "avg_duration_ms": 0.0,
+            "failed": 0,
+            "max_duration_ms": 0,
+            "spawned": 0,
+            "succeeded": 0,
+            "success_rate": 0.0
+          },
+          "surrogate_metrics": {
+            "context_waste_ratio": {
+              "caveat": "Proxy for context bloat: overflow events per iteration.",
+              "confidence": 1.0,
+              "denominator": 12.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "doom_loop_frequency": {
+              "caveat": "Proxy for stuck loops: repeated identical tool calls in a sliding window.",
+              "confidence": 1.0,
+              "denominator": 12.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "hypothesis_churn_rate": {
+              "caveat": "Approximates reasoning churn: invalidated / formed hypotheses.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "llm_efficiency": {
+              "caveat": "Approximates productive work: distinct successful tools per LLM call.",
+              "confidence": 1.0,
+              "denominator": 12.0,
+              "is_surrogate": true,
+              "numerator": 8.0,
+              "value": 0.6666666666666666
+            },
+            "time_to_first_tool_ms": {
+              "caveat": "Proxy for startup latency: ms from RunInitialized to first ToolCallDispatched.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 4473.0,
+              "value": 4473.0
+            }
+          },
+          "token_metrics": {
+            "cache_hit_rate": 0.0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "input_tokens": 172569,
+            "output_tokens": 1120,
+            "reasoning_tokens": 0,
+            "tokens_per_successful_edit": 173689.0,
+            "total_cost_usd": 0.0
+          },
+          "tool_breakdown": [
+            {
+              "avg_latency_ms": 5.333333333333333,
+              "call_count": 3,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 10,
+              "retry_count": 0,
+              "success_count": 3,
+              "success_rate": 1.0,
+              "tool_name": "bash"
+            },
+            {
+              "avg_latency_ms": 0.0,
+              "call_count": 2,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 0,
+              "retry_count": 0,
+              "success_count": 2,
+              "success_rate": 1.0,
+              "tool_name": "task_update"
+            },
+            {
+              "avg_latency_ms": 1.0,
+              "call_count": 2,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 1,
+              "retry_count": 0,
+              "success_count": 2,
+              "success_rate": 1.0,
+              "tool_name": "read"
+            },
+            {
+              "avg_latency_ms": 1.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 1,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "edit"
+            },
+            {
+              "avg_latency_ms": 1.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 1,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "memory"
+            },
+            {
+              "avg_latency_ms": 9.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 9,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "batch_execute"
+            },
+            {
+              "avg_latency_ms": 0.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 0,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "task_create"
+            },
+            {
+              "avg_latency_ms": 0.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 0,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "batch"
+            }
+          ]
+        },
+        "schema": "theo.headless.v4",
+        "success": true,
+        "summary": "Updated `src/pagination.py:6` to use ceiling division: `total_pages = (total + page_size - 1) // page_size`, which fixes exact-multiple cases like 10/10 -> 1 and 11/10 -> 2.\n\nI verified the source change directly, but execution verification was blocked by the sandbox: `python` was unavailable and `python3` runs were denied (`Cannot fork` / interpreter escape restriction), so I could not run a live repro in this environment.",
+        "tokens": {
+          "input": 172569,
+          "output": 1120,
+          "total": 173689
+        },
+        "tools": {
+          "success": 12,
+          "total": 13
+        },
+        "cost_usd": 0.879645
+      },
+      "stderr_tail": "",
+      "workdir": null
+    },
+    {
+      "id": "20-class-inheritance-bug",
+      "category": "fix-bug",
+      "mode": "agent",
+      "exit_code": 0,
+      "error": null,
+      "wallclock_secs": 77.91,
+      "check_passed": true,
+      "check_stderr": "rc=0 stdout='OK\\n' stderr=''",
+      "headless": {
+        "duration_ms": 77782,
+        "environment": {
+          "temperature_actual": 0.0,
+          "theo_version": "0.1.0"
+        },
+        "error_class": "solved",
+        "files_edited": [
+          "src/users.py",
+          "verify_admin_user.py"
+        ],
+        "iterations": 15,
+        "llm": {
+          "calls": 15,
+          "retries": 0
+        },
+        "mode": "agent",
+        "model": "gpt-5.4",
+        "provider": "ChatGPT Codex (OAuth)",
+        "report": {
+          "context_health": {
+            "action_repetition_rate": 0.0,
+            "avg_context_size_tokens": 4158.666666666667,
+            "compaction_count": 0,
+            "compaction_savings_ratio": 0.0,
+            "context_growth_rate": 106.13333333333334,
+            "max_context_size_tokens": 4933,
+            "refetch_rate": 0.0,
+            "usefulness_avg": 0.0
+          },
+          "error_taxonomy": {
+            "budget_errors": 0,
+            "failure_mode_errors": 0,
+            "llm_errors": 0,
+            "network_errors": 0,
+            "other_errors": 0,
+            "sandbox_errors": 0,
+            "tool_errors": 0,
+            "total_errors": 0,
+            "validation_errors": 0
+          },
+          "integrity": {
+            "complete": true,
+            "confidence": 1.0,
+            "drop_sentinels_found": 0,
+            "missing_sequences": [],
+            "schema_version": 1,
+            "total_events_expected": 136,
+            "total_events_received": 136,
+            "writer_recoveries_found": 0
+          },
+          "loop_metrics": {
+            "budget_utilization": {
+              "iterations_pct": 0.75,
+              "time_pct": 0.021388888888888888,
+              "tokens_pct": 0.22423
+            },
+            "convergence_rate": 1.0,
+            "done_blocked_count": 1,
+            "evolution_attempts": 0,
+            "evolution_success": false,
+            "phase_distribution": {
+              "Done": {
+                "duration_ms": 0,
+                "iterations": 1,
+                "pct": 0.06666666666666667
+              },
+              "Edit": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Explore": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              },
+              "Verify": {
+                "duration_ms": 0,
+                "iterations": 0,
+                "pct": 0.0
+              }
+            },
+            "total_iterations": 15
+          },
+          "memory_metrics": {
+            "constraints_learned": 0,
+            "episodes_created": 1,
+            "episodes_injected": 0,
+            "failure_fingerprints_new": 1,
+            "failure_fingerprints_recurrent": 0,
+            "hypotheses_active": 0,
+            "hypotheses_formed": 0,
+            "hypotheses_invalidated": 0
+          },
+          "subagent_metrics": {
+            "avg_duration_ms": 0.0,
+            "failed": 0,
+            "max_duration_ms": 0,
+            "spawned": 0,
+            "succeeded": 0,
+            "success_rate": 0.0
+          },
+          "surrogate_metrics": {
+            "context_waste_ratio": {
+              "caveat": "Proxy for context bloat: overflow events per iteration.",
+              "confidence": 1.0,
+              "denominator": 15.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "doom_loop_frequency": {
+              "caveat": "Proxy for stuck loops: repeated identical tool calls in a sliding window.",
+              "confidence": 1.0,
+              "denominator": 14.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "hypothesis_churn_rate": {
+              "caveat": "Approximates reasoning churn: invalidated / formed hypotheses.",
+              "confidence": 0.0,
+              "denominator": 0.0,
+              "is_surrogate": true,
+              "numerator": 0.0,
+              "value": 0.0
+            },
+            "llm_efficiency": {
+              "caveat": "Approximates productive work: distinct successful tools per LLM call.",
+              "confidence": 1.0,
+              "denominator": 15.0,
+              "is_surrogate": true,
+              "numerator": 9.0,
+              "value": 0.6
+            },
+            "time_to_first_tool_ms": {
+              "caveat": "Proxy for startup latency: ms from RunInitialized to first ToolCallDispatched.",
+              "confidence": 1.0,
+              "denominator": 1.0,
+              "is_surrogate": true,
+              "numerator": 3720.0,
+              "value": 3720.0
+            }
+          },
+          "token_metrics": {
+            "cache_hit_rate": 0.0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "input_tokens": 222467,
+            "output_tokens": 1763,
+            "reasoning_tokens": 0,
+            "tokens_per_successful_edit": 112115.0,
+            "total_cost_usd": 0.0
+          },
+          "tool_breakdown": [
+            {
+              "avg_latency_ms": 4.0,
+              "call_count": 3,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 6,
+              "retry_count": 0,
+              "success_count": 3,
+              "success_rate": 1.0,
+              "tool_name": "bash"
+            },
+            {
+              "avg_latency_ms": 19.333333333333332,
+              "call_count": 3,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 49,
+              "retry_count": 0,
+              "success_count": 3,
+              "success_rate": 1.0,
+              "tool_name": "batch_execute"
+            },
+            {
+              "avg_latency_ms": 2.0,
+              "call_count": 2,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 4,
+              "retry_count": 0,
+              "success_count": 2,
+              "success_rate": 1.0,
+              "tool_name": "task_update"
+            },
+            {
+              "avg_latency_ms": 1.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 1,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "glob"
+            },
+            {
+              "avg_latency_ms": 0.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 0,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "apply_patch"
+            },
+            {
+              "avg_latency_ms": 0.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 0,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "reflect"
+            },
+            {
+              "avg_latency_ms": 2.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 2,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "edit"
+            },
+            {
+              "avg_latency_ms": 0.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 0,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "task_create"
+            },
+            {
+              "avg_latency_ms": 0.0,
+              "call_count": 1,
+              "error_categories": {},
+              "failure_count": 0,
+              "max_latency_ms": 0,
+              "retry_count": 0,
+              "success_count": 1,
+              "success_rate": 1.0,
+              "tool_name": "write"
+            }
+          ]
+        },
+        "schema": "theo.headless.v4",
+        "success": true,
+        "summary": "Updated `src/users.py` so `AdminUser.__init__` now calls `super().__init__(email, name)`, preserving inherited fields like `email`, `name`, and `created_at` while keeping admin-specific `permissions` and `is_admin = True`. I verified the file diff reflects the intended fix; runtime verification was attempted with `python3`, but this sandbox blocked execution (`Cannot fork` / `python3 -c` denied), so I could not complete an empirical smoke test here.",
+        "tokens": {
+          "input": 222467,
+          "output": 1763,
+          "total": 224230
+        },
+        "tools": {
+          "success": 13,
+          "total": 14
+        },
+        "cost_usd": 1.13878
+      },
+      "stderr_tail": "",
+      "workdir": null
+    }
+  ],
+  "timestamp": 1777319481,
+  "theo_bin": "/home/paulo/Projetos/usetheo/theo-code/target/release/theo"
+}

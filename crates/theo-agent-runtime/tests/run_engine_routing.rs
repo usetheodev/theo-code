@@ -74,14 +74,14 @@ fn apply_routing(
     cfg: &AgentConfig,
     ctx: &RoutingContext<'_>,
 ) -> (String, Option<String>, &'static str) {
-    match &cfg.router {
+    match &cfg.routing.router {
         Some(handle) => {
             let c = handle.as_router().route(ctx);
             (c.model_id, c.reasoning_effort, c.routing_reason)
         }
         None => (
-            cfg.model.clone(),
-            cfg.reasoning_effort.clone(),
+            cfg.llm.model.clone(),
+            cfg.llm.reasoning_effort.clone(),
             "no_router",
         ),
     }
@@ -94,8 +94,8 @@ fn test_r3_ac_1_run_engine_uses_router_model() {
     let choice = ModelChoice::new("anthropic", "haiku-mock", 2048);
     let (mock, _seen) = MockRouter::new(choice.clone());
     let mut cfg = AgentConfig::default();
-    cfg.model = "default-model".to_string();
-    cfg.router = Some(RouterHandle::new(Arc::new(mock)));
+    cfg.llm.model = "default-model".to_string();
+    cfg.routing.router = Some(RouterHandle::new(Arc::new(mock)));
 
     let mut ctx = RoutingContext::new(RoutingPhase::Normal);
     ctx.latest_user_message = Some("list files");
@@ -109,8 +109,8 @@ fn test_r3_ac_1_run_engine_uses_router_model() {
 #[test]
 fn test_r3_ac_2_none_router_preserves_session_default_model() {
     let mut cfg = AgentConfig::default();
-    cfg.model = "session-default".to_string();
-    cfg.router = None;
+    cfg.llm.model = "session-default".to_string();
+    cfg.routing.router = None;
     let ctx = RoutingContext::new(RoutingPhase::Normal);
     let (model, _effort, reason) = apply_routing(&cfg, &ctx);
     assert_eq!(model, "session-default");
@@ -123,7 +123,7 @@ fn test_r3_ac_2_none_router_preserves_session_default_model() {
 fn test_r3_ac_3_routing_context_populated_with_iteration_and_tokens() {
     let (mock, seen) = MockRouter::new(ModelChoice::new("p", "m", 100));
     let mut cfg = AgentConfig::default();
-    cfg.router = Some(RouterHandle::new(Arc::new(mock)));
+    cfg.routing.router = Some(RouterHandle::new(Arc::new(mock)));
 
     let mut ctx = RoutingContext::new(RoutingPhase::Normal);
     ctx.iteration = 7;
@@ -150,14 +150,14 @@ fn test_r3_ac_4_routing_does_not_mutate_session_model() {
     let choice = ModelChoice::new("anthropic", "cheap-model", 2048);
     let (mock, _seen) = MockRouter::new(choice);
     let mut cfg = AgentConfig::default();
-    cfg.model = "default".to_string();
-    cfg.router = Some(RouterHandle::new(Arc::new(mock)));
+    cfg.llm.model = "default".to_string();
+    cfg.routing.router = Some(RouterHandle::new(Arc::new(mock)));
 
     let ctx = RoutingContext::new(RoutingPhase::Normal);
     let (model, _, _) = apply_routing(&cfg, &ctx);
     assert_eq!(model, "cheap-model");
     assert_eq!(
-        cfg.model, "default",
+        cfg.llm.model, "default",
         "router must not mutate AgentConfig.model"
     );
 }
@@ -182,8 +182,8 @@ impl ModelRouter for PanicRouter {
 fn test_r3_ac_5_router_failure_falls_back_to_session_default() {
     // Mirror the catch_unwind guard from run_engine.rs.
     let mut cfg = AgentConfig::default();
-    cfg.model = "session-default".to_string();
-    cfg.router = Some(RouterHandle::new(Arc::new(PanicRouter)));
+    cfg.llm.model = "session-default".to_string();
+    cfg.routing.router = Some(RouterHandle::new(Arc::new(PanicRouter)));
 
     let ctx = RoutingContext::new(RoutingPhase::Normal);
     let guarded = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -194,8 +194,8 @@ fn test_r3_ac_5_router_failure_falls_back_to_session_default() {
     let (model, _, reason) = match guarded {
         Ok(value) => value,
         Err(_) => (
-            cfg.model.clone(),
-            cfg.reasoning_effort.clone(),
+            cfg.llm.model.clone(),
+            cfg.llm.reasoning_effort.clone(),
             "router_panic_fallback_default",
         ),
     };
@@ -211,7 +211,7 @@ fn test_r3_ac_6_routing_reason_surfaces_through_chat_request_pipeline() {
     choice.routing_reason = "simple_turn";
     let (mock, _seen) = MockRouter::new(choice);
     let mut cfg = AgentConfig::default();
-    cfg.router = Some(RouterHandle::new(Arc::new(mock)));
+    cfg.routing.router = Some(RouterHandle::new(Arc::new(mock)));
     let ctx = RoutingContext::new(RoutingPhase::Normal);
     let (_, _, reason) = apply_routing(&cfg, &ctx);
     assert_eq!(reason, "simple_turn");
@@ -225,11 +225,30 @@ fn test_router_invoked_exactly_once_per_turn_in_runtime() {
     // `as_router().route(` — there must be exactly one such call site
     // per turn. The R4 phase will add a second site for Compaction,
     // but R3 landed with a single site.
-    let manifest = concat!(env!("CARGO_MANIFEST_DIR"), "/src/run_engine.rs");
-    let source = std::fs::read_to_string(manifest).expect("run_engine.rs readable");
-    let matches = source.matches("as_router().route(").count();
+    //
+    // REMEDIATION_PLAN T4.2: `run_engine.rs` was split into a directory
+    // module `run_engine/` with `mod.rs` + `main_loop.rs` + helpers. The
+    // invariant still holds — we just need to scan the whole directory.
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/src/run_engine");
+    let mut matches = 0usize;
+    for entry in std::fs::read_dir(dir).expect("run_engine/ readable") {
+        let entry = entry.expect("dir entry");
+        let path = entry.path();
+        if path.is_dir() {
+            for nested in std::fs::read_dir(&path).expect("nested readable") {
+                let p = nested.expect("nested entry").path();
+                if p.extension().and_then(|e| e.to_str()) == Some("rs") {
+                    let src = std::fs::read_to_string(&p).expect("rust source readable");
+                    matches += src.matches("as_router().route(").count();
+                }
+            }
+        } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+            let src = std::fs::read_to_string(&path).expect("rust source readable");
+            matches += src.matches("as_router().route(").count();
+        }
+    }
     assert_eq!(
         matches, 1,
-        "R3 invariant: exactly one call site for router.route() in run_engine.rs (found {matches})"
+        "R3 invariant: exactly one call site for router.route() in run_engine/* (found {matches})"
     );
 }

@@ -4,7 +4,7 @@
 use std::sync::{Arc, Mutex};
 
 use theo_agent_runtime::config::RouterHandle;
-use theo_agent_runtime::subagent::SubAgentRole;
+use theo_agent_runtime::subagent::builtins;
 use theo_domain::routing::{
     ModelChoice, ModelRouter, RoutingContext, RoutingFailureHint, RoutingPhase, SubAgentRoleId,
 };
@@ -190,16 +190,13 @@ fn test_r4_routing_config_flows_end_to_end() {
 }
 
 #[test]
-fn sub_agent_role_id_matches_slot_name_suffix() {
+fn agent_spec_role_id_matches_slot_name_suffix() {
     // Proves the contract: router slots are `subagent_<role_id>` and
-    // SubAgentRole::role_id() returns that role_id string.
-    assert_eq!(SubAgentRole::Explorer.role_id(), SubAgentRoleId::EXPLORER);
-    assert_eq!(
-        SubAgentRole::Implementer.role_id(),
-        SubAgentRoleId::IMPLEMENTER
-    );
-    assert_eq!(SubAgentRole::Verifier.role_id(), SubAgentRoleId::VERIFIER);
-    assert_eq!(SubAgentRole::Reviewer.role_id(), SubAgentRoleId::REVIEWER);
+    // AgentSpec::role_id() returns the spec name as the role_id.
+    assert_eq!(builtins::explorer().role_id(), SubAgentRoleId::EXPLORER);
+    assert_eq!(builtins::implementer().role_id(), SubAgentRoleId::IMPLEMENTER);
+    assert_eq!(builtins::verifier().role_id(), SubAgentRoleId::VERIFIER);
+    assert_eq!(builtins::reviewer().role_id(), SubAgentRoleId::REVIEWER);
 }
 
 #[test]

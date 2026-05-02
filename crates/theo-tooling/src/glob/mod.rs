@@ -81,9 +81,29 @@ impl Tool for GlobTool {
         permissions: &mut PermissionCollector,
     ) -> Result<ToolOutput, ToolError> {
         let pattern = require_string(&args, "pattern")?;
-        let base_path = optional_string(&args, "path")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| ctx.project_dir.clone());
+        // T2.3: canonicalise the base directory against project_dir so a
+        // `..`-based base path cannot silently expand the search into the
+        // parent filesystem. Record an ExternalDirectory permission when
+        // the caller asks for an out-of-workspace base.
+        let raw_base = optional_string(&args, "path");
+        let base_path: PathBuf = match raw_base {
+            Some(p) => match crate::path::absolutize(&ctx.project_dir, &p) {
+                Ok(canonical) => canonical,
+                Err(_) => PathBuf::from(p),
+            },
+            None => ctx.project_dir.clone(),
+        };
+        let inside = crate::path::is_contained(&base_path, &ctx.project_dir)
+            .unwrap_or_else(|_| base_path.starts_with(&ctx.project_dir));
+        if !inside {
+            let ext_pattern = format!("{}/*", base_path.display()).replace('\\', "/");
+            permissions.record(PermissionRequest {
+                permission: PermissionType::ExternalDirectory,
+                patterns: vec![ext_pattern.clone()],
+                always: vec![ext_pattern],
+                metadata: serde_json::json!({}),
+            });
+        }
 
         permissions.record(PermissionRequest {
             permission: PermissionType::Glob,

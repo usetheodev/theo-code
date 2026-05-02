@@ -25,108 +25,28 @@ pub enum TaskState {
 impl TaskState {
     /// Returns whether transitioning from `self` to `target` is valid.
     ///
-    /// All match arms are exhaustive — no wildcards.
+    /// Encoded as a `matches!`-per-arm table; terminal states (Completed,
+    /// Failed, Cancelled) reject every target.
     pub fn can_transition_to(&self, target: TaskState) -> bool {
         match self {
-            TaskState::Pending => match target {
-                TaskState::Ready => true,
-                TaskState::Cancelled => true,
-                TaskState::Pending => false,
-                TaskState::Running => false,
-                TaskState::WaitingTool => false,
-                TaskState::WaitingInput => false,
-                TaskState::Blocked => false,
-                TaskState::Completed => false,
-                TaskState::Failed => false,
-            },
-            TaskState::Ready => match target {
-                TaskState::Running => true,
-                TaskState::Cancelled => true,
-                TaskState::Pending => false,
-                TaskState::Ready => false,
-                TaskState::WaitingTool => false,
-                TaskState::WaitingInput => false,
-                TaskState::Blocked => false,
-                TaskState::Completed => false,
-                TaskState::Failed => false,
-            },
-            TaskState::Running => match target {
-                TaskState::WaitingTool => true,
-                TaskState::WaitingInput => true,
-                TaskState::Blocked => true,
-                TaskState::Completed => true,
-                TaskState::Failed => true,
-                TaskState::Cancelled => true,
-                TaskState::Pending => false,
-                TaskState::Ready => false,
-                TaskState::Running => false,
-            },
-            TaskState::WaitingTool => match target {
-                TaskState::Running => true,
-                TaskState::Failed => true,
-                TaskState::Cancelled => true,
-                TaskState::Pending => false,
-                TaskState::Ready => false,
-                TaskState::WaitingTool => false,
-                TaskState::WaitingInput => false,
-                TaskState::Blocked => false,
-                TaskState::Completed => false,
-            },
-            TaskState::WaitingInput => match target {
-                TaskState::Running => true,
-                TaskState::Failed => true,
-                TaskState::Cancelled => true,
-                TaskState::Pending => false,
-                TaskState::Ready => false,
-                TaskState::WaitingTool => false,
-                TaskState::WaitingInput => false,
-                TaskState::Blocked => false,
-                TaskState::Completed => false,
-            },
-            TaskState::Blocked => match target {
-                TaskState::Running => true,
-                TaskState::Failed => true,
-                TaskState::Cancelled => true,
-                TaskState::Pending => false,
-                TaskState::Ready => false,
-                TaskState::WaitingTool => false,
-                TaskState::WaitingInput => false,
-                TaskState::Blocked => false,
-                TaskState::Completed => false,
-            },
-            TaskState::Completed => match target {
-                TaskState::Pending => false,
-                TaskState::Ready => false,
-                TaskState::Running => false,
-                TaskState::WaitingTool => false,
-                TaskState::WaitingInput => false,
-                TaskState::Blocked => false,
-                TaskState::Completed => false,
-                TaskState::Failed => false,
-                TaskState::Cancelled => false,
-            },
-            TaskState::Failed => match target {
-                TaskState::Pending => false,
-                TaskState::Ready => false,
-                TaskState::Running => false,
-                TaskState::WaitingTool => false,
-                TaskState::WaitingInput => false,
-                TaskState::Blocked => false,
-                TaskState::Completed => false,
-                TaskState::Failed => false,
-                TaskState::Cancelled => false,
-            },
-            TaskState::Cancelled => match target {
-                TaskState::Pending => false,
-                TaskState::Ready => false,
-                TaskState::Running => false,
-                TaskState::WaitingTool => false,
-                TaskState::WaitingInput => false,
-                TaskState::Blocked => false,
-                TaskState::Completed => false,
-                TaskState::Failed => false,
-                TaskState::Cancelled => false,
-            },
+            TaskState::Pending => matches!(target, TaskState::Ready | TaskState::Cancelled),
+            TaskState::Ready => matches!(target, TaskState::Running | TaskState::Cancelled),
+            TaskState::Running => matches!(
+                target,
+                TaskState::WaitingTool
+                    | TaskState::WaitingInput
+                    | TaskState::Blocked
+                    | TaskState::Completed
+                    | TaskState::Failed
+                    | TaskState::Cancelled
+            ),
+            TaskState::WaitingTool
+            | TaskState::WaitingInput
+            | TaskState::Blocked => matches!(
+                target,
+                TaskState::Running | TaskState::Failed | TaskState::Cancelled
+            ),
+            TaskState::Completed | TaskState::Failed | TaskState::Cancelled => false,
         }
     }
 

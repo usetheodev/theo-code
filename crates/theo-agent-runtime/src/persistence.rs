@@ -1,3 +1,9 @@
+//! Persistence layer for run snapshots.
+//!
+//! Reserved-for-future-use snapshot store; the trait is implemented but no
+//! runtime caller wires it yet.
+#![allow(dead_code)]
+
 use std::path::PathBuf;
 
 use async_trait::async_trait;

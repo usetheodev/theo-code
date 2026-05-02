@@ -310,143 +310,99 @@ mod tests {
     use theo_engine_graph::model::{Edge, Node, SymbolKind};
 
     /// Helper: build a graph with interconnected symbols for testing.
+    fn file_node(id: &str, path: &str) -> Node {
+        Node {
+            id: id.into(),
+            node_type: NodeType::File,
+            name: path.into(),
+            file_path: Some(path.into()),
+            signature: None,
+            kind: None,
+            line_start: None,
+            line_end: None,
+            last_modified: 1000.0,
+            doc: None,
+        }
+    }
+
+    fn symbol_node(
+        id: &str,
+        name: &str,
+        signature: &str,
+        line_range: (usize, usize),
+        node_type: NodeType,
+    ) -> Node {
+        Node {
+            id: id.into(),
+            node_type,
+            name: name.into(),
+            file_path: Some("src/auth.rs".into()),
+            signature: Some(signature.into()),
+            kind: Some(SymbolKind::Function),
+            line_start: Some(line_range.0),
+            line_end: Some(line_range.1),
+            last_modified: 1000.0,
+            doc: None,
+        }
+    }
+
+    fn add_test_graph_nodes(graph: &mut CodeGraph) {
+        graph.add_node(file_node("file:src/auth.rs", "src/auth.rs"));
+        graph.add_node(symbol_node(
+            "sym:verify_token",
+            "verify_token",
+            "fn verify_token(token: &str) -> Result<Claims, AuthError>",
+            (1, 10),
+            NodeType::Symbol,
+        ));
+        graph.add_node(symbol_node(
+            "sym:decode_header",
+            "decode_header",
+            "fn decode_header(raw: &[u8]) -> Header",
+            (12, 20),
+            NodeType::Symbol,
+        ));
+        graph.add_node(symbol_node(
+            "sym:decode_claims",
+            "decode_claims",
+            "fn decode_claims(payload: &[u8]) -> Claims",
+            (22, 30),
+            NodeType::Symbol,
+        ));
+        graph.add_node(symbol_node(
+            "test:test_verify_valid",
+            "test_verify_valid",
+            "fn test_verify_valid()",
+            (50, 60),
+            NodeType::Test,
+        ));
+        graph.add_node(file_node("file:src/crypto.rs", "src/crypto.rs"));
+    }
+
+    fn add_test_graph_edges(graph: &mut CodeGraph) {
+        let edge = |s: &str, t: &str, et: EdgeType, w: f64| Edge {
+            source: s.into(),
+            target: t.into(),
+            edge_type: et,
+            weight: w,
+        };
+        // Contains: auth.rs ⊃ verify_token, decode_header, decode_claims.
+        graph.add_edge(edge("file:src/auth.rs", "sym:verify_token", EdgeType::Contains, 1.0));
+        graph.add_edge(edge("file:src/auth.rs", "sym:decode_header", EdgeType::Contains, 1.0));
+        graph.add_edge(edge("file:src/auth.rs", "sym:decode_claims", EdgeType::Contains, 1.0));
+        // Calls: verify_token → {decode_header, decode_claims}.
+        graph.add_edge(edge("sym:verify_token", "sym:decode_header", EdgeType::Calls, 1.0));
+        graph.add_edge(edge("sym:verify_token", "sym:decode_claims", EdgeType::Calls, 1.0));
+        // Tests: test_verify_valid → verify_token.
+        graph.add_edge(edge("test:test_verify_valid", "sym:verify_token", EdgeType::Tests, 0.7));
+        // CoChanges: auth.rs ↔ crypto.rs.
+        graph.add_edge(edge("file:src/auth.rs", "file:src/crypto.rs", EdgeType::CoChanges, 0.85));
+    }
+
     fn build_test_graph() -> (Community, CodeGraph) {
         let mut graph = CodeGraph::new();
-
-        // File node
-        graph.add_node(Node {
-            id: "file:src/auth.rs".into(),
-            node_type: NodeType::File,
-            name: "src/auth.rs".into(),
-            file_path: Some("src/auth.rs".into()),
-            signature: None,
-            kind: None,
-            line_start: None,
-            line_end: None,
-            last_modified: 1000.0,
-            doc: None,
-        });
-
-        // Symbol: verify_token
-        graph.add_node(Node {
-            id: "sym:verify_token".into(),
-            node_type: NodeType::Symbol,
-            name: "verify_token".into(),
-            file_path: Some("src/auth.rs".into()),
-            signature: Some("fn verify_token(token: &str) -> Result<Claims, AuthError>".into()),
-            kind: Some(SymbolKind::Function),
-            line_start: Some(1),
-            line_end: Some(10),
-            last_modified: 1000.0,
-            doc: None,
-        });
-
-        // Symbol: decode_header
-        graph.add_node(Node {
-            id: "sym:decode_header".into(),
-            node_type: NodeType::Symbol,
-            name: "decode_header".into(),
-            file_path: Some("src/auth.rs".into()),
-            signature: Some("fn decode_header(raw: &[u8]) -> Header".into()),
-            kind: Some(SymbolKind::Function),
-            line_start: Some(12),
-            line_end: Some(20),
-            last_modified: 1000.0,
-            doc: None,
-        });
-
-        // Symbol: decode_claims (no tests)
-        graph.add_node(Node {
-            id: "sym:decode_claims".into(),
-            node_type: NodeType::Symbol,
-            name: "decode_claims".into(),
-            file_path: Some("src/auth.rs".into()),
-            signature: Some("fn decode_claims(payload: &[u8]) -> Claims".into()),
-            kind: Some(SymbolKind::Function),
-            line_start: Some(22),
-            line_end: Some(30),
-            last_modified: 1000.0,
-            doc: None,
-        });
-
-        // Test node
-        graph.add_node(Node {
-            id: "test:test_verify_valid".into(),
-            node_type: NodeType::Test,
-            name: "test_verify_valid".into(),
-            file_path: Some("src/auth.rs".into()),
-            signature: Some("fn test_verify_valid()".into()),
-            kind: Some(SymbolKind::Function),
-            line_start: Some(50),
-            line_end: Some(60),
-            last_modified: 1000.0,
-            doc: None,
-        });
-
-        // Co-change file
-        graph.add_node(Node {
-            id: "file:src/crypto.rs".into(),
-            node_type: NodeType::File,
-            name: "src/crypto.rs".into(),
-            file_path: Some("src/crypto.rs".into()),
-            signature: None,
-            kind: None,
-            line_start: None,
-            line_end: None,
-            last_modified: 1000.0,
-            doc: None,
-        });
-
-        // Edges: Contains
-        graph.add_edge(Edge {
-            source: "file:src/auth.rs".into(),
-            target: "sym:verify_token".into(),
-            edge_type: EdgeType::Contains,
-            weight: 1.0,
-        });
-        graph.add_edge(Edge {
-            source: "file:src/auth.rs".into(),
-            target: "sym:decode_header".into(),
-            edge_type: EdgeType::Contains,
-            weight: 1.0,
-        });
-        graph.add_edge(Edge {
-            source: "file:src/auth.rs".into(),
-            target: "sym:decode_claims".into(),
-            edge_type: EdgeType::Contains,
-            weight: 1.0,
-        });
-
-        // Edges: Calls (verify_token calls decode_header and decode_claims)
-        graph.add_edge(Edge {
-            source: "sym:verify_token".into(),
-            target: "sym:decode_header".into(),
-            edge_type: EdgeType::Calls,
-            weight: 1.0,
-        });
-        graph.add_edge(Edge {
-            source: "sym:verify_token".into(),
-            target: "sym:decode_claims".into(),
-            edge_type: EdgeType::Calls,
-            weight: 1.0,
-        });
-
-        // Edge: Tests (test_verify_valid tests verify_token)
-        graph.add_edge(Edge {
-            source: "test:test_verify_valid".into(),
-            target: "sym:verify_token".into(),
-            edge_type: EdgeType::Tests,
-            weight: 0.7,
-        });
-
-        // Edge: CoChanges (auth.rs <-> crypto.rs)
-        graph.add_edge(Edge {
-            source: "file:src/auth.rs".into(),
-            target: "file:src/crypto.rs".into(),
-            edge_type: EdgeType::CoChanges,
-            weight: 0.85,
-        });
-
+        add_test_graph_nodes(&mut graph);
+        add_test_graph_edges(&mut graph);
         let community = Community {
             id: "comm_auth".into(),
             name: "auth/jwt".into(),
@@ -461,7 +417,6 @@ mod tests {
             parent_id: None,
             version: 1,
         };
-
         (community, graph)
     }
 

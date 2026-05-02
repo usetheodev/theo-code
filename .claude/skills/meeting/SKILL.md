@@ -1,6 +1,6 @@
 ---
 name: meeting
-description: Convoca reuniao com TODO o time de agentes (16 personas). Cada agente analisa o tema, debate, e produz uma ata estruturada em .claude/meetings/. Use para decisoes estrategicas, tecnicas, arquiteturais, ou qualquer tema que impacte o projeto.
+description: Convoca reuniao com TODO o time de agentes (22 personas). Cada agente analisa o tema, debate, e produz uma ata estruturada em .claude/meetings/. Use para decisoes estrategicas, tecnicas, arquiteturais, ou qualquer tema que impacte o projeto.
 user-invocable: true
 allowed-tools: Bash(date *) Bash(git *) Bash(ls *) Bash(cat *) Read Write Edit Glob Grep Agent
 argument-hint: "<tema da reuniao>"
@@ -8,7 +8,7 @@ argument-hint: "<tema da reuniao>"
 
 # Meeting — Reuniao do Time Completo
 
-Convoque TODOS os 16 agentes para uma reuniao sobre: **$ARGUMENTS**
+Convoque TODOS os 22 agentes para uma reuniao sobre: **$ARGUMENTS**
 
 ## Protocolo
 
@@ -43,31 +43,39 @@ Convoque TODOS os agentes em grupos paralelos. Cada agente deve analisar o tema 
 - **Riscos**: o que pode dar errado
 - **Recomendacoes**: o que faria diferente
 
-#### Grupo 1 — Estrategia (paralelo)
-- `chief-architect` — impacto no pipeline e execucao
-- `evolution-agent` — impacto no sistema como um todo
+#### Grupo 1 — Lideranca
+- `cto-architect` — verdade do sistema, SOTA alignment, features reais vs fantasma
 
-#### Grupo 2 — Conhecimento (paralelo)
-- `knowledge-compiler` — impacto na wiki e knowledge base
-- `ontology-manager` — impacto na taxonomia e conceitos
-- `data-ingestor` — impacto na ingestao de dados
-- `wiki-expert` — impacto na experiencia da wiki
+#### Grupo 2 — Arquitetos de Dominio: Runtime (paralelo)
+- `agent-loop-architect` — impacto no ReAct cycle, compaction, convergencia
+- `subagents-architect` — impacto em sub-agentes, delegacao, guardrails
+- `agents-architect` — impacto em task/plan management
+- `observability-architect` — impacto em metricas, OTel, dashboard
+- `prompt-engineering-architect` — impacto em prompts, schemas, fencing
 
-#### Grupo 3 — Qualidade (paralelo)
-- `validator` — riscos de corrupcao e consistencia
-- `linter` — impacto na saude do sistema
-- `retrieval-engineer` — impacto na busca e ranking
-- `memory-synthesizer` — impacto na sintese e datasets
+#### Grupo 3 — Arquitetos de Dominio: Engine (paralelo)
+- `context-architect` — impacto em GRAPHCTX, retrieval, RRF
+- `languages-architect` — impacto em parsing, Tree-Sitter, 14 langs
+- `wiki-architect` — impacto na Code Wiki, BM25, enrichment
 
-#### Grupo 4 — Engineering (paralelo)
-- `code-reviewer` — qualidade de codigo
-- `graphctx-expert` — impacto no GRAPHCTX
+#### Grupo 4 — Arquitetos de Dominio: Infra (paralelo)
+- `providers-architect` — impacto nos 26 providers, streaming, retry
+- `model-routing-architect` — impacto em routing, cost optimization
+- `memory-architect` — impacto em STM/WM/LTM, persistence
+- `security-governance-architect` — impacto em sandbox, capabilities, secrets
+
+#### Grupo 5 — Arquitetos de Dominio: Surface & Quality (paralelo)
+- `cli-architect` — impacto nos 17 subcommands, UX
+- `tools-architect` — impacto nos 72 tools, registry
+- `debug-architect` — impacto no DAP, 11 debug tools
+- `evals-architect` — impacto em benchmarks, metricas
+- `self-evolution-architect` — impacto no ciclo de evolucao
+
+#### Grupo 6 — Utilidade (paralelo)
 - `arch-validator` — violacoes arquiteturais
+- `code-reviewer` — qualidade de codigo
+- `frontend-dev` — impacto na UI (Tauri/React)
 - `test-runner` — impacto em testes
-- `frontend-dev` — impacto na UI
-
-#### Grupo 5 — Pesquisa
-- `research-agent` — estado da arte e referencias externas
 
 ### 4. Debate
 
@@ -75,7 +83,7 @@ Apos coletar todas as posicoes:
 - Identifique **conflitos** (agentes que discordam)
 - Identifique **consenso** (agentes que concordam)
 - Resolva conflitos com argumentos, nao autoridade
-- Se houver REJECT de chief-architect ou validator → o tema precisa ser revisado
+- Se houver REJECT de `cto-architect` → o tema precisa ser revisado obrigatoriamente
 
 ### 5. Veredito
 
@@ -96,7 +104,7 @@ id: YYYYMMDD-HHMMSS
 date: YYYY-MM-DD
 topic: "<tema>"
 verdict: APPROVED | REJECTED | DEFERRED | REVISED
-participants: 16
+participants: 22
 ---
 
 # Reuniao: <tema>
@@ -106,34 +114,51 @@ participants: 16
 
 ## Posicoes por Agente
 
-### Estrategia
+### Lideranca
 | Agente | Posicao | Resumo |
 |--------|---------|--------|
-| chief-architect | APPROVE | ... |
-| evolution-agent | CONCERN | ... |
+| cto-architect | APPROVE | ... |
 
-### Conhecimento
+### Arquitetos de Dominio: Runtime
 | Agente | Posicao | Resumo |
 |--------|---------|--------|
-| knowledge-compiler | APPROVE | ... |
-| ... | ... | ... |
+| agent-loop-architect | APPROVE | ... |
+| subagents-architect | CONCERN | ... |
+| agents-architect | APPROVE | ... |
+| observability-architect | APPROVE | ... |
+| prompt-engineering-architect | APPROVE | ... |
 
-### Qualidade
+### Arquitetos de Dominio: Engine
 | Agente | Posicao | Resumo |
 |--------|---------|--------|
-| validator | APPROVE | ... |
-| ... | ... | ... |
+| context-architect | APPROVE | ... |
+| languages-architect | APPROVE | ... |
+| wiki-architect | APPROVE | ... |
 
-### Engineering
+### Arquitetos de Dominio: Infra
 | Agente | Posicao | Resumo |
 |--------|---------|--------|
+| providers-architect | APPROVE | ... |
+| model-routing-architect | APPROVE | ... |
+| memory-architect | APPROVE | ... |
+| security-governance-architect | APPROVE | ... |
+
+### Arquitetos de Dominio: Surface & Quality
+| Agente | Posicao | Resumo |
+|--------|---------|--------|
+| cli-architect | APPROVE | ... |
+| tools-architect | APPROVE | ... |
+| debug-architect | APPROVE | ... |
+| evals-architect | APPROVE | ... |
+| self-evolution-architect | APPROVE | ... |
+
+### Utilidade
+| Agente | Posicao | Resumo |
+|--------|---------|--------|
+| arch-validator | APPROVE | ... |
 | code-reviewer | APPROVE | ... |
-| ... | ... | ... |
-
-### Pesquisa
-| Agente | Posicao | Resumo |
-|--------|---------|--------|
-| research-agent | APPROVE | ... |
+| frontend-dev | ABSTAIN | ... |
+| test-runner | APPROVE | ... |
 
 ## Conflitos
 <debates e resolucoes>
@@ -145,6 +170,13 @@ participants: 16
 ## Action Items
 - [ ] <quem> — <o que> — <quando>
 
+## Plano TDD
+Para cada action item que envolve codigo:
+1. RED: <que teste sera escrito primeiro>
+2. GREEN: <que implementacao minima>
+3. REFACTOR: <que limpeza>
+4. VERIFY: `cargo test -p <crate>`
+
 ## Veredito Final
 **<VERDICT>**: <justificativa em 1-2 frases>
 ```
@@ -152,24 +184,10 @@ participants: 16
 ## Regras
 
 1. **Todos participam** — nenhum agente pode ser omitido
-2. **Conflito obrigatorio** — se todos concordam sem debate, forca contra-argumentos
-3. **Ata obrigatoria** — sem ata, a reuniao nao aconteceu
-4. **Veredito claro** — APPROVED/REJECTED/DEFERRED/REVISED, sem ambiguidade
-5. **Action items concretos** — quem, o que, quando
-6. **Historico preservado** — atas nunca sao editadas apos salvas
-7. **TDD obrigatorio** — toda decisao que envolva codigo deve incluir um plano TDD (RED-GREEN-REFACTOR) nos action items. Sem plano de testes = decisao incompleta.
-
-## TDD na Ata
-
-Toda decisao que envolva codigo DEVE incluir na ata:
-
-```markdown
-## Plano TDD
-Para cada action item que envolve codigo:
-1. RED: <que teste sera escrito primeiro>
-2. GREEN: <que implementacao minima>
-3. REFACTOR: <que limpeza>
-4. VERIFY: `cargo test -p <crate>`
-```
-
-O test-runner DEVE validar que o plano TDD e viavel. Se nao for → CONCERN obrigatorio.
+2. **CTO tem veto** — REJECT do `cto-architect` bloqueia qualquer aprovacao
+3. **Conflito obrigatorio** — se todos concordam sem debate, forca contra-argumentos
+4. **Ata obrigatoria** — sem ata, a reuniao nao aconteceu
+5. **Veredito claro** — APPROVED/REJECTED/DEFERRED/REVISED, sem ambiguidade
+6. **Action items concretos** — quem, o que, quando
+7. **Historico preservado** — atas nunca sao editadas apos salvas
+8. **TDD obrigatorio** — toda decisao que envolva codigo deve incluir plano TDD nos action items

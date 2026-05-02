@@ -1,5 +1,6 @@
 use tauri::State;
-use theo_infra_auth::{AnthropicAuth, AnthropicConfig};
+// T1.3: facade re-export.
+use theo_application::facade::auth::{AnthropicAuth, AnthropicConfig};
 
 use crate::state::AppState;
 
@@ -32,7 +33,7 @@ pub async fn anthropic_poll_device_flow(
     server: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let auth = make_auth(server);
-    let dc = theo_infra_auth::anthropic::AnthropicDeviceCode {
+    let dc = theo_application::facade::auth::anthropic::AnthropicDeviceCode {
         user_code: String::new(),
         verification_uri: String::new(),
         device_code,
@@ -126,7 +127,7 @@ pub async fn anthropic_models() -> Result<serde_json::Value, String> {
 fn make_auth(server: Option<String>) -> AnthropicAuth {
     if let Some(s) = server {
         AnthropicAuth::with_config(
-            theo_infra_auth::AuthStore::open(),
+            theo_application::facade::auth::AuthStore::open(),
             AnthropicConfig::with_server(s),
         )
     } else {

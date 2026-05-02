@@ -10,6 +10,9 @@
 //! The C12 criterion in `.theo/evolution_criteria.md` requires: (a) discover
 //! on tool access, (b) no re-loading of the same path, (c) respect workspace
 //! root boundary.
+//!
+//! Reserved-for-future-use loader; not yet wired into the tool runtime.
+#![allow(dead_code)]
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};

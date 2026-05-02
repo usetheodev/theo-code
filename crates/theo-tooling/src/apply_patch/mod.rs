@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use std::path::{Path, PathBuf};
 use theo_domain::error::ToolError;
 use theo_domain::permission::{PermissionRequest, PermissionType};
 use theo_domain::tool::{
@@ -49,6 +50,41 @@ impl ApplyPatchTool {
         Self
     }
 
+    /// Canonicalize a patch-relative path against `project_dir`.
+    ///
+    /// Mirrors read/write/edit (T2.3): `..`, `.`, and symlinks are resolved
+    /// via `crate::path::absolutize`. The permission gate is separate
+    /// (`record_external_if_escapes`) so each PatchOp can decide its own
+    /// response to an out-of-workspace target.
+    fn resolve_path(file_path: &str, project_dir: &Path) -> PathBuf {
+        match crate::path::absolutize(project_dir, file_path) {
+            Ok(canonical) => canonical,
+            Err(_) => project_dir.join(file_path),
+        }
+    }
+
+    /// Record an `ExternalDirectory` permission request if `resolved`
+    /// escapes `project_dir`. Returns true when the path is inside.
+    fn record_external_if_escapes(
+        resolved: &Path,
+        project_dir: &Path,
+        permissions: &mut PermissionCollector,
+    ) -> bool {
+        let inside = crate::path::is_contained(resolved, project_dir)
+            .unwrap_or_else(|_| resolved.starts_with(project_dir));
+        if !inside {
+            let dir = resolved.parent().unwrap_or(resolved);
+            let pattern = format!("{}/*", dir.display()).replace('\\', "/");
+            permissions.record(PermissionRequest {
+                permission: PermissionType::ExternalDirectory,
+                patterns: vec![pattern.clone()],
+                always: vec![pattern],
+                metadata: serde_json::json!({}),
+            });
+        }
+        inside
+    }
+
     fn strip_heredoc(text: &str) -> &str {
         let trimmed = text.trim();
         // Strip cat <<'EOF' ... EOF wrapper
@@ -75,13 +111,10 @@ impl ApplyPatchTool {
         trimmed
     }
 
-    fn parse(text: &str) -> Result<Vec<PatchOp>, ToolError> {
-        let text = Self::strip_heredoc(text);
-        let lines: Vec<&str> = text.lines().collect();
-        let mut ops = Vec::new();
+    /// Locate the line index just AFTER `*** Begin Patch`. Returns
+    /// `Validation` error if the marker is missing.
+    fn skip_to_begin_patch(lines: &[&str]) -> Result<usize, ToolError> {
         let mut i = 0;
-
-        // Find *** Begin Patch
         while i < lines.len() && !lines[i].starts_with("*** Begin Patch") {
             i += 1;
         }
@@ -90,94 +123,136 @@ impl ApplyPatchTool {
                 "apply_patch verification failed: no Begin Patch marker".to_string(),
             ));
         }
-        i += 1;
+        Ok(i + 1)
+    }
+
+    /// Parse a `*** Add File: <path>` section starting at `start_idx`.
+    /// Returns the resulting `PatchOp::Add` and the index just past the section.
+    fn parse_add_section(path_ref: &str, lines: &[&str], start_idx: usize) -> (PatchOp, usize) {
+        let path = path_ref.to_string();
+        let mut i = start_idx;
+        let mut content_lines = Vec::new();
+        while i < lines.len() && !lines[i].starts_with("***") {
+            if let Some(rest) = lines[i].strip_prefix('+') {
+                content_lines.push(rest.to_string());
+            }
+            i += 1;
+        }
+        let mut content = content_lines.join("\n");
+        if !content.is_empty() {
+            content.push('\n');
+        }
+        (PatchOp::Add { path, content }, i)
+    }
+
+    /// Parse a `*** Update File: <path>` section (optional `*** Move to:`
+    /// header + 1+ hunks). Returns the `PatchOp::Update` and next index.
+    fn parse_update_section(
+        path_ref: &str,
+        lines: &[&str],
+        start_idx: usize,
+    ) -> Result<(PatchOp, usize), ToolError> {
+        let path = path_ref.to_string();
+        let mut i = start_idx;
+        let mut move_to = None;
+        if i < lines.len()
+            && let Some(dest_ref) = lines[i].strip_prefix("*** Move to: ")
+        {
+            move_to = Some(dest_ref.to_string());
+            i += 1;
+        }
+        let mut hunks = Vec::new();
+        while i < lines.len()
+            && (lines[i].starts_with("@@")
+                || lines[i].starts_with(' ')
+                || lines[i].starts_with('+')
+                || lines[i].starts_with('-')
+                || lines[i].starts_with("*** End of File"))
+        {
+            if lines[i].starts_with("@@") {
+                let (hunk, next) = Self::parse_hunk(lines, i);
+                hunks.push(hunk);
+                i = next;
+            } else {
+                i += 1;
+            }
+        }
+        if hunks.is_empty() {
+            return Err(ToolError::Validation(
+                "apply_patch verification failed: empty hunks".to_string(),
+            ));
+        }
+        Ok((
+            PatchOp::Update {
+                path,
+                hunks,
+                move_to,
+            },
+            i,
+        ))
+    }
+
+    /// Parse a single hunk starting at `@@`. Returns the `Hunk` and the
+    /// index just past the hunk's last line (including any `*** End of File`).
+    fn parse_hunk(lines: &[&str], start_idx: usize) -> (Hunk, usize) {
+        let header_line = lines[start_idx];
+        let ctx_header = if header_line.len() > 2 {
+            Some(header_line[2..].trim().to_string())
+        } else {
+            None
+        };
+        let mut i = start_idx + 1;
+        let mut hunk_lines = Vec::new();
+        let mut eof_anchor = false;
+        while i < lines.len() && !lines[i].starts_with("@@") && !lines[i].starts_with("***") {
+            let l = lines[i];
+            if let Some(rest) = l.strip_prefix('+') {
+                hunk_lines.push(HunkLine::Add(rest.to_string()));
+            } else if let Some(rest) = l.strip_prefix('-') {
+                hunk_lines.push(HunkLine::Remove(rest.to_string()));
+            } else if let Some(rest) = l.strip_prefix(' ') {
+                hunk_lines.push(HunkLine::Context(rest.to_string()));
+            }
+            i += 1;
+        }
+        if i < lines.len() && lines[i].starts_with("*** End of File") {
+            eof_anchor = true;
+            i += 1;
+        }
+        (
+            Hunk {
+                context_header: ctx_header.filter(|s| !s.is_empty()),
+                lines: hunk_lines,
+                eof_anchor,
+            },
+            i,
+        )
+    }
+
+    fn parse(text: &str) -> Result<Vec<PatchOp>, ToolError> {
+        let text = Self::strip_heredoc(text);
+        let lines: Vec<&str> = text.lines().collect();
+        let mut ops = Vec::new();
+        let mut i = Self::skip_to_begin_patch(&lines)?;
 
         while i < lines.len() {
             let line = lines[i];
             if line.starts_with("*** End Patch") {
                 break;
             }
-            if line.starts_with("*** Add File: ") {
-                let path = line.strip_prefix("*** Add File: ").unwrap().to_string();
-                i += 1;
-                let mut content_lines = Vec::new();
-                while i < lines.len() && !lines[i].starts_with("***") {
-                    if let Some(rest) = lines[i].strip_prefix('+') {
-                        content_lines.push(rest.to_string());
-                    }
-                    i += 1;
-                }
-                let mut content = content_lines.join("\n");
-                if !content.is_empty() {
-                    content.push('\n');
-                }
-                ops.push(PatchOp::Add { path, content });
-            } else if line.starts_with("*** Delete File: ") {
-                let path = line.strip_prefix("*** Delete File: ").unwrap().to_string();
-                ops.push(PatchOp::Delete { path });
-                i += 1;
-            } else if line.starts_with("*** Update File: ") {
-                let path = line.strip_prefix("*** Update File: ").unwrap().to_string();
-                i += 1;
-                let mut move_to = None;
-                if i < lines.len() && lines[i].starts_with("*** Move to: ") {
-                    move_to = Some(lines[i].strip_prefix("*** Move to: ").unwrap().to_string());
-                    i += 1;
-                }
-                let mut hunks = Vec::new();
-                while i < lines.len()
-                    && (lines[i].starts_with("@@")
-                        || lines[i].starts_with(' ')
-                        || lines[i].starts_with('+')
-                        || lines[i].starts_with('-')
-                        || lines[i].starts_with("*** End of File"))
-                {
-                    if lines[i].starts_with("@@") {
-                        let ctx_header = if lines[i].len() > 2 {
-                            Some(lines[i][2..].trim().to_string())
-                        } else {
-                            None
-                        };
-                        i += 1;
-                        let mut hunk_lines = Vec::new();
-                        let mut eof_anchor = false;
-                        while i < lines.len()
-                            && !lines[i].starts_with("@@")
-                            && !lines[i].starts_with("***")
-                        {
-                            let l = lines[i];
-                            if let Some(rest) = l.strip_prefix('+') {
-                                hunk_lines.push(HunkLine::Add(rest.to_string()));
-                            } else if let Some(rest) = l.strip_prefix('-') {
-                                hunk_lines.push(HunkLine::Remove(rest.to_string()));
-                            } else if let Some(rest) = l.strip_prefix(' ') {
-                                hunk_lines.push(HunkLine::Context(rest.to_string()));
-                            }
-                            i += 1;
-                        }
-                        if i < lines.len() && lines[i].starts_with("*** End of File") {
-                            eof_anchor = true;
-                            i += 1;
-                        }
-                        hunks.push(Hunk {
-                            context_header: ctx_header.filter(|s| !s.is_empty()),
-                            lines: hunk_lines,
-                            eof_anchor,
-                        });
-                    } else {
-                        i += 1;
-                    }
-                }
-                if hunks.is_empty() {
-                    return Err(ToolError::Validation(
-                        "apply_patch verification failed: empty hunks".to_string(),
-                    ));
-                }
-                ops.push(PatchOp::Update {
-                    path,
-                    hunks,
-                    move_to,
+            if let Some(path_ref) = line.strip_prefix("*** Add File: ") {
+                let (op, next) = Self::parse_add_section(path_ref, &lines, i + 1);
+                ops.push(op);
+                i = next;
+            } else if let Some(path_ref) = line.strip_prefix("*** Delete File: ") {
+                ops.push(PatchOp::Delete {
+                    path: path_ref.to_string(),
                 });
+                i += 1;
+            } else if let Some(path_ref) = line.strip_prefix("*** Update File: ") {
+                let (op, next) = Self::parse_update_section(path_ref, &lines, i + 1)?;
+                ops.push(op);
+                i = next;
             } else {
                 return Err(ToolError::Validation(format!(
                     "apply_patch verification failed: unexpected line: {line}"
@@ -330,6 +405,186 @@ impl ApplyPatchTool {
 
         Ok(candidates[0])
     }
+
+    /// Declare ExternalDirectory permissions for any op whose resolved path
+    /// escapes the project directory (mirrors ReadTool/WriteTool/EditTool T2.3).
+    fn declare_external_permissions(
+        ops: &[PatchOp],
+        project_dir: &std::path::Path,
+        permissions: &mut PermissionCollector,
+    ) {
+        for op in ops {
+            match op {
+                PatchOp::Add { path, .. }
+                | PatchOp::Delete { path }
+                | PatchOp::Update { path, .. } => {
+                    let resolved = Self::resolve_path(path, project_dir);
+                    let _ = Self::record_external_if_escapes(&resolved, project_dir, permissions);
+                }
+            }
+            if let PatchOp::Update {
+                move_to: Some(dest),
+                ..
+            } = op
+            {
+                let resolved = Self::resolve_path(dest, project_dir);
+                let _ = Self::record_external_if_escapes(&resolved, project_dir, permissions);
+            }
+        }
+    }
+
+    /// Fail-fast verification: every Update target must exist; every Delete
+    /// target must exist and be a file; every Update hunk must dry-run apply.
+    async fn verify_operations(
+        ops: &[PatchOp],
+        project_dir: &std::path::Path,
+    ) -> Result<(), ToolError> {
+        for op in ops {
+            match op {
+                PatchOp::Update { path, .. } => {
+                    let full = Self::resolve_path(path, project_dir);
+                    if !full.exists() {
+                        return Err(ToolError::Validation(
+                            "apply_patch verification failed: Failed to read file to update"
+                                .to_string(),
+                        ));
+                    }
+                }
+                PatchOp::Delete { path } => {
+                    let full = Self::resolve_path(path, project_dir);
+                    if !full.exists() {
+                        return Err(ToolError::Validation(format!(
+                            "apply_patch verification failed: File not found for delete: {path}"
+                        )));
+                    }
+                    if full.is_dir() {
+                        return Err(ToolError::Validation(format!(
+                            "apply_patch verification failed: Cannot delete directory: {path}"
+                        )));
+                    }
+                }
+                _ => {}
+            }
+        }
+        for op in ops {
+            if let PatchOp::Update { path, hunks, .. } = op {
+                let full = Self::resolve_path(path, project_dir);
+                let content = tokio::fs::read_to_string(&full)
+                    .await
+                    .map_err(|e| ToolError::Execution(format!("Failed to read file: {e}")))?;
+                Self::apply_hunks(&content, hunks)?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn apply_add(
+        path: &str,
+        content: &str,
+        project_dir: &std::path::Path,
+        summary: &mut Vec<String>,
+        files_info: &mut Vec<serde_json::Value>,
+    ) -> Result<(), ToolError> {
+        let full = Self::resolve_path(path, project_dir);
+        if let Some(parent) = full.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|e| ToolError::Execution(format!("{e}")))?;
+        }
+        let before = if full.exists() {
+            tokio::fs::read_to_string(&full).await.unwrap_or_default()
+        } else {
+            String::new()
+        };
+        tokio::fs::write(&full, content)
+            .await
+            .map_err(|e| ToolError::Execution(format!("{e}")))?;
+        summary.push(format!("A {}", path.replace('\\', "/")));
+        files_info.push(serde_json::json!({
+            "filePath": full.display().to_string(),
+            "relativePath": path.replace('\\', "/"),
+            "type": "add",
+            "before": before,
+            "after": content,
+        }));
+        Ok(())
+    }
+
+    async fn apply_delete(
+        path: &str,
+        project_dir: &std::path::Path,
+        summary: &mut Vec<String>,
+        files_info: &mut Vec<serde_json::Value>,
+    ) -> Result<(), ToolError> {
+        let full = Self::resolve_path(path, project_dir);
+        tokio::fs::remove_file(&full)
+            .await
+            .map_err(|e| ToolError::Execution(format!("{e}")))?;
+        summary.push(format!("D {}", path.replace('\\', "/")));
+        files_info.push(serde_json::json!({
+            "filePath": full.display().to_string(),
+            "relativePath": path.replace('\\', "/"),
+            "type": "delete",
+        }));
+        Ok(())
+    }
+
+    async fn apply_update(
+        path: &str,
+        hunks: &[Hunk],
+        move_to: Option<&str>,
+        project_dir: &std::path::Path,
+        summary: &mut Vec<String>,
+        files_info: &mut Vec<serde_json::Value>,
+    ) -> Result<(), ToolError> {
+        let full = Self::resolve_path(path, project_dir);
+        let content = tokio::fs::read_to_string(&full)
+            .await
+            .map_err(|e| ToolError::Execution(format!("{e}")))?;
+        let before = content.clone();
+        let new_content = Self::apply_hunks(&content, hunks)?;
+
+        if let Some(dest) = move_to {
+            let dest_full = Self::resolve_path(dest, project_dir);
+            if let Some(parent) = dest_full.parent() {
+                tokio::fs::create_dir_all(parent)
+                    .await
+                    .map_err(|e| ToolError::Execution(format!("{e}")))?;
+            }
+            tokio::fs::write(&dest_full, &new_content)
+                .await
+                .map_err(|e| ToolError::Execution(format!("{e}")))?;
+            tokio::fs::remove_file(&full)
+                .await
+                .map_err(|e| ToolError::Execution(format!("{e}")))?;
+            summary.push(format!(
+                "M {} -> {}",
+                path.replace('\\', "/"),
+                dest.replace('\\', "/")
+            ));
+            files_info.push(serde_json::json!({
+                "filePath": full.display().to_string(),
+                "relativePath": dest.replace('\\', "/"),
+                "type": "move",
+                "movePath": dest_full.display().to_string(),
+                "before": before,
+                "after": new_content,
+            }));
+        } else {
+            tokio::fs::write(&full, &new_content)
+                .await
+                .map_err(|e| ToolError::Execution(format!("{e}")))?;
+            summary.push(format!("M {}", path.replace('\\', "/")));
+            files_info.push(serde_json::json!({
+                "filePath": full.display().to_string(),
+                "relativePath": path.replace('\\', "/"),
+                "type": "update",
+                "before": before,
+                "after": new_content,
+            }));
+        }
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -375,146 +630,39 @@ impl Tool for ApplyPatchTool {
         permissions: &mut PermissionCollector,
     ) -> Result<ToolOutput, ToolError> {
         let patch_text = require_string(&args, "patchText")?;
-
         if patch_text.is_empty() {
             return Err(ToolError::Validation("patchText is required".to_string()));
         }
-
         let ops = Self::parse(&patch_text)?;
+        Self::declare_external_permissions(&ops, &ctx.project_dir, permissions);
+        Self::verify_operations(&ops, &ctx.project_dir).await?;
 
-        // Verify all operations first (fail-fast)
-        for op in &ops {
-            match op {
-                PatchOp::Update { path, .. } => {
-                    let full = ctx.project_dir.join(path);
-                    if !full.exists() {
-                        return Err(ToolError::Validation(
-                            "apply_patch verification failed: Failed to read file to update"
-                                .to_string(),
-                        ));
-                    }
-                }
-                PatchOp::Delete { path } => {
-                    let full = ctx.project_dir.join(path);
-                    if !full.exists() {
-                        return Err(ToolError::Validation(format!(
-                            "apply_patch verification failed: File not found for delete: {path}"
-                        )));
-                    }
-                    if full.is_dir() {
-                        return Err(ToolError::Validation(format!(
-                            "apply_patch verification failed: Cannot delete directory: {path}"
-                        )));
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        // Verify update hunks match before applying anything
-        for op in &ops {
-            if let PatchOp::Update { path, hunks, .. } = op {
-                let full = ctx.project_dir.join(path);
-                let content = tokio::fs::read_to_string(&full)
-                    .await
-                    .map_err(|e| ToolError::Execution(format!("Failed to read file: {e}")))?;
-                Self::apply_hunks(&content, hunks)?; // dry run
-            }
-        }
-
-        // Apply all operations
         let mut files_info = Vec::new();
         let mut summary = Vec::new();
-
         for op in &ops {
             match op {
                 PatchOp::Add { path, content } => {
-                    let full = ctx.project_dir.join(path);
-                    if let Some(parent) = full.parent() {
-                        tokio::fs::create_dir_all(parent)
-                            .await
-                            .map_err(|e| ToolError::Execution(format!("{e}")))?;
-                    }
-                    let before = if full.exists() {
-                        tokio::fs::read_to_string(&full).await.unwrap_or_default()
-                    } else {
-                        String::new()
-                    };
-                    tokio::fs::write(&full, content)
-                        .await
-                        .map_err(|e| ToolError::Execution(format!("{e}")))?;
-                    summary.push(format!("A {}", path.replace('\\', "/")));
-                    files_info.push(serde_json::json!({
-                        "filePath": full.display().to_string(),
-                        "relativePath": path.replace('\\', "/"),
-                        "type": "add",
-                        "before": before,
-                        "after": content,
-                    }));
+                    Self::apply_add(path, content, &ctx.project_dir, &mut summary, &mut files_info)
+                        .await?;
                 }
                 PatchOp::Delete { path } => {
-                    let full = ctx.project_dir.join(path);
-                    tokio::fs::remove_file(&full)
-                        .await
-                        .map_err(|e| ToolError::Execution(format!("{e}")))?;
-                    summary.push(format!("D {}", path.replace('\\', "/")));
-                    files_info.push(serde_json::json!({
-                        "filePath": full.display().to_string(),
-                        "relativePath": path.replace('\\', "/"),
-                        "type": "delete",
-                    }));
+                    Self::apply_delete(path, &ctx.project_dir, &mut summary, &mut files_info)
+                        .await?;
                 }
                 PatchOp::Update {
                     path,
                     hunks,
                     move_to,
                 } => {
-                    let full = ctx.project_dir.join(path);
-                    let content = tokio::fs::read_to_string(&full)
-                        .await
-                        .map_err(|e| ToolError::Execution(format!("{e}")))?;
-                    let before = content.clone();
-                    let new_content = Self::apply_hunks(&content, hunks)?;
-
-                    if let Some(dest) = move_to {
-                        let dest_full = ctx.project_dir.join(dest);
-                        if let Some(parent) = dest_full.parent() {
-                            tokio::fs::create_dir_all(parent)
-                                .await
-                                .map_err(|e| ToolError::Execution(format!("{e}")))?;
-                        }
-                        tokio::fs::write(&dest_full, &new_content)
-                            .await
-                            .map_err(|e| ToolError::Execution(format!("{e}")))?;
-                        tokio::fs::remove_file(&full)
-                            .await
-                            .map_err(|e| ToolError::Execution(format!("{e}")))?;
-                        summary.push(format!(
-                            "M {} -> {}",
-                            path.replace('\\', "/"),
-                            dest.replace('\\', "/")
-                        ));
-                        files_info.push(serde_json::json!({
-                            "filePath": full.display().to_string(),
-                            "relativePath": dest.replace('\\', "/"),
-                            "type": "move",
-                            "movePath": dest_full.display().to_string(),
-                            "before": before,
-                            "after": new_content,
-                        }));
-                    } else {
-                        tokio::fs::write(&full, &new_content)
-                            .await
-                            .map_err(|e| ToolError::Execution(format!("{e}")))?;
-                        summary.push(format!("M {}", path.replace('\\', "/")));
-                        files_info.push(serde_json::json!({
-                            "filePath": full.display().to_string(),
-                            "relativePath": path.replace('\\', "/"),
-                            "type": "update",
-                            "before": before,
-                            "after": new_content,
-                        }));
-                    }
+                    Self::apply_update(
+                        path,
+                        hunks,
+                        move_to.as_deref(),
+                        &ctx.project_dir,
+                        &mut summary,
+                        &mut files_info,
+                    )
+                    .await?;
                 }
             }
         }
@@ -559,278 +707,5 @@ impl Tool for ApplyPatchTool {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::test_helpers::*;
-
-    fn patch() -> ApplyPatchTool {
-        ApplyPatchTool::new()
-    }
-
-    #[tokio::test]
-    async fn requires_patch_text() {
-        let tmp = TestDir::new();
-        let ctx = test_context(tmp.path());
-        let mut perms = PermissionCollector::new();
-        let result = patch()
-            .execute(serde_json::json!({"patchText": ""}), &ctx, &mut perms)
-            .await;
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("patchText is required")
-        );
-    }
-
-    #[tokio::test]
-    async fn rejects_invalid_patch_format() {
-        let tmp = TestDir::new();
-        let ctx = test_context(tmp.path());
-        let mut perms = PermissionCollector::new();
-        let result = patch()
-            .execute(
-                serde_json::json!({"patchText": "invalid patch"}),
-                &ctx,
-                &mut perms,
-            )
-            .await;
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("apply_patch verification failed")
-        );
-    }
-
-    #[tokio::test]
-    async fn rejects_empty_patch() {
-        let tmp = TestDir::new();
-        let ctx = test_context(tmp.path());
-        let mut perms = PermissionCollector::new();
-        let result = patch()
-            .execute(
-                serde_json::json!({"patchText": "*** Begin Patch\n*** End Patch"}),
-                &ctx,
-                &mut perms,
-            )
-            .await;
-        assert!(result.unwrap_err().to_string().contains("empty patch"));
-    }
-
-    #[tokio::test]
-    async fn applies_add_update_delete_in_one_patch() {
-        let tmp = TestDir::with_git();
-        tmp.write_file("modify.txt", "line1\nline2\n");
-        tmp.write_file("delete.txt", "obsolete\n");
-        let ctx = test_context(tmp.path());
-        let mut perms = PermissionCollector::new();
-
-        let patch_text = "*** Begin Patch\n*** Add File: nested/new.txt\n+created\n*** Delete File: delete.txt\n*** Update File: modify.txt\n@@\n-line2\n+changed\n*** End Patch";
-        let result = patch()
-            .execute(
-                serde_json::json!({"patchText": patch_text}),
-                &ctx,
-                &mut perms,
-            )
-            .await
-            .unwrap();
-
-        assert!(
-            result
-                .title
-                .contains("Success. Updated the following files")
-        );
-        assert!(result.output.contains("A nested/new.txt"));
-        assert!(result.output.contains("D delete.txt"));
-        assert!(result.output.contains("M modify.txt"));
-
-        assert_eq!(tmp.read_file("nested/new.txt"), "created\n");
-        assert_eq!(tmp.read_file("modify.txt"), "line1\nchanged\n");
-        assert!(!tmp.file_exists("delete.txt"));
-    }
-
-    #[tokio::test]
-    async fn applies_multiple_hunks_to_one_file() {
-        let tmp = TestDir::new();
-        tmp.write_file("multi.txt", "line1\nline2\nline3\nline4\n");
-        let ctx = test_context(tmp.path());
-        let mut perms = PermissionCollector::new();
-
-        let patch_text = "*** Begin Patch\n*** Update File: multi.txt\n@@\n-line2\n+changed2\n@@\n-line4\n+changed4\n*** End Patch";
-        patch()
-            .execute(
-                serde_json::json!({"patchText": patch_text}),
-                &ctx,
-                &mut perms,
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(
-            tmp.read_file("multi.txt"),
-            "line1\nchanged2\nline3\nchanged4\n"
-        );
-    }
-
-    #[tokio::test]
-    async fn moves_file_to_new_directory() {
-        let tmp = TestDir::new();
-        tmp.write_file("old/name.txt", "old content\n");
-        let ctx = test_context(tmp.path());
-        let mut perms = PermissionCollector::new();
-
-        let patch_text = "*** Begin Patch\n*** Update File: old/name.txt\n*** Move to: renamed/dir/name.txt\n@@\n-old content\n+new content\n*** End Patch";
-        patch()
-            .execute(
-                serde_json::json!({"patchText": patch_text}),
-                &ctx,
-                &mut perms,
-            )
-            .await
-            .unwrap();
-
-        assert!(!tmp.file_exists("old/name.txt"));
-        assert_eq!(tmp.read_file("renamed/dir/name.txt"), "new content\n");
-    }
-
-    #[tokio::test]
-    async fn rejects_update_when_target_file_missing() {
-        let tmp = TestDir::new();
-        let ctx = test_context(tmp.path());
-        let mut perms = PermissionCollector::new();
-
-        let patch_text =
-            "*** Begin Patch\n*** Update File: missing.txt\n@@\n-nope\n+better\n*** End Patch";
-        let result = patch()
-            .execute(
-                serde_json::json!({"patchText": patch_text}),
-                &ctx,
-                &mut perms,
-            )
-            .await;
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("Failed to read file to update")
-        );
-    }
-
-    #[tokio::test]
-    async fn rejects_delete_when_file_missing() {
-        let tmp = TestDir::new();
-        let ctx = test_context(tmp.path());
-        let mut perms = PermissionCollector::new();
-
-        let patch_text = "*** Begin Patch\n*** Delete File: missing.txt\n*** End Patch";
-        let result = patch()
-            .execute(
-                serde_json::json!({"patchText": patch_text}),
-                &ctx,
-                &mut perms,
-            )
-            .await;
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn rejects_delete_when_target_is_directory() {
-        let tmp = TestDir::new();
-        std::fs::create_dir(tmp.path().join("dir")).unwrap();
-        let ctx = test_context(tmp.path());
-        let mut perms = PermissionCollector::new();
-
-        let patch_text = "*** Begin Patch\n*** Delete File: dir\n*** End Patch";
-        let result = patch()
-            .execute(
-                serde_json::json!({"patchText": patch_text}),
-                &ctx,
-                &mut perms,
-            )
-            .await;
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn verification_failure_leaves_no_side_effects() {
-        let tmp = TestDir::new();
-        let ctx = test_context(tmp.path());
-        let mut perms = PermissionCollector::new();
-
-        // Add file succeeds but Update fails - nothing should be written
-        let patch_text = "*** Begin Patch\n*** Add File: created.txt\n+hello\n*** Update File: missing.txt\n@@\n-old\n+new\n*** End Patch";
-        let result = patch()
-            .execute(
-                serde_json::json!({"patchText": patch_text}),
-                &ctx,
-                &mut perms,
-            )
-            .await;
-        assert!(result.is_err());
-        assert!(!tmp.file_exists("created.txt"));
-    }
-
-    #[tokio::test]
-    async fn parses_heredoc_wrapped_patch() {
-        let tmp = TestDir::new();
-        let ctx = test_context(tmp.path());
-        let mut perms = PermissionCollector::new();
-
-        let patch_text = "cat <<'EOF'\n*** Begin Patch\n*** Add File: heredoc_test.txt\n+heredoc content\n*** End Patch\nEOF";
-        patch()
-            .execute(
-                serde_json::json!({"patchText": patch_text}),
-                &ctx,
-                &mut perms,
-            )
-            .await
-            .unwrap();
-        assert_eq!(tmp.read_file("heredoc_test.txt"), "heredoc content\n");
-    }
-
-    #[tokio::test]
-    async fn disambiguates_change_context_with_header() {
-        let tmp = TestDir::new();
-        tmp.write_file("multi_ctx.txt", "fn a\nx=10\ny=2\nfn b\nx=10\ny=20\n");
-        let ctx = test_context(tmp.path());
-        let mut perms = PermissionCollector::new();
-
-        let patch_text =
-            "*** Begin Patch\n*** Update File: multi_ctx.txt\n@@ fn b\n-x=10\n+x=11\n*** End Patch";
-        patch()
-            .execute(
-                serde_json::json!({"patchText": patch_text}),
-                &ctx,
-                &mut perms,
-            )
-            .await
-            .unwrap();
-        assert_eq!(
-            tmp.read_file("multi_ctx.txt"),
-            "fn a\nx=10\ny=2\nfn b\nx=11\ny=20\n"
-        );
-    }
-
-    #[tokio::test]
-    async fn eof_anchor_matches_from_end_first() {
-        let tmp = TestDir::new();
-        tmp.write_file("eof_anchor.txt", "start\nmarker\nmiddle\nmarker\nend\n");
-        let ctx = test_context(tmp.path());
-        let mut perms = PermissionCollector::new();
-
-        let patch_text = "*** Begin Patch\n*** Update File: eof_anchor.txt\n@@\n-marker\n-end\n+marker-changed\n+end\n*** End of File\n*** End Patch";
-        patch()
-            .execute(
-                serde_json::json!({"patchText": patch_text}),
-                &ctx,
-                &mut perms,
-            )
-            .await
-            .unwrap();
-        assert_eq!(
-            tmp.read_file("eof_anchor.txt"),
-            "start\nmarker\nmiddle\nmarker-changed\nend\n"
-        );
-    }
-}
+#[path = "mod_tests.rs"]
+mod tests;

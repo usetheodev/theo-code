@@ -44,7 +44,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash .claude/hooks/validate-command.sh"
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/validate-command.sh\""
           }
         ]
       },
@@ -53,7 +53,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash .claude/hooks/boundary-check.sh"
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/boundary-check.sh\""
           }
         ]
       }
@@ -64,7 +64,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash .claude/hooks/post-edit-check.sh"
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/post-edit-check.sh\""
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/stop-validation.sh\"",
+            "timeout": 300
           }
         ]
       }

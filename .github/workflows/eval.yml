@@ -1,0 +1,195 @@
+# T12.1 — Continuous SOTA evaluation gate.
+#
+# Runs the benchmark smoke suite on every PR (with a free-tier model
+# default), and the full terminal-bench reduced subset only on PRs
+# carrying the `[bench]` label OR on pushes to main / develop. This
+# matches ADR D13 — "CI default uses Llama-3.3-70B via Groq free tier
+# for smoke; modelos pagos rodam só em [bench] label do PR".
+#
+# Without secrets configured, the smoke job is a no-op informational
+# step (skip + comment-on-PR pattern). The workflow LANDS the
+# infrastructure so secrets-bearing maintainers can flip a switch.
+
+name: eval
+
+on:
+  pull_request:
+    branches: [main, develop]
+    types: [opened, synchronize, reopened, labeled]
+  push:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+  pull-requests: write  # for the diff comment on PRs
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # ─────────────────────────────────────────────────────────────
+  # Smoke evaluation — runs on every PR. Free-tier model default.
+  # When THEO_GROQ_API_KEY secret is absent, the job exits early
+  # with an informational message (does NOT block the PR).
+  # ─────────────────────────────────────────────────────────────
+  smoke:
+    name: Smoke (Groq free tier)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect required secrets
+        id: secrets-gate
+        env:
+          GROQ_KEY: ${{ secrets.THEO_GROQ_API_KEY }}
+        run: |
+          if [[ -z "${GROQ_KEY:-}" ]]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice title=eval-smoke skipped::THEO_GROQ_API_KEY secret not configured. The eval workflow is wired and will run automatically once a maintainer sets the secret."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Rust toolchain
+        if: steps.secrets-gate.outputs.skip == 'false'
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry + target
+        if: steps.secrets-gate.outputs.skip == 'false'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-eval
+
+      - name: Set up Python
+        if: steps.secrets-gate.outputs.skip == 'false'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build theo (release)
+        if: steps.secrets-gate.outputs.skip == 'false'
+        run: cargo build --release --bin theo
+
+      - name: Run smoke benchmark
+        if: steps.secrets-gate.outputs.skip == 'false'
+        env:
+          THEO_GROQ_API_KEY: ${{ secrets.THEO_GROQ_API_KEY }}
+          # Smoke variant: text-only, low-cost, deterministic seed.
+          THEO_BENCH_VARIANT: smoke
+        run: |
+          mkdir -p apps/theo-benchmark/reports
+          python3 apps/theo-benchmark/runner/smoke.py \
+            --bin "$(pwd)/target/release/theo" \
+            > apps/theo-benchmark/reports/smoke-ci.json
+
+      - name: Upload smoke report
+        if: steps.secrets-gate.outputs.skip == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-eval-report
+          path: apps/theo-benchmark/reports/smoke-ci.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  # ─────────────────────────────────────────────────────────────
+  # Full terminal-bench reduced subset — gated by the `[bench]`
+  # label on PRs OR by main/develop push events. Uses paid models
+  # via the configured provider secrets.
+  # ─────────────────────────────────────────────────────────────
+  bench-full:
+    name: Full benchmark (paid models)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    if: |
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'bench')) ||
+      github.event_name == 'push'
+    needs: smoke
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect required secrets
+        id: secrets-gate
+        env:
+          ANTHROPIC_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [[ -z "${ANTHROPIC_KEY:-}" && -z "${OPENAI_KEY:-}" ]]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice title=bench-full skipped::No paid-model API key configured. Set ANTHROPIC_API_KEY or OPENAI_API_KEY in repository secrets to enable."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Rust toolchain
+        if: steps.secrets-gate.outputs.skip == 'false'
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Python
+        if: steps.secrets-gate.outputs.skip == 'false'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build theo (release)
+        if: steps.secrets-gate.outputs.skip == 'false'
+        run: cargo build --release --bin theo
+
+      - name: Run reduced terminal-bench
+        if: steps.secrets-gate.outputs.skip == 'false'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          THEO_BENCH_VARIANT: reduced
+        run: |
+          mkdir -p apps/theo-benchmark/reports
+          python3 apps/theo-benchmark/runner/ab_test.py \
+            --variant sota \
+            --tasks 10 \
+            --bin "$(pwd)/target/release/theo" \
+            > apps/theo-benchmark/reports/bench-ci.json
+
+      - name: Upload full bench report
+        if: steps.secrets-gate.outputs.skip == 'false'
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-bench-report
+          path: apps/theo-benchmark/reports/bench-ci.json
+          retention-days: 90
+
+      # Diff vs baseline: comment on PR with the delta. Future commit
+      # may add a stricter "must improve baseline by N points" gate.
+      - name: Comment delta on PR
+        if: |
+          steps.secrets-gate.outputs.skip == 'false' &&
+          github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = 'apps/theo-benchmark/reports/bench-ci.json';
+            if (!fs.existsSync(path)) return;
+            const report = JSON.parse(fs.readFileSync(path, 'utf8'));
+            const summary = report.summary || {};
+            const body = [
+              '## eval — bench-full report',
+              '',
+              `- **Tasks attempted:** ${summary.attempted ?? 'n/a'}`,
+              `- **Solved:** ${summary.solved ?? 'n/a'}`,
+              `- **Failed (real):** ${summary.failed_real ?? 'n/a'}`,
+              `- **Infra failures:** ${summary.infra_failures ?? 'n/a'}`,
+              `- **Total cost:** $${summary.total_cost_usd ?? 0}`,
+              '',
+              '_Baseline diff comparison is added when the historical baseline.json is wired._'
+            ].join('\n');
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body
+            });

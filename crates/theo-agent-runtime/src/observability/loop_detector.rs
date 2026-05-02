@@ -14,12 +14,27 @@ use std::hash::{Hash, Hasher};
 const WINDOW_SIZE: usize = 10;
 
 /// Expected tool-pair whitelist (A immediately followed by B is benign).
-const EXPECTED_SEQUENCES: &[(&str, &str)] = &[
-    ("write_file", "read_file"),
-    ("edit_file", "bash"),
-    ("edit_file", "read_file"),
-    ("bash", "read_file"),
-    ("grep", "read_file"),
+///
+/// Bug 2026-04-27 (dogfood): pairs used `edit_file` / `write_file` /
+/// `read_file` — names not present in the production registry since
+/// at least `default_registry_tool_id_snapshot_is_pinned` shipped.
+/// As a result EVERY edit→read or write→read pair was treated as a
+/// suspicious repetition rather than benign workflow, inflating the
+/// loop detector's noise floor. The pairs now mirror the production
+/// IDs (`edit`, `write`, `read`).
+///
+/// `pub` (was private) so the contract test
+/// `production_registry_recognises_all_observability_tool_names` in
+/// `tests/observability_tool_name_contract.rs` can cross-check every
+/// referenced name against the snapshot-pinned production registry.
+pub const EXPECTED_SEQUENCES: &[(&str, &str)] = &[
+    ("write", "read"),
+    ("edit", "bash"),
+    ("edit", "read"),
+    ("bash", "read"),
+    ("grep", "read"),
+    ("apply_patch", "bash"),
+    ("apply_patch", "read"),
 ];
 
 /// Verdict returned by [`LoopDetector::record`].
@@ -38,8 +53,6 @@ pub enum LoopVerdict {
 #[derive(Debug, Clone)]
 struct WindowEntry {
     tool_name: String,
-    #[allow(dead_code)]
-    fingerprint: u64,
 }
 
 /// Detector with sliding window and consecutive counter.
@@ -98,7 +111,6 @@ impl LoopDetector {
 
         self.window.push_back(WindowEntry {
             tool_name: tool_name.to_string(),
-            fingerprint: fp,
         });
         while self.window.len() > WINDOW_SIZE {
             self.window.pop_front();
@@ -273,15 +285,15 @@ mod tests {
     #[test]
     fn test_write_then_read_not_flagged() {
         let mut d = LoopDetector::new();
-        d.record("write_file", &json!({"path": "a"}), "");
-        let v = d.record("read_file", &json!({"path": "a"}), "");
+        d.record("write", &json!({"path": "a"}), "");
+        let v = d.record("read", &json!({"path": "a"}), "");
         assert_eq!(v, LoopVerdict::Ok);
     }
 
     #[test]
     fn test_edit_then_bash_not_flagged() {
         let mut d = LoopDetector::new();
-        d.record("edit_file", &json!({"path": "a"}), "");
+        d.record("edit", &json!({"path": "a"}), "");
         let v = d.record("bash", &json!({"cmd": "cargo test"}), "");
         assert_eq!(v, LoopVerdict::Ok);
     }

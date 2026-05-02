@@ -356,6 +356,7 @@ mod tests {
             Message {
                 role: Role::Assistant,
                 content: Some(String::new()),
+                content_blocks: None,
                 tool_calls: None,
                 tool_call_id: None,
                 name: None,
@@ -381,6 +382,7 @@ mod tests {
             Message {
                 role: Role::Assistant,
                 content: None,
+                content_blocks: None,
                 tool_calls: None,
                 tool_call_id: None,
                 name: None,

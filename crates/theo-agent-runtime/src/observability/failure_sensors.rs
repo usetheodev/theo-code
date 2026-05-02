@@ -10,8 +10,20 @@ use std::collections::HashSet;
 
 use crate::observability::projection::{ProjectedStep, StepOutcome};
 
+/// Tool ids that mutate the workspace.
+///
+/// Bug 2026-04-27 (dogfood): the original list was `edit_file | write_file`,
+/// which never matched the production registry (snapshot-pinned by
+/// `default_registry_tool_id_snapshot_is_pinned`: `edit`, `write`,
+/// `apply_patch`). The mismatch caused `detect_premature_termination` to
+/// fire as a false positive on every successful run with ≥ 2 iterations
+/// (edits were ignored ⇒ `successful_edits == 0`) and turned
+/// `detect_weak_verification` into dead code (the window never opened).
 fn is_edit_tool(step: &ProjectedStep) -> bool {
-    matches!(step.tool_name.as_deref(), Some("edit_file" | "write_file"))
+    matches!(
+        step.tool_name.as_deref(),
+        Some("edit" | "write" | "apply_patch")
+    )
 }
 
 fn is_verification_tool(step: &ProjectedStep) -> bool {
@@ -113,15 +125,16 @@ pub fn detect_conversation_history_loss(
         let end = (start + 4).min(steps.len());
         for s in &steps[start + 1..end] {
             if s.event_type == "ToolCallCompleted"
-                && matches!(s.tool_name.as_deref(), Some("read_file"))
-            {
-                if pre_compaction_hot_files
+                // Bug 2026-04-27 (dogfood): was `read_file`, but the
+                // production registry exposes the read tool as `read`
+                // (pinned by `default_registry_tool_id_snapshot_is_pinned`).
+                && matches!(s.tool_name.as_deref(), Some("read"))
+                && pre_compaction_hot_files
                     .iter()
                     .any(|f| s.payload_summary.contains(f))
                 {
                     return true;
                 }
-            }
         }
     }
     false
@@ -173,7 +186,7 @@ mod tests {
             step(0, 0, "RunInitialized", None, None, ""),
             step(1, 1, "LlmCallStart", None, None, ""),
             step(2, 2, "LlmCallStart", None, None, ""),
-            step(3, 3, "ToolCallCompleted", Some("edit_file"), Some(StepOutcome::Success), ""),
+            step(3, 3, "ToolCallCompleted", Some("edit"), Some(StepOutcome::Success), ""),
             step(4, 4, "RunStateChanged", None, None, "converged"),
         ];
         assert!(!detect_premature_termination(&s));
@@ -206,7 +219,7 @@ mod tests {
     #[test]
     fn test_weak_verification_detected() {
         let s = vec![
-            step(0, 0, "ToolCallCompleted", Some("edit_file"), Some(StepOutcome::Success), ""),
+            step(0, 0, "ToolCallCompleted", Some("edit"), Some(StepOutcome::Success), ""),
             step(1, 1, "LlmCallStart", None, None, ""),
             step(2, 2, "LlmCallStart", None, None, ""),
             step(3, 3, "LlmCallStart", None, None, ""),
@@ -217,7 +230,7 @@ mod tests {
     #[test]
     fn test_verification_present_clears_flag() {
         let s = vec![
-            step(0, 0, "ToolCallCompleted", Some("edit_file"), Some(StepOutcome::Success), ""),
+            step(0, 0, "ToolCallCompleted", Some("edit"), Some(StepOutcome::Success), ""),
             step(1, 1, "ToolCallCompleted", Some("bash"), Some(StepOutcome::Success), ""),
         ];
         assert!(!detect_weak_verification(&s));
@@ -226,7 +239,7 @@ mod tests {
     #[test]
     fn test_sensor_execution_counts_as_verification() {
         let s = vec![
-            step(0, 0, "ToolCallCompleted", Some("edit_file"), Some(StepOutcome::Success), ""),
+            step(0, 0, "ToolCallCompleted", Some("edit"), Some(StepOutcome::Success), ""),
             step(1, 1, "SensorExecuted", None, None, ""),
         ];
         assert!(!detect_weak_verification(&s));
@@ -235,9 +248,9 @@ mod tests {
     #[test]
     fn test_multiple_edits_each_checked() {
         let s = vec![
-            step(0, 0, "ToolCallCompleted", Some("edit_file"), Some(StepOutcome::Success), ""),
+            step(0, 0, "ToolCallCompleted", Some("edit"), Some(StepOutcome::Success), ""),
             step(1, 1, "ToolCallCompleted", Some("bash"), Some(StepOutcome::Success), ""),
-            step(2, 2, "ToolCallCompleted", Some("edit_file"), Some(StepOutcome::Success), ""),
+            step(2, 2, "ToolCallCompleted", Some("edit"), Some(StepOutcome::Success), ""),
             step(3, 3, "LlmCallStart", None, None, ""),
             step(4, 4, "LlmCallStart", None, None, ""),
             step(5, 5, "LlmCallStart", None, None, ""),
@@ -307,7 +320,7 @@ mod tests {
         hot.insert("hot.rs".to_string());
         let s = vec![
             step(0, 0, "ContextOverflowRecovery", None, None, ""),
-            step(1, 1, "ToolCallCompleted", Some("read_file"), None, "hot.rs"),
+            step(1, 1, "ToolCallCompleted", Some("read"), None, "hot.rs"),
         ];
         assert!(detect_conversation_history_loss(&s, &hot));
     }
@@ -316,7 +329,7 @@ mod tests {
     fn test_no_loss_without_overflow() {
         let mut hot = HashSet::new();
         hot.insert("hot.rs".to_string());
-        let s = vec![step(0, 0, "ToolCallCompleted", Some("read_file"), None, "hot.rs")];
+        let s = vec![step(0, 0, "ToolCallCompleted", Some("read"), None, "hot.rs")];
         assert!(!detect_conversation_history_loss(&s, &hot));
     }
 
@@ -326,8 +339,89 @@ mod tests {
         hot.insert("hot.rs".to_string());
         let s = vec![
             step(0, 0, "ContextOverflowRecovery", None, None, ""),
-            step(1, 1, "ToolCallCompleted", Some("read_file"), None, "new.rs"),
+            step(1, 1, "ToolCallCompleted", Some("read"), None, "new.rs"),
         ];
         assert!(!detect_conversation_history_loss(&s, &hot));
+    }
+
+    // --- Regression — dogfood 2026-04-27 ---
+    //
+    // Before the fix, `is_edit_tool` matched only `edit_file | write_file`
+    // and `detect_conversation_history_loss` matched only `read_file` —
+    // names that haven't existed in the production registry since at least
+    // the snapshot pin (`default_registry_tool_id_snapshot_is_pinned`).
+    // The test below assumes the production names (`edit`, `write`, `read`)
+    // and pins each sensor's contract against them so a future rename
+    // can't silently turn `PrematureTermination` back into a false positive
+    // or `WeakVerification` / `ConversationHistoryLoss` back into dead code.
+
+    #[test]
+    fn dogfood_premature_termination_recognises_production_edit_tool_id() {
+        // Two LLM iterations + ONE successful `edit` (not `edit_file`)
+        // + Converged → must NOT fire (edit is real progress).
+        let s = vec![
+            step(0, 0, "RunInitialized", None, None, ""),
+            step(1, 1, "LlmCallStart", None, None, ""),
+            step(2, 2, "LlmCallStart", None, None, ""),
+            step(3, 3, "ToolCallCompleted", Some("edit"), Some(StepOutcome::Success), ""),
+            step(4, 4, "RunStateChanged", None, None, "converged"),
+        ];
+        assert!(
+            !detect_premature_termination(&s),
+            "PrematureTermination must accept `edit` as a real edit (was: only `edit_file`)"
+        );
+    }
+
+    #[test]
+    fn dogfood_premature_termination_recognises_production_write_tool_id() {
+        let s = vec![
+            step(0, 0, "RunInitialized", None, None, ""),
+            step(1, 1, "LlmCallStart", None, None, ""),
+            step(2, 2, "LlmCallStart", None, None, ""),
+            step(3, 3, "ToolCallCompleted", Some("write"), Some(StepOutcome::Success), ""),
+            step(4, 4, "RunStateChanged", None, None, "converged"),
+        ];
+        assert!(!detect_premature_termination(&s));
+    }
+
+    #[test]
+    fn dogfood_premature_termination_recognises_apply_patch_tool_id() {
+        // `apply_patch` is also a production write-side tool — pin it too.
+        let s = vec![
+            step(0, 0, "RunInitialized", None, None, ""),
+            step(1, 1, "LlmCallStart", None, None, ""),
+            step(2, 2, "LlmCallStart", None, None, ""),
+            step(3, 3, "ToolCallCompleted", Some("apply_patch"), Some(StepOutcome::Success), ""),
+            step(4, 4, "RunStateChanged", None, None, "converged"),
+        ];
+        assert!(!detect_premature_termination(&s));
+    }
+
+    #[test]
+    fn dogfood_weak_verification_window_opens_for_production_edit_tool_id() {
+        // Successful `edit` followed by NOTHING → window opens, no
+        // verification → fires.
+        let s = vec![
+            step(0, 0, "ToolCallCompleted", Some("edit"), Some(StepOutcome::Success), ""),
+        ];
+        assert!(
+            detect_weak_verification(&s),
+            "WeakVerification must open its window on `edit` (was: only `edit_file`)"
+        );
+    }
+
+    #[test]
+    fn dogfood_conversation_history_loss_matches_production_read_tool_id() {
+        // ContextOverflowRecovery followed by `read` of a hot file → fires.
+        let mut hot = HashSet::new();
+        hot.insert("hot.rs".into());
+        let s = vec![
+            step(0, 0, "ContextOverflowRecovery", None, None, ""),
+            step(1, 1, "ToolCallCompleted", Some("read"), None, "hot.rs"),
+        ];
+        assert!(
+            detect_conversation_history_loss(&s, &hot),
+            "ConversationHistoryLoss must match `read` (was: only `read_file`)"
+        );
     }
 }

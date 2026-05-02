@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use theo_domain::event::{DomainEvent, EventKind, EventType};
+use theo_domain::event::{DomainEvent, EventKind};
 
 /// Current schema version for the trajectory JSONL format.
 pub const ENVELOPE_SCHEMA_VERSION: u32 = 1;
@@ -15,11 +15,15 @@ pub const ENVELOPE_SCHEMA_VERSION: u32 = 1;
 /// events, drop sentinels, writer-recovery markers, and summary lines.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum EnvelopeKind {
     Event,
     DropSentinel,
     WriterRecovered,
     Summary,
+    /// T16.1 — Human-provided rating attached to a turn or completed run.
+    /// Payload: `{ "rating": i8, "turn_index": u64, "comment": Option<String> }`.
+    Rating,
 }
 
 /// Wire format used to write a single line into the trajectory JSONL.
@@ -131,11 +135,52 @@ impl TrajectoryEnvelope {
             dropped_since_last: 0,
         }
     }
-}
 
-#[allow(dead_code)]
-fn event_type_stub() -> EventType {
-    EventType::TaskCreated
+    /// T16.1 — Build a `Rating` envelope capturing human feedback on a turn.
+    ///
+    /// `rating` follows the `-1` / `0` / `+1` convention (👎 / neutral / 👍)
+    /// but the type is `i8` so multi-step scoring (-3..=+3) is also supported.
+    /// `turn_index` references the LLM turn the human is rating.
+    pub fn rating(
+        run_id: &str,
+        seq: u64,
+        ts: u64,
+        rating: i8,
+        turn_index: u64,
+        comment: Option<&str>,
+    ) -> Self {
+        let mut payload = serde_json::json!({
+            "rating": rating,
+            "turn_index": turn_index,
+        });
+        if let Some(c) = comment {
+            payload["comment"] = serde_json::Value::String(c.to_string());
+        }
+        Self {
+            v: ENVELOPE_SCHEMA_VERSION,
+            seq,
+            ts,
+            run_id: run_id.to_string(),
+            kind: EnvelopeKind::Rating,
+            event_type: None,
+            event_kind: None,
+            entity_id: None,
+            payload,
+            dropped_since_last: 0,
+        }
+    }
+
+    /// T16.1 — Returns the rating value for this envelope, or None if it's
+    /// not a Rating-kind line.
+    pub fn rating_value(&self) -> Option<i8> {
+        if self.kind != EnvelopeKind::Rating {
+            return None;
+        }
+        self.payload
+            .get("rating")
+            .and_then(|v| v.as_i64())
+            .and_then(|i| i8::try_from(i).ok())
+    }
 }
 
 #[cfg(test)]
@@ -185,5 +230,110 @@ mod tests {
         let env = TrajectoryEnvelope::summary("run-1", 10, 3000, serde_json::json!({"metric": 0.5}));
         assert_eq!(env.kind, EnvelopeKind::Summary);
         assert_eq!(env.payload["metric"], 0.5);
+    }
+
+    // ---- T16.1 — Rating envelope ----
+
+    #[test]
+    fn t161_rating_envelope_has_rating_kind() {
+        let env = TrajectoryEnvelope::rating("run-1", 11, 4000, 1, 5, None);
+        assert_eq!(env.kind, EnvelopeKind::Rating);
+        assert_eq!(env.payload["rating"], 1);
+        assert_eq!(env.payload["turn_index"], 5);
+    }
+
+    #[test]
+    fn t161_rating_envelope_supports_negative_scores() {
+        let env = TrajectoryEnvelope::rating("r", 0, 0, -1, 3, None);
+        assert_eq!(env.rating_value(), Some(-1));
+    }
+
+    #[test]
+    fn t161_rating_envelope_with_comment_includes_it() {
+        let env = TrajectoryEnvelope::rating("r", 0, 0, 1, 2, Some("nice"));
+        assert_eq!(env.payload["comment"], "nice");
+    }
+
+    #[test]
+    fn t161_rating_envelope_without_comment_omits_it() {
+        let env = TrajectoryEnvelope::rating("r", 0, 0, 0, 1, None);
+        assert!(env.payload.get("comment").is_none());
+    }
+
+    #[test]
+    fn t161_rating_value_returns_none_for_non_rating_kind() {
+        let e = DomainEvent::new(EventType::ToolCallCompleted, "c", serde_json::json!({}));
+        let env = TrajectoryEnvelope::from_event(&e, "r", 0);
+        assert!(env.rating_value().is_none());
+    }
+
+    #[test]
+    fn t161_rating_envelope_serde_roundtrip() {
+        let env = TrajectoryEnvelope::rating("r", 7, 1234, 1, 9, Some("good"));
+        let json = serde_json::to_string(&env).unwrap();
+        assert!(json.contains("\"kind\":\"rating\""));
+        let back: TrajectoryEnvelope = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.kind, EnvelopeKind::Rating);
+        assert_eq!(back.rating_value(), Some(1));
+        assert_eq!(back.payload["comment"], "good");
+    }
+
+    /// Backward-compat regression guard for the `sota-tier1-tier2-plan`
+    /// global DoD: a `.theo/trajectories/*.jsonl` line written by a
+    /// theo build BEFORE T16.1 (so `EnvelopeKind` only had the original
+    /// 4 variants — `event`/`drop_sentinel`/`writer_recovered`/`summary`)
+    /// MUST still parse under the current `#[non_exhaustive]` enum that
+    /// also contains `Rating`. Locks the wire-format contract.
+    #[test]
+    fn pre_t161_legacy_trajectory_envelope_loads_each_original_kind() {
+        // Canonical pre-T16.1 lines for each of the 4 original kinds.
+        let cases = [
+            (
+                "event",
+                r#"{"v":1,"seq":0,"ts":1700000000,"run_id":"run-a",
+                    "kind":"event","event_type":"ToolCallCompleted",
+                    "event_kind":"Tooling","entity_id":"call-1",
+                    "payload":{"status":"ok"}}"#,
+                EnvelopeKind::Event,
+            ),
+            (
+                "drop_sentinel",
+                r#"{"v":1,"seq":5,"ts":1700000010,"run_id":"run-a",
+                    "kind":"drop_sentinel",
+                    "payload":{"dropped_count":3}}"#,
+                EnvelopeKind::DropSentinel,
+            ),
+            (
+                "writer_recovered",
+                r#"{"v":1,"seq":7,"ts":1700000020,"run_id":"run-a",
+                    "kind":"writer_recovered",
+                    "payload":{"buffered_events":12,"error":"disk_full"}}"#,
+                EnvelopeKind::WriterRecovered,
+            ),
+            (
+                "summary",
+                r#"{"v":1,"seq":10,"ts":1700000030,"run_id":"run-a",
+                    "kind":"summary",
+                    "payload":{"final_status":"ok","metric":0.42}}"#,
+                EnvelopeKind::Summary,
+            ),
+        ];
+        for (name, json, expected_kind) in cases {
+            let env: TrajectoryEnvelope = serde_json::from_str(json)
+                .unwrap_or_else(|e| panic!("legacy `{name}` envelope failed to parse: {e}"));
+            assert_eq!(env.kind, expected_kind, "kind mismatch for `{name}`");
+            assert_eq!(env.v, 1, "schema version preserved for `{name}`");
+            assert_eq!(
+                env.dropped_since_last, 0,
+                "`dropped_since_last` defaults to 0 on legacy envelopes (`{name}`)"
+            );
+            // Roundtrip: serialise and deserialise once more — the modern
+            // type must produce wire-format equivalent under all original
+            // kinds (no rename / no field renumber).
+            let s = serde_json::to_string(&env).expect("modern envelope serialises");
+            let back: TrajectoryEnvelope =
+                serde_json::from_str(&s).expect("modern envelope round-trips");
+            assert_eq!(back.kind, expected_kind);
+        }
     }
 }

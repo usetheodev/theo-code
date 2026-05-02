@@ -29,6 +29,11 @@ pub fn apply_network_isolation(policy: &NetworkPolicy) -> std::io::Result<()> {
 
     // CLONE_NEWUSER | CLONE_NEWNET
     let flags = libc::CLONE_NEWUSER | libc::CLONE_NEWNET;
+    // SAFETY: `unshare` is a libc FFI that takes a flag bitmask. The
+    // constants are Linux-specific constants by type (`CLONE_NEWUSER`,
+    // `CLONE_NEWNET`). Failure is graceful — the syscall returns a
+    // negative value on error which we convert into a warning. No
+    // pointer or memory ownership is involved.
     let ret = unsafe { libc::unshare(flags) };
 
     if ret != 0 {
@@ -102,6 +107,9 @@ mod tests {
             .stderr(Stdio::piped());
 
         let policy = NetworkPolicy::default(); // deny
+        // SAFETY: `pre_exec` runs in the forked child before exec.
+        // `apply_network_isolation` only calls `unshare(NEWUSER|NEWNET)`
+        // which is async-signal-safe. Test-only path.
         unsafe {
             cmd.pre_exec(move || apply_network_isolation(&policy));
         }

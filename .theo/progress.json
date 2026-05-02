@@ -1,0 +1,93 @@
+{
+  "updated_at": "1777324022Z",
+  "session_id": "0019dd0c4500a_a91b5f5e013ddcb5",
+  "tasks_completed": [
+    {
+      "name": "LLM error: network error: error sending request for url (http://localhost:8000/v1/chat/completions)",
+      "status": "failed",
+      "files_changed": []
+    },
+    {
+      "name": "LLM error: authentication failed: {\n    \"error\": {\n        \"message\": \"You didn't provide an API key",
+      "status": "failed",
+      "files_changed": []
+    },
+    {
+      "name": "LLM error: authentication failed: {\"detail\":\"Unauthorized\"}",
+      "status": "failed",
+      "files_changed": []
+    },
+    {
+      "name": "Before I help, what’s your role and what kind of software/projects are you working on (including you",
+      "status": "completed",
+      "files_changed": []
+    },
+    {
+      "name": "Before I do that, quick onboarding question: what’s your role and what kind of software/projects are",
+      "status": "completed",
+      "files_changed": []
+    },
+    {
+      "name": "Before we begin, what’s your role and what kind of software/projects are you working on (including y",
+      "status": "completed",
+      "files_changed": []
+    },
+    {
+      "name": "Understood — stopping here. If you want to resume later, just say “continue.”",
+      "status": "completed",
+      "files_changed": []
+    },
+    {
+      "name": "Understood — stopping now.",
+      "status": "completed",
+      "files_changed": []
+    },
+    {
+      "name": "No-op.",
+      "status": "completed",
+      "files_changed": []
+    },
+    {
+      "name": "Budget exceeded: iterations exceeded: 2 > 1 limit. Edits succeeded: 0. Files: ",
+      "status": "failed",
+      "files_changed": []
+    },
+    {
+      "name": "Budget exceeded: iterations exceeded: 2 > 1 limit. Edits succeeded: 0. Files: ",
+      "status": "failed",
+      "files_changed": []
+    },
+    {
+      "name": "No-op.",
+      "status": "completed",
+      "files_changed": []
+    },
+    {
+      "name": "What do you build, and what tech stack do you work in day to day?",
+      "status": "completed",
+      "files_changed": []
+    },
+    {
+      "name": "Antes de responder sobre o `RRF`, preciso coletar o contexto mínimo desta primeira sessão.\n\nO que vo",
+      "status": "completed",
+      "files_changed": []
+    },
+    {
+      "name": "Before I help, one quick setup question: what do you build day to day, and what tech stack do you mo",
+      "status": "completed",
+      "files_changed": []
+    },
+    {
+      "name": "pong",
+      "status": "completed",
+      "files_changed": []
+    },
+    {
+      "name": "Before I help, one quick setup question: what do you build day to day, and what tech stack do you wo",
+      "status": "completed",
+      "files_changed": []
+    }
+  ],
+  "next_steps": [],
+  "last_error": null
+}

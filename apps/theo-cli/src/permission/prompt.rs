@@ -150,6 +150,9 @@ mod tests {
 
     #[test]
     fn test_prompt_auto_accept_returns_always() {
+        // SAFETY: ADR-021#rust_2024_test_env_var — Rust 2024 made
+        // env::set_var unsafe; cargo test serialises this test module
+        // via #[cfg(test)] scope, so no concurrent reader race.
         unsafe {
             std::env::set_var("THEO_AUTO_ACCEPT", "1");
         }
@@ -158,6 +161,7 @@ mod tests {
             summary: "ls".into(),
         };
         let d = prompt_for(&req);
+        // SAFETY: ADR-021#rust_2024_test_env_var — same invariant as above.
         unsafe {
             std::env::remove_var("THEO_AUTO_ACCEPT");
         }

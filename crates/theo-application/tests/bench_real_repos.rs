@@ -28,8 +28,16 @@ struct QueryCase {
 }
 
 fn bench_cases() -> Vec<BenchCase> {
+    let mut all = Vec::new();
+    all.extend(tier1_baseline_cases());
+    all.extend(tier2_medium_cases());
+    all.extend(tier3_stress_cases());
+    all.extend(tier4_meta_cases());
+    all
+}
+
+fn tier1_baseline_cases() -> Vec<BenchCase> {
     vec![
-        // Tier 1: Baseline
         BenchCase {
             repo_path: "/root/bench/ripgrep",
             name: "ripgrep",
@@ -87,7 +95,11 @@ fn bench_cases() -> Vec<BenchCase> {
                 },
             ],
         },
-        // Tier 2: Medium
+    ]
+}
+
+fn tier2_medium_cases() -> Vec<BenchCase> {
+    vec![
         BenchCase {
             repo_path: "/root/bench/serde",
             name: "serde",
@@ -145,7 +157,11 @@ fn bench_cases() -> Vec<BenchCase> {
                 },
             ],
         },
-        // Tier 3: Stress
+    ]
+}
+
+fn tier3_stress_cases() -> Vec<BenchCase> {
+    vec![
         BenchCase {
             repo_path: "/root/bench/redis",
             name: "redis",
@@ -206,7 +222,11 @@ fn bench_cases() -> Vec<BenchCase> {
                 },
             ],
         },
-        // Tier 4: Meta
+    ]
+}
+
+fn tier4_meta_cases() -> Vec<BenchCase> {
+    vec![
         BenchCase {
             repo_path: "/root/bench/tokio",
             name: "tokio",
@@ -277,117 +297,21 @@ fn run_benchmark(case: &BenchCase) -> Option<RepoBenchResult> {
         eprintln!("  ⚠ {} not found at {}", case.name, case.repo_path);
         return None;
     }
-
     let total_start = Instant::now();
-
-    // Phase 1: Extract
-    let extract_start = Instant::now();
-    let (files, extract_stats) = extraction::extract_repo(repo_path);
-    let extract_ms = extract_start.elapsed().as_millis() as u64;
-
+    let (files, extract_stats, extract_ms) = bench_extract(repo_path)?;
     if files.is_empty() {
         eprintln!("  ⚠ {} extracted 0 files", case.name);
         return None;
     }
-
-    // Phase 2: Build graph + cluster
-    let mut pipeline = Pipeline::with_defaults();
-    let build_start = Instant::now();
-    let _bridge_stats = pipeline.build_graph(&files);
-    let build_ms = build_start.elapsed().as_millis() as u64;
-
-    let cluster_start = Instant::now();
-    let communities = pipeline.cluster();
-    let cluster_ms = cluster_start.elapsed().as_millis() as u64;
-    let community_count = communities.len();
-
-    // Phase 3: Query each ground truth case
-    let mut query_results: Vec<QueryResult> = Vec::new();
-
-    for qcase in &case.queries {
-        let query_start = Instant::now();
-        let payload = pipeline.assemble_context(qcase.query);
-        let query_ms = query_start.elapsed().as_millis() as u64;
-
-        // Extract file paths from assembled context (community content)
-        let mut returned_files: Vec<String> = Vec::new();
-        for item in &payload.items {
-            // Community content has lines like "## path/to/file.rs" or "path/file.py"
-            for line in item.content.lines() {
-                let trimmed = line.trim().trim_start_matches("## ").trim();
-                if trimmed.contains('/') && (trimmed.contains('.') || trimmed.ends_with('/')) {
-                    // Clean path: remove leading "file:" or "## "
-                    let clean = trimmed.trim_start_matches("file:").trim();
-                    if !clean.is_empty() && !clean.starts_with('#') && !clean.starts_with('|') {
-                        returned_files.push(clean.to_string());
-                    }
-                }
-            }
-            // Also include the community_id which often contains file paths
-            returned_files.push(item.community_id.clone());
-        }
-        returned_files.dedup();
-
-        // Use fuzzy matching: expected file is "hit" if ANY returned file contains it
-        // This handles path prefix differences (e.g., "src/dict.c" matches "redis/src/dict.c")
-        let fuzzy_returned: Vec<String> = qcase
-            .expected_files
-            .iter()
-            .filter(|expected| {
-                returned_files.iter().any(|ret| ret.contains(*expected))
-                    || payload
-                        .items
-                        .iter()
-                        .any(|item| item.content.contains(*expected))
-            })
-            .map(|e| e.to_string())
-            .collect();
-
-        // For standard metrics, use community IDs + fuzzy matches as "returned"
-        let _effective_returned: Vec<String> = returned_files
-            .iter()
-            .chain(fuzzy_returned.iter())
-            .cloned()
-            .collect();
-
-        // Compute metrics with fuzzy matching
-        let hit_count = fuzzy_returned.len();
-        let expected_count = qcase.expected_files.len();
-        let m = if hit_count > 0 { 1.0 } else { 0.0 }; // Simplified MRR
-        let r5 = hit_count as f64 / expected_count.max(1) as f64;
-        let r10 = r5; // Same for fuzzy
-        let h5 = if hit_count > 0 { 1.0 } else { 0.0 };
-        let p5 = if !payload.items.is_empty() {
-            hit_count as f64 / payload.items.len().min(5) as f64
-        } else {
-            0.0
-        };
-
-        query_results.push(QueryResult {
-            query: qcase.query.to_string(),
-            returned_count: returned_files.len(),
-            mrr: m,
-            recall_at_5: r5,
-            recall_at_10: r10,
-            hit_at_5: h5,
-            precision_at_5: p5,
-            tokens_used: payload.total_tokens,
-            query_ms,
-        });
-    }
-
+    let (mut pipeline, build_ms, cluster_ms, community_count) = bench_build_and_cluster(&files);
+    let query_results: Vec<QueryResult> = case
+        .queries
+        .iter()
+        .map(|qcase| run_one_query(&mut pipeline, qcase))
+        .collect();
     let total_ms = total_start.elapsed().as_millis() as u64;
-
-    // Aggregates
-    let avg_mrr = query_results.iter().map(|r| r.mrr).sum::<f64>() / query_results.len() as f64;
-    let avg_recall =
-        query_results.iter().map(|r| r.recall_at_10).sum::<f64>() / query_results.len() as f64;
-    let avg_hit =
-        query_results.iter().map(|r| r.hit_at_5).sum::<f64>() / query_results.len() as f64;
-    let avg_precision =
-        query_results.iter().map(|r| r.precision_at_5).sum::<f64>() / query_results.len() as f64;
-    let avg_tokens =
-        query_results.iter().map(|r| r.tokens_used).sum::<usize>() / query_results.len();
+    let (avg_mrr, avg_recall, avg_hit, avg_precision, avg_tokens) =
+        aggregate_query_metrics(&query_results);
 
     Some(RepoBenchResult {
         name: case.name.to_string(),
@@ -406,6 +330,135 @@ fn run_benchmark(case: &BenchCase) -> Option<RepoBenchResult> {
         avg_tokens,
         queries: query_results,
     })
+}
+
+/// Phase 1 — extract files + stats from disk; returns `None` if the
+/// repo directory is missing.
+fn bench_extract(
+    repo_path: &Path,
+) -> Option<(
+    Vec<theo_engine_graph::bridge::FileData>,
+    extraction::ExtractionStats,
+    u64,
+)> {
+    let extract_start = Instant::now();
+    let (files, extract_stats) = extraction::extract_repo(repo_path);
+    let extract_ms = extract_start.elapsed().as_millis() as u64;
+    Some((files, extract_stats, extract_ms))
+}
+
+/// Phase 2 — build the graph and run clustering, returning the
+/// pipeline ready to assemble context plus per-phase timings and the
+/// community count.
+fn bench_build_and_cluster(
+    files: &[theo_engine_graph::bridge::FileData],
+) -> (Pipeline, u64, u64, usize) {
+    let mut pipeline = Pipeline::with_defaults();
+    let build_start = Instant::now();
+    let _bridge_stats = pipeline.build_graph(files);
+    let build_ms = build_start.elapsed().as_millis() as u64;
+    let cluster_start = Instant::now();
+    let communities = pipeline.cluster();
+    let cluster_ms = cluster_start.elapsed().as_millis() as u64;
+    let community_count = communities.len();
+    (pipeline, build_ms, cluster_ms, community_count)
+}
+
+fn run_one_query(pipeline: &mut Pipeline, qcase: &QueryCase) -> QueryResult {
+    let query_start = Instant::now();
+    let payload = pipeline.assemble_context(qcase.query);
+    let query_ms = query_start.elapsed().as_millis() as u64;
+    let returned_files = extract_returned_files(&payload);
+    let fuzzy_returned = fuzzy_match_expected(&qcase.expected_files, &returned_files, &payload);
+    let (mrr, r5, r10, h5, p5) = compute_query_metrics(
+        fuzzy_returned.len(),
+        qcase.expected_files.len(),
+        payload.items.len(),
+    );
+    QueryResult {
+        query: qcase.query.to_string(),
+        returned_count: returned_files.len(),
+        mrr,
+        recall_at_5: r5,
+        recall_at_10: r10,
+        hit_at_5: h5,
+        precision_at_5: p5,
+        tokens_used: payload.total_tokens,
+        query_ms,
+    }
+}
+
+/// Extract file paths from assembled context (community content) so we
+/// can fuzzy-match them against the ground truth.
+fn extract_returned_files(
+    payload: &theo_application::use_cases::pipeline::ContextPayload,
+) -> Vec<String> {
+    let mut returned_files: Vec<String> = Vec::new();
+    for item in &payload.items {
+        for line in item.content.lines() {
+            let trimmed = line.trim().trim_start_matches("## ").trim();
+            if trimmed.contains('/') && (trimmed.contains('.') || trimmed.ends_with('/')) {
+                let clean = trimmed.trim_start_matches("file:").trim();
+                if !clean.is_empty() && !clean.starts_with('#') && !clean.starts_with('|') {
+                    returned_files.push(clean.to_string());
+                }
+            }
+        }
+        // Community IDs often contain file paths.
+        returned_files.push(item.community_id.clone());
+    }
+    returned_files.dedup();
+    returned_files
+}
+
+/// Fuzzy match: an expected file is "hit" if ANY returned file
+/// contains it OR if any community payload contains the expected
+/// path (handles prefix differences like "src/dict.c" vs
+/// "redis/src/dict.c").
+fn fuzzy_match_expected(
+    expected_files: &[&str],
+    returned_files: &[String],
+    payload: &theo_application::use_cases::pipeline::ContextPayload,
+) -> Vec<String> {
+    expected_files
+        .iter()
+        .filter(|expected| {
+            returned_files.iter().any(|ret| ret.contains(*expected))
+                || payload
+                    .items
+                    .iter()
+                    .any(|item| item.content.contains(*expected))
+        })
+        .map(|e| e.to_string())
+        .collect()
+}
+
+fn compute_query_metrics(
+    hit_count: usize,
+    expected_count: usize,
+    payload_items: usize,
+) -> (f64, f64, f64, f64, f64) {
+    let mrr = if hit_count > 0 { 1.0 } else { 0.0 };
+    let r5 = hit_count as f64 / expected_count.max(1) as f64;
+    let r10 = r5;
+    let h5 = if hit_count > 0 { 1.0 } else { 0.0 };
+    let p5 = if payload_items > 0 {
+        hit_count as f64 / payload_items.min(5) as f64
+    } else {
+        0.0
+    };
+    (mrr, r5, r10, h5, p5)
+}
+
+fn aggregate_query_metrics(query_results: &[QueryResult]) -> (f64, f64, f64, f64, usize) {
+    let n = query_results.len() as f64;
+    let avg_mrr = query_results.iter().map(|r| r.mrr).sum::<f64>() / n;
+    let avg_recall = query_results.iter().map(|r| r.recall_at_10).sum::<f64>() / n;
+    let avg_hit = query_results.iter().map(|r| r.hit_at_5).sum::<f64>() / n;
+    let avg_precision = query_results.iter().map(|r| r.precision_at_5).sum::<f64>() / n;
+    let avg_tokens =
+        query_results.iter().map(|r| r.tokens_used).sum::<usize>() / query_results.len();
+    (avg_mrr, avg_recall, avg_hit, avg_precision, avg_tokens)
 }
 
 #[allow(dead_code)] // Fields kept for benchmark report completeness; some not yet
@@ -450,11 +503,7 @@ struct QueryResult {
 fn bench_real_repos_full_pipeline() {
     let cases = bench_cases();
     let mut results: Vec<RepoBenchResult> = Vec::new();
-
-    eprintln!("\n╔══════════════════════════════════════════════════════════════╗");
-    eprintln!("║         GRAPHCTX REAL PIPELINE BENCHMARK — 12 REPOS         ║");
-    eprintln!("╚══════════════════════════════════════════════════════════════╝\n");
-
+    print_pipeline_banner();
     for case in &cases {
         eprint!("  Running {}...", case.name);
         match run_benchmark(case) {
@@ -468,16 +517,30 @@ fn bench_real_repos_full_pipeline() {
             None => eprintln!(" ✗ skipped"),
         }
     }
+    print_results_table(&results);
+    if results.is_empty() {
+        return;
+    }
+    let aggregates = compute_global_aggregates(&results);
+    print_aggregate_row(&aggregates);
+    print_sota_scorecard(&aggregates);
+    print_per_query_detail(&results);
+}
 
-    // Print summary table
+fn print_pipeline_banner() {
+    eprintln!("\n╔══════════════════════════════════════════════════════════════╗");
+    eprintln!("║         GRAPHCTX REAL PIPELINE BENCHMARK — 12 REPOS         ║");
+    eprintln!("╚══════════════════════════════════════════════════════════════╝\n");
+}
+
+fn print_results_table(results: &[RepoBenchResult]) {
     eprintln!("\n━━━ RESULTS ━━━\n");
     eprintln!(
         "{:<14} {:<6} {:>6} {:>6} {:>5} {:>5} {:>7} {:>7} {:>7} {:>7} {:>7}",
         "Repo", "Lang", "Files", "Syms", "Comm", "ms", "MRR", "R@10", "H@5", "P@5", "Tokens"
     );
     eprintln!("{}", "─".repeat(95));
-
-    for r in &results {
+    for r in results {
         eprintln!(
             "{:<14} {:<6} {:>6} {:>6} {:>5} {:>5} {:>7.3} {:>7.3} {:>7.3} {:>7.3} {:>7}",
             r.name,
@@ -493,94 +556,76 @@ fn bench_real_repos_full_pipeline() {
             r.avg_tokens
         );
     }
+}
 
-    // Global aggregates
-    if !results.is_empty() {
-        let n = results.len() as f64;
-        let global_mrr = results.iter().map(|r| r.avg_mrr).sum::<f64>() / n;
-        let global_recall = results.iter().map(|r| r.avg_recall).sum::<f64>() / n;
-        let global_hit = results.iter().map(|r| r.avg_hit).sum::<f64>() / n;
-        let global_precision = results.iter().map(|r| r.avg_precision).sum::<f64>() / n;
-        let global_tokens = results.iter().map(|r| r.avg_tokens).sum::<usize>() / results.len();
+struct GlobalAggregates {
+    mrr: f64,
+    recall: f64,
+    hit: f64,
+    precision: f64,
+    tokens: usize,
+}
 
-        eprintln!("{}", "─".repeat(95));
-        eprintln!(
-            "{:<14} {:<6} {:>6} {:>6} {:>5} {:>5} {:>7.3} {:>7.3} {:>7.3} {:>7.3} {:>7}",
-            "AGGREGATE",
-            "",
-            "",
-            "",
-            "",
-            "",
-            global_mrr,
-            global_recall,
-            global_hit,
-            global_precision,
-            global_tokens
-        );
+fn compute_global_aggregates(results: &[RepoBenchResult]) -> GlobalAggregates {
+    let n = results.len() as f64;
+    GlobalAggregates {
+        mrr: results.iter().map(|r| r.avg_mrr).sum::<f64>() / n,
+        recall: results.iter().map(|r| r.avg_recall).sum::<f64>() / n,
+        hit: results.iter().map(|r| r.avg_hit).sum::<f64>() / n,
+        precision: results.iter().map(|r| r.avg_precision).sum::<f64>() / n,
+        tokens: results.iter().map(|r| r.avg_tokens).sum::<usize>() / results.len(),
+    }
+}
 
-        eprintln!("\n━━━ SOTA SCORECARD ━━━\n");
-        eprintln!(
-            "  MRR:       {:.3}  (target ≥ 0.92) {}",
-            global_mrr,
-            if global_mrr >= 0.92 {
-                "✓ PASS"
-            } else if global_mrr >= 0.80 {
-                "~ CLOSE"
-            } else {
-                "✗ FAIL"
-            }
-        );
-        eprintln!(
-            "  Recall@10: {:.3}  (target ≥ 0.92) {}",
-            global_recall,
-            if global_recall >= 0.92 {
-                "✓ PASS"
-            } else if global_recall >= 0.80 {
-                "~ CLOSE"
-            } else {
-                "✗ FAIL"
-            }
-        );
-        eprintln!(
-            "  Hit@5:     {:.3}  (target ≥ 0.80) {}",
-            global_hit,
-            if global_hit >= 0.80 {
-                "✓ PASS"
-            } else if global_hit >= 0.60 {
-                "~ CLOSE"
-            } else {
-                "✗ FAIL"
-            }
-        );
-        eprintln!(
-            "  Prec@5:    {:.3}  (target ≥ 0.75) {}",
-            global_precision,
-            if global_precision >= 0.75 {
-                "✓ PASS"
-            } else if global_precision >= 0.55 {
-                "~ CLOSE"
-            } else {
-                "✗ FAIL"
-            }
-        );
+fn print_aggregate_row(g: &GlobalAggregates) {
+    eprintln!("{}", "─".repeat(95));
+    eprintln!(
+        "{:<14} {:<6} {:>6} {:>6} {:>5} {:>5} {:>7.3} {:>7.3} {:>7.3} {:>7.3} {:>7}",
+        "AGGREGATE", "", "", "", "", "", g.mrr, g.recall, g.hit, g.precision, g.tokens
+    );
+}
 
-        // Per-query detail
-        eprintln!("\n━━━ PER-QUERY DETAIL ━━━\n");
-        for r in &results {
-            eprintln!("  {} ({})", r.name, r.lang);
-            for q in &r.queries {
-                eprintln!(
-                    "    \"{}\": MRR={:.3} R@10={:.3} H@5={:.1} P@5={:.3} files={} {}ms",
-                    &q.query[..q.query.len().min(50)],
-                    q.mrr,
-                    q.recall_at_10,
-                    q.hit_at_5,
-                    q.precision_at_5,
-                    q.returned_count,
-                    q.query_ms
-                );
-            }
+fn sota_verdict(value: f64, pass_threshold: f64, close_threshold: f64) -> &'static str {
+    if value >= pass_threshold {
+        "✓ PASS"
+    } else if value >= close_threshold {
+        "~ CLOSE"
+    } else {
+        "✗ FAIL"
+    }
+}
+
+fn print_sota_scorecard(g: &GlobalAggregates) {
+    eprintln!("\n━━━ SOTA SCORECARD ━━━\n");
+    eprintln!("  MRR:       {:.3}  (target ≥ 0.92) {}", g.mrr, sota_verdict(g.mrr, 0.92, 0.80));
+    eprintln!(
+        "  Recall@10: {:.3}  (target ≥ 0.92) {}",
+        g.recall,
+        sota_verdict(g.recall, 0.92, 0.80)
+    );
+    eprintln!("  Hit@5:     {:.3}  (target ≥ 0.80) {}", g.hit, sota_verdict(g.hit, 0.80, 0.60));
+    eprintln!(
+        "  Prec@5:    {:.3}  (target ≥ 0.75) {}",
+        g.precision,
+        sota_verdict(g.precision, 0.75, 0.55)
+    );
+}
+
+fn print_per_query_detail(results: &[RepoBenchResult]) {
+    eprintln!("\n━━━ PER-QUERY DETAIL ━━━\n");
+    for r in results {
+        eprintln!("  {} ({})", r.name, r.lang);
+        for q in &r.queries {
+            eprintln!(
+                "    \"{}\": MRR={:.3} R@10={:.3} H@5={:.1} P@5={:.3} files={} {}ms",
+                &q.query[..q.query.len().min(50)],
+                q.mrr,
+                q.recall_at_10,
+                q.hit_at_5,
+                q.precision_at_5,
+                q.returned_count,
+                q.query_ms
+            );
         }
     }
 }

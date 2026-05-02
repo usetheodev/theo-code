@@ -1,0 +1,15 @@
+{
+  "avg_context_size": 3960.0,
+  "max_context_size": 3960,
+  "total_iterations": 1,
+  "refetch_rate": 0.0,
+  "action_repetition_rate": 0.0,
+  "hypothesis_changes": 0,
+  "unique_artifacts_fetched": 0,
+  "unique_actions": 0,
+  "top_refetched": [],
+  "repeated_actions": [],
+  "usefulness_scores": {},
+  "causal_usefulness": {},
+  "failure_constraints": []
+}

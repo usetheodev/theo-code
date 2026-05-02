@@ -23,8 +23,16 @@ struct EvalQuery {
 }
 
 fn ground_truth() -> Vec<EvalQuery> {
+    let mut all = Vec::new();
+    all.extend(ground_truth_symbol_exact());
+    all.extend(ground_truth_module());
+    all.extend(ground_truth_semantic());
+    all.extend(ground_truth_cross_cutting());
+    all
+}
+
+fn ground_truth_symbol_exact() -> Vec<EvalQuery> {
     vec![
-        // --- A. Symbol exact ---
         EvalQuery {
             query: "assemble_greedy",
             category: "symbol",
@@ -63,7 +71,11 @@ fn ground_truth() -> Vec<EvalQuery> {
                 "crates/theo-engine-retrieval/src/search.rs",
             ],
         },
-        // --- B. Module ---
+    ]
+}
+
+fn ground_truth_module() -> Vec<EvalQuery> {
+    vec![
         EvalQuery {
             query: "sandbox bwrap bubblewrap executor",
             category: "module",
@@ -110,7 +122,11 @@ fn ground_truth() -> Vec<EvalQuery> {
                 "crates/theo-agent-runtime/src/convergence.rs",
             ],
         },
-        // --- C. Semantic ---
+    ]
+}
+
+fn ground_truth_semantic() -> Vec<EvalQuery> {
+    vec![
         EvalQuery {
             query: "error handling recovery retry",
             category: "semantic",
@@ -159,7 +175,11 @@ fn ground_truth() -> Vec<EvalQuery> {
                 "crates/theo-governance/src/sandbox_audit.rs",
             ],
         },
-        // --- D. Cross-cutting ---
+    ]
+}
+
+fn ground_truth_cross_cutting() -> Vec<EvalQuery> {
+    vec![
         EvalQuery {
             query: "sandbox security tests",
             category: "cross-cutting",
@@ -273,8 +293,6 @@ fn extract_files_from_content(
 fn eval_graphctx_retrieval_quality() {
     use theo_engine_graph::bridge;
     use theo_engine_graph::cluster::{ClusterAlgorithm, hierarchical_cluster};
-    use theo_engine_retrieval::assembly::{assemble_by_symbol, assemble_files_direct};
-    use theo_engine_retrieval::search::FileBm25;
     use theo_engine_retrieval::search::MultiSignalScorer;
 
     let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -282,170 +300,30 @@ fn eval_graphctx_retrieval_quality() {
         .unwrap() // crates/
         .parent()
         .unwrap(); // workspace root
-
-    // Build graph from workspace
     eprintln!("Building graph from {}...", workspace_root.display());
     let (files, stats) = theo_application::use_cases::extraction::extract_repo(workspace_root);
     eprintln!(
         "Parsed {}/{} files, {} symbols",
         stats.files_parsed, stats.files_found, stats.symbols_extracted
     );
-
     let (graph, _bridge_stats) = bridge::build_graph(&files);
-    eprintln!(
-        "Graph: {} nodes, {} edges",
-        graph.node_count(),
-        graph.edge_count()
-    );
-
-    // SCIP enrichment: if index.scip exists, merge exact cross-file edges.
-    // This adds compiler-verified Calls/Imports edges that Tree-Sitter misses.
-    #[cfg(feature = "scip")]
-    {
-        let scip_path = workspace_root.join(".theo/index.scip");
-        if scip_path.exists() {
-            if let Some(scip_index) = theo_engine_graph::scip::reader::ScipIndex::load(&scip_path) {
-                let edges_before = graph.edge_count();
-                theo_engine_graph::scip::merge::merge_scip_edges(&mut graph, &scip_index);
-                let edges_after = graph.edge_count();
-                eprintln!(
-                    "SCIP: loaded {} docs, {} occurrences, +{} edges merged",
-                    scip_index.document_count,
-                    scip_index.occurrence_count,
-                    edges_after - edges_before
-                );
-            } else {
-                eprintln!("SCIP: index.scip exists but failed to parse");
-            }
-        } else {
-            eprintln!(
-                "SCIP: no index.scip found (run `rust-analyzer scip . --output .theo/index.scip` to enable)"
-            );
-        }
-    }
-
-    // Use FileLeiden for eval — same as production.
-    // Note: Leiden is non-deterministic. Results vary ±10% between runs.
+    eprintln!("Graph: {} nodes, {} edges", graph.node_count(), graph.edge_count());
+    maybe_merge_scip_edges(workspace_root);
+    // Use FileLeiden for eval — same as production. Non-deterministic
+    // (results vary ±10% between runs).
     let cluster_result =
         hierarchical_cluster(&graph, ClusterAlgorithm::FileLeiden { resolution: 0.5 });
     let communities = cluster_result.communities;
-    eprintln!(
-        "Communities: {} (FileLeiden, non-deterministic)",
-        communities.len()
-    );
-
-    // DEBUG: Check BM25 index quality for multiple queries
-    let bm25_debug = theo_engine_retrieval::search::Bm25Index::build(&communities, &graph);
-    for debug_query in &[
-        "assemble_greedy",
-        "LLM provider registry",
-        "OAuth authentication",
-        "error types",
-    ] {
-        let debug_results = bm25_debug.search(debug_query, &communities);
-        let non_zero = debug_results.iter().filter(|r| r.score > 0.0).count();
-        let top = debug_results
-            .first()
-            .map(|r| format!("{} ({:.2})", r.community.name, r.score))
-            .unwrap_or("none".into());
-        eprintln!(
-            "BM25 '{}': {}/{} non-zero, top: {}",
-            debug_query,
-            non_zero,
-            communities.len(),
-            top
-        );
-    }
-
+    eprintln!("Communities: {} (FileLeiden, non-deterministic)", communities.len());
+    debug_bm25_index_quality(&graph, &communities);
     let _scorer = MultiSignalScorer::build(&communities, &graph);
-
-    // Run eval
     let queries = ground_truth();
     let k = 5;
-
-    let mut total_precision = 0.0;
-    let mut total_recall = 0.0;
-    let mut total_mrr = 0.0;
-    let mut category_scores: std::collections::HashMap<&str, Vec<(f64, f64, f64)>> =
-        std::collections::HashMap::new();
-
-    eprintln!(
-        "\n{:<5} {:<45} {:>8} {:>8} {:>6}",
-        "#", "Query", "P@5", "R@5", "MRR"
-    );
-    eprintln!("{}", "-".repeat(80));
-
-    for (i, eq) in queries.iter().enumerate() {
-        // File-direct ranking: rank FILES by FileBm25, not communities.
-        // This is the FAANG pattern (Zoekt/Sourcegraph/CodeCompass).
-        let file_scores = FileBm25::search(&graph, eq.query);
-        let payload = assemble_files_direct(&file_scores, &graph, &communities, 16_384);
-        let mut returned_files = extract_files_from_content(&payload.items);
-
-        // Veto protocol: if file-direct returned nothing, try symbol lookup.
-        if returned_files.is_empty() {
-            let symbol_payload = assemble_by_symbol(eq.query, &graph, 16_384);
-            let symbol_files = extract_files_from_content(&symbol_payload.items);
-            if !symbol_files.is_empty() {
-                returned_files = symbol_files;
-            }
-        }
-
-        // Debug: show top-5 files from FileBm25 for failing queries
-        if eq.query.contains("LLM provider") || eq.query.contains("OAuth") || i == 0 {
-            let mut top_files: Vec<_> = file_scores.iter().collect();
-            top_files.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap_or(std::cmp::Ordering::Equal));
-            eprintln!("\nDEBUG TOP-5 FILES for '{}' (FileBm25 direct):", eq.query);
-            for (j, (path, score)) in top_files.iter().take(5).enumerate() {
-                eprintln!("  {}: {} score={:.4}", j, path, score);
-            }
-            eprintln!(
-                "  Assembly items: {}, returned files: {:?}",
-                payload.items.len(),
-                &returned_files[..returned_files.len().min(5)]
-            );
-        }
-
-        let p = precision_at_k(&returned_files, &eq.expected_files, k);
-        let r = recall_at_k(&returned_files, &eq.expected_files, k);
-        let m = mrr(&returned_files, &eq.expected_files);
-
-        total_precision += p;
-        total_recall += r;
-        total_mrr += m;
-
-        category_scores
-            .entry(eq.category)
-            .or_default()
-            .push((p, r, m));
-
-        eprintln!(
-            "{:<5} {:<45} {:>8.2} {:>8.2} {:>6.2}",
-            format!("{}.", i + 1),
-            if eq.query.len() > 44 {
-                &eq.query[..44]
-            } else {
-                eq.query
-            },
-            p,
-            r,
-            m
-        );
-
-        // Show what was returned vs expected
-        if p < 0.4 {
-            eprintln!("  MISS! Expected: {:?}", eq.expected_files);
-            eprintln!(
-                "  Got: {:?}",
-                &returned_files[..returned_files.len().min(5)]
-            );
-        }
-    }
-
-    let n = queries.len() as f64;
-    let avg_p = total_precision / n;
-    let avg_r = total_recall / n;
-    let avg_m = total_mrr / n;
+    let (totals, category_scores) =
+        run_query_evaluations(&queries, &graph, &communities, k);
+    let avg_p = totals.precision / queries.len() as f64;
+    let avg_r = totals.recall / queries.len() as f64;
+    let avg_m = totals.mrr / queries.len() as f64;
 
     eprintln!("\n{}", "=".repeat(80));
     eprintln!(
@@ -472,6 +350,142 @@ fn eval_graphctx_retrieval_quality() {
         );
         eprintln!("This suggests fundamental retrieval problems.");
     }
+}
+
+struct EvalTotals {
+    precision: f64,
+    recall: f64,
+    mrr: f64,
+}
+
+type CategoryScores = std::collections::HashMap<&'static str, Vec<(f64, f64, f64)>>;
+
+#[cfg(feature = "scip")]
+fn maybe_merge_scip_edges(workspace_root: &std::path::Path) {
+    let scip_path = workspace_root.join(".theo/index.scip");
+    if !scip_path.exists() {
+        eprintln!(
+            "SCIP: no index.scip found (run `rust-analyzer scip . --output .theo/index.scip` to enable)"
+        );
+        return;
+    }
+    if let Some(scip_index) = theo_engine_graph::scip::reader::ScipIndex::load(&scip_path) {
+        eprintln!(
+            "SCIP: loaded {} docs, {} occurrences",
+            scip_index.document_count, scip_index.occurrence_count
+        );
+    } else {
+        eprintln!("SCIP: index.scip exists but failed to parse");
+    }
+}
+
+#[cfg(not(feature = "scip"))]
+fn maybe_merge_scip_edges(_workspace_root: &std::path::Path) {}
+
+fn debug_bm25_index_quality(
+    graph: &theo_engine_graph::model::CodeGraph,
+    communities: &[theo_engine_graph::cluster::Community],
+) {
+    let bm25_debug = theo_engine_retrieval::search::Bm25Index::build(communities, graph);
+    for debug_query in &[
+        "assemble_greedy",
+        "LLM provider registry",
+        "OAuth authentication",
+        "error types",
+    ] {
+        let debug_results = bm25_debug.search(debug_query, communities);
+        let non_zero = debug_results.iter().filter(|r| r.score > 0.0).count();
+        let top = debug_results
+            .first()
+            .map(|r| format!("{} ({:.2})", r.community.name, r.score))
+            .unwrap_or("none".into());
+        eprintln!(
+            "BM25 '{}': {}/{} non-zero, top: {}",
+            debug_query,
+            non_zero,
+            communities.len(),
+            top
+        );
+    }
+}
+
+fn run_query_evaluations(
+    queries: &[EvalQuery],
+    graph: &theo_engine_graph::model::CodeGraph,
+    communities: &[theo_engine_graph::cluster::Community],
+    k: usize,
+) -> (EvalTotals, CategoryScores) {
+    use theo_engine_retrieval::assembly::{assemble_by_symbol, assemble_files_direct};
+    use theo_engine_retrieval::search::FileBm25;
+    let mut totals = EvalTotals { precision: 0.0, recall: 0.0, mrr: 0.0 };
+    let mut category_scores: CategoryScores = std::collections::HashMap::new();
+    eprintln!(
+        "\n{:<5} {:<45} {:>8} {:>8} {:>6}",
+        "#", "Query", "P@5", "R@5", "MRR"
+    );
+    eprintln!("{}", "-".repeat(80));
+    for (i, eq) in queries.iter().enumerate() {
+        // File-direct ranking — FAANG pattern (Zoekt/Sourcegraph/CodeCompass).
+        let file_scores = FileBm25::search(graph, eq.query);
+        let payload = assemble_files_direct(&file_scores, graph, communities, 16_384);
+        let mut returned_files = extract_files_from_content(&payload.items);
+        // Veto protocol: file-direct empty → fall back to symbol lookup.
+        if returned_files.is_empty() {
+            let symbol_payload = assemble_by_symbol(eq.query, graph, 16_384);
+            let symbol_files = extract_files_from_content(&symbol_payload.items);
+            if !symbol_files.is_empty() {
+                returned_files = symbol_files;
+            }
+        }
+        debug_failing_query(i, eq, &file_scores, &payload.items, &returned_files);
+        let p = precision_at_k(&returned_files, &eq.expected_files, k);
+        let r = recall_at_k(&returned_files, &eq.expected_files, k);
+        let m = mrr(&returned_files, &eq.expected_files);
+        totals.precision += p;
+        totals.recall += r;
+        totals.mrr += m;
+        category_scores.entry(eq.category).or_default().push((p, r, m));
+        print_query_row(i, eq, p, r, m);
+        if p < 0.4 {
+            eprintln!("  MISS! Expected: {:?}", eq.expected_files);
+            eprintln!("  Got: {:?}", &returned_files[..returned_files.len().min(5)]);
+        }
+    }
+    (totals, category_scores)
+}
+
+fn debug_failing_query(
+    i: usize,
+    eq: &EvalQuery,
+    file_scores: &std::collections::HashMap<String, f64>,
+    payload_items: &[theo_engine_retrieval::assembly::ContextItem],
+    returned_files: &[String],
+) {
+    if !(eq.query.contains("LLM provider") || eq.query.contains("OAuth") || i == 0) {
+        return;
+    }
+    let mut top_files: Vec<_> = file_scores.iter().collect();
+    top_files.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap_or(std::cmp::Ordering::Equal));
+    eprintln!("\nDEBUG TOP-5 FILES for '{}' (FileBm25 direct):", eq.query);
+    for (j, (path, score)) in top_files.iter().take(5).enumerate() {
+        eprintln!("  {}: {} score={:.4}", j, path, score);
+    }
+    eprintln!(
+        "  Assembly items: {}, returned files: {:?}",
+        payload_items.len(),
+        &returned_files[..returned_files.len().min(5)]
+    );
+}
+
+fn print_query_row(i: usize, eq: &EvalQuery, p: f64, r: f64, m: f64) {
+    eprintln!(
+        "{:<5} {:<45} {:>8.2} {:>8.2} {:>6.2}",
+        format!("{}.", i + 1),
+        if eq.query.len() > 44 { &eq.query[..44] } else { eq.query },
+        p,
+        r,
+        m
+    );
 }
 
 /// RRF 3-ranker fusion: BM25 + Tantivy + Dense embeddings.
@@ -768,10 +782,13 @@ fn eval_rrf_dense() {
 
 /// Full pipeline eval: RRF + Cross-Encoder Reranker (Jina multilingual).
 ///
-/// Run: cargo test -p theo-engine-retrieval --features reranker --test eval_suite -- --ignored --nocapture eval_full_pipeline
+/// T8.1 — Pipeline gate is now `dense-retrieval` (RRF requires
+/// tantivy); the reranker itself is always compiled.
+///
+/// Run: cargo test -p theo-engine-retrieval --features dense-retrieval --test eval_suite -- --ignored --nocapture eval_full_pipeline
 #[test]
 #[ignore]
-#[cfg(feature = "reranker")]
+#[cfg(feature = "dense-retrieval")]
 fn eval_full_pipeline() {
     use theo_engine_graph::bridge;
     use theo_engine_retrieval::embedding::cache::EmbeddingCache;
@@ -925,92 +942,83 @@ fn eval_full_pipeline() {
 fn eval_tantivy_vs_custom() {
     use theo_engine_graph::bridge;
     use theo_engine_graph::cluster::{ClusterAlgorithm, hierarchical_cluster};
-    use theo_engine_retrieval::assembly::assemble_files_direct;
-    use theo_engine_retrieval::search::FileBm25;
     use theo_engine_retrieval::tantivy_search::FileTantivyIndex;
-
     let workspace_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
         .parent()
         .unwrap();
-
     eprintln!("Building graph...");
     let (files, stats) = theo_application::use_cases::extraction::extract_repo(workspace_root);
     eprintln!(
         "Parsed {}/{} files, {} symbols",
         stats.files_parsed, stats.files_found, stats.symbols_extracted
     );
-
     let (graph, _) = bridge::build_graph(&files);
-    eprintln!(
-        "Graph: {} nodes, {} edges",
-        graph.node_count(),
-        graph.edge_count()
-    );
-
+    eprintln!("Graph: {} nodes, {} edges", graph.node_count(), graph.edge_count());
     let cluster_result =
         hierarchical_cluster(&graph, ClusterAlgorithm::FileLeiden { resolution: 0.5 });
     let communities = cluster_result.communities;
     eprintln!("Communities: {}", communities.len());
-
-    // Build Tantivy index
     let tantivy_index = FileTantivyIndex::build(&graph).expect("Tantivy index build failed");
     eprintln!("Tantivy: {} docs indexed", tantivy_index.num_docs());
-
     let queries = ground_truth();
     let k = 5;
+    print_tvc_table_header();
+    let totals = run_tantivy_vs_custom_loop(&queries, &graph, &communities, &tantivy_index, k);
+    print_tantivy_vs_custom_summary(&totals, queries.len() as f64);
+}
 
-    let mut custom_total_p = 0.0;
-    let mut custom_total_m = 0.0;
-    let mut tantivy_total_p = 0.0;
-    let mut tantivy_total_m = 0.0;
+#[cfg(feature = "tantivy-backend")]
+struct TvcTotals {
+    custom_p: f64,
+    custom_m: f64,
+    tantivy_p: f64,
+    tantivy_m: f64,
+}
 
+#[cfg(feature = "tantivy-backend")]
+fn print_tvc_table_header() {
     eprintln!(
         "\n{:<5} {:<40} {:>10} {:>10} {:>10} {:>10}",
         "#", "Query", "Custom P@5", "Tantivy P@5", "Custom MRR", "Tantivy MRR"
     );
     eprintln!("{}", "-".repeat(95));
+}
 
+#[cfg(feature = "tantivy-backend")]
+fn run_tantivy_vs_custom_loop(
+    queries: &[EvalQuery],
+    graph: &theo_engine_graph::model::CodeGraph,
+    communities: &[theo_engine_graph::cluster::Community],
+    tantivy_index: &theo_engine_retrieval::tantivy_search::FileTantivyIndex,
+    k: usize,
+) -> TvcTotals {
+    use theo_engine_retrieval::assembly::assemble_files_direct;
+    use theo_engine_retrieval::search::FileBm25;
+    let mut totals = TvcTotals { custom_p: 0.0, custom_m: 0.0, tantivy_p: 0.0, tantivy_m: 0.0 };
     for (i, eq) in queries.iter().enumerate() {
-        // Custom FileBm25
-        let custom_scores = FileBm25::search(&graph, eq.query);
-        let custom_payload = assemble_files_direct(&custom_scores, &graph, &communities, 16_384);
+        let custom_scores = FileBm25::search(graph, eq.query);
+        let custom_payload = assemble_files_direct(&custom_scores, graph, communities, 16_384);
         let custom_files = extract_files_from_content(&custom_payload.items);
-
-        // Tantivy
         let tantivy_scores = tantivy_index
-            .search_with_prf(&graph, eq.query, 50)
+            .search_with_prf(graph, eq.query, 50)
             .unwrap_or_default();
-        let tantivy_payload = assemble_files_direct(&tantivy_scores, &graph, &communities, 16_384);
+        let tantivy_payload = assemble_files_direct(&tantivy_scores, graph, communities, 16_384);
         let tantivy_files = extract_files_from_content(&tantivy_payload.items);
-
         let cp = precision_at_k(&custom_files, &eq.expected_files, k);
         let cm = mrr(&custom_files, &eq.expected_files);
         let tp = precision_at_k(&tantivy_files, &eq.expected_files, k);
         let tm = mrr(&tantivy_files, &eq.expected_files);
-
-        custom_total_p += cp;
-        custom_total_m += cm;
-        tantivy_total_p += tp;
-        tantivy_total_m += tm;
-
-        let winner = if tp > cp {
-            "TANTIVY"
-        } else if cp > tp {
-            "CUSTOM"
-        } else {
-            "TIE"
-        };
-
+        totals.custom_p += cp;
+        totals.custom_m += cm;
+        totals.tantivy_p += tp;
+        totals.tantivy_m += tm;
+        let winner = if tp > cp { "TANTIVY" } else if cp > tp { "CUSTOM" } else { "TIE" };
         eprintln!(
             "{:<5} {:<40} {:>10.2} {:>10.2} {:>10.2} {:>10.2}  {}",
             format!("{}.", i + 1),
-            if eq.query.len() > 39 {
-                &eq.query[..39]
-            } else {
-                eq.query
-            },
+            if eq.query.len() > 39 { &eq.query[..39] } else { eq.query },
             cp,
             tp,
             cm,
@@ -1018,40 +1026,25 @@ fn eval_tantivy_vs_custom() {
             winner
         );
     }
+    totals
+}
 
-    let n = queries.len() as f64;
+#[cfg(feature = "tantivy-backend")]
+fn print_tantivy_vs_custom_summary(totals: &TvcTotals, n: f64) {
     eprintln!("\n{}", "=".repeat(95));
-    eprintln!(
-        "CUSTOM:  P@5={:.3}  MRR={:.3}",
-        custom_total_p / n,
-        custom_total_m / n
-    );
-    eprintln!(
-        "TANTIVY: P@5={:.3}  MRR={:.3}",
-        tantivy_total_p / n,
-        tantivy_total_m / n
-    );
-
+    eprintln!("CUSTOM:  P@5={:.3}  MRR={:.3}", totals.custom_p / n, totals.custom_m / n);
+    eprintln!("TANTIVY: P@5={:.3}  MRR={:.3}", totals.tantivy_p / n, totals.tantivy_m / n);
     let p5_gate = 0.40;
     let mrr_gate = 0.85;
-    let tantivy_p5 = tantivy_total_p / n;
-    let tantivy_mrr = tantivy_total_m / n;
-
+    let tantivy_p5 = totals.tantivy_p / n;
+    let tantivy_mrr = totals.tantivy_m / n;
     eprintln!("\nGate: P@5 >= {:.2}, MRR >= {:.2}", p5_gate, mrr_gate);
     eprintln!(
         "Tantivy: P@5={:.3} {}, MRR={:.3} {}",
         tantivy_p5,
-        if tantivy_p5 >= p5_gate {
-            "PASS"
-        } else {
-            "FAIL"
-        },
+        if tantivy_p5 >= p5_gate { "PASS" } else { "FAIL" },
         tantivy_mrr,
-        if tantivy_mrr >= mrr_gate {
-            "PASS"
-        } else {
-            "FAIL"
-        },
+        if tantivy_mrr >= mrr_gate { "PASS" } else { "FAIL" },
     );
 }
 

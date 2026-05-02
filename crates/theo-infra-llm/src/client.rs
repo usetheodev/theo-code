@@ -195,6 +195,15 @@ impl LlmClient {
             .await
             .map_err(|e| LlmError::Parse(format!("read stream: {e}")))?;
 
+        // Phase 29 follow-up debug: when THEO_DEBUG_CODEX=1, dump first
+        // 4KB of the SSE body to stderr so we can see what the model
+        // actually returned (helps diagnose tool_choice issues).
+        if std::env::var("THEO_DEBUG_CODEX").is_ok() {
+            eprintln!(
+                "[theo:codex] raw SSE body (first 4KB):\n{}\n[theo:codex] --- end ---",
+                &full_body[..full_body.len().min(4096)]
+            );
+        }
         codex::from_codex_stream(&full_body).ok_or_else(|| {
             LlmError::Parse(format!(
                 "failed to parse Codex stream response. Body start: {}",
@@ -239,81 +248,66 @@ impl LlmClient {
         F: FnMut(&StreamDelta),
     {
         let url = self.url();
-
         if self.is_codex() {
-            // Codex: real incremental streaming via bytes_stream()
-            use futures::StreamExt;
+            return self.chat_streaming_codex(request, &url, &mut on_delta).await;
+        }
+        self.chat_streaming_oa_compatible(request, &url, &mut on_delta).await
+    }
 
-            let body = codex::to_codex_body(request);
-            let resolved_key = self.resolve_api_key().await;
-            let builder = self.apply_auth_with_key(self.http.post(&url).json(&body), &resolved_key);
-            let response = builder.send().await?;
-            let status = response.status().as_u16();
+    async fn chat_streaming_codex<F>(
+        &self,
+        request: &ChatRequest,
+        url: &str,
+        on_delta: &mut F,
+    ) -> Result<ChatResponse, LlmError>
+    where
+        F: FnMut(&StreamDelta),
+    {
+        use futures::StreamExt;
+        let body = codex::to_codex_body(request);
+        debug_codex_outgoing_tool_choice(&body);
+        let resolved_key = self.resolve_api_key().await;
+        let builder = self.apply_auth_with_key(self.http.post(url).json(&body), &resolved_key);
+        let response = builder.send().await?;
+        let status = response.status().as_u16();
+        if status >= 400 {
+            let body = response.text().await.unwrap_or_default();
+            return Err(LlmError::from_status(status, body));
+        }
+        let mut byte_stream = response.bytes_stream();
+        let mut buffer = String::new();
+        let mut full_body = String::new();
+        while let Some(chunk) = byte_stream.next().await {
+            let chunk = chunk.map_err(|e| LlmError::Parse(format!("stream chunk: {e}")))?;
+            let text = String::from_utf8_lossy(&chunk);
+            buffer.push_str(&text);
+            full_body.push_str(&text);
+            consume_codex_buffer_lines(&mut buffer, on_delta);
+        }
+        debug_codex_full_body(&full_body);
+        let parsed = codex::from_codex_stream(&full_body)
+            .ok_or_else(|| LlmError::Parse("failed to parse Codex stream".to_string()))?;
+        debug_codex_parsed(&parsed);
+        Ok(parsed)
+    }
 
-            if status >= 400 {
-                let body = response.text().await.unwrap_or_default();
-                return Err(LlmError::from_status(status, body));
-            }
-
-            // Stream bytes incrementally and parse SSE lines as they arrive
-            let mut byte_stream = response.bytes_stream();
-            let mut buffer = String::new();
-            let mut full_body = String::new();
-
-            while let Some(chunk) = byte_stream.next().await {
-                let chunk = chunk.map_err(|e| LlmError::Parse(format!("stream chunk: {e}")))?;
-                let text = String::from_utf8_lossy(&chunk);
-                buffer.push_str(&text);
-                full_body.push_str(&text);
-
-                // Process complete lines from buffer
-                while let Some(newline_pos) = buffer.find('\n') {
-                    let line = buffer[..newline_pos].to_string();
-                    buffer = buffer[newline_pos + 1..].to_string();
-
-                    if let Some(data) = line.strip_prefix("data: ")
-                        && let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
-                            let event_type =
-                                json.get("type").and_then(|v| v.as_str()).unwrap_or("");
-
-                            match event_type {
-                                // Reasoning/thinking deltas (real-time)
-                                "response.reasoning.delta" => {
-                                    if let Some(text) =
-                                        json.pointer("/delta/text").and_then(|v| v.as_str())
-                                    {
-                                        on_delta(&StreamDelta::Reasoning(text.to_string()));
-                                    }
-                                }
-                                // Content text deltas (real-time)
-                                "response.output_text.delta" => {
-                                    if let Some(text) =
-                                        json.pointer("/delta").and_then(|v| v.as_str())
-                                    {
-                                        on_delta(&StreamDelta::Content(text.to_string()));
-                                    }
-                                }
-                                // Completion signal
-                                "response.completed" => {
-                                    on_delta(&StreamDelta::Done);
-                                }
-                                _ => {}
-                            }
-                        }
-                }
-            }
-
-            // Build ChatResponse from the accumulated SSE body
-            codex::from_codex_stream(&full_body)
-                .ok_or_else(|| LlmError::Parse("failed to parse Codex stream".to_string()))
-        } else {
+    async fn chat_streaming_oa_compatible<F>(
+        &self,
+        request: &ChatRequest,
+        url: &str,
+        on_delta: &mut F,
+    ) -> Result<ChatResponse, LlmError>
+    where
+        F: FnMut(&StreamDelta),
+    {
+        {
             // OA-compatible: use SseStream
             use futures::StreamExt;
 
             let mut req = request.clone();
             req.stream = Some(true);
             let resolved_key = self.resolve_api_key().await;
-            let builder = self.apply_auth_with_key(self.http.post(&url).json(&req), &resolved_key);
+            let builder = self.apply_auth_with_key(self.http.post(url).json(&req), &resolved_key);
             let response = builder.send().await?;
             let status = response.status().as_u16();
 
@@ -346,6 +340,121 @@ impl LlmClient {
     pub fn request(&self, messages: Vec<Message>) -> ChatRequest {
         ChatRequest::new(&self.model, messages)
     }
+}
+
+/// Drain whole SSE lines from `buffer` and dispatch real-time deltas
+/// (Reasoning / Content / Done) via `on_delta`. Partial lines stay in
+/// `buffer` for the next chunk.
+fn consume_codex_buffer_lines<F>(buffer: &mut String, on_delta: &mut F)
+where
+    F: FnMut(&StreamDelta),
+{
+    while let Some(newline_pos) = buffer.find('\n') {
+        let line = buffer[..newline_pos].to_string();
+        *buffer = buffer[newline_pos + 1..].to_string();
+        let Some(data) = line.strip_prefix("data: ") else {
+            continue;
+        };
+        let Ok(json) = theo_domain::safe_json::from_str_bounded::<serde_json::Value>(
+            data,
+            theo_domain::safe_json::DEFAULT_JSON_LIMIT,
+        ) else {
+            continue;
+        };
+        let event_type = json.get("type").and_then(|v| v.as_str()).unwrap_or("");
+        match event_type {
+            "response.reasoning.delta" => {
+                if let Some(text) = json.pointer("/delta/text").and_then(|v| v.as_str()) {
+                    on_delta(&StreamDelta::Reasoning(text.to_string()));
+                }
+            }
+            "response.output_text.delta" => {
+                if let Some(text) = json.pointer("/delta").and_then(|v| v.as_str()) {
+                    on_delta(&StreamDelta::Content(text.to_string()));
+                }
+            }
+            "response.completed" => {
+                on_delta(&StreamDelta::Done);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// THEO_DEBUG_CODEX=1 dumps outgoing tool_choice to stderr (gap #7 diagnostics).
+fn debug_codex_outgoing_tool_choice(body: &serde_json::Value) {
+    if std::env::var("THEO_DEBUG_CODEX").is_err() {
+        return;
+    }
+    eprintln!(
+        "[theo:codex] outgoing tool_choice = {}",
+        body.get("tool_choice")
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "<absent>".into())
+    );
+}
+
+/// THEO_DEBUG_CODEX=1: dump full SSE body when THEO_DUMP_SSE is set,
+/// and surface every function_call mention for inspection.
+fn debug_codex_full_body(full_body: &str) {
+    if std::env::var("THEO_DEBUG_CODEX").is_err() {
+        return;
+    }
+    if let Ok(p) = std::env::var("THEO_DUMP_SSE") {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static COUNTER: AtomicU32 = AtomicU32::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let path = format!("{}.{}", p, n);
+        let _ = std::fs::write(&path, full_body.as_bytes());
+        eprintln!("[theo:codex] dumped full SSE to {}", path);
+    }
+    let chunk_count = full_body.matches("\n\n").count();
+    let function_count = full_body.matches("\"function_call\"").count();
+    eprintln!(
+        "[theo:codex] streaming completed: {} chunks, {} function_call mentions, {} bytes",
+        chunk_count,
+        function_count,
+        full_body.len()
+    );
+    if function_count == 0 {
+        return;
+    }
+    let mut search_start = 0;
+    let mut occurrence = 0;
+    while let Some(idx) = full_body[search_start..].find("\"function_call\"") {
+        occurrence += 1;
+        let abs = search_start + idx;
+        let start = abs.saturating_sub(50);
+        let end = (abs + 400).min(full_body.len());
+        eprintln!(
+            "[theo:codex] fc#{}: {}",
+            occurrence,
+            &full_body[start..end].replace('\n', " ")
+        );
+        search_start = abs + 1;
+    }
+}
+
+fn debug_codex_parsed(parsed: &ChatResponse) {
+    if std::env::var("THEO_DEBUG_CODEX").is_err() {
+        return;
+    }
+    let tc_count = parsed
+        .choices
+        .first()
+        .and_then(|c| c.message.tool_calls.as_ref())
+        .map(|v| v.len())
+        .unwrap_or(0);
+    let content_len = parsed
+        .choices
+        .first()
+        .and_then(|c| c.message.content.as_deref())
+        .map(|s| s.len())
+        .unwrap_or(0);
+    eprintln!(
+        "[theo:codex] parsed: tool_calls={} content_len={}",
+        tc_count, content_len
+    );
 }
 
 /// Backward-compatible LlmProvider implementation for LlmClient.

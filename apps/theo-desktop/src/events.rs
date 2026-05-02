@@ -1,5 +1,6 @@
 use tauri::{AppHandle, Emitter};
-use theo_agent_runtime::event_bus::EventListener;
+// T1.3: facade re-export.
+use theo_application::facade::agent::EventListener;
 pub use theo_api_contracts::events::FrontendEvent;
 use theo_domain::event::{DomainEvent, EventType};
 

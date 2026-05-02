@@ -308,7 +308,7 @@ IMPORTANT:
 /// If LLM is not available or fails, the template files remain as-is (fallback).
 pub async fn run_init_with_agent(
     project_dir: &std::path::Path,
-    config: theo_agent_runtime::AgentConfig,
+    config: theo_application::facade::agent::AgentConfig,
 ) -> Result<bool, String> {
     if !project_dir.exists() {
         return Err(format!(
@@ -335,7 +335,7 @@ pub async fn run_init_with_agent(
     }
 
     // Check if LLM is available
-    if config.api_key.is_none() {
+    if config.llm.api_key.is_none() {
         eprintln!("  No API key — using static template");
         let project_type = detect_project_type(project_dir);
         let project_name = detect_project_name(project_dir, project_type);
@@ -349,16 +349,17 @@ pub async fn run_init_with_agent(
     // Run agent to generate real content
     eprintln!("  Analyzing project with AI...");
 
-    let event_bus = std::sync::Arc::new(theo_agent_runtime::event_bus::EventBus::new());
+    let event_bus = std::sync::Arc::new(theo_application::facade::agent::EventBus::new());
     let renderer = std::sync::Arc::new(crate::renderer::CliRenderer::new());
     event_bus.subscribe(renderer);
 
-    let registry = theo_tooling::registry::create_default_registry();
+    // T15.1 — populate docs_search index from project's docs/, .theo/wiki/, ~/.cache/theo/docs/.
+    let registry = theo_application::facade::tooling::create_default_registry_with_project(project_dir);
     let mut agent_config = config;
-    agent_config.max_iterations = 30; // Cap for init task
-    agent_config.system_prompt = "You are a project analyzer. Read the codebase and generate configuration files. Be thorough but concise. Always use tools, never guess.".to_string();
+    agent_config.loop_cfg.max_iterations = 30; // Cap for init task
+    agent_config.context.system_prompt = "You are a project analyzer. Read the codebase and generate configuration files. Be thorough but concise. Always use tools, never guess.".to_string();
 
-    let agent = theo_agent_runtime::AgentLoop::new(agent_config, registry);
+    let agent = theo_application::facade::agent::AgentLoop::new(agent_config, registry);
 
     let result = agent
         .run_with_history(ENRICH_PROMPT, project_dir, Vec::new(), Some(event_bus))
